@@ -1,0 +1,15 @@
+﻿[Unit]
+Description=Trading AI Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=joe4410joe
+WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Main_new
+ExecStart=/home/joe4410joe/TradingAI_Bot_Main_new/venv/bin/python -m Live.slack_bot.auto_bot_full_prod
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
