@@ -1,61 +1,83 @@
-import time
+# Bot/engine/market_engine.py
 import pandas as pd
-from Bot.engine.market_engine import MarketEngine
-from Bot.core.trade_core import TradeCore
-from Bot.strategies.strategy_wrapper import StrategyWrapper
-from Bot.strategies.pro_fvg_strategy import ProFVGStrategy
-from Bot.utils.telegram_notifier import TelegramNotifier
-from Bot.utils.logger import BotLogger
+import time
+import random
 
-# =====================================================
-# Telegram通知 + Logger
-# =====================================================
-telegram = TelegramNotifier(
-    token="YOUR_BOT_TOKEN",
-    chat_id="YOUR_CHAT_ID"
-)
-telegram.bot_started()
+class MarketEngine:
+    """
+    Market Data Engine
+    価格データを Strategy に渡す本番用
+    """
 
-logger = BotLogger(log_file="logs/bot.log")
-logger.info("BOT 起動")
+    def __init__(self, trade_core=None, logger=None, notifier=None):
+        """
+        trade_core : TradeCore オブジェクト
+        logger     : BotLogger オブジェクト（任意）
+        notifier   : TelegramNotifier オブジェクト（任意）
+        """
+        self.trade_core = trade_core
+        self.logger = logger
+        self.notifier = notifier
 
-# =====================================================
-# BOT起動
-# =====================================================
-def main():
-    trade_core = TradeCore(initial_balance=10000)
-    market_engine = MarketEngine(start_price=2000, trade_core=trade_core)
-    wrapper = StrategyWrapper(core=trade_core)
+        # OHLCデータ
+        self.m15 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
+        self.h1 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
 
-    strategy = ProFVGStrategy()
-    wrapper.register_strategy(strategy)
+        # 前足終値
+        self.prev_close = None
 
-    logger.info("BOT監視開始")
-    print("=== BOT監視開始 ===")
+        # ループ制御
+        self.running = False
 
-    while True:
-        # ----------------------------
-        # Tick生成＋OHLC更新
-        # ----------------------------
-        market_data = market_engine.get_market_data()
+        if self.logger:
+            self.logger.info("MarketEngine initialized")
+        if self.notifier:
+            self.notifier.send("MarketEngine initialized")
 
-        # ----------------------------
-        # 戦略実行 → TradeCoreへシグナル送信
-        # ----------------------------
-        wrapper.on_bar(market_data)
+    # ---------------------------------
+    # Tick受信
+    # ---------------------------------
+    def on_market_tick(self, price):
+        try:
+            price = float(price)
+        except Exception:
+            if self.logger:
+                self.logger.warning(f"Invalid price received: {price}")
+            return
 
-        # ----------------------------
-        # 新規ポジション通知
-        # ----------------------------
-        for pos in trade_core.positions[-1:]:
-            telegram.entry_notification(pos)
-            logger.info(f"ENTRY | {pos.trade_type} | Entry: {pos.entry_price} | SL: {pos.sl} | TP: {pos.tp}")
+        market_data = {
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "prev_close": self.prev_close
+        }
 
-        # ----------------------------
-        # 日次・週次DDチェック（TradeCore内部で自動）
-        # ----------------------------
+        # Strategy 更新
+        if self.trade_core and hasattr(self.trade_core, 'strategy_wrapper'):
+            for strategy in self.trade_core.strategy_wrapper.strategies:
+                strategy.update(market_data)
 
-        time.sleep(1)
+        # TradeCore へのデータ通知
+        if self.trade_core and hasattr(self.trade_core, 'on_market_data'):
+            self.trade_core.on_market_data(market_data)
 
-if __name__ == "__main__":
-    main()
+        # 前足終値更新
+        self.prev_close = price
+
+        if self.logger:
+            self.logger.info(f"Market tick processed: {price}")
+
+    # ---------------------------------
+    # run() ループ（本番はリアルデータ取得に置き換え）
+    # ---------------------------------
+    def run(self):
+        if self.logger:
+            self.logger.info("MarketEngine run loop started")
+
+        self.running = True
+        while self.running:
+            # 仮のダミー価格生成（本番はリアルデータ）
+            price = 2000 + random.random() * 10
+            self.on_market_tick(price)
+            time.sleep(1)  # 本番は適切な間隔に変更

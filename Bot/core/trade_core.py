@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 import datetime
 
@@ -30,7 +30,7 @@ class StrategyContext:
     take_profit_price: float
     partial_close_percent: float = 0
     reason: str = ""
-    extra: dict = None
+    extra: dict = field(default_factory=dict)
 
 
 # =====================================================
@@ -42,15 +42,14 @@ class TradeCore:
         self,
         initial_balance: float = 10000,
         is_live: bool = False,
-        log_path: str = "bot.log"
+        logger: BotLogger | None = None
     ):
 
         # ==== 実行モード ====
         self.is_live = is_live
-        self.log_path = log_path
 
         # ==== Logger ====
-        self.logger = BotLogger()
+        self.logger = logger if logger else BotLogger()
 
         # ==== 資金状態 ====
         self.initial_balance = initial_balance
@@ -74,11 +73,8 @@ class TradeCore:
         # ==== 日次管理 ====
         self.current_date = datetime.datetime.now().date()
 
-    # =====================================================
-    # ポジション更新（簡易版）
-    # =====================================================
-    def update_positions(self):
-        pass
+        # ==== StrategyWrapper ====
+        self.strategy_wrapper = None
 
     # =====================================================
     # 外部残高更新
@@ -113,15 +109,12 @@ class TradeCore:
 
         if daily_dd >= self.max_daily_dd_percent:
             self._freeze("Daily DD exceeded")
-            return
 
         if total_dd >= self.max_total_dd_percent:
             self._freeze("Total DD exceeded")
-            return
 
         if peak_dd >= self.max_peak_dd_percent:
             self._freeze("Peak DD exceeded")
-            return
 
     # =====================================================
     # 凍結処理
@@ -133,11 +126,16 @@ class TradeCore:
 
         print(f"ACCOUNT FROZEN: {reason}")
 
+        if self.logger:
+            try:
+                self.logger.log_event("ACCOUNT_FROZEN", reason)
+            except Exception:
+                pass
+
     # =====================================================
     # エントリー可否
     # =====================================================
     def can_trade(self) -> bool:
-
         return not self.account_frozen
 
     # =====================================================
@@ -167,16 +165,35 @@ class TradeCore:
             f"Entry: {ctx.entry_price} | SL: {ctx.stop_loss_price} | TP: {ctx.take_profit_price}"
         )
 
-        # ===== ログ保存 =====
-        self.logger.log_trade(
-            ctx.strategy_name,
-            ctx.trade_type,
-            ctx.entry_price,
-            ctx.stop_loss_price,
-            ctx.take_profit_price
-        )
+        if self.logger:
+            try:
+                self.logger.log_trade(
+                    ctx.strategy_name,
+                    ctx.trade_type,
+                    ctx.entry_price,
+                    ctx.stop_loss_price,
+                    ctx.take_profit_price
+                )
+            except Exception:
+                pass
 
         return True
+
+    # =====================================================
+    # MarketEngine → Strategy
+    # =====================================================
+    def on_market_data(self, market_data):
+
+        if not self.strategy_wrapper:
+            return
+
+        try:
+
+            # StrategyWrapper呼び出し
+            self.strategy_wrapper.on_bar(market_data)
+
+        except Exception as e:
+            print(f"Strategy execution error: {e}")
 
     # =====================================================
     # 状態確認

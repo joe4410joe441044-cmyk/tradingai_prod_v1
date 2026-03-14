@@ -1,125 +1,91 @@
-import pandas as pd
+# Bot/strategies/fvg_strategy.py
 from typing import List
+from Bot.core.trade_core import TradeCore
+from Bot.utils.logger import BotLogger
+from Bot.utils.telegram_notifier import TelegramNotifier
 
-class FVG:
-    def __init__(self, top: float, bottom: float, bullish: bool, timeframe: str):
-        self.top = top
-        self.bottom = bottom
-        self.bullish = bullish
-        self.used = False
-        self.timeframe = timeframe
+class FVGStrategy:
+    """
+    本番用 FVGStrategy
+    初期シグナル生成ロジックを含む
+    """
+    def __init__(self, trade_core: TradeCore, logger: BotLogger = None, notifier: TelegramNotifier = None):
+        self.trade_core = trade_core
+        self.logger = logger
+        self.notifier = notifier
+        self.active_positions = []
 
-class ProFVGStrategy:
-    """プロ仕様 FVGStrategy: HTF Bias + Liquidity Sweep + FVG + Entry"""
+        self.logger and self.logger.info("FVGStrategy initialized.")
 
-    def __init__(self):
-        self.fvg_list: List[FVG] = []
-        self.tap_threshold = 0.3
-        self.max_fvg = 50
-
-    # ------------------------------
-    # FVG検出
-    # ------------------------------
-    def detect_fvg(self, market_data):
-        m15 = market_data["m15"]
-        h1 = market_data["h1"]
-
-        # --------------------------
-        # HTFバイアス確認 (H1)
-        # 上昇トレンド: close>open, 直近H1足
-        # --------------------------
-        self.htf_bias = None
-        if len(h1) >= 2:
-            last = h1.iloc[-1]
-            prev = h1.iloc[-2]
-            if last["Close"] > last["Open"] and last["Close"] > prev["Close"]:
-                self.htf_bias = "bullish"
-            elif last["Close"] < last["Open"] and last["Close"] < prev["Close"]:
-                self.htf_bias = "bearish"
-
-        if len(m15) < 3:
-            return
-
-        c1 = m15.iloc[-3]
-        c2 = m15.iloc[-2]
-        c3 = m15.iloc[-1]
-
-        # --------------------------
-        # Bullish FVG
-        # --------------------------
-        if c1["High"] < c3["Low"]:
-            fvg = FVG(top=c3["Low"], bottom=c1["High"], bullish=True, timeframe="M15")
-            self._append_fvg(fvg)
-
-        # --------------------------
-        # Bearish FVG
-        # --------------------------
-        if c1["Low"] > c3["High"]:
-            fvg = FVG(top=c1["Low"], bottom=c3["High"], bullish=False, timeframe="M15")
-            self._append_fvg(fvg)
-
-    # ------------------------------
-    # FVG管理
-    # ------------------------------
-    def _append_fvg(self, fvg):
-        # 重複チェック
-        for existing in self.fvg_list:
-            if existing.top == fvg.top and existing.bottom == fvg.bottom:
-                return
-        self.fvg_list.append(fvg)
-        # 最大保持数
-        if len(self.fvg_list) > self.max_fvg:
-            self.fvg_list.pop(0)
-
-    # ------------------------------
-    # シグナル生成
-    # ------------------------------
-    def generate_signals(self, market_data):
+    def scan_market(self, market_data) -> List[dict]:
+        """
+        市場データを解析してトレードシグナルを生成
+        market_data: dict with keys 'open', 'high', 'low', 'close'
+        """
         signals = []
-        price = market_data["price"]
 
-        for fvg in self.fvg_list:
-            if fvg.used:
-                continue
+        # === 簡易 FVG ロジック ===
+        # 前の足とのギャップでシグナル
+        # bullish: 現在のローソク足の高値 > 前足の終値 + 閾値
+        # bearish: 現在のローソク足の安値 < 前足の終値 - 閾値
+        GAP_THRESHOLD = 0.5  # USD単位の簡易閾値（必要に応じ調整）
 
-            # HTFバイアスがあればフィルター
-            if self.htf_bias:
-                if fvg.bullish and self.htf_bias != "bullish":
-                    continue
-                if not fvg.bullish and self.htf_bias != "bearish":
-                    continue
+        prev_close = market_data.get('prev_close')
+        curr_open = market_data.get('open')
+        curr_high = market_data.get('high')
+        curr_low = market_data.get('low')
+        curr_close = market_data.get('close')
 
-            # FVGタップ判定
-            center = (fvg.top + fvg.bottom) / 2
-            if abs(price - center) < self.tap_threshold:
+        if prev_close is not None:
+            # Bullish FVG シグナル
+            if curr_low > prev_close + GAP_THRESHOLD:
+                signals.append({
+                    'type': 'buy',
+                    'price': curr_close,
+                    'volume': 0.1,  # 本番は適切な数量に調整
+                    'sl': curr_low - GAP_THRESHOLD,
+                    'tp': curr_close + GAP_THRESHOLD*2
+                })
 
-                # --------------------------
-                # Liquidity Sweep (直近高値/安値ブレイク)
-                # --------------------------
-                sweep_ok = True
-                if fvg.bullish:
-                    if price < max(market_data["m15"]["High"].iloc[-3:]):
-                        sweep_ok = False
-                else:
-                    if price > min(market_data["m15"]["Low"].iloc[-3:]):
-                        sweep_ok = False
+            # Bearish FVG シグナル
+            elif curr_high < prev_close - GAP_THRESHOLD:
+                signals.append({
+                    'type': 'sell',
+                    'price': curr_close,
+                    'volume': 0.1,
+                    'sl': curr_high + GAP_THRESHOLD,
+                    'tp': curr_close - GAP_THRESHOLD*2
+                })
 
-                if not sweep_ok:
-                    continue
-
-                # --------------------------
-                # シグナル作成
-                # --------------------------
-                signal = {
-                    "strategy_name": "ProFVG",
-                    "trade_type": "BUY" if fvg.bullish else "SELL",
-                    "entry_price": center,
-                    "stop_loss_price": fvg.bottom - 2 if fvg.bullish else fvg.top + 2,
-                    "take_profit_price": center + 6 if fvg.bullish else center - 6,
-                    "partial_close_percent": 50,
-                    "reason": "ProFVG_Tap"
-                }
-                signals.append(signal)
-                fvg.used = True
+        if signals:
+            self.logger and self.logger.info(f"FVGStrategy signals: {signals}")
+            self.notifier and self.notifier.send(f"FVGStrategy signals: {signals}")
 
         return signals
+
+    def execute_signals(self, signals: List[dict]):
+        """
+        TradeCore 経由でポジションをオープン
+        """
+        for sig in signals:
+            try:
+                self.trade_core.open_position(
+                    trade_type=sig['type'],
+                    price=sig['price'],
+                    volume=sig['volume'],
+                    sl=sig.get('sl'),
+                    tp=sig.get('tp')
+                )
+                self.active_positions.append(sig)
+                self.logger and self.logger.info(f"Executed signal: {sig}")
+            except Exception as e:
+                self.logger and self.logger.error(f"Failed to execute signal: {sig}, error: {e}")
+                self.notifier and self.notifier.send(f"Failed to execute signal: {sig}, error: {e}")
+
+    def update(self, market_data):
+        """
+        MarketEngine ループから定期的に呼ばれる
+        """
+        signals = self.scan_market(market_data)
+        if signals:
+            self.execute_signals(signals)
