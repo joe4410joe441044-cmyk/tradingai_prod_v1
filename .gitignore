@@ -5,9 +5,27 @@ venv_new/
 # Python キャッシュ
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
 # ローカルログや一時ファイル
 logs/
 *.log
 prod_tree.txt
 token_chatID.txt
+
+# pip / setuptools 関連
+*.egg
+*.egg-info/
+dist/
+build/
+
+# VS Code 関連
+.vscode/
+
+# OS 一時ファイル
+Thumbs.db
+.DS_Store
+
+# Jupyter Notebook チェックポイント
+.ipynb_checkpoints/
