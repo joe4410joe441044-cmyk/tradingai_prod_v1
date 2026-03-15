@@ -1,22 +1,21 @@
-# test_full_bot_flow.py
+# bot/test_full_bot_flow.py
 import sys
 import os
 import time
 import logging
 
 # =====================================================
-# ルートパス追加（core, engine, wrappers を認識させる）
+# Pythonがbotフォルダをモジュールとして認識できるようにルートを追加
 # =====================================================
-root_path = os.path.abspath(os.path.dirname(__file__))
-if root_path not in sys.path:
-    sys.path.insert(0, root_path)  # 最優先で探索
+# 実行ディレクトリを基準に sys.path を追加
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # =====================================================
 # モジュールインポート
 # =====================================================
-from core.trade_core import TradeCore
-from engine.execution_engine import ExecutionEngine
-from wrappers.strategy_wrapper import StrategyWrapper
+from bot.core.trade_core import TradeCore
+from bot.engine.execution_engine import ExecutionEngine
+from bot.wrappers.strategy_wrapper import StrategyWrapper
 
 # =====================================================
 # ダミー戦略（TestSignalGenerator 代替）
