@@ -1,84 +1,83 @@
-# =========================================
-# main.py (TradingAI BOT Prod v1)
-# =========================================
+# Bot/engine/market_engine.py
+import pandas as pd
+import time
+import random
 
-# =========================================
-# Imports
-# =========================================
-from Bot.wrappers.strategy_wrapper import StrategyWrapper
-from Bot.core.trade_core import TradeCore
-from Bot.engine.market_engine import MarketEngine
-from Bot.utils.logger import BotLogger
-from Bot.utils.telegram_notifier import TelegramNotifier
-from Bot.strategies.fvg_strategy import FVGStrategy
+class MarketEngine:
+    """
+    Market Data Engine
+    価格データを Strategy に渡す本番用
+    """
 
-# =========================================
-# 設定
-# =========================================
-TOKEN = "8568714005:AAFlzofjXb1cDZyaM93Awq4TFMcBsFKizYc"
-CHAT_ID = "1040943428"
+    def __init__(self, trade_core=None, logger=None, notifier=None):
+        """
+        trade_core : TradeCore オブジェクト
+        logger     : BotLogger オブジェクト（任意）
+        notifier   : TelegramNotifier オブジェクト（任意）
+        """
+        self.trade_core = trade_core
+        self.logger = logger
+        self.notifier = notifier
 
-# =========================================
-# 初期化
-# =========================================
-def initialize_bot():
-    # Logger
-    logger = BotLogger("logs")
+        # OHLCデータ
+        self.m15 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
+        self.h1 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
 
-    # Telegram Notifier
-    notifier = TelegramNotifier(TOKEN, CHAT_ID)
+        # 前足終値
+        self.prev_close = None
 
-    logger.info("Initializing BOT...")
+        # ループ制御
+        self.running = False
 
-    # Trade Core
-    trade_core = TradeCore()
+        if self.logger:
+            self.logger.info("MarketEngine initialized")
+        if self.notifier:
+            self.notifier.send("MarketEngine initialized")
 
-    # Strategy Wrapper
-    strategy_wrapper = StrategyWrapper(core=trade_core, logger=logger, notifier=notifier)
+    # ---------------------------------
+    # Tick受信
+    # ---------------------------------
+    def on_market_tick(self, price):
+        try:
+            price = float(price)
+        except Exception:
+            if self.logger:
+                self.logger.warning(f"Invalid price received: {price}")
+            return
 
-    # Strategy 登録（FVGStrategy）
-    fvg_strategy = FVGStrategy(trade_core=trade_core, logger=logger, notifier=notifier)
-    strategy_wrapper.register_strategy(fvg_strategy)
+        market_data = {
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "prev_close": self.prev_close
+        }
 
-    # Market Engine
-    engine = MarketEngine(
-        trade_core=trade_core,
-        logger=logger,
-        notifier=notifier
-    )
+        # Strategy 更新
+        if self.trade_core and hasattr(self.trade_core, 'strategy_wrapper'):
+            for strategy in self.trade_core.strategy_wrapper.strategies:
+                strategy.update(market_data)
 
-    # 接続
-    trade_core.strategy_wrapper = strategy_wrapper
-    engine.trade_core = trade_core
+        # TradeCore へのデータ通知
+        if self.trade_core and hasattr(self.trade_core, 'on_market_data'):
+            self.trade_core.on_market_data(market_data)
 
-    logger.info("BOT initialization completed")
-    return engine, logger, notifier
+        # 前足終値更新
+        self.prev_close = price
 
-# =========================================
-# Main
-# =========================================
-def main():
-    engine, logger, notifier = initialize_bot()
+        if self.logger:
+            self.logger.info(f"Market tick processed: {price}")
 
-    logger.info("BOT STARTED")
-    notifier.bot_started()
+    # ---------------------------------
+    # run() ループ（本番はリアルデータ取得に置き換え）
+    # ---------------------------------
+    def run(self):
+        if self.logger:
+            self.logger.info("MarketEngine run loop started")
 
-    try:
-        engine.run()
-
-    except KeyboardInterrupt:
-        logger.warning("BOT stopped by user")
-        notifier.send("BOT stopped (KeyboardInterrupt)")
-
-    except Exception as e:
-        logger.error(f"BOT CRASHED: {e}")
-        notifier.send(f"BOT crashed: {e}")
-        raise
-
-# =========================================
-# Entry
-# =========================================
-if __name__ == "__main__":
-    main()
-
-    
+        self.running = True
+        while self.running:
+            # 仮のダミー価格生成（本番はリアルデータ）
+            price = 2000 + random.random() * 10
+            self.on_market_tick(price)
+            time.sleep(1)  # 本番は適切な間隔に変更

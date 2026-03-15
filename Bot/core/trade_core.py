@@ -45,92 +45,27 @@ class TradeCore:
         logger: BotLogger | None = None
     ):
 
-        # ==== 実行モード ====
         self.is_live = is_live
-
-        # ==== Logger ====
         self.logger = logger if logger else BotLogger()
 
-        # ==== 資金状態 ====
         self.initial_balance = initial_balance
         self.equity = initial_balance
         self.max_equity = initial_balance
         self.day_start_balance = initial_balance
 
-        # ==== DD設定 ====
         self.max_daily_dd_percent = 4.0
         self.max_total_dd_percent = 6.0
         self.max_peak_dd_percent = 8.0
 
-        # ==== 制御状態 ====
         self.account_frozen = False
         self.freeze_reason = None
 
-        # ==== ポジション管理 ====
         self.positions: List[Position] = []
         self.max_concurrent_positions = 5
 
-        # ==== 日次管理 ====
         self.current_date = datetime.datetime.now().date()
 
-        # ==== StrategyWrapper ====
         self.strategy_wrapper = None
-
-    # =====================================================
-    # 外部残高更新
-    # =====================================================
-    def update_equity(self, real_balance: float):
-
-        self.equity = real_balance
-
-        if self.equity > self.max_equity:
-            self.max_equity = self.equity
-
-        now = datetime.datetime.now()
-
-        if now.date() != self.current_date:
-            self.day_start_balance = self.equity
-            self.current_date = now.date()
-
-        self._check_drawdown()
-
-    # =====================================================
-    # DD判定
-    # =====================================================
-    def _check_drawdown(self):
-
-        if self.equity <= 0:
-            self._freeze("Equity <= 0")
-            return
-
-        daily_dd = (self.day_start_balance - self.equity) / self.day_start_balance * 100
-        total_dd = (self.initial_balance - self.equity) / self.initial_balance * 100
-        peak_dd = (self.max_equity - self.equity) / self.max_equity * 100
-
-        if daily_dd >= self.max_daily_dd_percent:
-            self._freeze("Daily DD exceeded")
-
-        if total_dd >= self.max_total_dd_percent:
-            self._freeze("Total DD exceeded")
-
-        if peak_dd >= self.max_peak_dd_percent:
-            self._freeze("Peak DD exceeded")
-
-    # =====================================================
-    # 凍結処理
-    # =====================================================
-    def _freeze(self, reason: str):
-
-        self.account_frozen = True
-        self.freeze_reason = reason
-
-        print(f"ACCOUNT FROZEN: {reason}")
-
-        if self.logger:
-            try:
-                self.logger.log_event("ACCOUNT_FROZEN", reason)
-            except Exception:
-                pass
 
     # =====================================================
     # エントリー可否
@@ -139,9 +74,9 @@ class TradeCore:
         return not self.account_frozen
 
     # =====================================================
-    # エントリー処理
+    # ポジションオープン（StrategyWrapper互換）
     # =====================================================
-    def try_enter(self, ctx: StrategyContext) -> bool:
+    def open_position(self, trade_type, price, sl, tp, volume=1.0):
 
         if not self.can_trade():
             return False
@@ -150,34 +85,61 @@ class TradeCore:
             return False
 
         pos = Position(
-            entry_price=ctx.entry_price,
-            trade_type=ctx.trade_type,
-            sl=ctx.stop_loss_price,
-            tp=ctx.take_profit_price,
-            volume=1.0,
+            entry_price=price,
+            trade_type=trade_type,
+            sl=sl,
+            tp=tp,
+            volume=volume,
             entry_time=datetime.datetime.now()
         )
 
         self.positions.append(pos)
 
         print(
-            f"[ENTRY] {ctx.strategy_name} | {ctx.trade_type} | "
-            f"Entry: {ctx.entry_price} | SL: {ctx.stop_loss_price} | TP: {ctx.take_profit_price}"
+            f"[ENTRY] {trade_type} | "
+            f"Entry: {price} | SL: {sl} | TP: {tp}"
         )
 
-        if self.logger:
-            try:
-                self.logger.log_trade(
-                    ctx.strategy_name,
-                    ctx.trade_type,
-                    ctx.entry_price,
-                    ctx.stop_loss_price,
-                    ctx.take_profit_price
-                )
-            except Exception:
-                pass
-
         return True
+
+    # =====================================================
+    # ポジション更新
+    # =====================================================
+    def update_positions(self, price=None):
+
+        if price is None:
+            return
+
+        remaining = []
+
+        for pos in self.positions:
+
+            closed = False
+
+            if pos.trade_type == "buy":
+
+                if price <= pos.sl:
+                    print("SL HIT")
+                    closed = True
+
+                elif price >= pos.tp:
+                    print("TP HIT")
+                    closed = True
+
+            elif pos.trade_type == "sell":
+
+                if price >= pos.sl:
+                    print("SL HIT")
+                    closed = True
+
+                elif price <= pos.tp:
+                    print("TP HIT")
+                    closed = True
+
+            if not closed:
+                remaining.append(pos)
+
+        self.positions = remaining
 
     # =====================================================
     # MarketEngine → Strategy
@@ -189,7 +151,6 @@ class TradeCore:
 
         try:
 
-            # StrategyWrapper呼び出し
             self.strategy_wrapper.on_bar(market_data)
 
         except Exception as e:
