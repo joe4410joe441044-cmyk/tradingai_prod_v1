@@ -1,73 +1,52 @@
-# Bot/engine/market_engine.py
-
-import pandas as pd
+# engine/market_engine.py
+import asyncio
+import logging
+from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.market.candle_buffer import CandleBuffer
+import websockets
+import json
+import time
 
+logger = logging.getLogger(__name__)
 
 class MarketEngine:
     """
     Market Data Engine
-    DataFeedから受け取った市場データをStrategyへ渡す
+    WebSocket受信 → CandleBuffer更新 → StrategyWrapper通知
+    再接続対応
     """
+    def __init__(self, ws_url: str, strategy_wrapper: StrategyWrapper):
+        self.ws_url = ws_url
+        self.strategy_wrapper = strategy_wrapper
+        self.candle_buffer = CandleBuffer()
+        self.ws = None
+        self.stop_flag = False
 
-    def __init__(self, trade_core=None, logger=None, notifier=None):
-
-        self.trade_core = trade_core
-        self.logger = logger
-        self.notifier = notifier
-
-        # OHLCデータ（将来CandleBufferに完全移行予定）
-        self.m15 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
-        self.h1 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
-
-        # ★ CandleBuffer管理（通貨ペアごと）
-        self.candle_buffers = {}
-
-        if self.logger:
-            self.logger.info("MarketEngine initialized")
-
-        if self.notifier:
+    async def connect(self):
+        while not self.stop_flag:
             try:
-                self.notifier.send("MarketEngine initialized")
-            except Exception:
-                pass
+                async with websockets.connect(self.ws_url) as ws:
+                    self.ws = ws
+                    logger.info("WebSocket接続成功")
+                    await self.listen()
+            except Exception as e:
+                logger.error(f"WebSocket接続エラー: {e}")
+                wait_sec = 5
+                logger.info(f"{wait_sec}秒後に再接続を試みます")
+                await asyncio.sleep(wait_sec)
 
-    # ---------------------------------
-    # DataFeed からの MarketData
-    # ---------------------------------
-    def on_market_data(self, market_data):
+    async def listen(self):
+        async for message in self.ws:
+            data = json.loads(message)
+            self.process_data(data)
 
-        try:
+    def process_data(self, data):
+        """
+        ローソク足更新 → StrategyWrapperに通知
+        """
+        candle_updated = self.candle_buffer.update(data)
+        if candle_updated:
+            self.strategy_wrapper.on_candle(self.candle_buffer.get_latest())
 
-            symbol = market_data.get("symbol", "UNKNOWN")
-            close_price = float(market_data.get("close", 0))
-
-            if self.logger:
-                self.logger.info(f"Market data received {symbol} {close_price}")
-
-            # ---------------------------------
-            # CandleBuffer 保存
-            # ---------------------------------
-            if symbol not in self.candle_buffers:
-                self.candle_buffers[symbol] = CandleBuffer()
-
-            self.candle_buffers[symbol].add_candle(market_data)
-
-            # ---------------------------------
-            # Strategy 更新
-            # ---------------------------------
-            if self.trade_core and hasattr(self.trade_core, "strategy_wrapper"):
-
-                for strategy in self.trade_core.strategy_wrapper.strategies:
-                    strategy.update(market_data)
-
-            # ---------------------------------
-            # TradeCore へ通知
-            # ---------------------------------
-            if self.trade_core and hasattr(self.trade_core, "on_market_data"):
-                self.trade_core.on_market_data(market_data)
-
-        except Exception as e:
-
-            if self.logger:
-                self.logger.error(f"MarketEngine data error: {e}")
+    def stop(self):
+        self.stop_flag = True
