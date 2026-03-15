@@ -2,20 +2,15 @@
 # main.py (TradingAI BOT Prod v1)
 # =========================================
 
-# =========================================
-# Imports
-# =========================================
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.core.trade_core import TradeCore
 from Bot.engine.market_engine import MarketEngine
 from Bot.utils.logger import BotLogger
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.strategies.fvg_strategy import FVGStrategy
+from Bot.datafeeds.crypto.binance_feed import BinanceDataFeed
 
 
-# =========================================
-# 設定
-# =========================================
 TOKEN = "8568714005:AAFlzofjXb1cDZyaM93Awq4TFMcBsFKizYc"
 CHAT_ID = "1040943428"
 
@@ -25,11 +20,9 @@ CHAT_ID = "1040943428"
 # =========================================
 def initialize_bot():
 
-    # Logger
     logger = BotLogger("logs")
     logger.info("Initializing BOT...")
 
-    # Telegram Notifier
     notifier = TelegramNotifier(TOKEN, CHAT_ID)
     logger.info("Telegram notifier initialized")
 
@@ -69,14 +62,23 @@ def initialize_bot():
     logger.info("MarketEngine initialized")
 
     # ---------------------------------
+    # Binance DataFeed
+    # ---------------------------------
+    feed = BinanceDataFeed(
+        symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        timeframe="15m",
+        market_engine=engine,
+        logger=logger
+    )
+
+    # ---------------------------------
     # 接続
     # ---------------------------------
     trade_core.strategy_wrapper = strategy_wrapper
-    engine.trade_core = trade_core
 
     logger.info("BOT initialization completed")
 
-    return engine, logger, notifier
+    return feed, logger, notifier
 
 
 # =========================================
@@ -84,13 +86,19 @@ def initialize_bot():
 # =========================================
 def main():
 
-    engine, logger, notifier = initialize_bot()
+    feed, logger, notifier = initialize_bot()
 
     logger.info("BOT STARTED")
     notifier.bot_started()
 
     try:
-        engine.run()
+
+        # WebSocket開始
+        feed.start()
+
+        # BOTを停止させないため待機
+        while True:
+            pass
 
     except KeyboardInterrupt:
         logger.warning("BOT stopped by user")

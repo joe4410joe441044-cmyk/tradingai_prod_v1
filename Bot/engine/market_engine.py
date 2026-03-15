@@ -1,83 +1,73 @@
 # Bot/engine/market_engine.py
+
 import pandas as pd
-import time
-import random
+from Bot.market.candle_buffer import CandleBuffer
+
 
 class MarketEngine:
     """
     Market Data Engine
-    価格データを Strategy に渡す本番用
+    DataFeedから受け取った市場データをStrategyへ渡す
     """
 
     def __init__(self, trade_core=None, logger=None, notifier=None):
-        """
-        trade_core : TradeCore オブジェクト
-        logger     : BotLogger オブジェクト（任意）
-        notifier   : TelegramNotifier オブジェクト（任意）
-        """
+
         self.trade_core = trade_core
         self.logger = logger
         self.notifier = notifier
 
-        # OHLCデータ
+        # OHLCデータ（将来CandleBufferに完全移行予定）
         self.m15 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
         self.h1 = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
 
-        # 前足終値
-        self.prev_close = None
-
-        # ループ制御
-        self.running = False
+        # ★ CandleBuffer管理（通貨ペアごと）
+        self.candle_buffers = {}
 
         if self.logger:
             self.logger.info("MarketEngine initialized")
+
         if self.notifier:
-            self.notifier.send("MarketEngine initialized")
+            try:
+                self.notifier.send("MarketEngine initialized")
+            except Exception:
+                pass
 
     # ---------------------------------
-    # Tick受信
+    # DataFeed からの MarketData
     # ---------------------------------
-    def on_market_tick(self, price):
+    def on_market_data(self, market_data):
+
         try:
-            price = float(price)
-        except Exception:
+
+            symbol = market_data.get("symbol", "UNKNOWN")
+            close_price = float(market_data.get("close", 0))
+
             if self.logger:
-                self.logger.warning(f"Invalid price received: {price}")
-            return
+                self.logger.info(f"Market data received {symbol} {close_price}")
 
-        market_data = {
-            "open": price,
-            "high": price,
-            "low": price,
-            "close": price,
-            "prev_close": self.prev_close
-        }
+            # ---------------------------------
+            # CandleBuffer 保存
+            # ---------------------------------
+            if symbol not in self.candle_buffers:
+                self.candle_buffers[symbol] = CandleBuffer()
 
-        # Strategy 更新
-        if self.trade_core and hasattr(self.trade_core, 'strategy_wrapper'):
-            for strategy in self.trade_core.strategy_wrapper.strategies:
-                strategy.update(market_data)
+            self.candle_buffers[symbol].add_candle(market_data)
 
-        # TradeCore へのデータ通知
-        if self.trade_core and hasattr(self.trade_core, 'on_market_data'):
-            self.trade_core.on_market_data(market_data)
+            # ---------------------------------
+            # Strategy 更新
+            # ---------------------------------
+            if self.trade_core and hasattr(self.trade_core, "strategy_wrapper"):
 
-        # 前足終値更新
-        self.prev_close = price
+                for strategy in self.trade_core.strategy_wrapper.strategies:
+                    strategy.update(market_data)
 
-        if self.logger:
-            self.logger.info(f"Market tick processed: {price}")
+            # ---------------------------------
+            # TradeCore へ通知
+            # ---------------------------------
+            if self.trade_core and hasattr(self.trade_core, "on_market_data"):
+                self.trade_core.on_market_data(market_data)
 
-    # ---------------------------------
-    # run() ループ（本番はリアルデータ取得に置き換え）
-    # ---------------------------------
-    def run(self):
-        if self.logger:
-            self.logger.info("MarketEngine run loop started")
+        except Exception as e:
 
-        self.running = True
-        while self.running:
-            # 仮のダミー価格生成（本番はリアルデータ）
-            price = 2000 + random.random() * 10
-            self.on_market_tick(price)
-            time.sleep(1)  # 本番は適切な間隔に変更
+            if self.logger:
+                self.logger.error(f"MarketEngine data error: {e}")
