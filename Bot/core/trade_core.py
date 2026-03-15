@@ -11,11 +11,12 @@ from Bot.utils.logger import BotLogger
 @dataclass
 class Position:
     entry_price: float
-    trade_type: str
+    trade_type: str  # BUY / SELL
     sl: float
     tp: float
     volume: float
     entry_time: datetime.datetime
+    symbol: str = "BTCUSDT"
 
 
 # =====================================================
@@ -42,11 +43,14 @@ class TradeCore:
         self,
         initial_balance: float = 10000,
         is_live: bool = False,
-        logger: BotLogger | None = None
+        logger: BotLogger | None = None,
+        execution_engine=None
     ):
 
         self.is_live = is_live
-        self.logger = logger if logger else BotLogger()
+        self.logger = logger if logger else BotLogger("TradeCore").get_logger()
+
+        self.execution_engine = execution_engine
 
         self.initial_balance = initial_balance
         self.equity = initial_balance
@@ -74,66 +78,86 @@ class TradeCore:
         return not self.account_frozen
 
     # =====================================================
-    # ポジションオープン（StrategyWrapper互換）
+    # ポジションオープン
     # =====================================================
-    def open_position(self, trade_type, price, sl, tp, volume=1.0):
+    def open_position(
+        self,
+        trade_type: str,
+        price: float,
+        sl: float,
+        tp: float,
+        volume: float = 1.0,
+        symbol: str = "BTCUSDT"
+    ) -> bool:
+
+        trade_type_upper = trade_type.upper()
+        if trade_type_upper not in ["BUY", "SELL"]:
+            self.logger.error(f"Invalid trade_type: {trade_type}")
+            return False
 
         if not self.can_trade():
+            self.logger.warning("Account is frozen, cannot open position")
             return False
 
         if len(self.positions) >= self.max_concurrent_positions:
+            self.logger.warning("Max concurrent positions reached")
             return False
 
         pos = Position(
             entry_price=price,
-            trade_type=trade_type,
+            trade_type=trade_type_upper,
             sl=sl,
             tp=tp,
             volume=volume,
-            entry_time=datetime.datetime.now()
+            entry_time=datetime.datetime.now(),
+            symbol=symbol
         )
-
         self.positions.append(pos)
 
-        print(
-            f"[ENTRY] {trade_type} | "
-            f"Entry: {price} | SL: {sl} | TP: {tp}"
-        )
+        self.logger.info(f"ENTRY {trade_type_upper} | {symbol} Entry:{price} SL:{sl} TP:{tp}")
+
+        # ExecutionEngine 呼び出し
+        if self.execution_engine and self.is_live:
+            self.execution_engine.place_order(
+                symbol=symbol,
+                side=trade_type_upper,
+                order_type="MARKET",
+                quantity=volume,
+                price=price,
+                sl=sl,
+                tp=tp
+            )
 
         return True
 
     # =====================================================
-    # ポジション更新
+    # ポジション更新（SL/TPチェック）
     # =====================================================
-    def update_positions(self, price=None):
-
-        if price is None:
-            return
+    def update_positions(self, price_dict: dict):
 
         remaining = []
 
         for pos in self.positions:
+            symbol_price = price_dict.get(pos.symbol)
+            if symbol_price is None:
+                remaining.append(pos)
+                continue
 
             closed = False
 
-            if pos.trade_type == "buy":
-
-                if price <= pos.sl:
-                    print("SL HIT")
+            if pos.trade_type == "BUY":
+                if symbol_price <= pos.sl:
+                    self.logger.info(f"SL HIT | {pos.symbol} Entry:{pos.entry_price} SL:{pos.sl} TP:{pos.tp}")
                     closed = True
-
-                elif price >= pos.tp:
-                    print("TP HIT")
+                elif symbol_price >= pos.tp:
+                    self.logger.info(f"TP HIT | {pos.symbol} Entry:{pos.entry_price} SL:{pos.sl} TP:{pos.tp}")
                     closed = True
-
-            elif pos.trade_type == "sell":
-
-                if price >= pos.sl:
-                    print("SL HIT")
+            elif pos.trade_type == "SELL":
+                if symbol_price >= pos.sl:
+                    self.logger.info(f"SL HIT | {pos.symbol} Entry:{pos.entry_price} SL:{pos.sl} TP:{pos.tp}")
                     closed = True
-
-                elif price <= pos.tp:
-                    print("TP HIT")
+                elif symbol_price <= pos.tp:
+                    self.logger.info(f"TP HIT | {pos.symbol} Entry:{pos.entry_price} SL:{pos.sl} TP:{pos.tp}")
                     closed = True
 
             if not closed:
@@ -150,11 +174,9 @@ class TradeCore:
             return
 
         try:
-
             self.strategy_wrapper.on_bar(market_data)
-
         except Exception as e:
-            print(f"Strategy execution error: {e}")
+            self.logger.exception(f"Strategy execution error: {e}")
 
     # =====================================================
     # 状態確認
@@ -166,5 +188,6 @@ class TradeCore:
             "max_equity": self.max_equity,
             "account_frozen": self.account_frozen,
             "freeze_reason": self.freeze_reason,
-            "is_live": self.is_live
+            "is_live": self.is_live,
+            "open_positions": len(self.positions)
         }

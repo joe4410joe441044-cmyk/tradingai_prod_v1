@@ -9,10 +9,10 @@ from Bot.utils.logger import BotLogger
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.strategies.fvg_strategy import FVGStrategy
 from Bot.datafeeds.crypto.binance_feed import BinanceDataFeed
+from Bot.engine.execution_engine import ExecutionEngine
 
-
-TOKEN = "8568714005:AAFlzofjXb1cDZyaM93Awq4TFMcBsFKizYc"
-CHAT_ID = "1040943428"
+TOKEN = "YOUR_TELEGRAM_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
 
 
 # =========================================
@@ -27,9 +27,21 @@ def initialize_bot():
     logger.info("Telegram notifier initialized")
 
     # ---------------------------------
+    # Execution Engine
+    # ---------------------------------
+    execution_engine = ExecutionEngine(
+        logger=logger,
+        notifier=notifier
+    )
+    logger.info("ExecutionEngine initialized")
+
+    # ---------------------------------
     # Trade Core
     # ---------------------------------
-    trade_core = TradeCore()
+    trade_core = TradeCore(
+        execution_engine=execution_engine,
+        logger=logger
+    )
     logger.info("TradeCore initialized")
 
     # ---------------------------------
