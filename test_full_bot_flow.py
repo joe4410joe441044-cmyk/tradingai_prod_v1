@@ -1,93 +1,116 @@
-# bot/test_full_bot_flow.py
+# test_full_bot_flow.py
+
 import sys
 import os
 import time
 import logging
 
 # =====================================================
-# Pythonがbotフォルダをモジュールとして認識できるようにルートを追加
+# ルートパスを追加（Botフォルダを認識させる）
 # =====================================================
-# 実行ディレクトリを基準に sys.path を追加
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath("."))
 
 # =====================================================
-# モジュールインポート
+# BOTモジュール
 # =====================================================
-from bot.core.trade_core import TradeCore
-from bot.engine.execution_engine import ExecutionEngine
-from bot.wrappers.strategy_wrapper import StrategyWrapper
+from Bot.core.trade_core import TradeCore
+from Bot.engine.execution_engine import ExecutionEngine
+from Bot.wrappers.strategy_wrapper import StrategyWrapper
+
 
 # =====================================================
-# ダミー戦略（TestSignalGenerator 代替）
+# ダミーStrategy
 # =====================================================
 class DummyStrategy:
-    def __init__(self):
-        self.name = "DummyStrategy"
 
     def generate_signal(self):
-        # 買いシグナルを返す
-        return {"symbol": "BTCUSDT", "type": "BUY", "volume": 0.01}
+
+        return {
+            "symbol": "BTCUSDT",
+            "type": "BUY",
+            "volume": 0.01
+        }
 
 
 # =====================================================
-# StrategyWrapper 拡張（TradeCore連携）
+# StrategyWrapperテスト用
 # =====================================================
 class TestStrategyWrapper(StrategyWrapper):
+
     def on_signal(self, signal):
-        # Signal受信 → TradeCoreに委譲
-        if hasattr(self, "trade_core"):
-            self.trade_core.handle_signal(signal)
-        else:
-            # 既存 execute_order を呼ぶ場合
-            self.execution_engine.execute_order(signal)
+
+        print("Signal received:", signal)
+
+        # core に処理を渡す
+        self.core.handle_signal(signal)
 
 
 # =====================================================
-# TradeCore 拡張（最小版）
+# TradeCoreテスト版
 # =====================================================
 class TestTradeCore(TradeCore):
-    def __init__(self, execution_engine, max_positions=5):
+
+    def __init__(self, execution_engine):
+
         self.execution_engine = execution_engine
-        self.max_positions = max_positions
         self.positions = []
+        self.max_positions = 5
 
     def handle_signal(self, signal):
+
+        print("TradeCore handling signal")
+
         if len(self.positions) < self.max_positions:
+
             self.positions.append(signal)
+
+            print("Order sent to ExecutionEngine")
+
             self.execution_engine.execute_order(signal)
+
         else:
-            logging.info(f"Max positions reached, signal skipped: {signal}")
+
+            print("Max positions reached")
 
 
 # =====================================================
-# メインテストフロー
+# MAIN
 # =====================================================
 def main():
-    # Logger初期化（グローバル）
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
-    # ExecutionEngine 初期化（資金未投入モード）
-    exec_engine = ExecutionEngine(live=False)
+    logging.basicConfig(level=logging.INFO)
 
-    # TradeCore 初期化
+    print("")
+    print("BOT FLOW TEST START")
+    print("")
+
+    # ExecutionEngine
+    exec_engine = ExecutionEngine()
+
+    # TradeCore
     trade_core = TestTradeCore(exec_engine)
 
-    # StrategyWrapper 初期化 & TradeCore登録
-    wrapper = TestStrategyWrapper(execution_engine=exec_engine)
-    wrapper.trade_core = trade_core
+    # StrategyWrapper
+    wrapper = TestStrategyWrapper(core=trade_core)
 
-    # ダミー戦略登録
+    # Strategy
     strategy = DummyStrategy()
-    wrapper.register_strategy(strategy)
 
-    # フロー確認ループ（3回だけ）
+    # テストループ
     for i in range(3):
-        signal = strategy.generate_signal()
-        wrapper.on_signal(signal)
-        time.sleep(0.5)  # 遅延でログ観察
 
-    # 最終ポジション確認
-    logging.info(f"Final positions: {trade_core.positions}")
+        print("")
+        print("Loop:", i + 1)
+
+        signal = strategy.generate_signal()
+
+        wrapper.on_signal(signal)
+
+        time.sleep(1)
+
+    print("")
+    print("Final Positions")
+    print(trade_core.positions)
 
 
 if __name__ == "__main__":
