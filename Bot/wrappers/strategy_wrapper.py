@@ -1,11 +1,12 @@
 from typing import List
 import logging
-from Bot.core.trade_core import StrategyContext
+from Bot.core.trade_core import StrategyContext, TradeCore
+
 
 class StrategyWrapper:
-    """複数戦略を統括し、Coreに委譲する汎用ラッパー"""
+    """複数戦略を統括し、TradeCoreに委譲する"""
 
-    def __init__(self, core):
+    def __init__(self, core: TradeCore):
         self.core = core
         self.strategies: List = []
 
@@ -19,34 +20,65 @@ class StrategyWrapper:
     # ローソク足確定時に呼ばれる
     # ---------------------------------
     def on_bar(self, market_data):
+        """
+        market_data: pandas.Series (open, high, low, close)
+        """
+
         for strat in self.strategies:
+
+            # 任意：FVGなどの内部更新
             if hasattr(strat, "detect_fvg"):
-                strat.detect_fvg()
-            if hasattr(strat, "generate_signals"):
+                try:
+                    strat.detect_fvg()
+                except Exception as e:
+                    logging.error(f"detect_fvg error: {e}")
+
+            # シグナル生成
+            if not hasattr(strat, "generate_signals"):
+                continue
+
+            try:
                 signals = strat.generate_signals(market_data)
-            else:
+            except Exception as e:
+                logging.error(f"generate_signals error: {e}")
+                continue
+
+            if not signals:
                 continue
 
             for s in signals:
-                ctx = StrategyContext(
-                    strategy_name=s["strategy_name"],
-                    trade_type=s["trade_type"],
-                    entry_price=s["entry_price"],
-                    stop_loss_price=s["stop_loss_price"],
-                    take_profit_price=s["take_profit_price"],
-                    partial_close_percent=s.get("partial_close_percent", 0),
-                    reason=s.get("reason", "")
-                )
-                self.core.try_enter(ctx)
+                try:
+                    ctx = StrategyContext(
+                        strategy_name=s.get("strategy_name", "UNKNOWN"),
+                        trade_type=s["trade_type"],
+                        entry_price=s["entry_price"],
+                        stop_loss_price=s["stop_loss_price"],
+                        take_profit_price=s["take_profit_price"],
+                        partial_close_percent=s.get("partial_close_percent", 0),
+                        reason=s.get("reason", "")
+                    )
 
-        self.core.update_positions()
+                    # 🔥 ここが重要：TradeCoreへ直接渡す
+                    self.core.try_enter(ctx)
+
+                except Exception as e:
+                    logging.error(f"signal processing error: {e}")
+
+        # 🔥 価格更新（SL/TP判定）
+        try:
+            price_dict = {
+                "BTCUSDT": float(market_data["close"])
+            }
+            self.core.update_positions(price_dict)
+        except Exception as e:
+            logging.error(f"update_positions error: {e}")
 
     # ---------------------------------
     # TestSignalGenerator 用
     # ---------------------------------
     def on_test_signal(self, trade_type, entry_price, stop_loss_price, take_profit_price, volume):
-        if not self.core.can_open_new_position():
-            logging.info("[TradeCore] max_concurrent_positions reached, skipping")
+        if not self.core.can_trade():
+            logging.info("[TradeCore] cannot trade, skipping")
             return
 
         ctx = StrategyContext(
@@ -58,4 +90,5 @@ class StrategyWrapper:
             partial_close_percent=0,
             reason="TestSignal"
         )
+
         self.core.try_enter(ctx)

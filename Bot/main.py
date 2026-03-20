@@ -1,6 +1,8 @@
 # =========================================
-# main.py (TradingAI BOT Prod v1)
+# main.py (TradingAI BOT 最終版)
 # =========================================
+
+import asyncio
 
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.core.trade_core import TradeCore
@@ -8,8 +10,12 @@ from Bot.engine.market_engine import MarketEngine
 from Bot.utils.logger import BotLogger
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.strategies.fvg_strategy import FVGStrategy
-from Bot.datafeeds.crypto.binance_feed import BinanceDataFeed
 from Bot.engine.execution_engine import ExecutionEngine
+
+# =========================
+# 設定
+# =========================
+WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 TOKEN = "YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
@@ -51,7 +57,7 @@ def initialize_bot():
     logger.info("StrategyWrapper initialized")
 
     # ---------------------------------
-    # Strategy 登録
+    # Strategy
     # ---------------------------------
     fvg_strategy = FVGStrategy(
         trade_core=trade_core,
@@ -63,54 +69,32 @@ def initialize_bot():
     logger.info("FVGStrategy registered")
 
     # ---------------------------------
-    # Market Engine
+    # Market Engine（ここが正解）
     # ---------------------------------
-    engine = MarketEngine(
-        trade_core=trade_core,
-        logger=logger,
-        notifier=notifier
+    market_engine = MarketEngine(
+        ws_url=WS_URL,
+        strategy_wrapper=strategy_wrapper
     )
 
     logger.info("MarketEngine initialized")
 
-    # ---------------------------------
-    # Binance DataFeed
-    # ---------------------------------
-    feed = BinanceDataFeed(
-        symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-        timeframe="15m",
-        market_engine=engine,
-        logger=logger
-    )
-
-    # ---------------------------------
-    # 接続
-    # ---------------------------------
-    trade_core.strategy_wrapper = strategy_wrapper
-
     logger.info("BOT initialization completed")
 
-    return feed, logger, notifier
+    return market_engine, logger, notifier
 
 
 # =========================================
-# Main
+# Main（非同期）
 # =========================================
-def main():
+async def main():
 
-    feed, logger, notifier = initialize_bot()
+    market_engine, logger, notifier = initialize_bot()
 
     logger.info("BOT STARTED")
     notifier.bot_started()
 
     try:
-
-        # WebSocket開始
-        feed.start()
-
-        # BOTを停止させないため待機
-        while True:
-            pass
+        await market_engine.connect()
 
     except KeyboardInterrupt:
         logger.warning("BOT stopped by user")
@@ -126,4 +110,4 @@ def main():
 # Entry
 # =========================================
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
