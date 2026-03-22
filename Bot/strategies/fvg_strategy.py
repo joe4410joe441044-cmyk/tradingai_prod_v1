@@ -95,10 +95,10 @@ class FVGStrategy(BaseStrategy):
     def _add_fvg(self, df: pd.DataFrame, tf: str):
         if len(df) < 3:
             return
-        high2 = df['High'].iloc[-3]
-        low2 = df['Low'].iloc[-3]
-        high0 = df['High'].iloc[-1]
-        low0 = df['Low'].iloc[-1]
+        high2 = df['high'].iloc[-3]
+        low2 = df['low'].iloc[-3]
+        high0 = df['high'].iloc[-1]
+        low0 = df['low'].iloc[-1]
         if low2 > high0:
             self._add_or_merge_fvg(low2, high0, False, tf)
         if high2 < low0:

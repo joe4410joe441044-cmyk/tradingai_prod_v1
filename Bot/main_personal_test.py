@@ -47,9 +47,9 @@ engine = MarketEngine(strategies=strategies)
 # ダミーCandle作成（本番フォーマットのDataFrameに変換）
 # --------------------------
 dummy_candles = [
-    {"symbol": "BTCUSDT", "Open": 30000, "High": 30100, "Low": 29950, "Close": 30100, "Volume": 10},
-    {"symbol": "BTCUSDT", "Open": 30200, "High": 30250, "Low": 30100, "Close": 30150, "Volume": 12},
-    {"symbol": "BTCUSDT", "Open": 30150, "High": 30300, "Low": 30100, "Close": 30300, "Volume": 15},
+    {"symbol": "BTCUSDT", "Open": 30000, "high": 30100, "low": 29950, "Close": 30100, "Volume": 10},
+    {"symbol": "BTCUSDT", "Open": 30200, "high": 30250, "low": 30100, "Close": 30150, "Volume": 12},
+    {"symbol": "BTCUSDT", "Open": 30150, "high": 30300, "low": 30100, "Close": 30300, "Volume": 15},
 ]
 
 df_dummy = pd.DataFrame(dummy_candles)
