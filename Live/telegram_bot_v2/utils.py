@@ -1,4 +1,4 @@
-ï»¿from dotenv import load_dotenv
+from dotenv import load_dotenv
 import os
 import requests
 import logging
@@ -10,7 +10,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_telegram(msg: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        logging.warning(f"[Telegramæœªè¨­å®š] {msg}")
+        logging.warning(f"[Telegram–¢İ’è] {msg}")
         return
     try:
         requests.post(
@@ -19,4 +19,4 @@ def send_telegram(msg: str):
             timeout=10
         )
     except Exception as e:
-        logging.error(f"Telegramé€ä¿¡å¤±æ•—: {e}")
+        logging.error(f"Telegram‘—M¸”s: {e}")

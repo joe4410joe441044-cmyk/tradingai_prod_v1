@@ -13,7 +13,7 @@ class RSIStrategy(BaseStrategy):
 
         if "H1" in market_data and not market_data["H1"].empty:
             df = market_data["H1"].copy()
-            df.columns = [c.lower() for c in df.columns]  # ← 重要
+            df.columns = [c.lower() for c in df.columns]  # ↁE重要E
             self.df_h1 = df
 
         if self.df_h1.empty:

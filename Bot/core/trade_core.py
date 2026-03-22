@@ -59,7 +59,7 @@ class StrategyContext:
 class TradeCore:
 
     def __init__(self, initial_balance=10000, logger=None):
-        # ✅ logger統一（今回の本質）
+        # ✁Elogger統一�E�今回の本質�E�E
         self.logger = logger if logger else BotLogger().get_logger()
 
         self.positions: List[Position] = []
@@ -85,7 +85,7 @@ class TradeCore:
     # --------------------------
     def open_position(self, trade_type, price, sl, tp, volume=1.0, symbol="BTCUSDT"):
 
-        trade_type = str(trade_type).upper()  # 🔥 強制安全化
+        trade_type = str(trade_type).upper()  # 🔥 強制安�E匁E
 
         pos = Position(
             entry_price=price,
@@ -103,7 +103,7 @@ class TradeCore:
         return True
 
     # --------------------------
-    # SL / TP 判定
+    # SL / TP 判宁E
     # --------------------------
     def update_positions(self, price_dict):
 
@@ -123,22 +123,22 @@ class TradeCore:
 
             if pos.trade_type == "BUY":
                 if price <= pos.sl:
-                    self.logger.info(f"❌ SL HIT @ {price}")
+                    self.logger.info(f"❁ESL HIT @ {price}")
                     closed = True
                 elif price >= pos.tp:
-                    self.logger.info(f"✅ TP HIT @ {price}")
+                    self.logger.info(f"✁ETP HIT @ {price}")
                     closed = True
 
             elif pos.trade_type == "SELL":
                 if price >= pos.sl:
-                    self.logger.info(f"❌ SL HIT @ {price}")
+                    self.logger.info(f"❁ESL HIT @ {price}")
                     closed = True
                 elif price <= pos.tp:
-                    self.logger.info(f"✅ TP HIT @ {price}")
+                    self.logger.info(f"✁ETP HIT @ {price}")
                     closed = True
 
             else:
-                # 🔥 未定義タイプ検出（デバッグ超重要）
+                # 🔥 未定義タイプ検�E�E�デバッグ趁E��要E��E
                 self.logger.warning(f"Unknown trade_type: {pos.trade_type}")
 
             if not closed:
@@ -147,7 +147,7 @@ class TradeCore:
         self.positions = remaining
 
     # --------------------------
-    # 注文チェック（Engineから呼ばれる）
+    # 注斁E��ェチE���E�Engineから呼ばれる�E�E
     # --------------------------
     def check_orders(self, price_dict):
         self.update_positions(price_dict)

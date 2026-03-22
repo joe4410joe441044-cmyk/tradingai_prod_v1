@@ -2,34 +2,62 @@ from typing import List
 from strategies.base_strategy import BaseStrategy
 from market.candle_buffer import CandleBuffer
 from utils.multi_timeframe_manager import MultiTimeFrameManager
-
+from websocket.ws_client import BinanceWSClient
+from utils.telegram import TelegramNotifier  # 本番用
 
 class MarketEngine:
     """
-    MarketEngine（本番用／ダミーデータ兼用）
+    MarketEngine�E�本番用�E�ダミ�EチE�Eタ兼用�E�E
     - CandleBuffer更新
-    - MultiTimeFrameManagerで任意時間足生成
-    - 戦略に on_bar データを渡す
+    - MultiTimeFrameManagerで任意時間足生�E
+    - 戦略に on_bar チE�Eタを渡ぁE
+    - WebSocket統吁E
     """
 
-    def __init__(self, strategies: List[BaseStrategy], debug: bool = True):
+    def __init__(self, strategies: List[BaseStrategy], debug: bool = True,
+                 telegram_token: str = None, telegram_chat_id: str = None):
         self.strategies = strategies
         self.debug = debug
 
         # 生足バッファ
         self.candle_buffer = CandleBuffer()
 
-        # マルチタイムフレーム管理（1分足ベース）
+        # マルチタイムフレーム管琁E��E刁E��ベ�Eス�E�E
         self.mtf_manager = MultiTimeFrameManager(base_timeframe="1m")
 
         # 対応時間足
         self.timeframes = ["M15", "H1", "H4"]
 
+        # Telegram 通知
+        self.notifier = TelegramNotifier(token=telegram_token, chat_id=telegram_chat_id) if telegram_token else None
+
+        # WebSocket クライアント管琁E
+        self.ws_clients: List[BinanceWSClient] = []
+
+    # ----------------------------
+    # WebSocket 連携
+    # ----------------------------
+    def add_ws_client(self, symbol: str):
+        """WebSocket Client を追加"""
+        ws_client = BinanceWSClient(
+            symbol=symbol,
+            on_candle=self.process_data,  # 受信チE�EタめEprocess_data に渡ぁE
+            telegram_token=self.notifier.token if self.notifier else None,
+            telegram_chat_id=self.notifier.chat_id if self.notifier else None
+        )
+        ws_client.start()
+        self.ws_clients.append(ws_client)
+        if self.debug:
+            print(f"[MarketEngine] WS client started for {symbol}")
+
+    # ----------------------------
+    # キャンドル処琁E
+    # ----------------------------
     def process_data(self, data: dict):
         """
-        WSやダミーデータを受け取り
-        CandleBuffer と MTFManager を更新して戦略に渡す
-        data フォーマット例:
+        WSめE��ミ�EチE�Eタを受け取めE
+        CandleBuffer と MTFManager を更新して戦略に渡ぁE
+        data フォーマット侁E
         {
             "symbol": "BTCUSDT",
             "time": 1679452800000,
@@ -40,8 +68,6 @@ class MarketEngine:
             "volume": 12.34
         }
         """
-
-        # 受信データを既存形式に合わせて整理
         candle = {
             "time": data.get("time"),
             "open": float(data.get("open", 0)),
@@ -63,13 +89,13 @@ class MarketEngine:
             candle=candle
         )
 
-        # 各時間足を取得して戦略に渡す
+        # 吁E��間足を取得して戦略に渡ぁE
         market_data = self.mtf_manager.get_all_timeframes(
             symbol=data.get("symbol", "BTCUSDT"),
             timeframes=self.timeframes
         )
         market_data["symbol"] = data.get("symbol", "BTCUSDT")
 
-        # 戦略にデータを渡す（既存構造維持）
+        # 戦略にチE�Eタを渡ぁE
         for strategy in self.strategies:
             strategy.on_bar(market_data)

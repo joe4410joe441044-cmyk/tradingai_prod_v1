@@ -1,4 +1,4 @@
-ï»¿import time
+import time
 import csv
 import os
 import logging
@@ -27,23 +27,23 @@ def start_bot_core():
         return
 
     bot_state.running = True
-    send_telegram(f"ğŸš€ Bot èµ·å‹•ï¼ˆ{'DRY' if bot_state.dry_run else 'æœ¬ç•ª'}ï¼‰")
+    send_telegram(f"?? Bot ‹N“®i{'DRY' if bot_state.dry_run else '–{”Ô'}j")
 
     for _ in range(10):
         if not bot_state.running:
             break
 
         if bot_state.dry_run:
-            logging.info("ğŸ’¤ DRY_RUNï¼šæ³¨æ–‡ãªã—")
+            logging.info("?? DRY_RUNF’•¶‚È‚µ")
         else:
-            logging.info("ğŸ’° æœ¬ç•ªæ³¨æ–‡å®Ÿè¡Œï¼ˆä»®ï¼‰")
+            logging.info("?? –{”Ô’•¶Àsi‰¼j")
 
         time.sleep(1)
 
     bot_state.running = False
-    send_telegram("ğŸ›‘ Bot å‡¦ç†çµ‚äº†")
+    send_telegram("?? Bot ˆ—I—¹")
 
 def periodic_check():
     while True:
-        log_check("æ­£å¸¸ç¨¼åƒä¸­")
+        log_check("³í‰Ò“­’†")
         time.sleep(CHECK_INTERVAL)

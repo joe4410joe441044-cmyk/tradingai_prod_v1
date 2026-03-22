@@ -1,4 +1,4 @@
-ï»¿import logging
+import logging
 from threading import Thread
 from telegram.ext import ApplicationBuilder
 from telegram.request import HTTPXRequest
@@ -21,7 +21,7 @@ def main():
     Thread(target=periodic_check, daemon=True).start()
 
     if not TELEGRAM_TOKEN:
-        logging.error("TELEGRAM_TOKEN æœªè¨­å®š")
+        logging.error("TELEGRAM_TOKEN –¢İ’è")
         return
 
     request = HTTPXRequest(
@@ -40,7 +40,7 @@ def main():
 
     register_handlers(app)
 
-    logging.info("ğŸš€ Bot èµ·å‹•ï¼ˆtelegram_bot_v2ï¼‰")
+    logging.info("?? Bot ‹N“®itelegram_bot_v2j")
 
     app.run_polling()
 

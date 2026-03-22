@@ -7,10 +7,10 @@ logger = logging.getLogger(__name__)
 
 class TelegramNotifier:
     """
-    Telegram BOT 通知ラッパー
+    Telegram BOT 通知ラチE��ー
     - 起動通知
     - エントリー通知
-    - 利確 / 損切通知
+    - 利確 / 損�E通知
     """
 
     def __init__(self, token: str, chat_id: str):
@@ -19,7 +19,7 @@ class TelegramNotifier:
         self.url = f"https://api.telegram.org/bot{self.token}/sendMessage"
 
     # ------------------------------
-    # メッセージ送信
+    # メチE��ージ送信
     # ------------------------------
     def send(self, message: str):
         payload = {"chat_id": self.chat_id, "text": message}
@@ -57,8 +57,8 @@ class TelegramNotifier:
         self.send(msg)
 
     # ------------------------------
-    # 損切通知
+    # 損�E通知
     # ------------------------------
     def stop_loss(self, loss: float):
-        msg = f"⚠️ STOP LOSS\nLoss: {loss}"
+        msg = f"⚠�E�ESTOP LOSS\nLoss: {loss}"
         self.send(msg)

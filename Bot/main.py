@@ -12,7 +12,7 @@ from utils.telegram_notifier import TelegramNotifier
 from strategies.fvg_strategy import FVGStrategy
 from engine.execution_engine import ExecutionEngine
 # =========================
-# 設定
+# 設宁E
 # =========================
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 
@@ -21,7 +21,7 @@ CHAT_ID = "YOUR_CHAT_ID"
 
 
 # =========================================
-# 初期化
+# 初期匁E
 # =========================================
 def initialize_bot():
 
@@ -35,7 +35,7 @@ def initialize_bot():
     # Execution Engine
     # ---------------------------------
     execution_engine = ExecutionEngine(
-        live=False,  # ← 安全のため必ずFalse
+        live=False,  # ↁE安�Eのため忁E��False
         logger=logger,
         notifier=notifier
     )
@@ -69,13 +69,13 @@ def initialize_bot():
     logger.info("FVGStrategy registered")
 
     # ---------------------------------
-    # Market Engine（🔥ここが最重要修正）
+    # Market Engine�E�🔥ここが最重要修正�E�E
     # ---------------------------------
     market_engine = MarketEngine(
         ws_url=WS_URL,
         strategy_wrapper=strategy_wrapper,
-        execution_engine=execution_engine,  # ← 追加
-        debug=True  # ← デバッグON
+        execution_engine=execution_engine,  # ↁE追加
+        debug=True  # ↁEチE��チE��ON
     )
 
     logger.info("MarketEngine initialized")
@@ -85,7 +85,7 @@ def initialize_bot():
 
 
 # =========================================
-# Main（非同期）
+# Main�E�非同期�E�E
 # =========================================
 async def main():
 

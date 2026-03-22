@@ -6,8 +6,8 @@ import json
 from typing import Dict, List, Any
 
 from exchanges.base_exchange import BaseExchange
-from .bybit_config import BybitConfig
-from .safe_mode import SafeModeController
+from bybit_config import BybitConfig
+from safe_mode import SafeModeController
 
 
 class BybitClient(BaseExchange):
@@ -21,7 +21,7 @@ class BybitClient(BaseExchange):
         self.recv_window = "5000"
 
     # ---------------------------------
-    # 署名生成
+    # 署名生戁E
     # ---------------------------------
     def _generate_signature(self, timestamp: str, payload: str) -> str:
         param_str = timestamp + self.api_key + self.recv_window + payload
@@ -32,7 +32,7 @@ class BybitClient(BaseExchange):
         ).hexdigest()
 
     # ---------------------------------
-    # ヘッダー生成
+    # ヘッダー生�E
     # ---------------------------------
     def _get_headers(self, payload: str = "") -> Dict[str, str]:
         timestamp = str(int(time.time() * 1000))
@@ -47,14 +47,14 @@ class BybitClient(BaseExchange):
         }
 
     # ---------------------------------
-    # 接続確認
+    # 接続確誁E
     # ---------------------------------
     def connect(self) -> None:
         balance = self.get_balance()
-        print("Bybit接続成功:", balance)
+        print("Bybit接続�E劁E", balance)
 
     # ---------------------------------
-    # 残高取得
+    # 残高取征E
     # ---------------------------------
     def get_balance(self) -> Dict[str, Any]:
 
@@ -71,7 +71,7 @@ class BybitClient(BaseExchange):
         return response.json()
 
     # ---------------------------------
-    # ポジション取得
+    # ポジション取征E
     # ---------------------------------
     def get_positions(self) -> List[Dict[str, Any]]:
 
@@ -92,7 +92,7 @@ class BybitClient(BaseExchange):
             return []
 
     # ---------------------------------
-    # 現在価格取得（公開API）
+    # 現在価格取得（�E開API�E�E
     # ---------------------------------
     def get_price(self, symbol: str) -> float:
 
@@ -105,7 +105,7 @@ class BybitClient(BaseExchange):
         return float(data["result"]["list"][0]["lastPrice"])
 
     # ---------------------------------
-    # 注文（SAFE_MODE付き）
+    # 注斁E��EAFE_MODE付き�E�E
     # ---------------------------------
     def place_order(
         self,

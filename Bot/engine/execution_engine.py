@@ -9,13 +9,13 @@ logger = BotLogger("ExecutionEngine")
 class ExecutionEngine:
     def __init__(self, client: Client, enable_trading: bool = False, log_dir="dryrun_logs"):
         """
-        :param client: Binance 本番クライアント
+        :param client: Binance 本番クライアンチE
         :param enable_trading: True にすると実際の発注が可能
-        :param log_dir: CSV 保存先（DryRun用）
+        :param log_dir: CSV 保存�E�E�EryRun用�E�E
         """
         self.client = client
         self.enable_trading = enable_trading
-        self.positions = {}  # symbolごとの内部ポジション管理
+        self.positions = {}  # symbolごとの冁E��ポジション管琁E
         self.log_dir = log_dir
 
         # CSVパス
@@ -43,7 +43,7 @@ class ExecutionEngine:
     def update_equity(self, symbol, pnl):
         self._log_csv(self.equity_file, [datetime.now(), symbol, pnl])
 
-    # ---------------- 内部ポジション更新 ----------------
+    # ---------------- 冁E��ポジション更新 ----------------
     def update_position(self, symbol, side, qty, price):
         pos = self.positions.get(symbol, {"long": 0, "short": 0})
         if side.lower() == "buy":
@@ -53,15 +53,15 @@ class ExecutionEngine:
         self.positions[symbol] = pos
         logger.debug(f"Updated position: {symbol} {pos}")
 
-        # 簡易 PnL 計算
+        # 簡昁EPnL 計箁E
         pnl = (pos["long"] - pos["short"]) * price
         self.update_equity(symbol, pnl)
 
-    # ---------------- 発注処理 ----------------
+    # ---------------- 発注処琁E----------------
     def place_order(self, symbol, side, qty, price=None, order_type="MARKET"):
         """
-        発注直前処理
-        enable_trading=False の場合は実際の注文は送信しない
+        発注直前�E琁E
+        enable_trading=False の場合�E実際の注斁E�E送信しなぁE
         """
         self.log_bot(f"Order requested: {symbol} {side} {qty} @ {price} ({order_type})")
         self.log_signal(symbol, side, qty, price)

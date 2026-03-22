@@ -3,7 +3,7 @@ import json
 import threading
 from websocket import WebSocketApp
 
-# 1. コールバック（ローソク足受信時）
+# 1. コールバック�E�ローソク足受信時！E
 def on_candle(candle):
     print(f"[WS] New candle: {candle}")
 
@@ -30,9 +30,9 @@ def _on_error(ws, error):
 def _on_close(ws, close_status_code, close_msg):
     print(f"[WS] Closed: {close_status_code} / {close_msg}")
 
-# 2. WebSocket 接続開始
+# 2. WebSocket 接続開姁E
 symbol = "btcusdt"
-interval = "1m"  # 1分足
+interval = "1m"  # 1刁E��
 url = f"wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}"
 
 ws_app = WebSocketApp(
@@ -43,11 +43,11 @@ ws_app = WebSocketApp(
     on_close=_on_close
 )
 
-# 3. 別スレッドで WS 実行
+# 3. 別スレチE��で WS 実衁E
 thread = threading.Thread(target=ws_app.run_forever, daemon=True)
 thread.start()
 
-# 4. メインスレッドは無限ループで待機
+# 4. メインスレチE��は無限ループで征E��E
 import time
 print("[WS] Thread started, receiving candles...")
 while True:

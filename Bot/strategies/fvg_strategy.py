@@ -19,8 +19,8 @@ class FVG:
 
 class FVGStrategy(BaseStrategy):
     """
-    単一戦略：FVG検出・シグナル生成
-    BaseStrategy を継承して共通部分は親に任せる
+    単一戦略�E�FVG検�E・シグナル生�E
+    BaseStrategy を継承して共通部刁E�E親に任せる
     """
 
     def __init__(self, trade_core: TradeCore,
@@ -29,15 +29,15 @@ class FVGStrategy(BaseStrategy):
                  h4: pd.DataFrame = pd.DataFrame(),
                  logger: BotLogger = None,
                  notifier: TelegramNotifier = None):
-        # 共通部分は BaseStrategy に任せる
+        # 共通部刁E�E BaseStrategy に任せる
         super().__init__(trade_core, logger, notifier)
 
-        # タイムフレームごとのデータ
+        # タイムフレームごとのチE�Eタ
         self.m15 = m15
         self.h1 = h1
         self.h4 = h4
 
-        # FVGリスト
+        # FVGリスチE
         self.fvg_list: List[FVG] = []
 
         # 設定パラメータ
@@ -51,31 +51,31 @@ class FVGStrategy(BaseStrategy):
     # --------------------------
     def on_bar(self, market_data):
         """
-        MarketEngineから最新データを受け取り、
+        MarketEngineから最新チE�Eタを受け取り、E
         Execution形式でシグナルを返す
         """
-        # データ更新
+        # チE�Eタ更新
         for tf in ["M15", "H1", "H4"]:
             if tf in market_data and not market_data[tf].empty:
                 setattr(self, tf.lower(), market_data[tf])
 
-        # FVG検出
+        # FVG検�E
         self.detect_fvg()
 
-        # シグナル生成
+        # シグナル生�E
         signals = self.generate_signals()
         if not signals:
             return None
 
-        # Execution形式に変換して返す（TradeCoreに渡す）
-        sig = signals[0]  # とりあえず1つだけ
+        # Execution形式に変換して返す�E�EradeCoreに渡す！E
+        sig = signals[0]  # とりあえず1つだぁE
         signal_exec = {
             "action": "BUY" if sig["trade_type"] == "buy" else "SELL",
             "symbol": market_data.get("symbol", "BTCUSDT"),
             "price": sig["entry_price"],
             "sl": sig["stop_loss_price"],
             "tp": sig["take_profit_price"],
-            "size": 0.001  # 固定サイズ。必要ならvolume対応
+            "size": 0.001  # 固定サイズ。忁E��ならvolume対忁E
         }
 
         # ログ・通知
@@ -85,7 +85,7 @@ class FVGStrategy(BaseStrategy):
         return signal_exec
 
     # --------------------------
-    # FVG検出
+    # FVG検�E
     # --------------------------
     def detect_fvg(self):
         self._add_fvg(self.m15, "M15")
@@ -111,17 +111,17 @@ class FVGStrategy(BaseStrategy):
         self.fvg_list.append(FVG(top, bottom, bullish, tf))
 
     # --------------------------
-    # シグナル生成
+    # シグナル生�E
     # --------------------------
     def generate_signals(self):
         """
-        StrategyContext相当のdictリストで返す
+        StrategyContext相当�Edictリストで返す
         """
         signals = []
         for fvg in self.fvg_list:
             if fvg.timeframe != "M15" or fvg.used:
                 continue
-            # シンプルに中心価格でエントリー
+            # シンプルに中忁E��格でエントリー
             center = (fvg.top + fvg.bottom) / 2
             signal = {
                 "strategy_name": "FVG",

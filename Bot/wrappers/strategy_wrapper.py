@@ -4,7 +4,7 @@ import logging
 
 class StrategyWrapper:
     """
-    複数Strategyを管理し、signalを1つ返す
+    褁E��Strategyを管琁E��、signalめEつ返す
     """
 
     def __init__(self):
@@ -21,7 +21,7 @@ class StrategyWrapper:
     # ---------------------------------
     def on_bar(self, market_data):
         """
-        各Strategyを実行し、最初のsignalを返す
+        各Strategyを実行し、最初�Esignalを返す
         """
 
         for strat in self.strategies:

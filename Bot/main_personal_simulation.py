@@ -6,9 +6,9 @@ from strategies.fvg_strategy import FVGStrategy
 from strategies.rsi_strategy import RSIStrategy
 
 # --------------------------
-# 初期化（🔥ここ修正）
+# 初期化（🔥ここ修正�E�E
 # --------------------------
-logger = BotLogger().get_logger()   # ← ここ重要（.get_logger()）
+logger = BotLogger().get_logger()   # ↁEここ重要E��Eget_logger()�E�E
 
 trade_core = TradeCore(logger=logger)
 
@@ -20,7 +20,7 @@ strategies = [
 engine = MarketEngine(strategies=strategies, debug=True)
 
 # --------------------------
-# ダミーデータ生成
+# ダミ�EチE�Eタ生�E
 # --------------------------
 def generate_candles(num=100):
     candles = []
@@ -44,17 +44,17 @@ def generate_candles(num=100):
     return candles
 
 # --------------------------
-# 実行
+# 実衁E
 # --------------------------
 async def run():
-    logger.info("=== シミュレーション開始 ===")
+    logger.info("=== シミュレーション開姁E===")
 
     candles = generate_candles(200)
 
     for c in candles:
         engine.process_data(c)
 
-        # 現在価格をTradeCoreへ渡す
+        # 現在価格をTradeCoreへ渡ぁE
         price_dict = {
             c["symbol"]: c["close"]
         }
@@ -63,7 +63,7 @@ async def run():
 
         await asyncio.sleep(0.01)
 
-    logger.info("=== シミュレーション終了 ===")
+    logger.info("=== シミュレーション終亁E===")
 
 # --------------------------
 # 実行エントリ

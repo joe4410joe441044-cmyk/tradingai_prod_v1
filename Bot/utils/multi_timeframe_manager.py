@@ -5,8 +5,8 @@ import pandas as pd
 
 class MultiTimeFrameManager:
     """
-    複数時間足を生成・管理するモジュール
-    MarketEngineから呼び出して、戦略に渡す
+    褁E��時間足を生成�E管琁E��るモジュール
+    MarketEngineから呼び出して、戦略に渡ぁE
     """
 
     def __init__(self, base_timeframe="1m"):
@@ -26,20 +26,20 @@ class MultiTimeFrameManager:
 
     def get_timeframe_df(self, symbol: str, timeframe: str) -> pd.DataFrame:
         """
-        任意の時間足に変換して返す
-        例: "1m", "5m", "15m", "1h"
+        任意�E時間足に変換して返す
+        侁E "1m", "5m", "15m", "1h"
         """
 
         if symbol not in self.data or self.data[symbol].empty:
             return pd.DataFrame()
 
-        # 🔥 フォーマットチェック（事故防止）
+        # 🔥 フォーマットチェチE���E�事故防止�E�E
         if not isinstance(timeframe, str) or len(timeframe) < 2:
             raise ValueError(f"Invalid timeframe format: {timeframe}")
 
         df = self.data[symbol].copy()
 
-        # 🔥 カラムチェック（次のKeyError防止）
+        # 🔥 カラムチェチE���E�次のKeyError防止�E�E
         required_cols = {'time', 'open', 'high', 'low', 'close', 'volume'}
         if not required_cols.issubset(df.columns):
             raise ValueError(f"Missing columns: {df.columns}")
@@ -48,7 +48,7 @@ class MultiTimeFrameManager:
         df.set_index('time', inplace=True)
 
         # =========================
-        # 🔥 ここが今回の修正ポイント
+        # 🔥 ここが今回の修正ポインチE
         # =========================
         unit = timeframe[0].lower()     # m / h / d
         value = int(timeframe[1:])      # 1 / 5 / 15
@@ -65,7 +65,7 @@ class MultiTimeFrameManager:
         resample_rule = f"{value}{tf_map[unit]}"
 
         # =========================
-        # OHLCV生成
+        # OHLCV生�E
         # =========================
         ohlc_dict = {
             'open': 'first',
@@ -87,7 +87,7 @@ class MultiTimeFrameManager:
 
     def get_all_timeframes(self, symbol: str, timeframes: list) -> dict:
         """
-        複数時間足をまとめて取得
+        褁E��時間足をまとめて取征E
         """
 
         result = {}

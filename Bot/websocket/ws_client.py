@@ -2,39 +2,41 @@
 import json
 import websocket
 import threading
-import time
 from typing import Callable, Optional
 
-from Bot.utils.telegram import TelegramNotifier  # 絶対インポートに修正
-
-# ここではテスト用 TelegramNotifier を使います
-# トークンとチャットIDは実際のものに置き換えてください
-tg = TelegramNotifier(token="YOUR_BOT_TOKEN", chat_id="YOUR_CHAT_ID")
+from utils.telegram import TelegramNotifier
 
 class BinanceWSClient:
     """
-    Binance WebSocket Client（テスト用）
-    実際の発注は行わず、データ受信とTelegram通知のテスト用
+    Binance WebSocket Client�E�本番用�E�E
+    MarketEngine 連携 + Telegram通知
     """
 
-    def __init__(self, symbol: str = "BTCUSDT", on_message: Optional[Callable] = None):
+    def __init__(
+        self,
+        symbol: str = "BTCUSDT",
+        on_candle: Optional[Callable] = None,
+        telegram_token: str = None,
+        telegram_chat_id: str = None
+    ):
         self.symbol = symbol.lower()
         self.ws_url = f"wss://stream.binance.com:9443/ws/{self.symbol}@kline_1m"
-        self.on_message_callback = on_message
+        self.on_candle = on_candle
         self.ws = None
         self.thread = None
+        self.notifier = TelegramNotifier(token=telegram_token, chat_id=telegram_chat_id)
 
     def _on_open(self, ws):
         print(f"[INFO] WebSocket opened for {self.symbol}")
-        tg.send(f"WebSocket opened for {self.symbol}")
+        self.notifier.bot_started()
 
     def _on_close(self, ws, close_status_code, close_msg):
         print(f"[INFO] WebSocket closed for {self.symbol}")
-        tg.send(f"WebSocket closed for {self.symbol}")
+        self.notifier.send(f"WebSocket closed for {self.symbol}")
 
     def _on_error(self, ws, error):
         print(f"[ERROR] WebSocket error: {error}")
-        tg.send(f"WebSocket error: {error}")
+        self.notifier.send(f"WebSocket error: {error}")
 
     def _on_message(self, ws, message):
         data = json.loads(message)
@@ -48,12 +50,11 @@ class BinanceWSClient:
                 "volume": float(kline["v"]),
                 "timestamp": kline["t"]
             }
-            print(f"[DEBUG] New candle: {candle}")
-            tg.send(f"[TEST] Candle: {candle}")
-            if self.on_message_callback:
-                self.on_message_callback(candle)
+            if self.on_candle:
+                self.on_candle(candle)
 
     def start(self):
+        """WebSocket 接続開姁E""
         self.ws = websocket.WebSocketApp(
             self.ws_url,
             on_open=self._on_open,
@@ -66,9 +67,9 @@ class BinanceWSClient:
         print(f"[INFO] WebSocket thread started for {self.symbol}")
 
     def stop(self):
+        """WebSocket 停止"""
         if self.ws:
             self.ws.close()
         if self.thread:
             self.thread.join()
         print(f"[INFO] WebSocket stopped for {self.symbol}")
-        

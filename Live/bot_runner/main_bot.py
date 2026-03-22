@@ -1,5 +1,5 @@
-ï»¿# =========================================
-# main.py (TradingAI BOT æœ¬ç•ªæ¥ç¶šç‰ˆ)
+# =========================================
+# main.py (TradingAI BOT –{”ÔÚ‘±”Å)
 # =========================================
 
 import asyncio
@@ -13,7 +13,7 @@ from Bot.strategies.fvg_strategy import FVGStrategy
 from Bot.engine.execution_engine import ExecutionEngine
 
 # =========================
-# è¨­å®š
+# İ’è
 # =========================
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
@@ -22,7 +22,7 @@ CHAT_ID = "YOUR_CHAT_ID"
 
 
 # =========================================
-# åˆæœŸåŒ–
+# ‰Šú‰»
 # =========================================
 def initialize_bot():
 
@@ -33,17 +33,17 @@ def initialize_bot():
     logger.info("Telegram notifier initialized")
 
     # ---------------------------------
-    # Execution Engineï¼ˆæœ€å„ªå…ˆï¼‰
+    # Execution EngineiÅ—Dæj
     # ---------------------------------
     execution_engine = ExecutionEngine(
-        live=False,  # â† æœ€åˆã¯å¿…ãšFalseï¼ˆè¶…é‡è¦ï¼‰
+        live=False,  # © Å‰‚Í•K‚¸Falsei’´d—vj
         logger=logger,
         notifier=notifier
     )
     logger.info("ExecutionEngine initialized")
 
     # ---------------------------------
-    # Trade Coreï¼ˆå°†æ¥ä½¿ç”¨ï¼‰
+    # Trade Corei«—ˆg—pj
     # ---------------------------------
     trade_core = TradeCore(
         execution_engine=execution_engine,
@@ -52,7 +52,7 @@ def initialize_bot():
     logger.info("TradeCore initialized")
 
     # ---------------------------------
-    # Strategyï¼ˆFVGæœ¬ç•ªï¼‰
+    # StrategyiFVG–{”Ôj
     # ---------------------------------
     fvg_strategy = FVGStrategy(
         trade_core=trade_core,
@@ -61,7 +61,7 @@ def initialize_bot():
     )
 
     # ---------------------------------
-    # Strategy Wrapperï¼ˆsignalè¿”å´å‹ï¼‰
+    # Strategy Wrapperisignal•Ô‹pŒ^j
     # ---------------------------------
     strategy_wrapper = StrategyWrapper()
     strategy_wrapper.register_strategy(fvg_strategy)
@@ -69,12 +69,12 @@ def initialize_bot():
     logger.info("FVGStrategy registered")
 
     # ---------------------------------
-    # Market Engineï¼ˆExecutionæ¥ç¶šï¼‰
+    # Market EngineiExecutionÚ‘±j
     # ---------------------------------
     market_engine = MarketEngine(
         ws_url=WS_URL,
         strategy_wrapper=strategy_wrapper,
-        execution_engine=execution_engine,  # ğŸ”¥ ã“ã‚ŒãŒä»Šå›ã®æ ¸å¿ƒ
+        execution_engine=execution_engine,  # ?? ‚±‚ê‚ª¡‰ñ‚ÌŠjS
         debug=True
     )
 
@@ -85,7 +85,7 @@ def initialize_bot():
 
 
 # =========================================
-# Mainï¼ˆéåŒæœŸï¼‰
+# Maini”ñ“¯Šúj
 # =========================================
 async def main():
 

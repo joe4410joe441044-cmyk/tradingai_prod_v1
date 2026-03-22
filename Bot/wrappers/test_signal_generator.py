@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 
 class TestSignalGenerator:
     """
-    TradeCoreの制御テスト用シグナル生成
-    - ポジション数制限（max_concurrent_positions）
-    - DD制御（max_daily_dd_percent, max_total_dd_percent）
+    TradeCoreの制御チE��ト用シグナル生�E
+    - ポジション数制限！Eax_concurrent_positions�E�E
+    - DD制御�E�Eax_daily_dd_percent, max_total_dd_percent�E�E
     """
     def __init__(self, strategy_wrapper, interval_sec=15):
         self.strategy_wrapper = strategy_wrapper
@@ -20,13 +20,13 @@ class TestSignalGenerator:
 
     async def run(self):
         """
-        interval_secごとにランダムシグナルを生成
+        interval_secごとにランダムシグナルを生戁E
         """
         while not self.stop_flag:
-            # ランダムに買い or 売りシグナル生成
+            # ランダムに買ぁEor 売りシグナル生�E
             trade_type = random.choice(["BUY", "SELL"])
             price = round(30000 + random.uniform(-1000, 1000), 2)
-            volume = 0.001  # テスト用少量
+            volume = 0.001  # チE��ト用少量
             sl = price - 50 if trade_type == "BUY" else price + 50
             tp = price + 50 if trade_type == "BUY" else price - 50
 

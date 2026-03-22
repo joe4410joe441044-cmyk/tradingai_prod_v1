@@ -11,7 +11,7 @@ class BybitClient:
         )
 
     # -------------------------
-    # 残高取得
+    # 残高取征E
     # -------------------------
     def get_balance(self):
         res = self.session.get_wallet_balance(accountType="UNIFIED")
@@ -19,7 +19,7 @@ class BybitClient:
         return balance
 
     # -------------------------
-    # 全ポジション取得
+    # 全ポジション取征E
     # -------------------------
     def get_all_positions(self):
         res = self.session.get_positions(category="linear")

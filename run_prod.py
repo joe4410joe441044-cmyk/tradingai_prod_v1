@@ -13,13 +13,13 @@ logging.basicConfig(
 )
 
 # -------------------------
-# 設定
+# 設宁E
 # -------------------------
-live_mode = False  # False: 資金未投入 / True: 実弾
+live_mode = False  # False: 賁E��未投�E / True: 実弾
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 # -------------------------
-# 初期化
+# 初期匁E
 # -------------------------
 exec_engine = ExecutionEngine(live=live_mode)
 trade_core = TradeCore(exec_engine)
@@ -31,7 +31,7 @@ if not live_mode:
     test_signal_generator = TestSignalGenerator(strategy_wrapper, interval_sec=10)
 
 # -------------------------
-# 並行稼働
+# 並行稼僁E
 # -------------------------
 async def main():
     tasks = [market_engine.connect()]
@@ -43,12 +43,12 @@ async def main():
     except KeyboardInterrupt:
         logging.info("BOT手動停止 (Ctrl+C)")
     except Exception as e:
-        logging.exception(f"BOT例外発生: {e}")
+        logging.exception(f"BOT例外発甁E {e}")
     finally:
         if test_signal_generator:
             test_signal_generator.stop()
         market_engine.stop()
-        logging.info("BOT安全停止完了")
+        logging.info("BOT安�E停止完亁E)
 
 if __name__ == "__main__":
     asyncio.run(main())

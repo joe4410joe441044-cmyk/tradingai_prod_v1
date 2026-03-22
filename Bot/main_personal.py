@@ -1,4 +1,4 @@
-# main_personal.py（本番/WebSocket + ダミーデータ統合版）
+# main_personal.py�E�本番/WebSocket + ダミ�EチE�Eタ統合版�E�E
 
 import asyncio
 from datetime import datetime
@@ -9,13 +9,13 @@ from strategies.rsi_strategy import RSIStrategy
 from utils.logger import BotLogger
 from utils.telegram_notifier import TelegramNotifier
 
-# WebSocket用（python-binance）
+# WebSocket用�E�Eython-binance�E�E
 from binance import AsyncClient, BinanceSocketManager
 
 # --------------------------
-# 設定
+# 設宁E
 # --------------------------
-USE_DUMMY = True  # True: ダミーデータでテスト / False: 本番WebSocket
+USE_DUMMY = True  # True: ダミ�EチE�EタでチE��チE/ False: 本番WebSocket
 SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 INTERVAL = "1m"
 API_KEY = "YOUR_BINANCE_API_KEY"
@@ -25,14 +25,14 @@ TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
 
 # --------------------------
-# ロガー・通知・TradeCore初期化
+# ロガー・通知・TradeCore初期匁E
 # --------------------------
 logger = BotLogger()
 notifier = TelegramNotifier(token=TELEGRAM_TOKEN, chat_id=TELEGRAM_CHAT_ID)
 trade_core = TradeCore(logger=logger, notifier=notifier)
 
 # --------------------------
-# 戦略初期化
+# 戦略初期匁E
 # --------------------------
 strategies = []
 for symbol in SYMBOLS:
@@ -40,15 +40,15 @@ for symbol in SYMBOLS:
     strategies.append(RSIStrategy(trade_core=trade_core, logger=logger, notifier=notifier))
 
 # --------------------------
-# MarketEngine初期化
+# MarketEngine初期匁E
 # --------------------------
 engine = MarketEngine(strategies=strategies, debug=True)
 
 # --------------------------
-# ダミーデータループ（テスト用）
+# ダミ�EチE�Eタループ（テスト用�E�E
 # --------------------------
 async def run_dummy():
-    logger.info("=== ダミーデータテスト開始 ===")
+    logger.info("=== ダミ�EチE�EタチE��ト開姁E===")
     dummy_candles = [
         {"symbol": "BTCUSDT", "time": "2026-03-22 00:00:00", "open": 30000, "high": 30100, "low": 29950, "close": 30100, "volume": 10},
         {"symbol": "BTCUSDT", "time": "2026-03-22 00:01:00", "open": 30200, "high": 30250, "low": 30100, "close": 30150, "volume": 12},
@@ -58,17 +58,17 @@ async def run_dummy():
         engine.process_data(candle)
         trade_core.check_orders()
         await asyncio.sleep(0.1)  # 適度に間隔を開ける
-    logger.info("=== ダミーデータテスト終了 ===")
+    logger.info("=== ダミ�EチE�EタチE��ト終亁E===")
 
 # --------------------------
-# WebSocketループ（本番用）
+# WebSocketループ（本番用�E�E
 # --------------------------
 async def run_websocket():
     client = await AsyncClient.create(API_KEY, API_SECRET)
     bm = BinanceSocketManager(client)
     sockets = [bm.kline_socket(symbol=symbol, interval=INTERVAL) for symbol in SYMBOLS]
 
-    logger.info("=== WebSocket自動化BOT開始 ===")
+    logger.info("=== WebSocket自動化BOT開姁E===")
 
     async def handle_socket(socket):
         async with socket as stream:
@@ -93,7 +93,7 @@ async def run_websocket():
     await asyncio.gather(*(handle_socket(s) for s in sockets))
 
 # --------------------------
-# 実行
+# 実衁E
 # --------------------------
 if __name__ == "__main__":
     if USE_DUMMY:

@@ -1,18 +1,18 @@
-ï»¿import os
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
 from bot_core import bot_state, start_bot_core
 
 async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("ğŸ“Š çŠ¶æ…‹ç¢ºèª", callback_data="status")],
-        [InlineKeyboardButton("â–¶ï¸ æœ¬ç•ªé–‹å§‹", callback_data="confirm_live")],
-        [InlineKeyboardButton("â¸ DRYåœæ­¢", callback_data="set_dry")],
-        [InlineKeyboardButton("ğŸš¨ ç·Šæ€¥åœæ­¢", callback_data="kill")]
+        [InlineKeyboardButton("?? ó‘ÔŠm”F", callback_data="status")],
+        [InlineKeyboardButton("?? –{”ÔŠJn", callback_data="confirm_live")],
+        [InlineKeyboardButton("? DRY’â~", callback_data="set_dry")],
+        [InlineKeyboardButton("?? ‹Ù‹}’â~", callback_data="kill")]
     ]
 
     await update.message.reply_text(
-        "ğŸ“Œ TradingAI æœ¬ç•ªæ“ä½œãƒ‘ãƒãƒ«",
+        "?? TradingAI –{”Ô‘€ìƒpƒlƒ‹",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -22,24 +22,24 @@ async def tg_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "status":
         await query.edit_message_text(
-            f"ğŸ“Š çŠ¶æ…‹\n"
-            f"ç¨¼åƒä¸­: {bot_state.running}\n"
-            f"ãƒ¢ãƒ¼ãƒ‰: {'DRY' if bot_state.dry_run else 'æœ¬ç•ª'}"
+            f"?? ó‘Ô\n"
+            f"‰Ò“­’†: {bot_state.running}\n"
+            f"ƒ‚[ƒh: {'DRY' if bot_state.dry_run else '–{”Ô'}"
         )
 
     elif query.data == "confirm_live":
         bot_state.dry_run = False
-        await query.edit_message_text("ğŸš€ æœ¬ç•ªãƒ¢ãƒ¼ãƒ‰ã«åˆ‡æ›¿ã—ã¾ã—ãŸ")
+        await query.edit_message_text("?? –{”Ôƒ‚[ƒh‚ÉØ‘Ö‚µ‚Ü‚µ‚½")
         start_bot_core()
 
     elif query.data == "set_dry":
         bot_state.dry_run = True
-        await query.edit_message_text("â¸ DRYãƒ¢ãƒ¼ãƒ‰ã«ã—ã¾ã—ãŸ")
+        await query.edit_message_text("? DRYƒ‚[ƒh‚É‚µ‚Ü‚µ‚½")
 
     elif query.data == "kill":
         bot_state.running = False
         bot_state.dry_run = True
-        await query.edit_message_text("ğŸš¨ ç·Šæ€¥åœæ­¢ã—ã¾ã—ãŸ")
+        await query.edit_message_text("?? ‹Ù‹}’â~‚µ‚Ü‚µ‚½")
 
 def register_handlers(app):
     app.add_handler(CommandHandler("menu", tg_menu))

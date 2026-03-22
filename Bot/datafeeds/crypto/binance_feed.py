@@ -7,7 +7,7 @@ import websocket
 class BinanceDataFeed:
     """
     Binance WebSocket DataFeed
-    マルチペア対応
+    マルチ�Eア対忁E
     """
 
     def __init__(self, symbols, timeframe="15m", market_engine=None, logger=None):
@@ -22,7 +22,7 @@ class BinanceDataFeed:
         self.running = False
 
     # ==============================
-    # WebSocket URL生成
+    # WebSocket URL生�E
     # ==============================
     def _build_ws_url(self):
 
@@ -35,7 +35,7 @@ class BinanceDataFeed:
         return url
 
     # ==============================
-    # メッセージ受信
+    # メチE��ージ受信
     # ==============================
     def _on_message(self, ws, message):
 
@@ -49,7 +49,7 @@ class BinanceDataFeed:
             if not kline:
                 return
 
-            # 確定足のみ処理
+            # 確定足のみ処琁E
             if not kline["x"]:
                 return
 
@@ -71,7 +71,7 @@ class BinanceDataFeed:
             print(f"DataFeed message error: {e}")
 
     # ==============================
-    # 接続成功
+    # 接続�E劁E
     # ==============================
     def _on_open(self, ws):
 
@@ -91,14 +91,14 @@ class BinanceDataFeed:
         print(f"WebSocket error: {error}")
 
     # ==============================
-    # 接続終了
+    # 接続終亁E
     # ==============================
     def _on_close(self, ws, close_status_code, close_msg):
 
         print("Binance WebSocket closed")
 
     # ==============================
-    # 起動
+    # 起勁E
     # ==============================
     def start(self):
 

@@ -8,10 +8,10 @@ class BotSupervisor:
 
     def __init__(self):
 
-        # BOT起動コマンド
+        # BOT起動コマンチE
         self.bot_command = ["python", "-m", "Bot.main"]
 
-        # 再起動待機時間
+        # 再起動征E��時閁E
         self.restart_delay = 5
 
         # ログ
@@ -35,7 +35,7 @@ class BotSupervisor:
             f.write(line + "\n")
 
     # =========================================
-    # BOT実行
+    # BOT実衁E
     # =========================================
 
     def run(self):

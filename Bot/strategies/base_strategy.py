@@ -3,23 +3,23 @@ from utils.logger import BotLogger
 
 class BaseStrategy:
     """
-    全戦略共通の基盤
+    全戦略共通�E基盤
     TradeCore, Logger, Notifier を保持
-    on_bar() は各戦略でオーバーライド
+    on_bar() は吁E��略でオーバ�EライチE
     """
 
     def __init__(self, trade_core, logger=None, notifier=None):
         self.trade_core = trade_core
 
-        # 🔥 logger統一（なければ自動生成）
+        # 🔥 logger統一�E�なければ自動生成！E
         self.logger = logger if logger else BotLogger().get_logger()
 
-        # 🔥 notifierは任意（本番のみ使用）
+        # 🔥 notifierは任意（本番のみ使用�E�E
         self.notifier = notifier
 
     def on_bar(self, market_data: dict):
         """
-        MarketEngine から渡される最新データを受け取る
-        各戦略でオーバーライドして処理
+        MarketEngine から渡される最新チE�Eタを受け取めE
+        吁E��略でオーバ�Eライドして処琁E
         """
         raise NotImplementedError
