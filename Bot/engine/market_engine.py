@@ -27,10 +27,21 @@ class MarketEngine:
 
     def process_data(self, data: dict):
         """
-        ダミーデータや実データを受け取り
+        WSやダミーデータを受け取り
         CandleBuffer と MTFManager を更新して戦略に渡す
+        data フォーマット例:
+        {
+            "symbol": "BTCUSDT",
+            "time": 1679452800000,
+            "open": 30000,
+            "high": 30100,
+            "low": 29950,
+            "close": 30050,
+            "volume": 12.34
+        }
         """
-        # 生足追加
+
+        # 受信データを既存形式に合わせて整理
         candle = {
             "time": data.get("time"),
             "open": float(data.get("open", 0)),
@@ -41,10 +52,16 @@ class MarketEngine:
         }
 
         if self.debug:
-            print(f"[DEBUG] New candle: {candle}")
+            print(f"[MarketEngine] New candle: {candle}")
 
+        # CandleBuffer に追加
         self.candle_buffer.add_candle(candle)
-        self.mtf_manager.update_candle(data.get("symbol", "BTCUSDT"), candle)
+
+        # MultiTimeFrameManager を更新
+        self.mtf_manager.update_candle(
+            symbol=data.get("symbol", "BTCUSDT"),
+            candle=candle
+        )
 
         # 各時間足を取得して戦略に渡す
         market_data = self.mtf_manager.get_all_timeframes(
@@ -53,5 +70,6 @@ class MarketEngine:
         )
         market_data["symbol"] = data.get("symbol", "BTCUSDT")
 
+        # 戦略にデータを渡す（既存構造維持）
         for strategy in self.strategies:
             strategy.on_bar(market_data)
