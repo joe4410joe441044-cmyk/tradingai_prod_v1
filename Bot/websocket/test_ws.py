@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 # test_ws.py
 from ws_client import BinanceWSClient
 

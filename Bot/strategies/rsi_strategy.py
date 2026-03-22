@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 import pandas as pd
 import random
 from strategies.base_strategy import BaseStrategy
@@ -13,7 +14,7 @@ class RSIStrategy(BaseStrategy):
 
         if "H1" in market_data and not market_data["H1"].empty:
             df = market_data["H1"].copy()
-            df.columns = [c.lower() for c in df.columns]  # ↁE重要E
+            df.columns = [c.lower() for c in df.columns]  # 竊・驥崎ｦ・
             self.df_h1 = df
 
         if self.df_h1.empty:

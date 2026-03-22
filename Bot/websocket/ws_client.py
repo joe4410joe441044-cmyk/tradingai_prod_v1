@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 # Bot/websocket/ws_client.py
 import json
 import websocket
@@ -8,8 +9,8 @@ from utils.telegram import TelegramNotifier
 
 class BinanceWSClient:
     """
-    Binance WebSocket Client�E�本番用�E�E
-    MarketEngine 連携 + Telegram通知
+    Binance WebSocket Client・域悽逡ｪ逕ｨ・・
+    MarketEngine 騾｣謳ｺ + Telegram騾夂衍
     """
 
     def __init__(
@@ -54,7 +55,7 @@ class BinanceWSClient:
                 self.on_candle(candle)
 
     def start(self):
-        """WebSocket 接続開姁E""
+        """WebSocket 謗･邯夐幕蟋・""
         self.ws = websocket.WebSocketApp(
             self.ws_url,
             on_open=self._on_open,
@@ -67,7 +68,7 @@ class BinanceWSClient:
         print(f"[INFO] WebSocket thread started for {self.symbol}")
 
     def stop(self):
-        """WebSocket 停止"""
+        """WebSocket 蛛懈ｭ｢"""
         if self.ws:
             self.ws.close()
         if self.thread:

@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 # Bot/utils/multi_timeframe_manager.py
 
 import pandas as pd
@@ -5,8 +6,8 @@ import pandas as pd
 
 class MultiTimeFrameManager:
     """
-    褁E��時間足を生成�E管琁E��るモジュール
-    MarketEngineから呼び出して、戦略に渡ぁE
+    隍・焚譎る俣雜ｳ繧堤函謌舌・邂｡逅・☆繧九Δ繧ｸ繝･繝ｼ繝ｫ
+    MarketEngine縺九ｉ蜻ｼ縺ｳ蜃ｺ縺励※縲∵姶逡･縺ｫ貂｡縺・
     """
 
     def __init__(self, base_timeframe="1m"):
@@ -15,7 +16,7 @@ class MultiTimeFrameManager:
 
     def update_candle(self, symbol: str, candle: dict):
         """
-        新しいローソク足を追加
+        譁ｰ縺励＞繝ｭ繝ｼ繧ｽ繧ｯ雜ｳ繧定ｿｽ蜉
         """
         df = self.data.get(symbol, pd.DataFrame())
 
@@ -26,20 +27,20 @@ class MultiTimeFrameManager:
 
     def get_timeframe_df(self, symbol: str, timeframe: str) -> pd.DataFrame:
         """
-        任意�E時間足に変換して返す
-        侁E "1m", "5m", "15m", "1h"
+        莉ｻ諢上・譎る俣雜ｳ縺ｫ螟画鋤縺励※霑斐☆
+        萓・ "1m", "5m", "15m", "1h"
         """
 
         if symbol not in self.data or self.data[symbol].empty:
             return pd.DataFrame()
 
-        # 🔥 フォーマットチェチE���E�事故防止�E�E
+        # 櫨 繝輔か繝ｼ繝槭ャ繝医メ繧ｧ繝・け・井ｺ区腐髦ｲ豁｢・・
         if not isinstance(timeframe, str) or len(timeframe) < 2:
             raise ValueError(f"Invalid timeframe format: {timeframe}")
 
         df = self.data[symbol].copy()
 
-        # 🔥 カラムチェチE���E�次のKeyError防止�E�E
+        # 櫨 繧ｫ繝ｩ繝繝√ぉ繝・け・域ｬ｡縺ｮKeyError髦ｲ豁｢・・
         required_cols = {'time', 'open', 'high', 'low', 'close', 'volume'}
         if not required_cols.issubset(df.columns):
             raise ValueError(f"Missing columns: {df.columns}")
@@ -48,7 +49,7 @@ class MultiTimeFrameManager:
         df.set_index('time', inplace=True)
 
         # =========================
-        # 🔥 ここが今回の修正ポインチE
+        # 櫨 縺薙％縺御ｻ雁屓縺ｮ菫ｮ豁｣繝昴う繝ｳ繝・
         # =========================
         unit = timeframe[0].lower()     # m / h / d
         value = int(timeframe[1:])      # 1 / 5 / 15
@@ -65,7 +66,7 @@ class MultiTimeFrameManager:
         resample_rule = f"{value}{tf_map[unit]}"
 
         # =========================
-        # OHLCV生�E
+        # OHLCV逕滓・
         # =========================
         ohlc_dict = {
             'open': 'first',
@@ -87,7 +88,7 @@ class MultiTimeFrameManager:
 
     def get_all_timeframes(self, symbol: str, timeframes: list) -> dict:
         """
-        褁E��時間足をまとめて取征E
+        隍・焚譎る俣雜ｳ繧偵∪縺ｨ繧√※蜿門ｾ・
         """
 
         result = {}

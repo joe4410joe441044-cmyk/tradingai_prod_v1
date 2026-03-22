@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 import json
 import threading
 import time
@@ -7,7 +8,7 @@ import websocket
 class BinanceDataFeed:
     """
     Binance WebSocket DataFeed
-    マルチ�Eア対忁E
+    繝槭Ν繝√・繧｢蟇ｾ蠢・
     """
 
     def __init__(self, symbols, timeframe="15m", market_engine=None, logger=None):
@@ -22,7 +23,7 @@ class BinanceDataFeed:
         self.running = False
 
     # ==============================
-    # WebSocket URL生�E
+    # WebSocket URL逕滓・
     # ==============================
     def _build_ws_url(self):
 
@@ -35,7 +36,7 @@ class BinanceDataFeed:
         return url
 
     # ==============================
-    # メチE��ージ受信
+    # 繝｡繝・そ繝ｼ繧ｸ蜿嶺ｿ｡
     # ==============================
     def _on_message(self, ws, message):
 
@@ -49,7 +50,7 @@ class BinanceDataFeed:
             if not kline:
                 return
 
-            # 確定足のみ処琁E
+            # 遒ｺ螳夊ｶｳ縺ｮ縺ｿ蜃ｦ逅・
             if not kline["x"]:
                 return
 
@@ -71,7 +72,7 @@ class BinanceDataFeed:
             print(f"DataFeed message error: {e}")
 
     # ==============================
-    # 接続�E劁E
+    # 謗･邯壽・蜉・
     # ==============================
     def _on_open(self, ws):
 
@@ -84,21 +85,21 @@ class BinanceDataFeed:
                 pass
 
     # ==============================
-    # エラー
+    # 繧ｨ繝ｩ繝ｼ
     # ==============================
     def _on_error(self, ws, error):
 
         print(f"WebSocket error: {error}")
 
     # ==============================
-    # 接続終亁E
+    # 謗･邯夂ｵゆｺ・
     # ==============================
     def _on_close(self, ws, close_status_code, close_msg):
 
         print("Binance WebSocket closed")
 
     # ==============================
-    # 起勁E
+    # 襍ｷ蜍・
     # ==============================
     def start(self):
 
@@ -133,7 +134,7 @@ class BinanceDataFeed:
         thread.start()
 
     # ==============================
-    # 停止
+    # 蛛懈ｭ｢
     # ==============================
     def stop(self):
 

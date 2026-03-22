@@ -1,5 +1,6 @@
+﻿# -*- coding: utf-8 -*-
 # =========================================
-# main.py (TradingAI BOT 最終版)
+# main.py (TradingAI BOT 譛邨ら沿)
 # =========================================
 
 import asyncio
@@ -12,7 +13,7 @@ from utils.telegram_notifier import TelegramNotifier
 from strategies.fvg_strategy import FVGStrategy
 from engine.execution_engine import ExecutionEngine
 # =========================
-# 設宁E
+# 險ｭ螳・
 # =========================
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 
@@ -21,7 +22,7 @@ CHAT_ID = "YOUR_CHAT_ID"
 
 
 # =========================================
-# 初期匁E
+# 蛻晄悄蛹・
 # =========================================
 def initialize_bot():
 
@@ -35,7 +36,7 @@ def initialize_bot():
     # Execution Engine
     # ---------------------------------
     execution_engine = ExecutionEngine(
-        live=False,  # ↁE安�Eのため忁E��False
+        live=False,  # 竊・螳牙・縺ｮ縺溘ａ蠢・★False
         logger=logger,
         notifier=notifier
     )
@@ -69,13 +70,13 @@ def initialize_bot():
     logger.info("FVGStrategy registered")
 
     # ---------------------------------
-    # Market Engine�E�🔥ここが最重要修正�E�E
+    # Market Engine・芋沐･縺薙％縺梧怙驥崎ｦ∽ｿｮ豁｣・・
     # ---------------------------------
     market_engine = MarketEngine(
         ws_url=WS_URL,
         strategy_wrapper=strategy_wrapper,
-        execution_engine=execution_engine,  # ↁE追加
-        debug=True  # ↁEチE��チE��ON
+        execution_engine=execution_engine,  # 竊・霑ｽ蜉
+        debug=True  # 竊・繝・ヰ繝・げON
     )
 
     logger.info("MarketEngine initialized")
@@ -85,7 +86,7 @@ def initialize_bot():
 
 
 # =========================================
-# Main�E�非同期�E�E
+# Main・磯撼蜷梧悄・・
 # =========================================
 async def main():
 

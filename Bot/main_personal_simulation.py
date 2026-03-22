@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 import asyncio
 from datetime import datetime, timedelta
 from core.trade_core import TradeCore, BotLogger
@@ -6,9 +7,9 @@ from strategies.fvg_strategy import FVGStrategy
 from strategies.rsi_strategy import RSIStrategy
 
 # --------------------------
-# 初期化（🔥ここ修正�E�E
+# 蛻晄悄蛹厄ｼ芋沐･縺薙％菫ｮ豁｣・・
 # --------------------------
-logger = BotLogger().get_logger()   # ↁEここ重要E��Eget_logger()�E�E
+logger = BotLogger().get_logger()   # 竊・縺薙％驥崎ｦ・ｼ・get_logger()・・
 
 trade_core = TradeCore(logger=logger)
 
@@ -20,7 +21,7 @@ strategies = [
 engine = MarketEngine(strategies=strategies, debug=True)
 
 # --------------------------
-# ダミ�EチE�Eタ生�E
+# 繝繝溘・繝・・繧ｿ逕滓・
 # --------------------------
 def generate_candles(num=100):
     candles = []
@@ -44,17 +45,17 @@ def generate_candles(num=100):
     return candles
 
 # --------------------------
-# 実衁E
+# 螳溯｡・
 # --------------------------
 async def run():
-    logger.info("=== シミュレーション開姁E===")
+    logger.info("=== 繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ髢句ｧ・===")
 
     candles = generate_candles(200)
 
     for c in candles:
         engine.process_data(c)
 
-        # 現在価格をTradeCoreへ渡ぁE
+        # 迴ｾ蝨ｨ萓｡譬ｼ繧探radeCore縺ｸ貂｡縺・
         price_dict = {
             c["symbol"]: c["close"]
         }
@@ -63,10 +64,10 @@ async def run():
 
         await asyncio.sleep(0.01)
 
-    logger.info("=== シミュレーション終亁E===")
+    logger.info("=== 繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ邨ゆｺ・===")
 
 # --------------------------
-# 実行エントリ
+# 螳溯｡後お繝ｳ繝医Μ
 # --------------------------
 if __name__ == "__main__":
     asyncio.run(run())

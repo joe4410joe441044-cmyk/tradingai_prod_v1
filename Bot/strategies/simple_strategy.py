@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 from DryRun.Bot.core.trade_core import StrategyContext
 from strategies.base_strategy import BaseStrategy
 

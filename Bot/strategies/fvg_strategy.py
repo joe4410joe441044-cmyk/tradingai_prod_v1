@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 # Bot/strategies/fvg_strategy.py
 
 import pandas as pd
@@ -19,8 +20,8 @@ class FVG:
 
 class FVGStrategy(BaseStrategy):
     """
-    単一戦略�E�FVG検�E・シグナル生�E
-    BaseStrategy を継承して共通部刁E�E親に任せる
+    蜊倅ｸ謌ｦ逡･・哥VG讀懷・繝ｻ繧ｷ繧ｰ繝翫Ν逕滓・
+    BaseStrategy 繧堤ｶ呎価縺励※蜈ｱ騾夐Κ蛻・・隕ｪ縺ｫ莉ｻ縺帙ｋ
     """
 
     def __init__(self, trade_core: TradeCore,
@@ -29,63 +30,63 @@ class FVGStrategy(BaseStrategy):
                  h4: pd.DataFrame = pd.DataFrame(),
                  logger: BotLogger = None,
                  notifier: TelegramNotifier = None):
-        # 共通部刁E�E BaseStrategy に任せる
+        # 蜈ｱ騾夐Κ蛻・・ BaseStrategy 縺ｫ莉ｻ縺帙ｋ
         super().__init__(trade_core, logger, notifier)
 
-        # タイムフレームごとのチE�Eタ
+        # 繧ｿ繧､繝繝輔Ξ繝ｼ繝縺斐→縺ｮ繝・・繧ｿ
         self.m15 = m15
         self.h1 = h1
         self.h4 = h4
 
-        # FVGリスチE
+        # FVG繝ｪ繧ｹ繝・
         self.fvg_list: List[FVG] = []
 
-        # 設定パラメータ
+        # 險ｭ螳壹ヱ繝ｩ繝｡繝ｼ繧ｿ
         self.tap_threshold = 0.3
         self.require_engulfing = True
 
         self.logger and self.logger.info("FVGStrategy initialized.")
 
     # --------------------------
-    # MarketEngineから呼ばれる入口
+    # MarketEngine縺九ｉ蜻ｼ縺ｰ繧後ｋ蜈･蜿｣
     # --------------------------
     def on_bar(self, market_data):
         """
-        MarketEngineから最新チE�Eタを受け取り、E
-        Execution形式でシグナルを返す
+        MarketEngine縺九ｉ譛譁ｰ繝・・繧ｿ繧貞女縺大叙繧翫・
+        Execution蠖｢蠑上〒繧ｷ繧ｰ繝翫Ν繧定ｿ斐☆
         """
-        # チE�Eタ更新
+        # 繝・・繧ｿ譖ｴ譁ｰ
         for tf in ["M15", "H1", "H4"]:
             if tf in market_data and not market_data[tf].empty:
                 setattr(self, tf.lower(), market_data[tf])
 
-        # FVG検�E
+        # FVG讀懷・
         self.detect_fvg()
 
-        # シグナル生�E
+        # 繧ｷ繧ｰ繝翫Ν逕滓・
         signals = self.generate_signals()
         if not signals:
             return None
 
-        # Execution形式に変換して返す�E�EradeCoreに渡す！E
-        sig = signals[0]  # とりあえず1つだぁE
+        # Execution蠖｢蠑上↓螟画鋤縺励※霑斐☆・・radeCore縺ｫ貂｡縺呻ｼ・
+        sig = signals[0]  # 縺ｨ繧翫≠縺医★1縺､縺縺・
         signal_exec = {
             "action": "BUY" if sig["trade_type"] == "buy" else "SELL",
             "symbol": market_data.get("symbol", "BTCUSDT"),
             "price": sig["entry_price"],
             "sl": sig["stop_loss_price"],
             "tp": sig["take_profit_price"],
-            "size": 0.001  # 固定サイズ。忁E��ならvolume対忁E
+            "size": 0.001  # 蝗ｺ螳壹し繧､繧ｺ縲ょｿ・ｦ√↑繧益olume蟇ｾ蠢・
         }
 
-        # ログ・通知
+        # 繝ｭ繧ｰ繝ｻ騾夂衍
         self.logger and self.logger.info(f"FVGStrategy signal: {signal_exec}")
         self.notifier and self.notifier.send(f"FVGStrategy signal: {signal_exec}")
 
         return signal_exec
 
     # --------------------------
-    # FVG検�E
+    # FVG讀懷・
     # --------------------------
     def detect_fvg(self):
         self._add_fvg(self.m15, "M15")
@@ -111,17 +112,17 @@ class FVGStrategy(BaseStrategy):
         self.fvg_list.append(FVG(top, bottom, bullish, tf))
 
     # --------------------------
-    # シグナル生�E
+    # 繧ｷ繧ｰ繝翫Ν逕滓・
     # --------------------------
     def generate_signals(self):
         """
-        StrategyContext相当�Edictリストで返す
+        StrategyContext逶ｸ蠖薙・dict繝ｪ繧ｹ繝医〒霑斐☆
         """
         signals = []
         for fvg in self.fvg_list:
             if fvg.timeframe != "M15" or fvg.used:
                 continue
-            # シンプルに中忁E��格でエントリー
+            # 繧ｷ繝ｳ繝励Ν縺ｫ荳ｭ蠢・ｾ｡譬ｼ縺ｧ繧ｨ繝ｳ繝医Μ繝ｼ
             center = (fvg.top + fvg.bottom) / 2
             signal = {
                 "strategy_name": "FVG",

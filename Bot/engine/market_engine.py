@@ -1,17 +1,18 @@
+﻿# -*- coding: utf-8 -*-
 from typing import List
 from strategies.base_strategy import BaseStrategy
 from market.candle_buffer import CandleBuffer
 from utils.multi_timeframe_manager import MultiTimeFrameManager
 from websocket.ws_client import BinanceWSClient
-from utils.telegram import TelegramNotifier  # 本番用
+from utils.telegram import TelegramNotifier  # 譛ｬ逡ｪ逕ｨ
 
 class MarketEngine:
     """
-    MarketEngine�E�本番用�E�ダミ�EチE�Eタ兼用�E�E
-    - CandleBuffer更新
-    - MultiTimeFrameManagerで任意時間足生�E
-    - 戦略に on_bar チE�Eタを渡ぁE
-    - WebSocket統吁E
+    MarketEngine・域悽逡ｪ逕ｨ・上ム繝溘・繝・・繧ｿ蜈ｼ逕ｨ・・
+    - CandleBuffer譖ｴ譁ｰ
+    - MultiTimeFrameManager縺ｧ莉ｻ諢乗凾髢楢ｶｳ逕滓・
+    - 謌ｦ逡･縺ｫ on_bar 繝・・繧ｿ繧呈ｸ｡縺・
+    - WebSocket邨ｱ蜷・
     """
 
     def __init__(self, strategies: List[BaseStrategy], debug: bool = True,
@@ -19,29 +20,29 @@ class MarketEngine:
         self.strategies = strategies
         self.debug = debug
 
-        # 生足バッファ
+        # 逕溯ｶｳ繝舌ャ繝輔ぃ
         self.candle_buffer = CandleBuffer()
 
-        # マルチタイムフレーム管琁E��E刁E��ベ�Eス�E�E
+        # 繝槭Ν繝√ち繧､繝繝輔Ξ繝ｼ繝邂｡逅・ｼ・蛻・ｶｳ繝吶・繧ｹ・・
         self.mtf_manager = MultiTimeFrameManager(base_timeframe="1m")
 
-        # 対応時間足
+        # 蟇ｾ蠢懈凾髢楢ｶｳ
         self.timeframes = ["M15", "H1", "H4"]
 
-        # Telegram 通知
+        # Telegram 騾夂衍
         self.notifier = TelegramNotifier(token=telegram_token, chat_id=telegram_chat_id) if telegram_token else None
 
-        # WebSocket クライアント管琁E
+        # WebSocket 繧ｯ繝ｩ繧､繧｢繝ｳ繝育ｮ｡逅・
         self.ws_clients: List[BinanceWSClient] = []
 
     # ----------------------------
-    # WebSocket 連携
+    # WebSocket 騾｣謳ｺ
     # ----------------------------
     def add_ws_client(self, symbol: str):
-        """WebSocket Client を追加"""
+        """WebSocket Client 繧定ｿｽ蜉"""
         ws_client = BinanceWSClient(
             symbol=symbol,
-            on_candle=self.process_data,  # 受信チE�EタめEprocess_data に渡ぁE
+            on_candle=self.process_data,  # 蜿嶺ｿ｡繝・・繧ｿ繧・process_data 縺ｫ貂｡縺・
             telegram_token=self.notifier.token if self.notifier else None,
             telegram_chat_id=self.notifier.chat_id if self.notifier else None
         )
@@ -51,13 +52,13 @@ class MarketEngine:
             print(f"[MarketEngine] WS client started for {symbol}")
 
     # ----------------------------
-    # キャンドル処琁E
+    # 繧ｭ繝｣繝ｳ繝峨Ν蜃ｦ逅・
     # ----------------------------
     def process_data(self, data: dict):
         """
-        WSめE��ミ�EチE�Eタを受け取めE
-        CandleBuffer と MTFManager を更新して戦略に渡ぁE
-        data フォーマット侁E
+        WS繧・ム繝溘・繝・・繧ｿ繧貞女縺大叙繧・
+        CandleBuffer 縺ｨ MTFManager 繧呈峩譁ｰ縺励※謌ｦ逡･縺ｫ貂｡縺・
+        data 繝輔か繝ｼ繝槭ャ繝井ｾ・
         {
             "symbol": "BTCUSDT",
             "time": 1679452800000,
@@ -80,22 +81,22 @@ class MarketEngine:
         if self.debug:
             print(f"[MarketEngine] New candle: {candle}")
 
-        # CandleBuffer に追加
+        # CandleBuffer 縺ｫ霑ｽ蜉
         self.candle_buffer.add_candle(candle)
 
-        # MultiTimeFrameManager を更新
+        # MultiTimeFrameManager 繧呈峩譁ｰ
         self.mtf_manager.update_candle(
             symbol=data.get("symbol", "BTCUSDT"),
             candle=candle
         )
 
-        # 吁E��間足を取得して戦略に渡ぁE
+        # 蜷・凾髢楢ｶｳ繧貞叙蠕励＠縺ｦ謌ｦ逡･縺ｫ貂｡縺・
         market_data = self.mtf_manager.get_all_timeframes(
             symbol=data.get("symbol", "BTCUSDT"),
             timeframes=self.timeframes
         )
         market_data["symbol"] = data.get("symbol", "BTCUSDT")
 
-        # 戦略にチE�Eタを渡ぁE
+        # 謌ｦ逡･縺ｫ繝・・繧ｿ繧呈ｸ｡縺・
         for strategy in self.strategies:
             strategy.on_bar(market_data)
