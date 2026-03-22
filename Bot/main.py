@@ -4,18 +4,17 @@
 
 import asyncio
 
-from Bot.wrappers.strategy_wrapper import StrategyWrapper
-from Bot.core.trade_core import TradeCore
-from Bot.engine.market_engine import MarketEngine
-from Bot.utils.logger import BotLogger
-from Bot.utils.telegram_notifier import TelegramNotifier
-from Bot.strategies.fvg_strategy import FVGStrategy
-from Bot.engine.execution_engine import ExecutionEngine
-
+from wrappers.strategy_wrapper import StrategyWrapper
+from core.trade_core import TradeCore
+from engine.market_engine import MarketEngine
+from utils.logger import BotLogger
+from utils.telegram_notifier import TelegramNotifier
+from strategies.fvg_strategy import FVGStrategy
+from engine.execution_engine import ExecutionEngine
 # =========================
 # 設定
 # =========================
-WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
+WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 
 TOKEN = "YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
@@ -36,6 +35,7 @@ def initialize_bot():
     # Execution Engine
     # ---------------------------------
     execution_engine = ExecutionEngine(
+        live=False,  # ← 安全のため必ずFalse
         logger=logger,
         notifier=notifier
     )
@@ -53,7 +53,7 @@ def initialize_bot():
     # ---------------------------------
     # Strategy Wrapper
     # ---------------------------------
-    strategy_wrapper = StrategyWrapper(core=trade_core)
+    strategy_wrapper = StrategyWrapper()
     logger.info("StrategyWrapper initialized")
 
     # ---------------------------------
@@ -69,15 +69,16 @@ def initialize_bot():
     logger.info("FVGStrategy registered")
 
     # ---------------------------------
-    # Market Engine（ここが正解）
+    # Market Engine（🔥ここが最重要修正）
     # ---------------------------------
     market_engine = MarketEngine(
         ws_url=WS_URL,
-        strategy_wrapper=strategy_wrapper
+        strategy_wrapper=strategy_wrapper,
+        execution_engine=execution_engine,  # ← 追加
+        debug=True  # ← デバッグON
     )
 
     logger.info("MarketEngine initialized")
-
     logger.info("BOT initialization completed")
 
     return market_engine, logger, notifier

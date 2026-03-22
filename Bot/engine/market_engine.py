@@ -1,97 +1,57 @@
-import asyncio
-import logging
-import json
-import websockets
-
-from Bot.wrappers.strategy_wrapper import StrategyWrapper
-from Bot.market.candle_buffer import CandleBuffer
-
-logger = logging.getLogger(__name__)
+from typing import List
+from strategies.base_strategy import BaseStrategy
+from market.candle_buffer import CandleBuffer
+from utils.multi_timeframe_manager import MultiTimeFrameManager
 
 
 class MarketEngine:
     """
-    WebSocket受信 → CandleBuffer更新 → StrategyWrapper通知
-    再接続対応
+    MarketEngine（本番用／ダミーデータ兼用）
+    - CandleBuffer更新
+    - MultiTimeFrameManagerで任意時間足生成
+    - 戦略に on_bar データを渡す
     """
 
-    def __init__(self, ws_url: str, strategy_wrapper: StrategyWrapper):
-        self.ws_url = ws_url
-        self.strategy_wrapper = strategy_wrapper
+    def __init__(self, strategies: List[BaseStrategy], debug: bool = True):
+        self.strategies = strategies
+        self.debug = debug
+
+        # 生足バッファ
         self.candle_buffer = CandleBuffer()
-        self.ws = None
-        self.stop_flag = False
 
-        logger.info(f"CandleBuffer loaded from: {CandleBuffer.__module__}")
+        # マルチタイムフレーム管理（1分足ベース）
+        self.mtf_manager = MultiTimeFrameManager(base_timeframe="1m")
 
-    async def connect(self):
-        while not self.stop_flag:
-            try:
-                async with websockets.connect(self.ws_url) as ws:
-                    self.ws = ws
-                    logger.info("WebSocket connected")
-                    await self.listen()
-            except Exception as e:
-                logger.error(f"WebSocket connection error: {e}")
-                await asyncio.sleep(5)
+        # 対応時間足
+        self.timeframes = ["M15", "H1", "H4"]
 
-    async def listen(self):
-        async for message in self.ws:
-            try:
-                print("data received")  # ✅ データ受信確認
-                data = json.loads(message)
-                self.process_data(data)
-            except Exception as e:
-                logger.error(f"Data processing error: {e}")
-
-    def process_data(self, data):
+    def process_data(self, data: dict):
         """
-        CandleBuffer更新 → StrategyWrapper呼び出し
+        ダミーデータや実データを受け取り
+        CandleBuffer と MTFManager を更新して戦略に渡す
         """
-        try:
-            k = data.get("k")
+        # 生足追加
+        candle = {
+            "time": data.get("time"),
+            "open": float(data.get("open", 0)),
+            "high": float(data.get("high", 0)),
+            "low": float(data.get("low", 0)),
+            "close": float(data.get("close", 0)),
+            "volume": float(data.get("volume", 0))
+        }
 
-            # 🔥 テスト中は未確定足も通す（重要）
-            if k is None:
-                return
+        if self.debug:
+            print(f"[DEBUG] New candle: {candle}")
 
-            print("candle closed (test)")  # ✅ 通過確認
+        self.candle_buffer.add_candle(candle)
+        self.mtf_manager.update_candle(data.get("symbol", "BTCUSDT"), candle)
 
-            candle = {
-                "open": float(k["o"]),
-                "high": float(k["h"]),
-                "low": float(k["l"]),
-                "close": float(k["c"]),
-                "volume": float(k["v"])
-            }
+        # 各時間足を取得して戦略に渡す
+        market_data = self.mtf_manager.get_all_timeframes(
+            symbol=data.get("symbol", "BTCUSDT"),
+            timeframes=self.timeframes
+        )
+        market_data["symbol"] = data.get("symbol", "BTCUSDT")
 
-            # ---------------------------------
-            # Candle追加
-            # ---------------------------------
-            self.candle_buffer.add_candle(candle)
-
-            # ---------------------------------
-            # 最新取得
-            # ---------------------------------
-            latest_data = self.candle_buffer.get_last(1)
-
-            if not latest_data:
-                return
-
-            # 🔥 list / DataFrame 両対応
-            if isinstance(latest_data, list):
-                latest = latest_data[-1]
-            else:
-                latest = latest_data.iloc[-1]
-
-            # ---------------------------------
-            # Strategyへ渡す
-            # ---------------------------------
-            print("➡ Strategy call")  # ✅ ここ重要
-            self.strategy_wrapper.on_bar(latest)
-
-        except Exception as e:
-            logger.error(f"process_data error: {e}")
-
-    def stop(self):
-        self.stop_flag = True
+        for strategy in self.strategies:
+            strategy.on_bar(market_data)

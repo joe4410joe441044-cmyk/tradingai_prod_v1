@@ -1,9 +1,25 @@
 from dataclasses import dataclass, field
 from typing import List
 import datetime
+import logging
 
-from Bot.utils.logger import BotLogger
+# =====================================================
+# 修正版 BotLogger
+# =====================================================
+class BotLogger:
+    def __init__(self, name="Bot"):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
 
+    def get_logger(self):
+        """ TradeCore が使用する get_logger メソッド """
+        return self.logger
 
 # =====================================================
 # ポジション情報
@@ -17,7 +33,6 @@ class Position:
     volume: float
     entry_time: datetime.datetime
     symbol: str = "BTCUSDT"
-
 
 # =====================================================
 # 戦略 → Core への注文コンテキスト
@@ -33,7 +48,6 @@ class StrategyContext:
     reason: str = ""
     extra: dict = field(default_factory=dict)
 
-
 # =====================================================
 # 資金管理・DD制御コア
 # =====================================================
@@ -48,7 +62,8 @@ class TradeCore:
     ):
 
         self.is_live = is_live
-        self.logger = logger if logger else BotLogger("TradeCore").get_logger()
+        # ← ここを get_logger() で安全に取得
+        self.logger = logger.get_logger() if logger else BotLogger("TradeCore").get_logger()
 
         self.execution_engine = execution_engine
 

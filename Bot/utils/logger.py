@@ -1,7 +1,7 @@
+# utils/logger.py
 import csv
 import os
 import datetime
-
 
 class BotLogger:
 
@@ -13,7 +13,7 @@ class BotLogger:
         self.trade_file = os.path.join(log_dir, "trade_log.csv")
         self.signal_file = os.path.join(log_dir, "signal_log.csv")
         self.equity_file = os.path.join(log_dir, "equity_curve.csv")
-        self.general_file = os.path.join(log_dir, "bot_log.csv")  # ← 新規追加
+        self.general_file = os.path.join(log_dir, "bot_log.csv")  # 一般ログ用
 
         self._init_files()
 
@@ -84,3 +84,12 @@ class BotLogger:
 
     def error(self, message):
         self._write_general_log("ERROR", message)
+
+    # =========================================
+    # TradeCore 用 get_logger
+    # =========================================
+    def get_logger(self):
+        """
+        TradeCore などから logger を取得するためのメソッド
+        """
+        return self
