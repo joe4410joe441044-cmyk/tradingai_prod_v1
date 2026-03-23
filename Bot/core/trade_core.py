@@ -1,13 +1,16 @@
 ﻿# -*- coding: utf-8 -*-
+
 from dataclasses import dataclass, field
 from typing import List
 import datetime
 import logging
 
+
 # =====================================================
 # BotLogger
 # =====================================================
 class BotLogger:
+
     def __init__(self, name="Bot"):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
@@ -26,7 +29,7 @@ class BotLogger:
 
 
 # =====================================================
-# 繝昴ず繧ｷ繝ｧ繝ｳ
+# Position
 # =====================================================
 @dataclass
 class Position:
@@ -55,19 +58,21 @@ class StrategyContext:
 
 
 # =====================================================
-# TradeCore
+# TradeCore（統合版）
 # =====================================================
 class TradeCore:
 
-    def __init__(self, initial_balance=10000, logger=None):
-        # 笨・logger邨ｱ荳・井ｻ雁屓縺ｮ譛ｬ雉ｪ・・
+    def __init__(self, execution_engine=None, logger=None, initial_balance=10000):
+        print(">>> TradeCore INIT CALLED")
+
         self.logger = logger if logger else BotLogger().get_logger()
+        self.execution_engine = execution_engine
 
         self.positions: List[Position] = []
         self.max_concurrent_positions = 5
 
     # --------------------------
-    # 繧ｨ繝ｳ繝医Μ繝ｼ
+    # Entry（Strategy → ここ）
     # --------------------------
     def try_enter(self, ctx: StrategyContext):
 
@@ -75,7 +80,8 @@ class TradeCore:
             self.logger.warning("Max positions reached")
             return False
 
-        return self.open_position(
+        # ① 内部ポジション記録（従来機能）
+        self.open_position(
             trade_type=ctx.trade_type,
             price=ctx.entry_price,
             sl=ctx.stop_loss_price,
@@ -83,10 +89,25 @@ class TradeCore:
             symbol="BTCUSDT"
         )
 
+        # ② ExecutionEngineへ流す（新構造）
+        if self.execution_engine:
+            signal = {
+                "symbol": "BTCUSDT",
+                "side": ctx.trade_type,
+                "qty": 0.001,  # 仮（後でロット管理）
+                "price": ctx.entry_price
+            }
+
+            print("[TradeCore] Sending signal:", signal)
+
+            return self.execution_engine.send_signal(signal)
+
+        return True
+
     # --------------------------
     def open_position(self, trade_type, price, sl, tp, volume=1.0, symbol="BTCUSDT"):
 
-        trade_type = str(trade_type).upper()  # 櫨 蠑ｷ蛻ｶ螳牙・蛹・
+        trade_type = str(trade_type).upper()
 
         pos = Position(
             entry_price=price,
@@ -100,20 +121,21 @@ class TradeCore:
 
         self.positions.append(pos)
 
-        self.logger.info(f"櫨 ENTRY {trade_type} @ {price} SL:{sl} TP:{tp}")
+        self.logger.info(f"ENTRY {trade_type} @ {price} SL:{sl} TP:{tp}")
         return True
 
     # --------------------------
-    # SL / TP 蛻､螳・
+    # SL / TP 管理
     # --------------------------
     def update_positions(self, price_dict):
 
-        if not isinstance(price_dict, dict):  # 櫨 莠区腐髦ｲ豁｢
+        if not isinstance(price_dict, dict):
             return
 
         remaining = []
 
         for pos in self.positions:
+
             price = price_dict.get(pos.symbol)
 
             if price is None:
@@ -124,22 +146,21 @@ class TradeCore:
 
             if pos.trade_type == "BUY":
                 if price <= pos.sl:
-                    self.logger.info(f"笶・SL HIT @ {price}")
+                    self.logger.info(f"SL HIT @ {price}")
                     closed = True
                 elif price >= pos.tp:
-                    self.logger.info(f"笨・TP HIT @ {price}")
+                    self.logger.info(f"TP HIT @ {price}")
                     closed = True
 
             elif pos.trade_type == "SELL":
                 if price >= pos.sl:
-                    self.logger.info(f"笶・SL HIT @ {price}")
+                    self.logger.info(f"SL HIT @ {price}")
                     closed = True
                 elif price <= pos.tp:
-                    self.logger.info(f"笨・TP HIT @ {price}")
+                    self.logger.info(f"TP HIT @ {price}")
                     closed = True
 
             else:
-                # 櫨 譛ｪ螳夂ｾｩ繧ｿ繧､繝玲､懷・・医ョ繝舌ャ繧ｰ雜・㍾隕・ｼ・
                 self.logger.warning(f"Unknown trade_type: {pos.trade_type}")
 
             if not closed:
@@ -147,8 +168,6 @@ class TradeCore:
 
         self.positions = remaining
 
-    # --------------------------
-    # 豕ｨ譁・メ繧ｧ繝・け・・ngine縺九ｉ蜻ｼ縺ｰ繧後ｋ・・
     # --------------------------
     def check_orders(self, price_dict):
         self.update_positions(price_dict)

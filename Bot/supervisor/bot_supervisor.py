@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import subprocess
 import time
 import datetime
@@ -9,19 +9,19 @@ class BotSupervisor:
 
     def __init__(self):
 
-        # BOT襍ｷ蜍輔さ繝槭Φ繝・
+        # BOTE
         self.bot_command = ["python", "-m", "Bot.main"]
 
-        # 蜀崎ｵｷ蜍募ｾ・ｩ滓凾髢・
+        # EE
         self.restart_delay = 5
 
-        # 繝ｭ繧ｰ
+        # 
         self.log_file = "logs/supervisor.log"
 
         os.makedirs("logs", exist_ok=True)
 
     # =========================================
-    # 繝ｭ繧ｰ
+    # 
     # =========================================
 
     def log(self, message):
@@ -36,7 +36,7 @@ class BotSupervisor:
             f.write(line + "\n")
 
     # =========================================
-    # BOT螳溯｡・
+    # BOTE
     # =========================================
 
     def run(self):

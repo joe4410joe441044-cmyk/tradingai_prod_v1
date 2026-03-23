@@ -1,19 +1,21 @@
-﻿# -*- coding: utf-8 -*-
-# =========================================
-# main.py (TradingAI BOT 譛邨ら沿)
-# =========================================
+# -*- coding: utf-8 -*-
+
+print("=== FILE LOADED ===")
 
 import asyncio
+import logging
+import inspect
 
-from wrappers.strategy_wrapper import StrategyWrapper
-from core.trade_core import TradeCore
-from engine.market_engine import MarketEngine
-from utils.logger import BotLogger
-from utils.telegram_notifier import TelegramNotifier
-from strategies.fvg_strategy import FVGStrategy
-from engine.execution_engine import ExecutionEngine
+from Bot.engine.market_engine import MarketEngine
+from Bot.core.trade_core import TradeCore
+from Bot.strategies.fvg_strategy import FVGStrategy
+from Bot.engine.execution_engine import ExecutionEngine
+from Bot.utils.telegram_notifier import TelegramNotifier
+from Bot.utils.logger import BotLogger
+
+
 # =========================
-# 險ｭ螳・
+# 設定
 # =========================
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 
@@ -22,89 +24,116 @@ CHAT_ID = "YOUR_CHAT_ID"
 
 
 # =========================================
-# 蛻晄悄蛹・
+# Strategy Runner
+# =========================================
+class StrategyRunner:
+    def __init__(self, strategy, execution_engine):
+        self.strategy = strategy
+        self.execution_engine = execution_engine
+
+    async def on_bar(self, market_data):
+        try:
+            print("[Runner] on_bar called")
+
+            result = self.strategy.on_bar(market_data)
+
+            if asyncio.iscoroutine(result):
+                await result
+
+            signal = getattr(self.strategy, "latest_signal", None)
+
+            if signal:
+                print("[Runner] SIGNAL DETECTED:", signal)
+                self.execution_engine.send_signal(signal)
+
+        except Exception as e:
+            print("[Runner] ERROR:", e)
+            logging.exception(e)
+
+
+# =========================================
+# 初期化
 # =========================================
 def initialize_bot():
+
+    print(">>> INITIALIZE START")
 
     logger = BotLogger("logs")
     logger.info("Initializing BOT...")
 
     notifier = TelegramNotifier(TOKEN, CHAT_ID)
-    logger.info("Telegram notifier initialized")
+    print(">>> Telegram initialized")
 
-    # ---------------------------------
-    # Execution Engine
-    # ---------------------------------
+    # =========================
+    # ExecutionEngine検証（重要）
+    # =========================
+    print(">>> CHECK ExecutionEngine SIGNATURE")
+    print(inspect.getsource(ExecutionEngine.__init__))
+
+    # ExecutionEngine（新設計）
     execution_engine = ExecutionEngine(
-        live=False,  # 竊・螳牙・縺ｮ縺溘ａ蠢・★False
         logger=logger,
-        notifier=notifier
+        notifier=notifier,
+        live=False
     )
-    logger.info("ExecutionEngine initialized")
+    print(">>> ExecutionEngine created")
 
-    # ---------------------------------
-    # Trade Core
-    # ---------------------------------
+    # TradeCore
     trade_core = TradeCore(
         execution_engine=execution_engine,
         logger=logger
     )
-    logger.info("TradeCore initialized")
+    print(">>> TradeCore created")
 
-    # ---------------------------------
-    # Strategy Wrapper
-    # ---------------------------------
-    strategy_wrapper = StrategyWrapper()
-    logger.info("StrategyWrapper initialized")
-
-    # ---------------------------------
     # Strategy
-    # ---------------------------------
-    fvg_strategy = FVGStrategy(
+    strategy = FVGStrategy(
         trade_core=trade_core,
         logger=logger,
         notifier=notifier
     )
+    print(">>> Strategy created")
 
-    strategy_wrapper.register_strategy(fvg_strategy)
-    logger.info("FVGStrategy registered")
+    # Runner
+    runner = StrategyRunner(strategy, execution_engine)
+    print(">>> Runner created")
 
-    # ---------------------------------
-    # Market Engine・芋沐･縺薙％縺梧怙驥崎ｦ∽ｿｮ豁｣・・
-    # ---------------------------------
+    # MarketEngine
     market_engine = MarketEngine(
-        ws_url=WS_URL,
-        strategy_wrapper=strategy_wrapper,
-        execution_engine=execution_engine,  # 竊・霑ｽ蜉
-        debug=True  # 竊・繝・ヰ繝・げON
+        strategies=[strategy],
+        strategy_callback=runner.on_bar
     )
+    print(">>> MarketEngine created")
 
-    logger.info("MarketEngine initialized")
-    logger.info("BOT initialization completed")
+    print(">>> INITIALIZE END")
 
     return market_engine, logger, notifier
 
 
 # =========================================
-# Main・磯撼蜷梧悄・・
+# Main
 # =========================================
 async def main():
 
+    print(">>> MAIN START")
+
     market_engine, logger, notifier = initialize_bot()
 
+    print(">>> AFTER INIT")
+
     logger.info("BOT STARTED")
-    notifier.bot_started()
 
     try:
-        await market_engine.connect()
+        print(">>> BEFORE RUN")
+        await market_engine.run_websocket()
+        print(">>> AFTER RUN (これは通常出ない)")
 
     except KeyboardInterrupt:
+        print(">>> KEYBOARD INTERRUPT")
         logger.warning("BOT stopped by user")
-        notifier.send("BOT stopped (KeyboardInterrupt)")
 
     except Exception as e:
+        print(">>> EXCEPTION:", e)
         logger.error(f"BOT CRASHED: {e}")
-        notifier.send(f"BOT crashed: {e}")
         raise
 
 
@@ -112,4 +141,5 @@ async def main():
 # Entry
 # =========================================
 if __name__ == "__main__":
+    print(">>> ENTRY POINT")
     asyncio.run(main())

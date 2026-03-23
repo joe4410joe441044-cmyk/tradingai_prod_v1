@@ -3,16 +3,16 @@ import pandas as pd
 
 class CandleBuffer:
     """
-    Candle履歴を保持するクラス
-    SMC / FVG / BOS 検出用
-    各時間足 (M1, M5, M15, H1, H4) のDataFrameも保持
+    Candle
+    SMC / FVG / BOS E
+    E (M1, M5, M15, H1, H4) DataFrame
     """
 
     def __init__(self, maxlen=500):
-        # 単一ローソク足 deque (必要に応じて)
+        #  deque (E)
         self.candles = deque(maxlen=maxlen)
 
-        # 時間足ごとの DataFrame 初期化
+        #  DataFrame E
         self.df_M1 = pd.DataFrame()
         self.df_M5 = pd.DataFrame()
         self.df_M15 = pd.DataFrame()
@@ -20,7 +20,7 @@ class CandleBuffer:
         self.df_H4 = pd.DataFrame()
 
     # ---------------------------------
-    # Candle追加
+    # Candle
     # ---------------------------------
     def add_candle(self, candle, timeframe="M1"):
         """
@@ -36,10 +36,10 @@ class CandleBuffer:
         timeframe: "M1", "M5", "M15", "H1", "H4"
         """
 
-        # deque に追加
+        # deque 
         self.candles.append(candle)
 
-        # 時間足 DataFrame に追加
+        #  DataFrame 
         df_attr = f"df_{timeframe}"
         if not hasattr(self, df_attr):
             raise ValueError(f"Unsupported timeframe: {timeframe}")
@@ -50,7 +50,7 @@ class CandleBuffer:
         setattr(self, df_attr, df)
 
     # ---------------------------------
-    # 最新Candle
+    # Candle
     # ---------------------------------
     def last(self):
         if len(self.candles) == 0:
@@ -58,7 +58,7 @@ class CandleBuffer:
         return self.candles[-1]
 
     # ---------------------------------
-    # 1つ前のCandle
+    # 1ECandle
     # ---------------------------------
     def prev(self):
         if len(self.candles) < 2:
@@ -66,13 +66,13 @@ class CandleBuffer:
         return self.candles[-2]
 
     # ---------------------------------
-    # 指定数取得
+    # EE
     # ---------------------------------
     def get_last(self, n):
         return list(self.candles)[-n:]
 
     # ---------------------------------
-    # サイズ
+    # 
     # ---------------------------------
     def size(self):
         return len(self.candles)

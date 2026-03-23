@@ -1,6 +1,6 @@
-﻿# -*- coding: utf-8 -*-
-from DryRun.Bot.core.trade_core import StrategyContext
-from strategies.base_strategy import BaseStrategy
+# -*- coding: utf-8 -*-
+from Bot.core.trade_core import TradeCore
+from Bot.strategies.base_strategy import BaseStrategy
 
 class SimpleStrategy:
 

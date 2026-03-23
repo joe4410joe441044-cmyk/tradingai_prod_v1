@@ -1,15 +1,15 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import asyncio
 from datetime import datetime, timedelta
-from core.trade_core import TradeCore, BotLogger
+from Bot.core.trade_core import TradeCore, BotLogger
 from engine.market_engine import MarketEngine
-from strategies.fvg_strategy import FVGStrategy
-from strategies.rsi_strategy import RSIStrategy
+from Bot.strategies.fvg_strategy import FVGStrategy
+from Bot.strategies.rsi_strategy import RSIStrategy
 
 # --------------------------
-# 蛻晄悄蛹厄ｼ芋沐･縺薙％菫ｮ豁｣・・
+# EE
 # --------------------------
-logger = BotLogger().get_logger()   # 竊・縺薙％驥崎ｦ・ｼ・get_logger()・・
+logger = BotLogger().get_logger()   # EEEget_logger()EE
 
 trade_core = TradeCore(logger=logger)
 
@@ -21,7 +21,7 @@ strategies = [
 engine = MarketEngine(strategies=strategies, debug=True)
 
 # --------------------------
-# 繝繝溘・繝・・繧ｿ逕滓・
+# EEEE
 # --------------------------
 def generate_candles(num=100):
     candles = []
@@ -45,17 +45,17 @@ def generate_candles(num=100):
     return candles
 
 # --------------------------
-# 螳溯｡・
+# E
 # --------------------------
 async def run():
-    logger.info("=== 繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ髢句ｧ・===")
+    logger.info("=== E===")
 
     candles = generate_candles(200)
 
     for c in candles:
         engine.process_data(c)
 
-        # 迴ｾ蝨ｨ萓｡譬ｼ繧探radeCore縺ｸ貂｡縺・
+        # TradeCoreE
         price_dict = {
             c["symbol"]: c["close"]
         }
@@ -64,10 +64,10 @@ async def run():
 
         await asyncio.sleep(0.01)
 
-    logger.info("=== 繧ｷ繝溘Η繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ邨ゆｺ・===")
+    logger.info("=== E===")
 
 # --------------------------
-# 螳溯｡後お繝ｳ繝医Μ
+# 
 # --------------------------
 if __name__ == "__main__":
     asyncio.run(run())

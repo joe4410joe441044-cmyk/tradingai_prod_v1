@@ -13,12 +13,12 @@ class BotLogger:
         self.trade_file = os.path.join(log_dir, "trade_log.csv")
         self.signal_file = os.path.join(log_dir, "signal_log.csv")
         self.equity_file = os.path.join(log_dir, "equity_curve.csv")
-        self.general_file = os.path.join(log_dir, "bot_log.csv")  # 一般ログ用
+        self.general_file = os.path.join(log_dir, "bot_log.csv")  # 
 
         self._init_files()
 
     # =========================================
-    # 初期化
+    # E
     # =========================================
     def _init_files(self):
 
@@ -43,7 +43,7 @@ class BotLogger:
                 writer.writerow(["time", "level", "message"])
 
     # =========================================
-    # トレードログ
+    # 
     # =========================================
     def log_trade(self, strategy, trade_type, entry, sl, tp):
         with open(self.trade_file, "a", newline="") as f:
@@ -51,7 +51,7 @@ class BotLogger:
             writer.writerow([datetime.datetime.now(), strategy, trade_type, entry, sl, tp])
 
     # =========================================
-    # シグナルログ
+    # 
     # =========================================
     def log_signal(self, strategy, reason, price):
         with open(self.signal_file, "a", newline="") as f:
@@ -59,7 +59,7 @@ class BotLogger:
             writer.writerow([datetime.datetime.now(), strategy, reason, price])
 
     # =========================================
-    # Equityログ
+    # Equity
     # =========================================
     def log_equity(self, equity):
         with open(self.equity_file, "a", newline="") as f:
@@ -67,11 +67,11 @@ class BotLogger:
             writer.writerow([datetime.datetime.now(), equity])
 
     # =========================================
-    # 一般ログ（info / warning / error）
+    # EEnfo / warning / errorEE
     # =========================================
     def _write_general_log(self, level, message):
         timestamp = datetime.datetime.now()
-        print(f"[{level}] {timestamp} - {message}")  # ターミナル出力
+        print(f"[{level}] {timestamp} - {message}")  # E
         with open(self.general_file, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([timestamp, level, message])
@@ -86,10 +86,10 @@ class BotLogger:
         self._write_general_log("ERROR", message)
 
     # =========================================
-    # TradeCore 用 get_logger
+    # TradeCore  get_logger
     # =========================================
     def get_logger(self):
         """
-        TradeCore などから logger を取得するためのメソッド
+        TradeCore  logger EE
         """
         return self

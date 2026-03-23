@@ -1,12 +1,12 @@
 ﻿# -*- coding: utf-8 -*-
-# Bot/strategies/fvg_strategy.py
 
-import pandas as pd
 from typing import List
-from strategies.base_strategy import BaseStrategy
-from core.trade_core import TradeCore
-from utils.logger import BotLogger
-from utils.telegram_notifier import TelegramNotifier
+import pandas as pd
+
+from Bot.strategies.base_strategy import BaseStrategy
+from Bot.core.trade_core import TradeCore
+from Bot.utils.logger import BotLogger
+from Bot.utils.telegram_notifier import TelegramNotifier
 
 
 class FVG:
@@ -19,74 +19,85 @@ class FVG:
 
 
 class FVGStrategy(BaseStrategy):
-    """
-    蜊倅ｸ謌ｦ逡･・哥VG讀懷・繝ｻ繧ｷ繧ｰ繝翫Ν逕滓・
-    BaseStrategy 繧堤ｶ呎価縺励※蜈ｱ騾夐Κ蛻・・隕ｪ縺ｫ莉ｻ縺帙ｋ
-    """
 
-    def __init__(self, trade_core: TradeCore,
-                 m15: pd.DataFrame = pd.DataFrame(),
-                 h1: pd.DataFrame = pd.DataFrame(),
-                 h4: pd.DataFrame = pd.DataFrame(),
+    def __init__(self,
+                 trade_core: TradeCore,
+                 m15: pd.DataFrame = None,
+                 h1: pd.DataFrame = None,
+                 h4: pd.DataFrame = None,
                  logger: BotLogger = None,
                  notifier: TelegramNotifier = None):
-        # 蜈ｱ騾夐Κ蛻・・ BaseStrategy 縺ｫ莉ｻ縺帙ｋ
+
         super().__init__(trade_core, logger, notifier)
 
-        # 繧ｿ繧､繝繝輔Ξ繝ｼ繝縺斐→縺ｮ繝・・繧ｿ
-        self.m15 = m15
-        self.h1 = h1
-        self.h4 = h4
+        self.m15 = m15 if m15 is not None else pd.DataFrame()
+        self.h1 = h1 if h1 is not None else pd.DataFrame()
+        self.h4 = h4 if h4 is not None else pd.DataFrame()
 
-        # FVG繝ｪ繧ｹ繝・
         self.fvg_list: List[FVG] = []
 
-        # 險ｭ螳壹ヱ繝ｩ繝｡繝ｼ繧ｿ
         self.tap_threshold = 0.3
         self.require_engulfing = True
 
-        self.logger and self.logger.info("FVGStrategy initialized.")
+        # 最新シグナル格納用
+        self.latest_signal = None
+
+        if self.logger:
+            self.logger.info("FVGStrategy initialized.")
 
     # --------------------------
-    # MarketEngine縺九ｉ蜻ｼ縺ｰ繧後ｋ蜈･蜿｣
-    # --------------------------
     def on_bar(self, market_data):
-        """
-        MarketEngine縺九ｉ譛譁ｰ繝・・繧ｿ繧貞女縺大叙繧翫・
-        Execution蠖｢蠑上〒繧ｷ繧ｰ繝翫Ν繧定ｿ斐☆
-        """
-        # 繝・・繧ｿ譖ｴ譁ｰ
+
+        print("[FVG] on_bar called")
+
+        # Data更新
         for tf in ["M15", "H1", "H4"]:
             if tf in market_data and not market_data[tf].empty:
                 setattr(self, tf.lower(), market_data[tf])
 
-        # FVG讀懷・
+        # FVG検出
         self.detect_fvg()
 
-        # 繧ｷ繧ｰ繝翫Ν逕滓・
+        # Signal生成
         signals = self.generate_signals()
+
         if not signals:
+            # ⭐ 強制テスト用シグナル（必ず動作確認できる）
+            self.latest_signal = {
+                "symbol": "BTCUSDT",
+                "side": "BUY",
+                "qty": 0.001,
+                "price": 50000
+            }
+            print("[FVG] FORCED SIGNAL")
             return None
 
-        # Execution蠖｢蠑上↓螟画鋤縺励※霑斐☆・・radeCore縺ｫ貂｡縺呻ｼ・
-        sig = signals[0]  # 縺ｨ繧翫≠縺医★1縺､縺縺・
+        sig = signals[0]
+
         signal_exec = {
-            "action": "BUY" if sig["trade_type"] == "buy" else "SELL",
             "symbol": market_data.get("symbol", "BTCUSDT"),
+            "side": "BUY" if sig["trade_type"] == "buy" else "SELL",
+            "qty": 0.001,
             "price": sig["entry_price"],
             "sl": sig["stop_loss_price"],
             "tp": sig["take_profit_price"],
-            "size": 0.001  # 蝗ｺ螳壹し繧､繧ｺ縲ょｿ・ｦ√↑繧益olume蟇ｾ蠢・
         }
 
-        # 繝ｭ繧ｰ繝ｻ騾夂衍
-        self.logger and self.logger.info(f"FVGStrategy signal: {signal_exec}")
-        self.notifier and self.notifier.send(f"FVGStrategy signal: {signal_exec}")
+        self.latest_signal = signal_exec
+
+        print("[FVG] SIGNAL GENERATED:", signal_exec)
+
+        if self.logger:
+            self.logger.info(f"FVGStrategy signal: {signal_exec}")
+
+        if self.notifier:
+            try:
+                self.notifier.send_message(f"FVGStrategy signal: {signal_exec}")
+            except Exception as e:
+                print("Notifier error:", e)
 
         return signal_exec
 
-    # --------------------------
-    # FVG讀懷・
     # --------------------------
     def detect_fvg(self):
         self._add_fvg(self.m15, "M15")
@@ -96,12 +107,15 @@ class FVGStrategy(BaseStrategy):
     def _add_fvg(self, df: pd.DataFrame, tf: str):
         if len(df) < 3:
             return
+
         high2 = df['high'].iloc[-3]
         low2 = df['low'].iloc[-3]
         high0 = df['high'].iloc[-1]
         low0 = df['low'].iloc[-1]
+
         if low2 > high0:
             self._add_or_merge_fvg(low2, high0, False, tf)
+
         if high2 < low0:
             self._add_or_merge_fvg(low0, high2, True, tf)
 
@@ -112,18 +126,15 @@ class FVGStrategy(BaseStrategy):
         self.fvg_list.append(FVG(top, bottom, bullish, tf))
 
     # --------------------------
-    # 繧ｷ繧ｰ繝翫Ν逕滓・
-    # --------------------------
     def generate_signals(self):
-        """
-        StrategyContext逶ｸ蠖薙・dict繝ｪ繧ｹ繝医〒霑斐☆
-        """
         signals = []
+
         for fvg in self.fvg_list:
             if fvg.timeframe != "M15" or fvg.used:
                 continue
-            # 繧ｷ繝ｳ繝励Ν縺ｫ荳ｭ蠢・ｾ｡譬ｼ縺ｧ繧ｨ繝ｳ繝医Μ繝ｼ
+
             center = (fvg.top + fvg.bottom) / 2
+
             signal = {
                 "strategy_name": "FVG",
                 "trade_type": "buy" if fvg.bullish else "sell",
@@ -133,6 +144,8 @@ class FVGStrategy(BaseStrategy):
                 "partial_close_percent": 50,
                 "reason": "FVG_Tap"
             }
+
             signals.append(signal)
             fvg.used = True
+
         return signals

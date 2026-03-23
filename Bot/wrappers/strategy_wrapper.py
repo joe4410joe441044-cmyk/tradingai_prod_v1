@@ -1,28 +1,28 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from typing import List
 import logging
 
 
 class StrategyWrapper:
     """
-    隍・焚Strategy繧堤ｮ｡逅・＠縲《ignal繧・縺､霑斐☆
+    EStrategyEsignalE
     """
 
     def __init__(self):
         self.strategies: List = []
 
     # ---------------------------------
-    # 謌ｦ逡･逋ｻ骭ｲ
+    # 
     # ---------------------------------
     def register_strategy(self, strategy):
         self.strategies.append(strategy)
 
     # ---------------------------------
-    # MarketEngine縺九ｉ蜻ｼ縺ｰ繧後ｋ
+    # MarketEngine
     # ---------------------------------
     def on_bar(self, market_data):
         """
-        蜷Тtrategy繧貞ｮ溯｡後＠縲∵怙蛻昴・signal繧定ｿ斐☆
+        StrategyEsignal
         """
 
         for strat in self.strategies:

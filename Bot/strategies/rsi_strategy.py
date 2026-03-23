@@ -1,8 +1,8 @@
-﻿# -*- coding: utf-8 -*-
-import pandas as pd
+# -*- coding: utf-8 -*-
+from Bot.strategies.base_strategy import BaseStrategy
+from Bot.core.trade_core import TradeCore
+import pandas
 import random
-from strategies.base_strategy import BaseStrategy
-from core.trade_core import StrategyContext
 
 class RSIStrategy(BaseStrategy):
 
@@ -14,7 +14,7 @@ class RSIStrategy(BaseStrategy):
 
         if "H1" in market_data and not market_data["H1"].empty:
             df = market_data["H1"].copy()
-            df.columns = [c.lower() for c in df.columns]  # 竊・驥崎ｦ・
+            df.columns = [c.lower() for c in df.columns]  # EE
             self.df_h1 = df
 
         if self.df_h1.empty:
