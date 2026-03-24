@@ -1,115 +1,206 @@
+# -*- coding: utf-8 -*-
+# Bot/engine/market_engine.py
+
 import asyncio
 import logging
-import json
-from typing import List, Callable
+from datetime import datetime
+from collections import deque
+import pandas as pd
+from typing import List, Optional
 
-from Bot.strategies.fvg_strategy import FVGStrategy
-from Bot.market.candle_buffer import CandleBuffer
+from Bot.core.trade_core import TradeCore
+from Bot.wrappers.strategy_wrapper import StrategyWrapper
+from Bot.utils.logger import BotLogger
+from Bot.utils.telegram_notifier import TelegramNotifier
 
-logger = logging.getLogger("MarketEngine")
+# ★追加（ここだけ増やす）
+from Bot.utils.safety import safe_run, check_connections, ensure_connections
 
 
+# -------------------------
+# CandleBuffer
+# -------------------------
+class CandleBuffer:
+    """ローソク足管理"""
+    def __init__(self, maxlen=500):
+        self.candles = deque(maxlen=maxlen)
+        self.df_M1 = pd.DataFrame()
+        self.df_M5 = pd.DataFrame()
+        self.df_M15 = pd.DataFrame()
+        self.df_H1 = pd.DataFrame()
+        self.df_H4 = pd.DataFrame()
+
+    def add_candle(self, candle: dict, timeframe="M1"):
+        timeframe_map = {
+            "1m": "M1",
+            "5m": "M5",
+            "15m": "M15",
+            "1h": "H1",
+            "4h": "H4"
+        }
+        tf = timeframe_map.get(timeframe.lower())
+        if not tf:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        df_attr = f"df_{tf}"
+        df = getattr(self, df_attr)
+        new_row = pd.DataFrame([candle])
+        df = pd.concat([df, new_row], ignore_index=True)
+        setattr(self, df_attr, df)
+        self.candles.append(candle)
+
+    def last(self):
+        return self.candles[-1] if self.candles else None
+
+    def prev(self):
+        return self.candles[-2] if len(self.candles) >= 2 else None
+
+
+# -------------------------
+# MarketEngine
+# -------------------------
 class MarketEngine:
-    """
-    WebSocket → Queue → CandleBuffer → Strategy
-    """
 
-    def __init__(self, strategies: List[FVGStrategy], strategy_callback: Callable):
-        self.strategies = strategies
-        self.strategy_callback = strategy_callback
+    def __init__(
+        self,
+        strategies: Optional[List] = None,
+        strategy_wrapper: Optional[StrategyWrapper] = None,
+        trade_core: Optional[TradeCore] = None,
+        logger: Optional[BotLogger] = None,
+        notifier: Optional[TelegramNotifier] = None,
+        ws_url: Optional[str] = None,
+        debug: bool = False,
+        use_dummy: bool = False
+    ):
+        self.logger = logger or BotLogger()
+        self.notifier = notifier
+        self.ws_url = ws_url
+        self.debug = debug
+        self.use_dummy = use_dummy
+
+        self.trade_core = trade_core
+        self.strategy_wrapper = strategy_wrapper
+        self.strategies = strategies or []
 
         self.candle_buffer = CandleBuffer()
+        self._running = False
 
-        # ✅ queue制限（メモリ暴走防止）
-        self.queue = asyncio.Queue(maxsize=1000)
+        self.logger.info("MarketEngine initialized.")
 
-        self.ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
-        self.last_candle_ts = None
+    # -------------------------
+    # データ処理（安全化）
+    # -------------------------
+    @safe_run
+    def process_data(self, candle: dict):
+
+        # ★接続チェック（追加）
+        if self.trade_core:
+            errors = check_connections(self.trade_core)
+            if errors:
+                self.logger.error(f"[CONNECTION ERROR] {errors}")
+                ensure_connections(self.trade_core, None)
+
+        timeframe = candle.get("timeframe", "1m")
+        self.candle_buffer.add_candle(candle, timeframe=timeframe)
+
+        if self.debug:
+            print(f"[MarketEngine] Candle added: {candle}")
+
+        # Strategy通知
+        try:
+            if self.strategy_wrapper:
+                signal = self.strategy_wrapper.on_bar(candle)
+                if signal and self.trade_core:
+                    self.trade_core.check_orders(signal)
+            else:
+                for strat in self.strategies:
+                    signal = strat.on_bar(candle)
+                    if signal and self.trade_core:
+                        self.trade_core.check_orders(signal)
+        except Exception as e:
+            self.logger.error(f"[STRATEGY ERROR] {e}")
+
+    # -------------------------
+    # ダミー
+    # -------------------------
+    @safe_run
+    async def run_dummy(self, dummy_candles: list):
+        self._running = True
+        self.logger.info("=== Running in DUMMY mode ===")
+
+        for candle in dummy_candles:
+            if not self._running:
+                break
+
+            self.process_data(candle)
+
+            if self.trade_core:
+                try:
+                    self.trade_core.check_orders({})
+                except Exception as e:
+                    self.logger.error(f"[TRADECORE ERROR] {e}")
+
+            await asyncio.sleep(0.1)
+
+        self.logger.info("=== DUMMY mode completed ===")
+
+    # -------------------------
+    # WebSocket（無敵化）
+    # -------------------------
+    @safe_run
+    async def run_websocket(self):
+
+        if not self.ws_url:
+            raise ValueError("WebSocket URL is required")
+
+        import websockets
+        import json
 
         self._running = True
-
-    # ------------------------------
-    # WebSocket Listener
-    # ------------------------------
-    async def _websocket_listener(self):
-        import websockets
+        self.logger.info(f"Connecting to WS: {self.ws_url}")
 
         while self._running:
             try:
-                async with websockets.connect(
-                    self.ws_url,
-                    ping_interval=20,
-                    ping_timeout=10
-                ) as ws:
-                    logger.info("WebSocket connected")
+                async with websockets.connect(self.ws_url) as ws:
+
+                    last_recv = asyncio.get_event_loop().time()
 
                     async for message in ws:
-                        try:
-                            data = json.loads(message)
-                            kline = data.get("k")
 
-                            if not kline:
-                                continue
+                        last_recv = asyncio.get_event_loop().time()
 
-                            # queue満杯対策
-                            if self.queue.full():
-                                logger.warning("Queue full, dropping oldest data")
-                                _ = self.queue.get_nowait()
+                        candle = self.parse_message(message)
+                        self.process_data(candle)
 
-                            await self.queue.put(kline)
-
-                        except Exception as e:
-                            logger.exception(f"Message processing error: {e}")
+                        # ★タイムアウト監視（追加）
+                        if asyncio.get_event_loop().time() - last_recv > 60:
+                            raise Exception("WS timeout")
 
             except Exception as e:
-                logger.error(f"WebSocket error: {e} → reconnecting in 5s")
+                self.logger.error(f"WebSocket error: {e}, retrying in 5s")
                 await asyncio.sleep(5)
 
-    # ------------------------------
-    # Candle Processor
-    # ------------------------------
-    async def _candle_processor(self):
-        while self._running:
-            try:
-                kline = await self.queue.get()
+    # -------------------------
+    # メッセージ解析
+    # -------------------------
+    def parse_message(self, message: str) -> dict:
+        import json
+        data = json.loads(message)
+        kline = data.get("k", {})
 
-                if not kline:
-                    continue
+        return {
+            "symbol": data.get("s"),
+            "time": datetime.fromtimestamp(kline.get("t", 0)/1000).strftime("%Y-%m-%d %H:%M:%S"),
+            "open": float(kline.get("o", 0)),
+            "high": float(kline.get("h", 0)),
+            "low": float(kline.get("l", 0)),
+            "close": float(kline.get("c", 0)),
+            "volume": float(kline.get("v", 0)),
+            "timeframe": kline.get("i", "1m")
+        }
 
-                candle_ts = kline.get("t")
-
-                if not candle_ts:
-                    continue
-
-                # 重複防止
-                if self.last_candle_ts and candle_ts <= self.last_candle_ts:
-                    continue
-
-                self.last_candle_ts = candle_ts
-
-                # CandleBuffer更新
-                try:
-                    self.candle_buffer.add_candle(kline)
-                except Exception as e:
-                    logger.exception(f"CandleBuffer error: {e}")
-
-                # Strategy実行（最重要：絶対止めない）
-                try:
-                    await self.strategy_callback(kline)
-                except Exception as e:
-                    logger.exception(f"Strategy error: {e}")
-
-            except Exception as e:
-                logger.exception(f"Processor loop error: {e}")
-
-    # ------------------------------
-    # Run
-    # ------------------------------
-    async def run_websocket(self):
-        listener_task = asyncio.create_task(self._websocket_listener())
-        processor_task = asyncio.create_task(self._candle_processor())
-
-        try:
-            await asyncio.gather(listener_task, processor_task)
-        finally:
-            self._running = False   
+    # -------------------------
+    # 停止
+    # -------------------------
+    def stop(self):
+        self._running = False
+        self.logger.info("MarketEngine stopped.")

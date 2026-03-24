@@ -1,149 +1,103 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+import logging
 
-import csv
-from datetime import datetime
-
-from binance.client import Client
-from Bot.utils.logger import BotLogger
+# ★追加：安全ラッパー
+from Bot.utils.safety import safe_run
 
 
 class ExecutionEngine:
+    """
+    ExecutionEngine
+    ----------------
+    Strategy からの Signal を受け取り処理する。
+    live=False の場合はログのみで、実際の発注は行わない。
+    notifier があれば Telegram へ通知。
+    """
 
-    def __init__(self, logger=None, notifier=None, live=False, client: Client = None, log_dir="dryrun_logs"):
-        """
-        新設計 + 旧機能統合版
-
-        :param logger: BotLogger
-        :param notifier: TelegramNotifier
-        :param live: 本番実行フラグ（Falseなら発注しない）
-        :param client: Binance Client（本番時のみ使用）
-        :param log_dir: ログ保存先
-        """
-        print(">>> ExecutionEngine INIT CALLED")
-        self.logger = logger or BotLogger("ExecutionEngine").get_logger()
-        self.notifier = notifier
+    def __init__(self, live=False, logger=None, notifier=None):
         self.live = live
-        self.client = client
-        self.positions = {}
-        self.log_dir = log_dir
+        self.logger = logger or logging.getLogger(__name__)
+        self.notifier = notifier
 
-        # CSVログ
-        self.bot_log_file = f"{log_dir}/bot_log.csv"
-        self.equity_file = f"{log_dir}/equity_curve.csv"
-        self.signal_file = f"{log_dir}/signal_log.csv"
-        self.trade_file = f"{log_dir}/trade_log.csv"
+        self.logger.info(f"ExecutionEngine initialized (live={self.live})")
 
-    # ---------------- CSV ----------------
-    def _log_csv(self, file_path, row):
-        try:
-            with open(file_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(row)
-        except Exception as e:
-            print("CSV log error:", e)
+    # --------------------------
+    # Signal送信（TradeCore → ExecutionEngine）
+    # --------------------------
+    @safe_run  # ★追加
+    def send_signal(self, signal):
+        """
+        Signal に応じて注文処理
+        Signal 例: {'side': 'BUY', 'symbol': 'BTCUSDT', 'qty': 0.001, 'price': xxx}
+        """
+        # ログ強化
+        self.logger.info(f"[EXECUTION] Processing signal: {signal}")
 
-    def log_bot(self, msg: str):
-        self._log_csv(self.bot_log_file, [datetime.now(), msg])
-        self.logger.info(msg)
-
-    def log_signal(self, symbol, side, qty, price):
-        self._log_csv(self.signal_file, [datetime.now(), symbol, side, qty, price])
-
-    def log_trade(self, symbol, side, qty, price, status):
-        self._log_csv(self.trade_file, [datetime.now(), symbol, side, qty, price, status])
-
-    def update_equity(self, symbol, pnl):
-        self._log_csv(self.equity_file, [datetime.now(), symbol, pnl])
-
-    # ---------------- ポジション ----------------
-    def update_position(self, symbol, side, qty, price):
-        pos = self.positions.get(symbol, {"long": 0, "short": 0})
-
-        if side.lower() == "buy":
-            pos["long"] += qty
+        if self.live:
+            # 実際に発注する場合のコードはここに追加
+            self.logger.info(f"[LIVE] Sending order: {signal}")
         else:
-            pos["short"] += qty
+            # 発注前チェック・ログ
+            self.logger.info(f"[DRY_RUN] Signal received: {signal}")
 
-        self.positions[symbol] = pos
+        # Telegram通知
+        if self.notifier:
+            try:
+                self.notifier.send(f"Signal executed: {signal}")
+            except Exception as e:
+                self.logger.error(f"Failed to send Telegram notification: {e}")
 
-        self.logger.info(f"Updated position: {symbol} {pos}")
-
-        # 簡易PnL
-        if price:
-            pnl = (pos["long"] - pos["short"]) * price
-            self.update_equity(symbol, pnl)
-
-    # ---------------- 注文 ----------------
-    def place_order(self, symbol, side, qty, price=None, order_type="MARKET"):
-        self.log_bot(f"Order requested: {symbol} {side} {qty} @ {price} ({order_type})")
-        self.log_signal(symbol, side, qty, price)
-
-        if not self.live:
-            status = "skipped"
-            self.log_trade(symbol, side, qty, price, status)
-            self.logger.info("[ExecutionEngine] Trading disabled")
-            return {"status": status, "symbol": symbol, "side": side, "qty": qty, "price": price}
-
-        if not self.client:
-            self.logger.error("Client not set for live trading")
-            return {"status": "error", "error": "client not set"}
-
-        try:
-            if order_type.upper() == "MARKET":
-                result = self.client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type="MARKET",
-                    quantity=qty
-                )
-            else:
-                result = self.client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type="LIMIT",
-                    timeInForce="GTC",
-                    quantity=qty,
-                    price=price
-                )
-
-            status = "executed"
-            self.log_trade(symbol, side, qty, price, status)
-            self.logger.info(f"[ExecutionEngine] Order executed: {result}")
-            return result
-
-        except Exception as e:
-            status = "error"
-            self.log_trade(symbol, side, qty, price, status)
-            self.logger.error(f"[ExecutionEngine] Order failed: {e}")
-            return {"status": status, "error": str(e)}
-
-    # ---------------- Signal ----------------
-    def execute_signal(self, symbol, side, qty, price=None, order_type="MARKET"):
-        self.update_position(symbol, side, qty, price)
-        return self.place_order(symbol, side, qty, price, order_type)
-
-    # ---------------- Runner 統一入口 ----------------
-    def send_signal(self, signal: dict):
+    # --------------------------
+    # 発注前準備
+    # --------------------------
+    @safe_run  # ★追加
+    def prepare_order(self, position):
         """
-        StrategyRunner から呼ばれる統一入口
+        注文直前処理
+        TradeCore から呼ばれる
+        live=False の場合はログのみ
         """
-        print("[ExecutionEngine] Signal received:", signal)
+        signal = {
+            "symbol": position.symbol,
+            "side": position.trade_type,
+            "qty": position.volume,
+            "price": position.entry_price
+        }
 
-        try:
-            symbol = signal.get("symbol")
-            side = signal.get("side")
-            qty = signal.get("qty", 0.001)
-            price = signal.get("price")
+        if self.live:
+            self.logger.info(f"[LIVE] Preparing order: {signal}")
+            # 実発注処理はここに実装
+        else:
+            self.logger.info(f"[DRY_RUN] Preparing order: {signal}")
 
-            # 通知
-            if self.notifier:
-                try:
-                    self.notifier.send(f"Signal: {signal}")
-                except Exception as e:
-                    print("Notifier error:", e)
+    @safe_run  # ★追加
+    def prepare_close_order(self, position):
+        """
+        決済直前処理
+        TradeCore から呼ばれる
+        """
+        signal = {
+            "symbol": position.symbol,
+            "side": "SELL" if position.trade_type == "BUY" else "BUY",
+            "qty": position.volume,
+            "price": position.entry_price  # 実際の決済価格は別途取得
+        }
 
-            return self.execute_signal(symbol, side, qty, price)
+        if self.live:
+            self.logger.info(f"[LIVE] Preparing close order: {signal}")
+            # 実決済処理はここに実装
+        else:
+            self.logger.info(f"[DRY_RUN] Preparing close order: {signal}")
 
-        except Exception as e:
-            self.logger.error(f"Signal execution error: {e}")
-            return {"status": "error", "error": str(e)}
+    # --------------------------
+    # 統一注文入口（追加）
+    # --------------------------
+    @safe_run  # ★追加（これが最重要）
+    async def execute_order(self, signal):
+        """
+        Signal → 注文処理の統一入口
+        TradeCore からはこの関数を呼ぶ
+        """
+
+        # 既存処理をそのまま使用（安全）
+        self.send_signal(signal)

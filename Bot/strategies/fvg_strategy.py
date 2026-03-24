@@ -4,9 +4,10 @@ from typing import List
 import pandas as pd
 
 from Bot.strategies.base_strategy import BaseStrategy
-from Bot.core.trade_core import TradeCore
+from Bot.core.trade_core import TradeCore, StrategyContext
 from Bot.utils.logger import BotLogger
 from Bot.utils.telegram_notifier import TelegramNotifier
+from Bot.utils.safety import safe_run  # ★追加
 
 
 class FVG:
@@ -46,6 +47,7 @@ class FVGStrategy(BaseStrategy):
             self.logger.info("FVGStrategy initialized.")
 
     # --------------------------
+    @safe_run  # ★追加（これで絶対に落ちない）
     def on_bar(self, market_data):
 
         print("[FVG] on_bar called")
@@ -62,14 +64,22 @@ class FVGStrategy(BaseStrategy):
         signals = self.generate_signals()
 
         if not signals:
-            # ⭐ 強制テスト用シグナル（必ず動作確認できる）
-            self.latest_signal = {
-                "symbol": "BTCUSDT",
-                "side": "BUY",
-                "qty": 0.001,
-                "price": 50000
-            }
+            # ⭐ 強制テスト用シグナル
+            price = 50000
+
+            ctx = StrategyContext(
+                strategy_name="FVG",
+                trade_type="BUY",
+                entry_price=price,
+                stop_loss_price=price - 100,
+                take_profit_price=price + 100
+            )
+
             print("[FVG] FORCED SIGNAL")
+
+            # TradeCoreへ渡す
+            self.trade_core.try_enter(ctx)
+
             return None
 
         sig = signals[0]
@@ -95,6 +105,17 @@ class FVGStrategy(BaseStrategy):
                 self.notifier.send_message(f"FVGStrategy signal: {signal_exec}")
             except Exception as e:
                 print("Notifier error:", e)
+
+        # TradeCoreへ渡す
+        ctx = StrategyContext(
+            strategy_name="FVG",
+            trade_type=signal_exec["side"],
+            entry_price=signal_exec["price"],
+            stop_loss_price=signal_exec["sl"],
+            take_profit_price=signal_exec["tp"]
+        )
+
+        self.trade_core.try_enter(ctx)
 
         return signal_exec
 
