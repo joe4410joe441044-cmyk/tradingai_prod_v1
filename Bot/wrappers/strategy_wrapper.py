@@ -5,25 +5,28 @@ import logging
 
 class StrategyWrapper:
     """
-    EStrategyEsignalE
+    複数Strategyを管理し、Signalをまとめて返す
     """
 
     def __init__(self):
         self.strategies: List = []
 
     # ---------------------------------
-    # 
+    # Strategy登録
     # ---------------------------------
     def register_strategy(self, strategy):
         self.strategies.append(strategy)
 
     # ---------------------------------
-    # MarketEngine
+    # MarketEngineから呼ばれる
     # ---------------------------------
     def on_bar(self, market_data):
         """
-        StrategyEsignal
+        各StrategyからSignalを収集して返す
+        return: List[signal]
         """
+
+        signals = []
 
         for strat in self.strategies:
 
@@ -34,6 +37,6 @@ class StrategyWrapper:
                 continue
 
             if signal:
-                return signal
+                signals.append(signal)
 
-        return None
+        return signals

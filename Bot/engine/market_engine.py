@@ -8,12 +8,11 @@ from collections import deque
 import pandas as pd
 from typing import List, Optional
 
-from Bot.core.trade_core import TradeCore
+from Bot.core.trade_core import TradeCore, StrategyContext
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.utils.logger import BotLogger
 from Bot.utils.telegram_notifier import TelegramNotifier
 
-# ★追加（ここだけ増やす）
 from Bot.utils.safety import safe_run, check_connections, ensure_connections
 
 
@@ -87,37 +86,73 @@ class MarketEngine:
         self.logger.info("MarketEngine initialized.")
 
     # -------------------------
-    # データ処理（安全化）
+    # データ処理（完全ループ版）
     # -------------------------
     @safe_run
     def process_data(self, candle: dict):
 
-        # ★接続チェック（追加）
+        # 接続チェック
         if self.trade_core:
             errors = check_connections(self.trade_core)
             if errors:
                 self.logger.error(f"[CONNECTION ERROR] {errors}")
                 ensure_connections(self.trade_core, None)
 
+        # ローソク足保存
         timeframe = candle.get("timeframe", "1m")
         self.candle_buffer.add_candle(candle, timeframe=timeframe)
 
         if self.debug:
             print(f"[MarketEngine] Candle added: {candle}")
 
-        # Strategy通知
+        # --------------------------
+        # Strategy → Signal取得（配列）
+        # --------------------------
+        signals = []
         try:
             if self.strategy_wrapper:
-                signal = self.strategy_wrapper.on_bar(candle)
-                if signal and self.trade_core:
-                    self.trade_core.check_orders(signal)
+                signals = self.strategy_wrapper.on_bar(candle)
             else:
                 for strat in self.strategies:
                     signal = strat.on_bar(candle)
-                    if signal and self.trade_core:
-                        self.trade_core.check_orders(signal)
+                    if signal:
+                        signals.append(signal)
         except Exception as e:
             self.logger.error(f"[STRATEGY ERROR] {e}")
+
+        # --------------------------
+        # Entry処理
+        # --------------------------
+        for signal in signals:
+            if not self.trade_core:
+                continue
+
+            try:
+                ctx = StrategyContext(
+                    strategy_name="wrapper",
+                    trade_type=signal["side"],
+                    entry_price=signal["price"],
+                    stop_loss_price=signal.get("sl"),
+                    take_profit_price=signal.get("tp")
+                )
+
+                self.trade_core.try_enter(ctx)
+
+            except Exception as e:
+                self.logger.error(f"[ENTRY ERROR] {e}")
+
+        # --------------------------
+        # 決済チェック（価格ベース）
+        # --------------------------
+        if self.trade_core:
+            try:
+                price_dict = {
+                    candle["symbol"]: candle["close"]
+                }
+                self.trade_core.check_orders(price_dict)
+
+            except Exception as e:
+                self.logger.error(f"[CLOSE CHECK ERROR] {e}")
 
     # -------------------------
     # ダミー
@@ -133,18 +168,12 @@ class MarketEngine:
 
             self.process_data(candle)
 
-            if self.trade_core:
-                try:
-                    self.trade_core.check_orders({})
-                except Exception as e:
-                    self.logger.error(f"[TRADECORE ERROR] {e}")
-
             await asyncio.sleep(0.1)
 
         self.logger.info("=== DUMMY mode completed ===")
 
     # -------------------------
-    # WebSocket（無敵化）
+    # WebSocket
     # -------------------------
     @safe_run
     async def run_websocket(self):
@@ -153,7 +182,6 @@ class MarketEngine:
             raise ValueError("WebSocket URL is required")
 
         import websockets
-        import json
 
         self._running = True
         self.logger.info(f"Connecting to WS: {self.ws_url}")
@@ -171,7 +199,6 @@ class MarketEngine:
                         candle = self.parse_message(message)
                         self.process_data(candle)
 
-                        # ★タイムアウト監視（追加）
                         if asyncio.get_event_loop().time() - last_recv > 60:
                             raise Exception("WS timeout")
 
