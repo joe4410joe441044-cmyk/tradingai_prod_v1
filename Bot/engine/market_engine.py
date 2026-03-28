@@ -40,10 +40,13 @@ class CandleBuffer:
         tf = timeframe_map.get(timeframe.lower())
         if not tf:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
+
         df_attr = f"df_{tf}"
         df = getattr(self, df_attr)
+
         new_row = pd.DataFrame([candle])
         df = pd.concat([df, new_row], ignore_index=True)
+
         setattr(self, df_attr, df)
         self.candles.append(candle)
 
@@ -86,7 +89,7 @@ class MarketEngine:
         self.logger.info("MarketEngine initialized.")
 
     # -------------------------
-    # データ処理（完全ループ版）
+    # データ処理
     # -------------------------
     @safe_run
     def process_data(self, candle: dict):
@@ -106,17 +109,19 @@ class MarketEngine:
             print(f"[MarketEngine] Candle added: {candle}")
 
         # --------------------------
-        # Strategy → Signal取得（配列）
+        # Strategy → Signal取得
         # --------------------------
         signals = []
+
         try:
             if self.strategy_wrapper:
-                signals = self.strategy_wrapper.on_bar(candle)
+                signals = self.strategy_wrapper.on_bar(candle) or []
             else:
                 for strat in self.strategies:
                     signal = strat.on_bar(candle)
                     if signal:
                         signals.append(signal)
+
         except Exception as e:
             self.logger.error(f"[STRATEGY ERROR] {e}")
 
@@ -142,7 +147,7 @@ class MarketEngine:
                 self.logger.error(f"[ENTRY ERROR] {e}")
 
         # --------------------------
-        # 決済チェック（価格ベース）
+        # 決済チェック
         # --------------------------
         if self.trade_core:
             try:
@@ -153,24 +158,6 @@ class MarketEngine:
 
             except Exception as e:
                 self.logger.error(f"[CLOSE CHECK ERROR] {e}")
-
-    # -------------------------
-    # ダミー
-    # -------------------------
-    @safe_run
-    async def run_dummy(self, dummy_candles: list):
-        self._running = True
-        self.logger.info("=== Running in DUMMY mode ===")
-
-        for candle in dummy_candles:
-            if not self._running:
-                break
-
-            self.process_data(candle)
-
-            await asyncio.sleep(0.1)
-
-        self.logger.info("=== DUMMY mode completed ===")
 
     # -------------------------
     # WebSocket
@@ -207,7 +194,7 @@ class MarketEngine:
                 await asyncio.sleep(5)
 
     # -------------------------
-    # メッセージ解析
+    # メッセージ解析（★ここが修正ポイント）
     # -------------------------
     def parse_message(self, message: str) -> dict:
         import json
@@ -222,7 +209,10 @@ class MarketEngine:
             "low": float(kline.get("l", 0)),
             "close": float(kline.get("c", 0)),
             "volume": float(kline.get("v", 0)),
-            "timeframe": kline.get("i", "1m")
+            "timeframe": kline.get("i", "1m"),
+
+            # ★★★★★ 最重要 ★★★★★
+            "is_closed": kline.get("x", False)
         }
 
     # -------------------------

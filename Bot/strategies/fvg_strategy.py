@@ -40,7 +40,8 @@ class FVGStrategy(BaseStrategy):
         self.tap_threshold = 0.3
         self.require_engulfing = True
 
-        self.latest_signal = None
+        # ★ 同一足制御
+        self.last_signal_time = None
 
         if self.logger:
             self.logger.info("FVGStrategy initialized.")
@@ -51,66 +52,39 @@ class FVGStrategy(BaseStrategy):
 
         print("[FVG] on_bar called")
 
-        # Data更新（将来用）
-        for tf in ["M15", "H1", "H4"]:
-            if tf in market_data and hasattr(market_data[tf], "empty") and not market_data[tf].empty:
-                setattr(self, tf.lower(), market_data[tf])
+        is_closed = market_data.get("is_closed", None)
+        current_time = market_data.get("time")
 
-        # FVG検出
-        self.detect_fvg()
-
-        # Signal生成
-        signals = self.generate_signals()
+        print(f"[FVG DEBUG] time={current_time} is_closed={is_closed}")
 
         # --------------------------
-        # 強制テスト用シグナル（現在価格ベース）
+        # ★ 確定足のみ
         # --------------------------
-        if not signals:
-            current_price = market_data["close"]
-
-            signal_exec = {
-                "symbol": market_data.get("symbol", "BTCUSDT"),
-                "side": "BUY",
-                "qty": 0.001,
-                "price": current_price,
-                "sl": current_price - 100,
-                "tp": current_price + 100,
-            }
-
-            print("[FVG] FORCED SIGNAL:", signal_exec)
-
-            return signal_exec
+        if not is_closed:
+            print("[FVG] SKIP: not closed candle")
+            return None
 
         # --------------------------
-        # 通常シグナル
+        # ★ 同一足1回のみ
         # --------------------------
-        sig = signals[0]
+        if current_time == self.last_signal_time:
+            print("[FVG] SKIP: already processed this candle")
+            return None
 
-        signal_exec = {
-            "symbol": market_data.get("symbol", "BTCUSDT"),
-            "side": "BUY" if sig["trade_type"] == "buy" else "SELL",
-            "qty": 0.001,
-            "price": sig["entry_price"],
-            "sl": sig["stop_loss_price"],
-            "tp": sig["take_profit_price"],
-        }
+        self.last_signal_time = current_time
 
-        self.latest_signal = signal_exec
+        print(f"[FVG] CLOSED CANDLE: {current_time}")
 
-        print("[FVG] SIGNAL GENERATED:", signal_exec)
-
-        if self.logger:
-            self.logger.info(f"FVGStrategy signal: {signal_exec}")
-
-        if self.notifier:
-            try:
-                self.notifier.send_message(f"FVGStrategy signal: {signal_exec}")
-            except Exception as e:
-                print("Notifier error:", e)
-
-        return signal_exec
+        # --------------------------
+        # ★ 本番：ここではまだエントリーしない
+        # --------------------------
+        # FVGロジックが未実装のためシグナルは出さない
+        return None
 
     # --------------------------
+    # ↓↓↓ 以下は一旦使わない（残してOK）
+    # --------------------------
+
     def detect_fvg(self):
         self._add_fvg(self.m15, "M15")
         self._add_fvg(self.h1, "H1")
@@ -137,27 +111,5 @@ class FVGStrategy(BaseStrategy):
                 return
         self.fvg_list.append(FVG(top, bottom, bullish, tf))
 
-    # --------------------------
     def generate_signals(self):
-        signals = []
-
-        for fvg in self.fvg_list:
-            if fvg.timeframe != "M15" or fvg.used:
-                continue
-
-            center = (fvg.top + fvg.bottom) / 2
-
-            signal = {
-                "strategy_name": "FVG",
-                "trade_type": "buy" if fvg.bullish else "sell",
-                "entry_price": center,
-                "stop_loss_price": center - 0.01 if fvg.bullish else center + 0.01,
-                "take_profit_price": center + 0.03 if fvg.bullish else center - 0.03,
-                "partial_close_percent": 50,
-                "reason": "FVG_Tap"
-            }
-
-            signals.append(signal)
-            fvg.used = True
-
-        return signals
+        return []
