@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Project Folder Tree</title>
+<style>
+  body { font-family: monospace; }
+  ul { list-style-type: none; }
+  li::before { content: "📁 "; }
+  li.file::before { content: "📄 "; }
+</style>
+</head>
+<body>
+<h2>tradingai_prod_v1 Project Tree (max 4階層)</h2>
+<ul>
+  <!-- 第一階層 -->
+  <li>Bot
+    <ul>
+      <!-- 第二階層 -->
+      <li>core
+        <ul>
+          <!-- 第三階層 -->
+          <li>trade_core.py</li>
+          <li>position_manager.py</li>
+        </ul>
+      </li>
+      <li>engine
+        <ul>
+          <li>execution_engine.py</li>
+          <li>market_engine.py</li>
+        </ul>
+      </li>
+      <li>strategies
+        <ul>
+          <li>fvg_strategy.py</li>
+          <li>base_strategy.py</li>
+        </ul>
+      </li>
+      <li>utils
+        <ul>
+          <li>logger.py</li>
+          <li>telegram_notifier.py</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li>data
+    <ul>
+      <li>historical</li>
+      <li>config</li>
+    </ul>
+  </li>
+  <li>run_prod.py</li>
+  <li>requirements.txt</li>
+  <li>venv_new</li>
+</ul>
+</body>
+</html>

@@ -19,6 +19,7 @@ class Position:
     entry_time: datetime.datetime
     symbol: str = "BTCUSDT"
     status: str = "open"
+    close_price: float = None  # 🔥 追加
 
 
 @dataclass
@@ -109,11 +110,13 @@ class TradeCore:
                 # SL
                 if price <= pos.sl:
                     print("[CLOSE] SL HIT")
+                    pos.close_price = price  # 🔥 追加
                     pos.status = "closed"
 
                 # TP
                 elif price >= pos.tp:
                     print("[CLOSE] TP HIT")
+                    pos.close_price = price  # 🔥 追加
                     pos.status = "closed"
 
             # ==========================
@@ -124,9 +127,11 @@ class TradeCore:
                 # SL
                 if price >= pos.sl:
                     print("[CLOSE] SL HIT")
+                    pos.close_price = price  # 🔥 追加
                     pos.status = "closed"
 
                 # TP
                 elif price <= pos.tp:
                     print("[CLOSE] TP HIT")
+                    pos.close_price = price  # 🔥 追加
                     pos.status = "closed"
