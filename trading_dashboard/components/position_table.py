@@ -1,34 +1,24 @@
 import streamlit as st
 import pandas as pd
+from services.bot_api import _bot_instance
+import uuid
 
 def show_positions(positions=None):
     st.markdown("### Current Positions")
 
-    # モックデータ
     if positions is None:
-        positions = [
-            {"Symbol": "BTCUSDT", "Side": "BUY", "Qty": 0.1, "Entry": 66000, "P/L": 50},
-            {"Symbol": "ETHUSDT", "Side": "SELL", "Qty": 1, "Entry": 2200, "P/L": -10},
-            {"Symbol": "ADAUSDT", "Side": "BUY", "Qty": 50, "Entry": 0.35, "P/L": 5},
-        ]
+        positions = _bot_instance.get_positions()
 
     df = pd.DataFrame(positions or [])
 
-    # Symbolカラムがない場合に備える
-    if 'Symbol' not in df.columns:
-        df['Symbol'] = []
+    if df.empty:
+        st.info("No open positions")
+        return
 
-    # 重複しないユニーク key を生成
-    import uuid
+    # Symbolフィルター用ユニークkey
     unique_key = f"positions_filter_{uuid.uuid4()}"
-
     symbols = df['Symbol'].unique().tolist()
-    selected_symbols = st.multiselect(
-        "Filter by Symbol",
-        options=symbols,
-        default=symbols,
-        key=unique_key
-    )
+    selected_symbols = st.multiselect("Filter by Symbol", options=symbols, default=symbols, key=unique_key)
     df = df[df['Symbol'].isin(selected_symbols)]
 
     # 色付け関数
@@ -40,7 +30,6 @@ def show_positions(positions=None):
         color = "#d0f0c0" if str(val).upper() == "BUY" else "#f0d0d0"
         return f"background-color: {color}; color: black;"
 
-    # pandas 1.5+ 用 map に修正
     styled_df = df.style.map(color_pl, subset=['P/L']).map(color_side, subset=['Side'])
     st.dataframe(styled_df, height=300)
 
