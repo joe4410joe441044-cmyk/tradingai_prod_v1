@@ -1,0 +1,117 @@
+import { useState, useEffect } from 'react'
+import PositionsTable from './components/PositionsTable.jsx'
+import PriceCard from './components/PriceCard.jsx'
+import RightPanel from './components/RightPanel.jsx'
+
+export default function App() {
+  const [positions, setPositions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [botStatus, setBotStatus] = useState({ running: false })
+  const [currentPrice, setCurrentPrice] = useState(null)
+
+  // --------------------------
+  // データ取得用
+  // --------------------------
+  useEffect(() => {
+    const controller = new AbortController()
+
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+
+        // ポジション取得
+        const posRes = await fetch('http://localhost:8000/positions', {
+          signal: controller.signal
+        })
+        const posData = await posRes.json()
+        setPositions(Array.isArray(posData) ? posData : [])
+
+        // Botステータス取得
+        const statusRes = await fetch('http://localhost:8000/bot_status', {
+          signal: controller.signal
+        })
+        const statusData = await statusRes.json()
+        setBotStatus(statusData)
+
+        // 現在価格は positions の最新価格で取得
+        if (posData.length > 0) {
+          setCurrentPrice(posData[posData.length - 1].current)
+        } else {
+          setCurrentPrice(null)
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error(err)
+          setPositions([])
+          setBotStatus({ running: false })
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    // 初回取得
+    fetchData()
+
+    // 5秒ごと更新
+    const interval = setInterval(fetchData, 5000)
+
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [])
+
+  // --------------------------
+  // Bot操作
+  // --------------------------
+  const startBot = async () => {
+    try {
+      await fetch('http://localhost:8000/bot/start', { method: 'POST' })
+      setBotStatus({ running: true })
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const stopBot = async () => {
+    try {
+      await fetch('http://localhost:8000/bot/stop', { method: 'POST' })
+      setBotStatus({ running: false })
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  // --------------------------
+  // UI
+  // --------------------------
+  return (
+    <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
+      <div style={{ flex: 1 }}>
+        {/* 現在価格をPriceCardに渡す */}
+        <PriceCard currentPrice={currentPrice} />
+
+        {/* ポジション表示 */}
+        <PositionsTable positions={positions} loading={loading} />
+
+        {/* Bot操作ボタン */}
+        <div style={{ marginTop: '20px' }}>
+          <button onClick={startBot} disabled={botStatus.running} style={{ marginRight: '10px' }}>
+            Start Bot
+          </button>
+          <button onClick={stopBot} disabled={!botStatus.running}>
+            Stop Bot
+          </button>
+          <span style={{ marginLeft: '20px' }}>
+            Status: {botStatus.running ? 'RUNNING' : 'STOPPED'}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ width: '350px' }}>
+        <RightPanel />
+      </div>
+    </div>
+  )
+}
