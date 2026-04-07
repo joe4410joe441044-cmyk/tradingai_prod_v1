@@ -7,9 +7,8 @@ from Bot.engine.execution_engine import ExecutionEngine
 from Bot.core.trade_core import TradeCore
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.engine.market_engine import MarketEngine
-from Bot.wrappers.test_signal_generator import TestSignalGenerator
 
-# ▼ Telegram追加
+# ▼ Telegram
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.control.telegram_controller import TelegramController
 from Bot.control.telegram_listener import TelegramListener
@@ -33,8 +32,8 @@ ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 # -------------------------
 # Telegram設定
 # -------------------------
-TOKEN = "8568714005:AAFlzofjXb1cDZyaM93Awq4TFMcBsFKizYc"
-CHAT_ID = "1040943428"
+TOKEN = "YOUR_TOKEN_HERE"
+CHAT_ID = "YOUR_CHAT_ID_HERE"
 
 notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
 controller = TelegramController(notifier)
@@ -56,10 +55,6 @@ market_engine = MarketEngine(
     trade_core=trade_core,
     ws_url=ws_url
 )
-
-test_signal_generator = None
-if not live_mode:
-    test_signal_generator = TestSignalGenerator(strategy_wrapper, interval_sec=10)
 
 # -------------------------
 # ENTRY通知フック
@@ -118,9 +113,6 @@ async def main():
         asyncio.create_task(monitor_positions())
     ]
 
-    if test_signal_generator:
-        tasks.append(asyncio.create_task(test_signal_generator.run()))
-
     try:
         await asyncio.gather(*tasks)
 
@@ -131,9 +123,6 @@ async def main():
         logging.exception(f"BOT例外発生: {e}")
 
     finally:
-        if test_signal_generator:
-            test_signal_generator.stop()
-
         market_engine._running = False
         logging.info("BOT安全停止完了")
 
