@@ -24,9 +24,10 @@ logging.basicConfig(
 )
 
 # -------------------------
-# 設定
+# 設定（🔥本番モードON）
 # -------------------------
-live_mode = False
+live_mode = True  # ← ★ここをTrueに変更
+
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 # -------------------------
@@ -57,6 +58,13 @@ market_engine = MarketEngine(
 )
 
 # -------------------------
+# 起動ログ（追加）
+# -------------------------
+logging.info("===================================")
+logging.info(f"🚀 BOT START (LIVE MODE = {live_mode})")
+logging.info("===================================")
+
+# -------------------------
 # ENTRY通知フック
 # -------------------------
 def notify_entry(ctx):
@@ -73,11 +81,9 @@ strategy_wrapper.on_entry = notify_entry
 # TP / SL 通知監視
 # -------------------------
 async def monitor_positions():
-    print("🔥 monitor_positions STARTED")
+    logging.info("🔥 monitor_positions STARTED")
 
     while True:
-        print("[MONITOR] running...")
-
         for pos in trade_core.positions:
             if pos.status == "closed" and not hasattr(pos, "notified"):
                 try:
@@ -92,6 +98,7 @@ async def monitor_positions():
                             controller.notify_take_profit(pnl)
                         else:
                             controller.notify_stop_loss(abs(pnl))
+
                     else:
                         logging.warning("close_price が無いので通知スキップ")
 
@@ -99,7 +106,7 @@ async def monitor_positions():
                     logging.error(f"通知エラー: {e}")
 
                 pos.notified = True
-                print("[MONITOR] detected closed position")
+                logging.info("[MONITOR] closed position detected")
 
         await asyncio.sleep(1)
 
