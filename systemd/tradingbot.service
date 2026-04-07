@@ -1,15 +1,20 @@
 ﻿[Unit]
-Description=Trading AI Bot Service
+Description=TradingAI Bot (LIVE)
 After=network.target
 
 [Service]
-Type=simple
 User=joe4410joe
-WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Main_new
-ExecStart=/home/joe4410joe/TradingAI_Bot_Main_new/venv/bin/python -m Live.slack_bot.auto_bot_full_prod
+WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Prod_v1
+
+ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python run_prod.py
+
 Restart=always
-RestartSec=5
+RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+
+# ログ
+StandardOutput=append:/home/joe4410joe/TradingAI_Bot_Prod_v1/bot.log
+StandardError=append:/home/joe4410joe/TradingAI_Bot_Prod_v1/bot.log
 
 [Install]
 WantedBy=multi-user.target
