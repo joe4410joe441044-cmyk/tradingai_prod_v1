@@ -1,20 +1,22 @@
 ﻿[Unit]
-Description=TradingAI Bot (LIVE)
+Description=Trading AI Bot Service (本番運用)
 After=network.target
 
 [Service]
+Type=simple
 User=joe4410joe
 WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Prod_v1
 
-ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python run_prod.py
+ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python /home/joe4410joe/TradingAI_Bot_Prod_v1/run_prod.py
 
 Restart=always
-RestartSec=3
-Environment=PYTHONUNBUFFERED=1
+RestartSec=5
 
-# ログ
-StandardOutput=append:/home/joe4410joe/TradingAI_Bot_Prod_v1/bot.log
-StandardError=append:/home/joe4410joe/TradingAI_Bot_Prod_v1/bot.log
+StandardOutput=journal
+StandardError=journal
+
+# ▼ Telegram 環境変数（ここを本番用に置き換え）
+Environment=TELEGRAM_CHAT_ID=1040943428
 
 [Install]
 WantedBy=multi-user.target
