@@ -49,7 +49,11 @@ class TradeCore:
         self.entry_cooldown = 5
 
     @safe_run
-    def try_enter(self, ctx: StrategyContext):
+    def try_enter(self, ctx: StrategyContext = None, **kwargs):
+        # 🔥 ここが今回の修正ポイント
+        if ctx is None:
+            ctx = StrategyContext(**kwargs)
+
         now = time.time()
         last_time = self.last_entry_time.get(ctx.strategy_name, 0)
         if now - last_time < self.entry_cooldown:
@@ -127,9 +131,6 @@ class TradeCore:
         pos.status = "closed"
         print(f"[CLOSED] {pos.trade_type} @ {price}")
 
-    # --------------------------
-    # リアルタイム PnL 計算
-    # --------------------------
     def calc_pnl(self, price_dict):
         total_pnl = 0
         for pos in self.positions:
@@ -145,9 +146,6 @@ class TradeCore:
             total_pnl += pnl
         return total_pnl
 
-    # --------------------------
-    # ポジションサマリー出力
-    # --------------------------
     def summary(self, price_dict):
         print("\n===== POSITION SUMMARY =====")
         for pos in self.positions:
