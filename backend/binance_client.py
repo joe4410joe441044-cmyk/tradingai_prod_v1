@@ -33,3 +33,22 @@ class BinanceClient(ExchangeClient):
     def get_positions(self, symbol: str):
         positions = self.client.futures_position_information(symbol=symbol)
         return positions
+
+    # ============================
+    # ここから追加: execute_order ラッパー
+    # ============================
+    def execute_order(self, **kwargs):
+        """
+        ExecutionEngine から呼ばれる統一メソッド
+        kwargs に必要なパラメータを含む:
+            symbol, side, qty, order_type, price
+        """
+        # order_type がなければデフォルトで MARKET
+        order_type = kwargs.get("order_type", "MARKET")
+        return self.create_order(
+            symbol=kwargs["symbol"],
+            side=kwargs["side"],
+            qty=kwargs["qty"],
+            order_type=order_type,
+            price=kwargs.get("price", None)
+        )
