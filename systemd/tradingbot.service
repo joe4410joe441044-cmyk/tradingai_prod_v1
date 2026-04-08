@@ -7,16 +7,18 @@ Type=simple
 User=joe4410joe
 WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Prod_v1
 
+# run_prod.py を venv で実行
 ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python /home/joe4410joe/TradingAI_Bot_Prod_v1/run_prod.py
 
 Restart=always
 RestartSec=5
 
+# 標準出力 / エラーを journal に出力
 StandardOutput=journal
 StandardError=journal
 
-# ▼ Telegram 環境変数（ここを本番用に置き換え）
-Environment=TELEGRAM_CHAT_ID=1040943428
+# ▼ Telegram 環境変数（ダブルクォーテーションで囲む）
+Environment="TELEGRAM_CHAT_ID=1040943428"
 
 [Install]
 WantedBy=multi-user.target
