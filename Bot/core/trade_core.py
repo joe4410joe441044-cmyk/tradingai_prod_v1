@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
 import datetime
 import logging
@@ -19,16 +19,18 @@ class Position:
     entry_time: datetime.datetime
     symbol: str = "BTCUSDT"
     status: str = "open"
-    close_price: float = None  # 🔥 追加
+    close_price: float = None
 
 
 @dataclass
 class StrategyContext:
-    strategy_name: str
-    trade_type: str
-    entry_price: float
-    stop_loss_price: float
-    take_profit_price: float
+    # 🔥 kwargs対応のためデフォルト値を必ず付ける
+    strategy_name: str = "default"
+    trade_type: str = "BUY"
+    entry_price: float = 0.0
+    stop_loss_price: float = 0.0
+    take_profit_price: float = 0.0
+    volume: float = 0.001
 
 
 class TradeCore:
@@ -45,9 +47,13 @@ class TradeCore:
         self.entry_cooldown = 5
 
     @safe_run
-    def try_enter(self, ctx: StrategyContext):
+    def try_enter(self, ctx: StrategyContext = None, **kwargs):
 
         print("[TradeCore] try_enter called")
+
+        # 🔥 kwargs対応（最重要）
+        if ctx is None:
+            ctx = StrategyContext(**kwargs)
 
         now = time.time()
         if now - self.last_entry_time < self.entry_cooldown:
@@ -60,7 +66,7 @@ class TradeCore:
         signal = {
             "symbol": "BTCUSDT",
             "side": ctx.trade_type,
-            "qty": 0.001,
+            "qty": ctx.volume,
             "price": ctx.entry_price,
             "sl": ctx.stop_loss_price,
             "tp": ctx.take_profit_price
@@ -77,7 +83,7 @@ class TradeCore:
             trade_type=ctx.trade_type,
             sl=ctx.stop_loss_price,
             tp=ctx.take_profit_price,
-            volume=0.001,
+            volume=ctx.volume,
             entry_time=datetime.datetime.now()
         )
 
@@ -100,38 +106,33 @@ class TradeCore:
 
             price = price_dict.get(pos.symbol)
 
+            if price is None:
+                continue
+
             print(f"[POSITION] price={price} entry={pos.entry_price} sl={pos.sl} tp={pos.tp}")
 
-            # ==========================
             # BUY
-            # ==========================
             if pos.trade_type == "BUY":
 
-                # SL
                 if price <= pos.sl:
                     print("[CLOSE] SL HIT")
-                    pos.close_price = price  # 🔥 追加
+                    pos.close_price = price
                     pos.status = "closed"
 
-                # TP
                 elif price >= pos.tp:
                     print("[CLOSE] TP HIT")
-                    pos.close_price = price  # 🔥 追加
+                    pos.close_price = price
                     pos.status = "closed"
 
-            # ==========================
             # SELL
-            # ==========================
             elif pos.trade_type == "SELL":
 
-                # SL
                 if price >= pos.sl:
                     print("[CLOSE] SL HIT")
-                    pos.close_price = price  # 🔥 追加
+                    pos.close_price = price
                     pos.status = "closed"
 
-                # TP
                 elif price <= pos.tp:
                     print("[CLOSE] TP HIT")
-                    pos.close_price = price  # 🔥 追加
+                    pos.close_price = price
                     pos.status = "closed"
