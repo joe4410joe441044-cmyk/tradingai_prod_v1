@@ -1,5 +1,5 @@
 # backend/binance_client.py
-from exchange_client import ExchangeClient
+from backend.exchange_client import ExchangeClient
 from binance.client import Client
 from binance.enums import *
 
