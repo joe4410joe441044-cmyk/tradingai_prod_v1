@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # ★ BotManager追加
-from bot_manager import BotManager
+from backend.bot_manager import BotManager
 
 # --------------------------
 # FastAPI 本体

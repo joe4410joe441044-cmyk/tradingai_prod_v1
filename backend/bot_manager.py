@@ -22,7 +22,7 @@ from Bot.core.trade_core import TradeCore, StrategyContext
 from Bot.core.price_manager import PriceManager
 
 # ★ BinanceClient追加
-from binance_client import BinanceClient
+from backend.binance_client import BinanceClient
 
 
 class BotManager:
