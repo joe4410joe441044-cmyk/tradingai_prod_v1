@@ -8,96 +8,94 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [botStatus, setBotStatus] = useState({ running: false })
   const [currentPrice, setCurrentPrice] = useState(null)
-  const [errorMsg, setErrorMsg] = useState(null)
 
-  const BASE_URL = "http://127.0.0.1:8010"
-
+  // --------------------------
+  // データ取得用
+  // --------------------------
   useEffect(() => {
     const controller = new AbortController()
 
     const fetchData = async () => {
       try {
         setLoading(true)
-        setErrorMsg(null)
 
         // ポジション取得
-        const posRes = await fetch(`${BASE_URL}/positions`, {
+        const posRes = await fetch('http://localhost:8000/positions', {
           signal: controller.signal
         })
-        if (!posRes.ok) throw new Error('ポジション取得失敗')
         const posData = await posRes.json()
         setPositions(Array.isArray(posData) ? posData : [])
 
-        // BOTステータス取得
-        const statusRes = await fetch(`${BASE_URL}/bot_status`, {
+        // Botステータス取得
+        const statusRes = await fetch('http://localhost:8000/bot_status', {
           signal: controller.signal
         })
-        if (!statusRes.ok) throw new Error('BOTステータス取得失敗')
         const statusData = await statusRes.json()
         setBotStatus(statusData)
 
-        // 価格
+        // 現在価格は positions の最新価格で取得
         if (posData.length > 0) {
-          setCurrentPrice(posData[posData.length - 1].mark_price)
+          setCurrentPrice(posData[posData.length - 1].current)
         } else {
           setCurrentPrice(null)
         }
-
       } catch (err) {
         if (err.name !== 'AbortError') {
           console.error(err)
           setPositions([])
           setBotStatus({ running: false })
-          setCurrentPrice(null)
-          setErrorMsg('接続に失敗しました。FastAPI が起動しているか確認してください。')
         }
       } finally {
         setLoading(false)
       }
     }
 
+    // 初回取得
     fetchData()
+
+    // 5秒ごと更新
     const interval = setInterval(fetchData, 5000)
 
     return () => {
       controller.abort()
       clearInterval(interval)
     }
-  }, [BASE_URL]) // ←🔥ここ修正
+  }, [])
 
+  // --------------------------
   // Bot操作
+  // --------------------------
   const startBot = async () => {
     try {
-      await fetch(`${BASE_URL}/start`)
+      await fetch('http://localhost:8000/bot/start', { method: 'POST' })
       setBotStatus({ running: true })
     } catch (err) {
       console.error(err)
-      setErrorMsg('BOTの起動に失敗しました')
     }
   }
 
   const stopBot = async () => {
     try {
-      await fetch(`${BASE_URL}/stop`)
+      await fetch('http://localhost:8000/bot/stop', { method: 'POST' })
       setBotStatus({ running: false })
     } catch (err) {
       console.error(err)
-      setErrorMsg('BOTの停止に失敗しました')
     }
   }
 
+  // --------------------------
+  // UI
+  // --------------------------
   return (
     <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
       <div style={{ flex: 1 }}>
+        {/* 現在価格をPriceCardに渡す */}
         <PriceCard currentPrice={currentPrice} />
+
+        {/* ポジション表示 */}
         <PositionsTable positions={positions} loading={loading} />
 
-        {errorMsg && (
-          <div style={{ color: 'red', marginTop: '10px' }}>
-            {errorMsg}
-          </div>
-        )}
-
+        {/* Bot操作ボタン */}
         <div style={{ marginTop: '20px' }}>
           <button onClick={startBot} disabled={botStatus.running} style={{ marginRight: '10px' }}>
             Start Bot
