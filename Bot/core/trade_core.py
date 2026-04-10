@@ -24,7 +24,6 @@ class Position:
 
 @dataclass
 class StrategyContext:
-    # 🔥 kwargs対応のためデフォルト値を必ず付ける
     strategy_name: str = "default"
     trade_type: str = "BUY"
     entry_price: float = 0.0
@@ -51,7 +50,6 @@ class TradeCore:
 
         print("[TradeCore] try_enter called")
 
-        # 🔥 kwargs対応（最重要）
         if ctx is None:
             ctx = StrategyContext(**kwargs)
 
@@ -77,7 +75,6 @@ class TradeCore:
         if self.execution_engine:
             self.execution_engine.execute_order(signal)
 
-        # ポジション作成
         pos = Position(
             entry_price=ctx.entry_price,
             trade_type=ctx.trade_type,
@@ -93,8 +90,32 @@ class TradeCore:
 
         self.last_entry_time = time.time()
 
+    # =====================================================
+    # ⭐ これを追加（今回のエラー解決ポイント）
+    # =====================================================
+    @safe_run
+    def on_position_opened(self, position: dict):
+        """
+        ExecutionEngine → TradeCore の橋渡し
+        実質：ポジション同期用フック
+        """
+        print("[TradeCore] on_position_opened called")
+
+        pos = Position(
+            entry_price=position["entry_price"],
+            trade_type=position["side"],
+            sl=position.get("sl", 0),
+            tp=position.get("tp", 0),
+            volume=position.get("volume", 0.001),
+            entry_time=datetime.datetime.now(),
+            symbol=position.get("symbol", "BTCUSDT"),
+            status="open"
+        )
+
+        self.positions.append(pos)
+
     # --------------------------
-    # 本番用 CLOSE判定
+    # CLOSE判定
     # --------------------------
     @safe_run
     def check_orders(self, price_dict):
@@ -111,7 +132,6 @@ class TradeCore:
 
             print(f"[POSITION] price={price} entry={pos.entry_price} sl={pos.sl} tp={pos.tp}")
 
-            # BUY
             if pos.trade_type == "BUY":
 
                 if price <= pos.sl:
@@ -124,7 +144,6 @@ class TradeCore:
                     pos.close_price = price
                     pos.status = "closed"
 
-            # SELL
             elif pos.trade_type == "SELL":
 
                 if price >= pos.sl:
