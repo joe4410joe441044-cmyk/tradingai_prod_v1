@@ -21,19 +21,27 @@ from datetime import datetime
 from Bot.core.trade_core import TradeCore, StrategyContext
 from Bot.core.price_manager import PriceManager
 
-# ★ BinanceClient追加
-from backend.binance_client import BinanceClient
+# ★ ExecutionEngineを正しく使う
+from Bot.engine.execution_engine import ExecutionEngine
 
 
 class BotManager:
     def __init__(self, api_key=None, api_secret=None):
         self.running = False
 
-        # ★ BinanceClient 初期化
-        self.binance = BinanceClient(api_key=api_key, api_secret=api_secret)
+        # --------------------------
+        # ExecutionEngine（正しい実行層）
+        # --------------------------
+        self.execution_engine = ExecutionEngine(
+            live=False,   # ← 本番にするなら True
+            notifier=None
+        )
 
-        # TradeCore に BinanceClient を渡す
-        self.core = TradeCore(self.binance)
+        # TradeCore に ExecutionEngine を渡す
+        self.core = TradeCore(self.execution_engine)
+
+        # ★ 循環参照（重要）
+        self.execution_engine.trade_core = self.core
 
         # PriceManager 初期化
         self.price_manager = PriceManager()
@@ -45,7 +53,7 @@ class BotManager:
         # 設定
         self.config = {
             "symbol": "BTCUSDT",
-            "lot": 0.001  # 小LOTテスト用
+            "lot": 0.001
         }
 
     # --------------------------
@@ -76,14 +84,14 @@ class BotManager:
         self.add_log("SYSTEM", "Bot Stopped")
 
     # --------------------------
-    # メインループ（Binance本番化）
+    # メインループ
     # --------------------------
     def run_loop(self):
         while self.running:
             symbol = self.config["symbol"]
 
-            # ★ Binance価格取得
-            price = self.binance.get_price(symbol)
+            # 価格取得（PriceManager経由想定）
+            price = random.uniform(70000, 75000)  # ← 仮（Binanceに戻すならここ差し替え）
 
             if price is None:
                 self.add_log("ERROR", "Price fetch failed")
@@ -93,13 +101,12 @@ class BotManager:
             # 価格更新
             self.price_manager.update(symbol, price)
 
-            # ログ（価格）
             self.add_log("PRICE", f"{symbol} {price}")
 
-            # 決済チェック
+            # ポジション管理
             self.core.check_orders(self.price_manager.get_all())
 
-            # 仮エントリー（戦略テスト用）
+            # 仮エントリー（テスト戦略）
             ctx = StrategyContext(
                 strategy_name="test",
                 trade_type="BUY" if random.random() > 0.5 else "SELL",
@@ -108,7 +115,7 @@ class BotManager:
                 take_profit_price=price + 100
             )
 
-            # 本番注文呼び出し（ロット量を try_enter に渡す）
+            # ★ 正しい実行ルート（ExecutionEngine経由）
             self.core.try_enter(ctx, volume=self.config["lot"])
 
             time.sleep(1)
