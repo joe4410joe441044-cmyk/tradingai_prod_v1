@@ -10,7 +10,8 @@ export default function App() {
   const [currentPrice, setCurrentPrice] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
 
-  const BASE_URL = "http://127.0.0.1:8010"
+  // ✅ 修正：nginx経由でAPIへアクセス
+  const BASE_URL = "/api"
 
   useEffect(() => {
     const controller = new AbortController()
@@ -63,7 +64,7 @@ export default function App() {
       controller.abort()
       clearInterval(interval)
     }
-  }, [BASE_URL]) // ←🔥ここ修正
+  }, []) // ← BASE_URL依存削除（固定なので不要）
 
   // Bot操作
   const startBot = async () => {
