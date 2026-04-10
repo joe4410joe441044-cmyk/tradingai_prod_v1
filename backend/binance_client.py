@@ -7,12 +7,26 @@ class BinanceClient(ExchangeClient):
     def __init__(self, api_key: str, api_secret: str):
         self.client = Client(api_key, api_secret)
 
+    # ============================
+    # 価格取得
+    # ============================
     def get_price(self, symbol: str) -> float:
         ticker = self.client.futures_symbol_ticker(symbol=symbol)
-        return float(ticker['price'])
+        return float(ticker["price"])
 
-    def create_order(self, symbol: str, side: str, qty: float, order_type: str = "MARKET", price: float = None):
+    # ============================
+    # 新規注文（内部本体）
+    # ============================
+    def create_order(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str = "MARKET",
+        price: float = None
+    ):
         order_side = SIDE_BUY if side.upper() == "BUY" else SIDE_SELL
+
         if order_type.upper() == "MARKET":
             return self.client.futures_create_order(
                 symbol=symbol,
@@ -20,6 +34,7 @@ class BinanceClient(ExchangeClient):
                 type=ORDER_TYPE_MARKET,
                 quantity=qty
             )
+
         elif order_type.upper() == "LIMIT":
             return self.client.futures_create_order(
                 symbol=symbol,
@@ -30,25 +45,43 @@ class BinanceClient(ExchangeClient):
                 timeInForce=TIME_IN_FORCE_GTC
             )
 
-    def get_positions(self, symbol: str):
-        positions = self.client.futures_position_information(symbol=symbol)
-        return positions
+        else:
+            raise ValueError(f"Unsupported order_type: {order_type}")
 
     # ============================
-    # ここから追加: execute_order ラッパー
+    # ポジション取得
     # ============================
-    def execute_order(self, **kwargs):
+    def get_positions(self, symbol: str):
+        return self.client.futures_position_information(symbol=symbol)
+
+    # ============================
+    # ★統一エントリーポイント（重要）
+    # ExecutionEngine からここだけ呼ぶ
+    # ============================
+    def execute_order(self, signal: dict):
         """
-        ExecutionEngine から呼ばれる統一メソッド
-        kwargs に必要なパラメータを含む:
-            symbol, side, qty, order_type, price
+        signal例:
+        {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.001,
+            "price": 12345,
+            "order_type": "MARKET"
+        }
         """
-        # order_type がなければデフォルトで MARKET
-        order_type = kwargs.get("order_type", "MARKET")
+
+        if not isinstance(signal, dict):
+            raise TypeError("signal must be dict")
+
+        required_keys = ["symbol", "side", "qty"]
+        for k in required_keys:
+            if k not in signal:
+                raise ValueError(f"Missing key in signal: {k}")
+
         return self.create_order(
-            symbol=kwargs["symbol"],
-            side=kwargs["side"],
-            qty=kwargs["qty"],
-            order_type=order_type,
-            price=kwargs.get("price", None)
+            symbol=signal["symbol"],
+            side=signal["side"],
+            qty=signal["qty"],
+            order_type=signal.get("order_type", "MARKET"),
+            price=signal.get("price", None)
         )
