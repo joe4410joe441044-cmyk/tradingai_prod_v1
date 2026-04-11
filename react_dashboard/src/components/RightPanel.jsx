@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 
+const API_BASE = 'http://34.85.66.137:8000'
+
 export default function RightPanel() {
   const [status, setStatus] = useState('STOPPED')
   const [logs, setLogs] = useState([])
@@ -13,8 +15,8 @@ export default function RightPanel() {
       setLoading(true)
 
       const [statusRes, logsRes] = await Promise.all([
-        fetch('http://localhost:8000/bot_status'),
-        fetch('http://localhost:8000/logs')
+        fetch(`${API_BASE}/bot_status`),
+        fetch(`${API_BASE}/logs`)
       ])
 
       const statusData = await statusRes.json()
@@ -33,20 +35,28 @@ export default function RightPanel() {
   }
 
   // --------------------------
-  // Bot操作（★追加）
+  // Bot操作
   // --------------------------
   const startBot = async () => {
-    await fetch('http://localhost:8000/bot/start', {
-      method: 'POST'
-    })
-    fetchData()
+    try {
+      await fetch(`${API_BASE}/bot/start`, {
+        method: 'POST'
+      })
+      fetchData()
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   const stopBot = async () => {
-    await fetch('http://localhost:8000/bot/stop', {
-      method: 'POST'
-    })
-    fetchData()
+    try {
+      await fetch(`${API_BASE}/bot/stop`, {
+        method: 'POST'
+      })
+      fetchData()
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   // --------------------------
@@ -64,13 +74,13 @@ export default function RightPanel() {
       <h3>Bot Status</h3>
       <p>{loading ? 'Loading...' : status}</p>
 
-      {/* ★ここ追加 */}
       <button onClick={startBot}>Start</button>
       <button onClick={stopBot} style={{ marginLeft: '10px' }}>
         Stop
       </button>
 
       <h3>Logs</h3>
+
       {loading ? (
         <p>Loading...</p>
       ) : (

@@ -1,8 +1,43 @@
+import { useState, useEffect } from "react";
+
+const API_BASE = "http://34.85.66.137:8000";
+
 export default function PnLCard() {
+  const [pnl, setPnl] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchPnL = async () => {
+    try {
+      setLoading(true);
+
+      const res = await fetch(`${API_BASE}/pnl`);
+      const data = await res.json();
+
+      setPnl(data.pnl ?? 0);
+    } catch (err) {
+      console.error("PnL fetch error:", err);
+      setPnl("ERROR");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPnL();
+
+    const interval = setInterval(fetchPnL, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isPositive = typeof pnl === "number" && pnl >= 0;
+
   return (
     <div className="card">
       <h3>PnL</h3>
-      <h2 style={{ color: "lime" }}>+120</h2>
+
+      <h2 style={{ color: isPositive ? "lime" : "red" }}>
+        {loading ? "Loading..." : pnl}
+      </h2>
     </div>
   );
 }

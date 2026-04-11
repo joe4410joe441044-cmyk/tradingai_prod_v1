@@ -11,7 +11,7 @@ from Bot.utils.safety import safe_run
 from Bot.control.duplicate_guard import GlobalSignalRegistry, ExecutionGuard
 
 # ★AI Logger（STEP5）
-from services.ai_logger import AILogger
+from backend.services.ai_logger import AILogger
 
 
 class ExecutionEngine:
