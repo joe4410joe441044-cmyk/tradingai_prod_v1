@@ -10,10 +10,12 @@ from Bot.core.trade_core import TradeCore
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.engine.market_engine import MarketEngine
 
-# ▼ State Manager（今回追加）
+# ▼ State Manager
 from Bot.control.state_manager import StateManager
 from Bot.control.bot_state import BotState
-from exchanges.base_exchange import BaseExchange
+
+# ✅ 重要：実体を使う（ここが正解）
+from Bot.exchanges.mock_exchange import MockExchange
 
 # ▼ Telegram
 from Bot.utils.telegram_notifier import TelegramNotifier
@@ -33,22 +35,21 @@ logging.basicConfig(
 )
 
 # -------------------------
-# 設定（本番モード）
+# 設定
 # -------------------------
 live_mode = True
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 # -------------------------
-# Telegram設定（環境変数）
+# Telegram
 # -------------------------
-TOKEN = os.environ.get("TELEGRAM_TOKEN")  # ←修正
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
 controller = TelegramController(notifier)
 listener = TelegramListener(token=TOKEN, controller=controller)
 
-# Listener起動
 threading.Thread(target=listener.start, daemon=True).start()
 
 # -------------------------
@@ -64,7 +65,7 @@ def send_telegram_alert(message: str):
         logging.error(f"Telegram通知失敗: {e}")
 
 # -------------------------
-# 初期化（コア）
+# コア初期化
 # -------------------------
 exec_engine = ExecutionEngine(live=live_mode)
 trade_core = TradeCore(exec_engine)
@@ -77,21 +78,22 @@ market_engine = MarketEngine(
 )
 
 # -------------------------
-# 🟢 StateManager追加（ここが重要）
+# 🟢 StateManager（重要）
 # -------------------------
-exchange = BaseExchange()
+exchange = MockExchange()   # ← 必ず実体
 state = BotState()
+
 state_manager = StateManager(exchange, state)
 
 # -------------------------
-# 起動ログ
+# ログ
 # -------------------------
 logging.info("===================================")
 logging.info(f"🚀 BOT START (LIVE MODE = {live_mode})")
 logging.info("===================================")
 
 # -------------------------
-# ENTRY通知フック
+# ENTRY通知
 # -------------------------
 def notify_entry(ctx):
     try:
@@ -108,7 +110,7 @@ def notify_entry(ctx):
 strategy_wrapper.on_entry = notify_entry
 
 # -------------------------
-# TP / SL 通知監視
+# ポジション監視
 # -------------------------
 async def monitor_positions():
     logging.info("🔥 monitor_positions STARTED")
@@ -145,7 +147,6 @@ async def monitor_positions():
 # -------------------------
 async def main():
 
-    # 🟢 ★重要：起動時State復元
     try:
         state_manager.sync_on_startup()
     except Exception as e:
@@ -166,7 +167,7 @@ async def main():
     except Exception as e:
         logging.exception(f"BOT例外発生: {e}")
         send_telegram_alert(f"⚠️ BOT例外発生: {e}\n{traceback.format_exc()}")
-        raise  # systemd再起動
+        raise
 
     finally:
         market_engine._running = False

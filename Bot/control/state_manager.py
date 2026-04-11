@@ -1,5 +1,15 @@
-﻿from Bot.exchanges.base_exchange import BaseExchange
+﻿# Bot/control/state_manager.py
+
 from Bot.control.bot_state import BotState
+from Bot.exchanges.base_exchange import BaseExchange
+
+# 🔥 安全import（exchangesが未構成でも落ちないようにする）
+try:
+    from Bot.exchanges.base_exchange import BaseExchange
+except Exception as e:
+    print("[WARN] BaseExchange import failed:", e)
+    BaseExchange = object  # ダミー（起動クラッシュ防止）
+
 
 class StateManager:
     def __init__(self, exchange: BaseExchange, state: BotState):
@@ -13,7 +23,13 @@ class StateManager:
         """
         print("[StateManager] Sync start...")
 
-        exchange_positions = self.exchange.get_open_positions()
+        # 🔥 exchangeが壊れてても落とさない
+        try:
+            exchange_positions = self.exchange.get_open_positions()
+        except Exception as e:
+            print("[ERROR] exchange.get_open_positions failed:", e)
+            exchange_positions = []
+
         local_state = self.state.load()
 
         self._rebuild_state(exchange_positions, local_state)
