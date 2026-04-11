@@ -10,6 +10,12 @@ from queue import Queue
 
 from Bot.utils.safety import safe_run
 
+# =========================
+# AI MODULES
+# =========================
+from Bot.ai.ai_risk_filter import AIRiskFilter
+from Bot.monitoring.ai_logger import AILogger
+
 
 # =====================================================
 # POSITION STATE
@@ -50,7 +56,7 @@ class EventType:
 
 
 # =====================================================
-# TRADE CORE (C - EVENT DRIVEN)
+# TRADE CORE (AI INTEGRATED)
 # =====================================================
 class TradeCore:
 
@@ -66,6 +72,15 @@ class TradeCore:
 
         self.last_entry_time = 0
         self.entry_cooldown = 5
+
+        # =========================
+        # 🧠 AI LAYER
+        # =========================
+        self.ai_filter = AIRiskFilter()
+        self.ai_logger = AILogger()
+
+        self.ai_last_score = 0.0
+        self.ai_last_decision = "NONE"
 
     # =====================================================
     # EVENT DISPATCHER
@@ -93,20 +108,13 @@ class TradeCore:
 
         self._handle_price_update(price_dict)
 
-        # =================================================
-        # 🧠 STEP4：自己修復ループ
-        # =================================================
         self.self_heal(price_dict)
-
-        # =================================================
-        # 🚀 FINAL：運用安定化レイヤー
-        # =================================================
         self.health_check()
         self.emergency_flush()
         self.log_watch()
 
     # =====================================================
-    # ENTRY HANDLER（Executionへ完全委譲）
+    # ENTRY HANDLER + AI FILTER
     # =====================================================
     def _handle_entry(self, event):
 
@@ -115,6 +123,44 @@ class TradeCore:
         if now - self.last_entry_time < self.entry_cooldown:
             return
 
+        # =========================
+        # 🧠 AI FEATURES
+        # =========================
+        features = {
+            "execution_latency": event.get("latency", 100),
+            "retry_count": event.get("retry", 0),
+            "state_diff": event.get("state_diff", 0),
+            "volatility": event.get("volatility", 10)
+        }
+
+        # =========================
+        # 🧠 AI EVALUATION
+        # =========================
+        score = self.ai_filter.evaluate(features)
+        ai_decision = self.ai_filter.decision(score)
+
+        self.ai_last_score = score
+        self.ai_last_decision = ai_decision
+
+        # =========================
+        # 🚨 BLOCK
+        # =========================
+        if ai_decision == "BLOCK":
+
+            self.ai_logger.log_decision(
+                symbol=event["symbol"],
+                bot_signal="ENTRY_BLOCKED",
+                ai_score=score,
+                ai_decision=ai_decision,
+                final_action="SKIP"
+            )
+
+            print(f"[AI BLOCKED] {event['symbol']} score={score}")
+            return
+
+        # =========================
+        # EXECUTION SIGNAL
+        # =========================
         signal = {
             "position_id": str(uuid.uuid4()),
             "symbol": event["symbol"],
@@ -132,10 +178,21 @@ class TradeCore:
 
         self.last_entry_time = now
 
-        print(f"[ENTRY SENT] {signal['position_id']}")
+        # =========================
+        # 🧠 AI LOG (APPROVED)
+        # =========================
+        self.ai_logger.log_decision(
+            symbol=event["symbol"],
+            bot_signal="ENTRY",
+            ai_score=score,
+            ai_decision=ai_decision,
+            final_action="EXECUTE"
+        )
+
+        print(f"[ENTRY SENT] {signal['position_id']} AI={score}")
 
     # =====================================================
-    # SYNC（Execution結果のみ）
+    # POSITION OPEN SYNC
     # =====================================================
     def _handle_position_opened(self, event):
 
@@ -154,11 +211,10 @@ class TradeCore:
         )
 
         self.positions[pid] = pos
-
         print(f"[OPENED SYNC] {pid}")
 
     # =====================================================
-    # POSITION OPEN EVENT（ExecutionEngine→TradeCore）
+    # POSITION OPEN EVENT
     # =====================================================
     def on_position_opened(self, position: Dict[str, Any]):
 
@@ -174,7 +230,7 @@ class TradeCore:
         })
 
     # =====================================================
-    # PRICE UPDATE（STATE ENGINE）
+    # PRICE UPDATE
     # =====================================================
     def _handle_price_update(self, price_dict):
 
@@ -220,7 +276,7 @@ class TradeCore:
                 print(f"[CLOSE {close_reason}] {pid}")
 
     # =====================================================
-    # 🧠 STEP4：SL/TPズレ検知（ドリフト）
+    # DRIFT DETECTION
     # =====================================================
     def detect_sl_tp_drift(self, price_dict):
 
@@ -246,7 +302,7 @@ class TradeCore:
         return drifted
 
     # =====================================================
-    # 🧠 STEP4：強制クローズ保険
+    # FORCE CLOSE
     # =====================================================
     def force_close(self, pid_list, price_dict):
 
@@ -273,7 +329,7 @@ class TradeCore:
             print(f"[FORCED CLOSE] {pid}")
 
     # =====================================================
-    # 🧠 STEP4：自己修復ループ
+    # SELF HEAL
     # =====================================================
     def self_heal(self, price_dict):
 
@@ -291,7 +347,7 @@ class TradeCore:
             print(f"[HEAL ERROR] {e}")
 
     # =====================================================
-    # 🚀 FINAL：ヘルスチェック
+    # HEALTH CHECK
     # =====================================================
     def health_check(self):
 
@@ -299,6 +355,8 @@ class TradeCore:
             "open_positions": len(self.positions),
             "queue_size": self.event_queue.qsize(),
             "execution_engine": self.execution_engine is not None,
+            "ai_score": self.ai_last_score,
+            "ai_decision": self.ai_last_decision,
             "timestamp": time.time()
         }
 
@@ -314,7 +372,7 @@ class TradeCore:
         return status
 
     # =====================================================
-    # 🚀 FINAL：異常強制フラッシュ
+    # EMERGENCY FLUSH
     # =====================================================
     def emergency_flush(self):
 
@@ -339,7 +397,7 @@ class TradeCore:
         print("[EMERGENCY] All positions cleared")
 
     # =====================================================
-    # 🚀 FINAL：ログ監視
+    # LOG WATCH
     # =====================================================
     def log_watch(self):
 

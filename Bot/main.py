@@ -9,6 +9,11 @@ from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.utils.logger import BotLogger
 
+# =========================
+# 🧠 AI FASTAPI INJECTION
+# =========================
+from backend.api_ai import set_trade_core
+
 
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 TOKEN = "YOUR_TELEGRAM_TOKEN"
@@ -36,6 +41,18 @@ def initialize_bot():
         execution_engine=execution_engine,
         logger=logger
     )
+
+    # =========================
+    # 🧠 STEP4-2 FIX（重要）
+    # FastAPIへTradeCoreを注入
+    # =========================
+    set_trade_core(trade_core)
+
+    # =========================
+    # 🧠 STEP5 FIX（追加）
+    # ExecutionEngineへTradeCore接続（重要）
+    # =========================
+    execution_engine.trade_core = trade_core
 
     fvg = FVGStrategy(
         trade_core=trade_core,
@@ -89,6 +106,8 @@ async def monitor_positions(trade_core, logger):
 # =========================
 async def main():
 
+    logger = None  # ← FATALエラー防止用
+
     while True:
         try:
             market_engine = initialize_bot()
@@ -106,7 +125,11 @@ async def main():
             await asyncio.gather(*tasks)
 
         except Exception as e:
-            logger.error(f"[FATAL ERROR] restarting bot: {e}")
+            if logger:
+                logger.error(f"[FATAL ERROR] restarting bot: {e}")
+            else:
+                print(f"[FATAL ERROR] restarting bot: {e}")
+
             await asyncio.sleep(3)
 
 

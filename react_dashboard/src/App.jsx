@@ -3,6 +3,9 @@ import PositionsTable from './components/PositionsTable.jsx'
 import PriceCard from './components/PriceCard.jsx'
 import RightPanel from './components/RightPanel.jsx'
 
+// 🧠 STEP5追加：AIスコア可視化
+import AIScoreChart from './AIScoreChart.jsx'
+
 export default function App() {
   const [positions, setPositions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -10,7 +13,7 @@ export default function App() {
   const [currentPrice, setCurrentPrice] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
 
-  // ✅ 修正：nginx経由でAPIへアクセス
+  // API base
   const BASE_URL = "/api"
 
   useEffect(() => {
@@ -37,7 +40,7 @@ export default function App() {
         const statusData = await statusRes.json()
         setBotStatus(statusData)
 
-        // 価格
+        // 現在価格
         if (posData.length > 0) {
           setCurrentPrice(posData[posData.length - 1].mark_price)
         } else {
@@ -64,7 +67,7 @@ export default function App() {
       controller.abort()
       clearInterval(interval)
     }
-  }, []) // ← BASE_URL依存削除（固定なので不要）
+  }, [])
 
   // Bot操作
   const startBot = async () => {
@@ -89,6 +92,8 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
+
+      {/* LEFT PANEL */}
       <div style={{ flex: 1 }}>
         <PriceCard currentPrice={currentPrice} />
         <PositionsTable positions={positions} loading={loading} />
@@ -112,9 +117,16 @@ export default function App() {
         </div>
       </div>
 
+      {/* RIGHT PANEL */}
       <div style={{ width: '350px' }}>
         <RightPanel />
       </div>
+
+      {/* 🧠 STEP5 AI SCORE PANEL */}
+      <div style={{ width: '450px' }}>
+        <AIScoreChart symbol="BTCUSDT" />
+      </div>
+
     </div>
   )
 }

@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 import logging
+import time
+import requests
+import threading
 
 # ★安全ラッパー
 from Bot.utils.safety import safe_run
 
 # ★Duplicate Guard
 from Bot.control.duplicate_guard import GlobalSignalRegistry, ExecutionGuard
+
+# ★AI Logger（STEP5）
+from services.ai_logger import AILogger
 
 
 class ExecutionEngine:
@@ -27,6 +33,9 @@ class ExecutionEngine:
 
         # ★Execution Guard（追加）
         self.guard = ExecutionGuard(state_manager)
+
+        # ★STEP5 AI Logger
+        self.ai_logger = AILogger()
 
         self.logger.info(f"ExecutionEngine initialized (live={self.live})")
 
@@ -140,6 +149,20 @@ class ExecutionEngine:
             return
 
         try:
+            # =================================================
+            # 🚀 STEP5 AI LOG（追加：最重要）
+            # =================================================
+            self.ai_logger.log({
+                "timestamp": time.time(),
+                "symbol": symbol,
+                "ai_score": signal.get("ai_score", 0.0),
+                "risk_score": signal.get("risk_score", 0.0),
+                "entry_allowed": True,
+                "position_id": signal.get("position_id", "unknown"),
+                "price": signal["price"],
+                "reason": signal.get("reason", "execution")
+            })
+
             # =================================================
             # 🚀 実行本体
             # =================================================
