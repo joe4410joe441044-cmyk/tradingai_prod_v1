@@ -10,18 +10,15 @@ from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.utils.logger import BotLogger
 
 
-# =========================
-# 設定
-# =========================
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 TOKEN = "YOUR_TELEGRAM_TOKEN"
 CHAT_ID = "YOUR_CHAT_ID"
 LIVE_MODE = False
 
 
-# =========================================
-# 初期化
-# =========================================
+# =========================
+# INIT
+# =========================
 def initialize_bot():
 
     logger = BotLogger("logs").get_logger()
@@ -53,7 +50,7 @@ def initialize_bot():
         strategy_wrapper=wrapper,
         trade_core=trade_core,
         ws_url=WS_URL,
-        debug=True
+        debug=False
     )
 
     logger.info("Bot initialization completed")
@@ -61,38 +58,60 @@ def initialize_bot():
     return market_engine
 
 
-# =========================================
-# monitor
-# =========================================
+# =========================
+# MONITOR（改善版）
+# =========================
 async def monitor_positions(trade_core, logger):
-    logger.info("🔥 monitor_positions STARTED")
+
+    logger.info("🔥 MONITOR STARTED")
 
     while True:
-        logger.info("[MONITOR] running...")
-        await asyncio.sleep(1)
+        try:
+            open_positions = [
+                p for p in trade_core.positions.values()
+                if p.status == "OPEN"
+            ]
+
+            logger.info(f"[MONITOR] open_positions={len(open_positions)}")
+
+            # 異常検知（簡易）
+            if len(open_positions) > 5:
+                logger.warning("⚠️ TOO MANY POSITIONS!")
+
+        except Exception as e:
+            logger.error(f"[MONITOR ERROR] {e}")
+
+        await asyncio.sleep(5)
 
 
-# =========================================
-# Main
-# =========================================
+# =========================
+# MAIN LOOP（耐障害化）
+# =========================
 async def main():
-    market_engine = initialize_bot()
 
-    trade_core = market_engine.trade_core
-    logger = market_engine.logger
+    while True:
+        try:
+            market_engine = initialize_bot()
 
-    logger.info("BOT STARTED")
+            trade_core = market_engine.trade_core
+            logger = market_engine.logger
 
-    tasks = [
-        asyncio.create_task(market_engine.run_websocket()),
-        asyncio.create_task(monitor_positions(trade_core, logger))
-    ]
+            logger.info("🚀 BOT STARTED")
 
-    await asyncio.gather(*tasks)
+            tasks = [
+                asyncio.create_task(market_engine.run_websocket()),
+                asyncio.create_task(monitor_positions(trade_core, logger))
+            ]
+
+            await asyncio.gather(*tasks)
+
+        except Exception as e:
+            logger.error(f"[FATAL ERROR] restarting bot: {e}")
+            await asyncio.sleep(3)
 
 
-# =========================================
-# Entry
-# =========================================
+# =========================
+# ENTRY
+# =========================
 if __name__ == "__main__":
     asyncio.run(main())

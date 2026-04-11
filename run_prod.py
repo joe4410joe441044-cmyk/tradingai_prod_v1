@@ -10,6 +10,11 @@ from Bot.core.trade_core import TradeCore
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.engine.market_engine import MarketEngine
 
+# ▼ State Manager（今回追加）
+from Bot.control.state_manager import StateManager
+from Bot.control.bot_state import BotState
+from exchanges.base_exchange import BaseExchange
+
 # ▼ Telegram
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.control.telegram_controller import TelegramController
@@ -21,19 +26,22 @@ from Bot.control.telegram_listener import TelegramListener
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
 )
 
 # -------------------------
-# 設定（🔥本番モードON）
+# 設定（本番モード）
 # -------------------------
 live_mode = True
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 # -------------------------
-# Telegram設定（環境変数から取得）
+# Telegram設定（環境変数）
 # -------------------------
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")  # ←修正
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
@@ -43,7 +51,9 @@ listener = TelegramListener(token=TOKEN, controller=controller)
 # Listener起動
 threading.Thread(target=listener.start, daemon=True).start()
 
-# 例外時 Telegram 通知
+# -------------------------
+# 例外通知
+# -------------------------
 def send_telegram_alert(message: str):
     try:
         if TOKEN and CHAT_ID:
@@ -54,7 +64,7 @@ def send_telegram_alert(message: str):
         logging.error(f"Telegram通知失敗: {e}")
 
 # -------------------------
-# 初期化
+# 初期化（コア）
 # -------------------------
 exec_engine = ExecutionEngine(live=live_mode)
 trade_core = TradeCore(exec_engine)
@@ -65,6 +75,13 @@ market_engine = MarketEngine(
     trade_core=trade_core,
     ws_url=ws_url
 )
+
+# -------------------------
+# 🟢 StateManager追加（ここが重要）
+# -------------------------
+exchange = BaseExchange()
+state = BotState()
+state_manager = StateManager(exchange, state)
 
 # -------------------------
 # 起動ログ
@@ -98,10 +115,14 @@ async def monitor_positions():
 
     while True:
         for pos in trade_core.positions:
-            if pos.status == "closed" and not hasattr(pos, "notified"):
+            if pos.status == "closed" and not getattr(pos, "notified", False):
                 try:
                     if hasattr(pos, "close_price"):
-                        pnl = (pos.close_price - pos.entry_price) if pos.trade_type == "BUY" else (pos.entry_price - pos.close_price)
+                        pnl = (
+                            (pos.close_price - pos.entry_price)
+                            if pos.trade_type == "BUY"
+                            else (pos.entry_price - pos.close_price)
+                        )
 
                         if pnl >= 0:
                             controller.notify_take_profit(pnl)
@@ -123,6 +144,14 @@ async def monitor_positions():
 # メイン
 # -------------------------
 async def main():
+
+    # 🟢 ★重要：起動時State復元
+    try:
+        state_manager.sync_on_startup()
+    except Exception as e:
+        logging.error(f"State復元失敗: {e}")
+        send_telegram_alert(f"⚠️ State復元失敗: {e}\n{traceback.format_exc()}")
+
     tasks = [
         asyncio.create_task(market_engine.run_websocket()),
         asyncio.create_task(monitor_positions())
@@ -137,7 +166,7 @@ async def main():
     except Exception as e:
         logging.exception(f"BOT例外発生: {e}")
         send_telegram_alert(f"⚠️ BOT例外発生: {e}\n{traceback.format_exc()}")
-        raise  # systemd 再起動用
+        raise  # systemd再起動
 
     finally:
         market_engine._running = False

@@ -1,16 +1,33 @@
 ﻿# -*- coding: utf-8 -*-
 
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, Any
 import datetime
 import logging
 import time
+import uuid
+from queue import Queue
 
 from Bot.utils.safety import safe_run
 
 
+# =====================================================
+# POSITION STATE
+# =====================================================
+class PositionStatus:
+    PENDING = "PENDING"
+    OPEN = "OPEN"
+    CLOSING = "CLOSING"
+    CLOSED = "CLOSED"
+    FAILED = "FAILED"
+
+
+# =====================================================
+# POSITION
+# =====================================================
 @dataclass
 class Position:
+    id: str
     entry_price: float
     trade_type: str
     sl: float
@@ -18,140 +35,330 @@ class Position:
     volume: float
     entry_time: datetime.datetime
     symbol: str = "BTCUSDT"
-    status: str = "open"
+    status: str = PositionStatus.PENDING
     close_price: float = None
 
 
-@dataclass
-class StrategyContext:
-    strategy_name: str = "default"
-    trade_type: str = "BUY"
-    entry_price: float = 0.0
-    stop_loss_price: float = 0.0
-    take_profit_price: float = 0.0
-    volume: float = 0.001
+# =====================================================
+# EVENT TYPES
+# =====================================================
+class EventType:
+    ENTRY = "ENTRY"
+    POSITION_OPENED = "POSITION_OPENED"
+    PRICE_UPDATE = "PRICE_UPDATE"
+    CLOSE = "CLOSE"
 
 
+# =====================================================
+# TRADE CORE (C - EVENT DRIVEN)
+# =====================================================
 class TradeCore:
 
     def __init__(self, execution_engine=None, logger=None):
-        print(">>> TradeCore INIT CALLED")
+
+        print(">>> TradeCore C INIT")
 
         self.logger = logger or logging.getLogger("TradeCore")
         self.execution_engine = execution_engine
-        self.positions: List[Position] = []
 
-        self.max_concurrent_positions = 1
+        self.positions: Dict[str, Position] = {}
+        self.event_queue: Queue = Queue()
+
         self.last_entry_time = 0
         self.entry_cooldown = 5
 
+    # =====================================================
+    # EVENT DISPATCHER
+    # =====================================================
     @safe_run
-    def try_enter(self, ctx: StrategyContext = None, **kwargs):
+    def emit(self, event: Dict[str, Any]):
+        self.event_queue.put(event)
 
-        print("[TradeCore] try_enter called")
+    # =====================================================
+    # EVENT LOOP
+    # =====================================================
+    @safe_run
+    def process_events(self, price_dict: Dict[str, float]):
 
-        if ctx is None:
-            ctx = StrategyContext(**kwargs)
+        while not self.event_queue.empty():
+
+            event = self.event_queue.get()
+            etype = event.get("type")
+
+            if etype == EventType.ENTRY:
+                self._handle_entry(event)
+
+            elif etype == EventType.POSITION_OPENED:
+                self._handle_position_opened(event)
+
+        self._handle_price_update(price_dict)
+
+        # =================================================
+        # 🧠 STEP4：自己修復ループ
+        # =================================================
+        self.self_heal(price_dict)
+
+        # =================================================
+        # 🚀 FINAL：運用安定化レイヤー
+        # =================================================
+        self.health_check()
+        self.emergency_flush()
+        self.log_watch()
+
+    # =====================================================
+    # ENTRY HANDLER（Executionへ完全委譲）
+    # =====================================================
+    def _handle_entry(self, event):
 
         now = time.time()
+
         if now - self.last_entry_time < self.entry_cooldown:
             return
 
-        if len(self.positions) >= self.max_concurrent_positions:
-            print("[TradeCore] Position exists → skip")
-            return
-
         signal = {
-            "symbol": "BTCUSDT",
-            "side": ctx.trade_type,
-            "qty": ctx.volume,
-            "price": ctx.entry_price,
-            "sl": ctx.stop_loss_price,
-            "tp": ctx.take_profit_price
+            "position_id": str(uuid.uuid4()),
+            "symbol": event["symbol"],
+            "side": event["side"],
+            "qty": event["qty"],
+            "price": event["price"],
+            "sl": event["sl"],
+            "tp": event["tp"],
+            "strategy": event.get("strategy", "default"),
+            "timeframe": event.get("timeframe", "1m")
         }
-
-        print(f"[EXECUTION] Processing signal: {signal}")
 
         if self.execution_engine:
             self.execution_engine.execute_order(signal)
 
-        pos = Position(
-            entry_price=ctx.entry_price,
-            trade_type=ctx.trade_type,
-            sl=ctx.stop_loss_price,
-            tp=ctx.take_profit_price,
-            volume=ctx.volume,
-            entry_time=datetime.datetime.now()
-        )
+        self.last_entry_time = now
 
-        self.positions.append(pos)
-
-        print(f"ENTRY {pos.trade_type} @ {pos.entry_price}")
-
-        self.last_entry_time = time.time()
+        print(f"[ENTRY SENT] {signal['position_id']}")
 
     # =====================================================
-    # ⭐ これを追加（今回のエラー解決ポイント）
+    # SYNC（Execution結果のみ）
     # =====================================================
-    @safe_run
-    def on_position_opened(self, position: dict):
-        """
-        ExecutionEngine → TradeCore の橋渡し
-        実質：ポジション同期用フック
-        """
-        print("[TradeCore] on_position_opened called")
+    def _handle_position_opened(self, event):
+
+        pid = event["position_id"]
 
         pos = Position(
-            entry_price=position["entry_price"],
-            trade_type=position["side"],
-            sl=position.get("sl", 0),
-            tp=position.get("tp", 0),
-            volume=position.get("volume", 0.001),
+            id=pid,
+            entry_price=event["entry_price"],
+            trade_type=event["side"],
+            sl=event["sl"],
+            tp=event["tp"],
+            volume=event["volume"],
             entry_time=datetime.datetime.now(),
-            symbol=position.get("symbol", "BTCUSDT"),
-            status="open"
+            symbol=event.get("symbol", "BTCUSDT"),
+            status=PositionStatus.OPEN
         )
 
-        self.positions.append(pos)
+        self.positions[pid] = pos
 
-    # --------------------------
-    # CLOSE判定
-    # --------------------------
-    @safe_run
-    def check_orders(self, price_dict):
+        print(f"[OPENED SYNC] {pid}")
 
-        for pos in self.positions:
+    # =====================================================
+    # POSITION OPEN EVENT（ExecutionEngine→TradeCore）
+    # =====================================================
+    def on_position_opened(self, position: Dict[str, Any]):
 
-            if pos.status != "open":
+        self.emit({
+            "type": EventType.POSITION_OPENED,
+            "position_id": position["symbol"] + "_" + str(time.time()),
+            "entry_price": position["entry_price"],
+            "side": position["side"],
+            "sl": position["sl"],
+            "tp": position["tp"],
+            "volume": position.get("volume", 0.001),
+            "symbol": position["symbol"]
+        })
+
+    # =====================================================
+    # PRICE UPDATE（STATE ENGINE）
+    # =====================================================
+    def _handle_price_update(self, price_dict):
+
+        for pid, pos in list(self.positions.items()):
+
+            if pos.status != PositionStatus.OPEN:
                 continue
 
             price = price_dict.get(pos.symbol)
-
             if price is None:
                 continue
 
-            print(f"[POSITION] price={price} entry={pos.entry_price} sl={pos.sl} tp={pos.tp}")
+            close_reason = None
 
             if pos.trade_type == "BUY":
 
                 if price <= pos.sl:
-                    print("[CLOSE] SL HIT")
-                    pos.close_price = price
-                    pos.status = "closed"
-
+                    close_reason = "SL"
                 elif price >= pos.tp:
-                    print("[CLOSE] TP HIT")
-                    pos.close_price = price
-                    pos.status = "closed"
+                    close_reason = "TP"
 
-            elif pos.trade_type == "SELL":
+            else:
 
                 if price >= pos.sl:
-                    print("[CLOSE] SL HIT")
-                    pos.close_price = price
-                    pos.status = "closed"
-
+                    close_reason = "SL"
                 elif price <= pos.tp:
-                    print("[CLOSE] TP HIT")
-                    pos.close_price = price
-                    pos.status = "closed"
+                    close_reason = "TP"
+
+            if close_reason:
+
+                pos.status = PositionStatus.CLOSED
+                pos.close_price = price
+
+                if self.execution_engine:
+                    self.execution_engine.close_order({
+                        "position_id": pid,
+                        "price": price,
+                        "reason": close_reason
+                    })
+
+                del self.positions[pid]
+
+                print(f"[CLOSE {close_reason}] {pid}")
+
+    # =====================================================
+    # 🧠 STEP4：SL/TPズレ検知（ドリフト）
+    # =====================================================
+    def detect_sl_tp_drift(self, price_dict):
+
+        drifted = []
+
+        for pid, pos in self.positions.items():
+
+            if pos.status != "OPEN":
+                continue
+
+            price = price_dict.get(pos.symbol)
+            if price is None:
+                continue
+
+            if pos.trade_type == "BUY":
+                if price <= pos.sl or price >= pos.tp:
+                    drifted.append(pid)
+
+            else:
+                if price >= pos.sl or price <= pos.tp:
+                    drifted.append(pid)
+
+        return drifted
+
+    # =====================================================
+    # 🧠 STEP4：強制クローズ保険
+    # =====================================================
+    def force_close(self, pid_list, price_dict):
+
+        for pid in pid_list:
+
+            pos = self.positions.get(pid)
+            if not pos:
+                continue
+
+            price = price_dict.get(pos.symbol)
+
+            pos.status = PositionStatus.CLOSED
+            pos.close_price = price
+
+            if self.execution_engine:
+                self.execution_engine.close_order({
+                    "position_id": pid,
+                    "price": price,
+                    "reason": "FORCED_CLOSE"
+                })
+
+            del self.positions[pid]
+
+            print(f"[FORCED CLOSE] {pid}")
+
+    # =====================================================
+    # 🧠 STEP4：自己修復ループ
+    # =====================================================
+    def self_heal(self, price_dict):
+
+        try:
+
+            drifted = self.detect_sl_tp_drift(price_dict)
+
+            if drifted:
+                self.force_close(drifted, price_dict)
+
+            if len(self.positions) > 50:
+                print("[HEAL WARNING] Too many open positions")
+
+        except Exception as e:
+            print(f"[HEAL ERROR] {e}")
+
+    # =====================================================
+    # 🚀 FINAL：ヘルスチェック
+    # =====================================================
+    def health_check(self):
+
+        status = {
+            "open_positions": len(self.positions),
+            "queue_size": self.event_queue.qsize(),
+            "execution_engine": self.execution_engine is not None,
+            "timestamp": time.time()
+        }
+
+        if not status["execution_engine"]:
+            print("[HEALTH] ExecutionEngine missing!")
+
+        if status["queue_size"] > 500:
+            print("[HEALTH WARNING] Event queue overload")
+
+        if status["open_positions"] > 100:
+            print("[HEALTH WARNING] Too many open positions")
+
+        return status
+
+    # =====================================================
+    # 🚀 FINAL：異常強制フラッシュ
+    # =====================================================
+    def emergency_flush(self):
+
+        if len(self.positions) < 200:
+            return
+
+        print("[EMERGENCY] Position overflow detected -> FORCE FLUSH")
+
+        for pid in list(self.positions.keys()):
+
+            pos = self.positions[pid]
+
+            if self.execution_engine:
+                self.execution_engine.close_order({
+                    "position_id": pid,
+                    "price": pos.entry_price,
+                    "reason": "EMERGENCY_FLUSH"
+                })
+
+            del self.positions[pid]
+
+        print("[EMERGENCY] All positions cleared")
+
+    # =====================================================
+    # 🚀 FINAL：ログ監視
+    # =====================================================
+    def log_watch(self):
+
+        now = time.time()
+
+        for pid, pos in list(self.positions.items()):
+
+            age = now - pos.entry_time.timestamp()
+
+            if age > 3600:
+
+                print(f"[ANOMALY] Long open position detected: {pid}")
+
+                if self.execution_engine:
+                    self.execution_engine.close_order({
+                        "position_id": pid,
+                        "price": pos.entry_price,
+                        "reason": "TIME_LIMIT"
+                    })
+
+                del self.positions[pid]
+                break
