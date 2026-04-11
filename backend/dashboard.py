@@ -18,7 +18,7 @@ app.add_middleware(
 
 LOG_FILE = "/home/joe4410joe/TradingAI_Bot_Prod_v1/logs/bot.log"
 
-# --- 共通：ログの最後取得（Windows対応） ---
+# --- 共通：ログの最後取得 ---
 def get_last_log():
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -27,7 +27,7 @@ def get_last_log():
     except:
         return "ログなし"
 
-# --- 共通：ログ複数取得（Windows対応） ---
+# --- 共通：ログ複数取得 ---
 def get_logs(lines: int):
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -89,6 +89,16 @@ def get_positions():
             "pnl": 1.0
         }
     ]
+
+
+# 🔥🔥🔥 追加：AIスコアAPI（今回の本体）
+@app.get("/ai/scores")
+def get_ai_scores(symbol: str):
+    return {
+        "symbol": symbol,
+        "score": 0,
+        "confidence": 0
+    }
 
 
 # --- 最新ログ表示 ---
