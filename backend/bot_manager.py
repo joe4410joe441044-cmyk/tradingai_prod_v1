@@ -18,10 +18,8 @@ import time
 import random
 from datetime import datetime
 
-from Bot.core.trade_core import TradeCore, StrategyContext
+from Bot.core.trade_core import TradeCore
 from Bot.core.price_manager import PriceManager
-
-# ★ ExecutionEngineを正しく使う
 from Bot.engine.execution_engine import ExecutionEngine
 
 
@@ -33,20 +31,20 @@ class BotManager:
         # ExecutionEngine（正しい実行層）
         # --------------------------
         self.execution_engine = ExecutionEngine(
-            live=False,   # ← 本番にするなら True
+            live=False,   # 本番 True
             notifier=None
         )
 
         # TradeCore に ExecutionEngine を渡す
         self.core = TradeCore(self.execution_engine)
 
-        # ★ 循環参照（重要）
+        # 循環参照
         self.execution_engine.trade_core = self.core
 
         # PriceManager 初期化
         self.price_manager = PriceManager()
 
-        # ログ、スレッド
+        # ログ
         self.logs = []
         self.thread = None
 
@@ -90,8 +88,8 @@ class BotManager:
         while self.running:
             symbol = self.config["symbol"]
 
-            # 価格取得（PriceManager経由想定）
-            price = random.uniform(70000, 75000)  # ← 仮（Binanceに戻すならここ差し替え）
+            # 仮価格（後でBinanceに差し替え）
+            price = random.uniform(70000, 75000)
 
             if price is None:
                 self.add_log("ERROR", "Price fetch failed")
@@ -103,20 +101,31 @@ class BotManager:
 
             self.add_log("PRICE", f"{symbol} {price}")
 
-            # ポジション管理
-            self.core.check_orders(self.price_manager.get_all())
+            # --------------------------
+            # TradeCore Event処理
+            # --------------------------
+            self.core.process_events(self.price_manager.get_all())
 
-            # 仮エントリー（テスト戦略）
-            ctx = StrategyContext(
-                strategy_name="test",
-                trade_type="BUY" if random.random() > 0.5 else "SELL",
-                entry_price=price,
-                stop_loss_price=price - 100,
-                take_profit_price=price + 100
-            )
+            # --------------------------
+            # 仮エントリーイベント生成（テスト）
+            # --------------------------
+            side = "BUY" if random.random() > 0.5 else "SELL"
 
-            # ★ 正しい実行ルート（ExecutionEngine経由）
-            self.core.try_enter(ctx, volume=self.config["lot"])
+            self.core.emit({
+                "type": "ENTRY",
+                "symbol": symbol,
+                "side": side,
+                "qty": self.config["lot"],
+                "price": price,
+                "sl": price - 100,
+                "tp": price + 100,
+                "strategy": "test",
+                "timeframe": "1m",
+                "latency": 100,
+                "retry": 0,
+                "state_diff": 0,
+                "volatility": 10
+            })
 
             time.sleep(1)
 
@@ -126,7 +135,7 @@ class BotManager:
     def get_positions(self):
         result = []
 
-        for p in self.core.positions:
+        for p in self.core.positions.values():
             result.append({
                 "pair": p.symbol,
                 "side": p.trade_type,

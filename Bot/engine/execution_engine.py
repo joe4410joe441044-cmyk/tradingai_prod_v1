@@ -1,130 +1,61 @@
 # -*- coding: utf-8 -*-
 import logging
 import time
-import requests
-import threading
 
-# ★安全ラッパー
 from Bot.utils.safety import safe_run
-
-# ★Duplicate Guard
 from Bot.control.duplicate_guard import GlobalSignalRegistry, ExecutionGuard
-
-# ★AI Logger（STEP5）
 from backend.services.ai_logger import AILogger
 
 
+# =========================
+# SIMPLE STATE MANAGER
+# =========================
+class StateManager:
+    def __init__(self):
+        self.positions = {}
+
+    def get_open_positions(self):
+        return list(self.positions.values())
+
+    def set_position(self, pid, data):
+        self.positions[pid] = data
+
+    def remove_position(self, pid):
+        if pid in self.positions:
+            del self.positions[pid]
+
+
+# =====================================================
+# EXECUTION ENGINE
+# =====================================================
 class ExecutionEngine:
-    """
-    ExecutionEngine
-    ----------------
-    TradeCore からの Signal を受け取り処理する。
-    live=False の場合はログのみ（擬似約定）。
-    notifier があれば Telegram へ通知。
-    """
 
     def __init__(self, live=False, logger=None, notifier=None, trade_core=None, state_manager=None):
         self.live = live
         self.logger = logger or logging.getLogger(__name__)
         self.notifier = notifier
 
-        # ★TradeCore接続
         self.trade_core = trade_core
 
-        # ★Execution Guard（追加）
-        self.guard = ExecutionGuard(state_manager)
+        # ★必ず存在させる（重要）
+        self.state_manager = state_manager or StateManager()
 
-        # ★STEP5 AI Logger
+        # Guard（state_manager必須）
+        self.guard = ExecutionGuard(self.state_manager)
+
         self.ai_logger = AILogger()
 
         self.logger.info(f"ExecutionEngine initialized (live={self.live})")
 
-    # --------------------------
-    # Signal送信（内部処理）
-    # --------------------------
-    @safe_run
-    def send_signal(self, signal):
-
-        print(f"[EXECUTION] ORDER: {signal['side']} @ {signal['price']}")
-
-        self.logger.info(f"[EXECUTION] Processing signal: {signal}")
-
-        if self.live:
-            self.logger.info(f"[LIVE] Sending order: {signal}")
-        else:
-            self.logger.info(f"[DRY_RUN] Signal received: {signal}")
-
-        # --------------------------
-        # ★擬似約定 → TradeCoreへ返す
-        # --------------------------
-        if self.trade_core:
-            position = {
-                "symbol": signal["symbol"],
-                "side": signal["side"],
-                "entry_price": signal["price"],
-                "sl": signal.get("sl"),
-                "tp": signal.get("tp"),
-                "status": "OPEN"
-            }
-
-            self.trade_core.on_position_opened(position)
-
-        # Telegram通知
-        if self.notifier:
-            try:
-                self.notifier.send(f"Signal executed: {signal}")
-            except Exception as e:
-                self.logger.error(f"Failed to send Telegram notification: {e}")
-
-    # --------------------------
-    # 発注前準備（任意）
-    # --------------------------
-    @safe_run
-    def prepare_order(self, position):
-        signal = {
-            "symbol": position["symbol"],
-            "side": position["side"],
-            "qty": position.get("qty", 0.001),
-            "price": position["entry_price"]
-        }
-
-        if self.live:
-            self.logger.info(f"[LIVE] Preparing order: {signal}")
-        else:
-            self.logger.info(f"[DRY_RUN] Preparing order: {signal}")
-
-    # --------------------------
-    # 決済準備（任意）
-    # --------------------------
-    @safe_run
-    def prepare_close_order(self, position):
-        signal = {
-            "symbol": position["symbol"],
-            "side": "SELL" if position["side"] == "BUY" else "BUY",
-            "qty": position.get("qty", 0.001),
-            "price": position["entry_price"]
-        }
-
-        if self.live:
-            self.logger.info(f"[LIVE] Preparing close order: {signal}")
-        else:
-            self.logger.info(f"[DRY_RUN] Preparing close order: {signal}")
-
-    # --------------------------
-    # ★統一注文入口（Guard統合済み）
-    # --------------------------
+    # =================================================
+    # ORDER EXECUTION
+    # =================================================
     @safe_run
     def execute_order(self, signal):
-        """
-        TradeCoreから呼ばれる唯一の入口
-        """
 
         symbol = signal["symbol"]
         direction = signal["side"]
 
-        # =================================================
-        # 🛡️ STEP1: Global Signal Guard（重複排除）
-        # =================================================
         fingerprint = GlobalSignalRegistry.generate_fingerprint(
             symbol=symbol,
             strategy=signal.get("strategy", "default"),
@@ -137,11 +68,8 @@ class ExecutionEngine:
             self.logger.info("[GUARD] Duplicate signal blocked")
             return
 
-        # =================================================
-        # 🛡️ STEP2: Execution Guard（ローカル制御）
-        # =================================================
         if not self.guard.can_execute(symbol, direction):
-            self.logger.info("[GUARD] Execution blocked (state or position)")
+            self.logger.info("[GUARD] Execution blocked")
             return
 
         if not self.guard.acquire():
@@ -149,9 +77,7 @@ class ExecutionEngine:
             return
 
         try:
-            # =================================================
-            # 🚀 STEP5 AI LOG（追加：最重要）
-            # =================================================
+            # AI LOG
             self.ai_logger.log({
                 "timestamp": time.time(),
                 "symbol": symbol,
@@ -160,28 +86,55 @@ class ExecutionEngine:
                 "entry_allowed": True,
                 "position_id": signal.get("position_id", "unknown"),
                 "price": signal["price"],
-                "reason": signal.get("reason", "execution")
+                "reason": "execution"
             })
 
-            # =================================================
-            # 🚀 実行本体
-            # =================================================
             self.send_signal(signal)
-
-            # =================================================
-            # 🧠 State同期（安全側）
-            # =================================================
-            if self.trade_core:
-                position = {
-                    "symbol": signal["symbol"],
-                    "side": signal["side"],
-                    "entry_price": signal["price"],
-                    "sl": signal.get("sl"),
-                    "tp": signal.get("tp"),
-                    "status": "OPEN"
-                }
-
-                self.trade_core.on_position_opened(position)
 
         finally:
             self.guard.release()
+
+    # =================================================
+    # SEND SIGNAL
+    # =================================================
+    @safe_run
+    def send_signal(self, signal):
+
+        print(f"[EXECUTION] ORDER: {signal['side']} @ {signal['price']}")
+        self.logger.info(f"[EXECUTION] Processing signal: {signal}")
+
+        if self.trade_core:
+            pid = signal.get("position_id", f"pos_{time.time()}")
+
+            position = {
+                "position_id": pid,
+                "symbol": signal["symbol"],
+                "side": signal["side"],
+                "entry_price": signal["price"],
+                "sl": signal.get("sl"),
+                "tp": signal.get("tp"),
+                "status": "OPEN"
+            }
+
+            # ★ state_manager同期（重要）
+            self.state_manager.set_position(pid, position)
+
+            self.trade_core.on_position_opened(position)
+
+    # =================================================
+    # CLOSE ORDER ★追加（これが今回の修正ポイント）
+    # =================================================
+    @safe_run
+    def close_order(self, order):
+
+        pid = order.get("position_id")
+        price = order.get("price")
+
+        print(f"[CLOSE ORDER] {pid} @ {price}")
+
+        # state削除
+        self.state_manager.remove_position(pid)
+
+        # TradeCoreへ通知（あれば）
+        if self.trade_core and hasattr(self.trade_core, "on_position_closed"):
+            self.trade_core.on_position_closed(order)
