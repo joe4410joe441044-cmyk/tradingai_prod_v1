@@ -4,6 +4,7 @@ import logging
 import os
 import traceback
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from Bot.engine.execution_engine import ExecutionEngine
@@ -81,7 +82,7 @@ async def startup():
         state_manager.sync_on_startup()
         bot_running = True
 
-        # 🔥 非同期タスク起動
+        # 非同期タスク起動
         asyncio.create_task(market_engine.run_websocket())
         asyncio.create_task(monitor_positions())
 
@@ -112,7 +113,7 @@ def positions():
 
         positions = trade_core.positions
 
-        # 🔥 dict / list 両対応
+        # dict / list 両対応
         if isinstance(positions, dict):
             positions = positions.values()
 
@@ -156,6 +157,16 @@ async def monitor_positions():
         except Exception as e:
             logging.error(f"monitor error: {e}")
             logging.error(traceback.format_exc())
+
+
+# -------------------------
+# 🔥 React配信（最重要）
+# -------------------------
+app.mount(
+    "/",
+    StaticFiles(directory="react_dashboard/dist", html=True),
+    name="react"
+)
 
 
 # -------------------------
