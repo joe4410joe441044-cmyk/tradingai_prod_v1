@@ -15,7 +15,11 @@ app = FastAPI(title="TradingAI Backend")
 # --------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 本番は制限推奨
+    allow_origins=[
+        "http://34.85.66.137",
+        "http://localhost",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -98,7 +102,6 @@ def get_asset_summary():
         positions = bot.get_positions()
         pnl = bot.get_pnl()
 
-        # 安全なbalance取得（存在しない場合に備える）
         balance = getattr(bot, "get_balance", lambda: 0)()
 
         return {

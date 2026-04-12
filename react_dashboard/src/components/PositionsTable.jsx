@@ -1,4 +1,4 @@
-// src/components/PositionsTable.jsx
+// src/components/monitor/PositionsTable.jsx
 
 export default function PositionsTable({ positions, loading }) {
   // 安全化（APIが壊れてても落とさない）
@@ -32,26 +32,34 @@ export default function PositionsTable({ positions, loading }) {
 
         <tbody>
           {safePositions.map((p, i) => {
-            const pnl = Number(p?.pnl ?? 0);
+            // フォールバック整形（formatPositionが無くても動く）
+            const f = {
+              pair: p?.pair ?? "-",
+              side: p?.side ?? "-",
+              entry: p?.entry ?? 0,
+              current: p?.current ?? 0,
+              pnl: p?.pnl ?? 0,
+              size: p?.size ?? 0,
+            };
 
             return (
               <tr key={p?.id ?? i}>
-                <td style={td}>{p?.pair ?? "-"}</td>
-                <td style={td}>{p?.side ?? "-"}</td>
-                <td style={td}>{p?.entry ?? "-"}</td>
-                <td style={td}>{p?.current ?? "-"}</td>
+                <td style={td}>{f.pair}</td>
+                <td style={td}>{f.side}</td>
+                <td style={td}>{f.entry}</td>
+                <td style={td}>{f.current}</td>
 
                 <td
                   style={{
                     ...td,
-                    color: pnl >= 0 ? "limegreen" : "red",
+                    color: f.pnl >= 0 ? "limegreen" : "red",
                     fontWeight: "bold",
                   }}
                 >
-                  {isNaN(pnl) ? 0 : pnl}
+                  {isNaN(f.pnl) ? 0 : f.pnl}
                 </td>
 
-                <td style={td}>{p?.size ?? "-"}</td>
+                <td style={td}>{f.size}</td>
               </tr>
             );
           })}

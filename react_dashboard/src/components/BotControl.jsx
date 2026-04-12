@@ -1,79 +1,55 @@
-import React, { useState, useEffect } from "react";
+// src/components/BotControl.jsx
 
-const API_BASE = "http://34.85.66.137:8000";
+import { useState, useEffect } from "react";
+
+// API層（新設）
+import {
+  getBotStatus,
+  getPositions,
+  getLogs,
+  startBot,
+  stopBot
+} from "../api/bot";
 
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
   const [positions, setPositions] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // --------------------------
-  // BOT STATUS（修正）
+  // 全データ取得統合
   // --------------------------
-  const fetchStatus = async () => {
+  const fetchAll = async () => {
     try {
-      const res = await fetch(`${API_BASE}/bot_status`);
-      const data = await res.json();
-      setStatus(data);
+      setLoading(true);
+
+      const [s, p, l] = await Promise.all([
+        getBotStatus(),
+        getPositions(),
+        getLogs()
+      ]);
+
+      setStatus(s);
+      setPositions(p);
+      setLogs(l);
     } catch (err) {
-      console.error("Bot status error:", err);
+      console.error("BotControl fetch error:", err);
+
       setStatus({ running: false });
-    }
-  };
-
-  // --------------------------
-  // POSITIONS（修正）
-  // --------------------------
-  const fetchPositions = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/positions`);
-      const data = await res.json();
-      setPositions(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Positions error:", err);
       setPositions([]);
-    }
-  };
-
-  // --------------------------
-  // LOGS（修正）
-  // --------------------------
-  const fetchLogs = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/logs`);
-      const text = await res.text();
-      setLogs(text.split("\n").filter(Boolean));
-    } catch (err) {
-      console.error("Logs error:", err);
       setLogs([]);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  // --------------------------
-  // START / STOP（VPS仕様）
-  // --------------------------
-  const startBot = async () => {
-    await fetch(`${API_BASE}/start`);
-    fetchStatus();
-    fetchPositions();
-  };
-
-  const stopBot = async () => {
-    await fetch(`${API_BASE}/stop`);
-    fetchStatus();
-    fetchPositions();
   };
 
   // --------------------------
   useEffect(() => {
-    fetchStatus();
-    fetchPositions();
-    fetchLogs();
+    fetchAll();
 
     const interval = setInterval(() => {
-      fetchStatus();
-      fetchPositions();
-      fetchLogs();
+      fetchAll();
     }, 5000);
 
     return () => clearInterval(interval);
@@ -84,14 +60,25 @@ export default function BotControl() {
     <div style={{ marginTop: "20px" }}>
       <h3>Bot Control</h3>
 
-      <p>Status: {status?.running ? "RUNNING" : "STOPPED"}</p>
+      <p>
+        Status:{" "}
+        {loading
+          ? "Loading..."
+          : status?.running
+          ? "RUNNING"
+          : "STOPPED"}
+      </p>
 
       <button onClick={startBot}>Start</button>
       <button onClick={stopBot} style={{ marginLeft: "10px" }}>
         Stop
       </button>
 
+      {/* ---------------------- */}
+      {/* POSITIONS */}
+      {/* ---------------------- */}
       <h4>Positions</h4>
+
       {positions.length === 0 ? (
         <p>No positions</p>
       ) : (
@@ -104,7 +91,11 @@ export default function BotControl() {
         </ul>
       )}
 
+      {/* ---------------------- */}
+      {/* LOGS */}
+      {/* ---------------------- */}
       <h4>Logs</h4>
+
       {logs.length === 0 ? (
         <p>No logs</p>
       ) : (
