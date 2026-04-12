@@ -52,35 +52,57 @@ class MarketEngine:
 
         self.logger.info("MarketEngine initialized.")
 
+    # =====================================================
+    # DATA PIPELINE
+    # =====================================================
     @safe_run
     def process_data(self, candle: dict):
 
-        print(f"[MARKET] is_closed={candle['is_closed']} price={candle['close']}")
+        if not candle:
+            return
+
+        print(f"[MARKET] is_closed={candle.get('is_closed')} price={candle.get('close')}")
 
         # Candle保存
         self.candle_buffer.add_candle(candle)
 
         # --------------------------
-        # 価格更新 → TP/SL判定
+        # PRICE UPDATE → TRADE CORE
         # --------------------------
         if self.trade_core:
+
             try:
                 price_dict = {
-                    candle["symbol"]: candle["close"]
+                    candle.get("symbol"): candle.get("close")
                 }
 
                 print(f"[TICK] {price_dict}")
-                self.trade_core.check_orders(price_dict)
+
+                # 安全チェック
+                if None in price_dict.values():
+                    self.logger.error("[PRICE UPDATE ERROR] invalid price_dict")
+                    return
+
+                # =================================================
+                # MAIN PIPELINE
+                # =================================================
+                self.trade_core.process_events(price_dict)
 
             except Exception as e:
                 self.logger.error(f"[PRICE UPDATE ERROR] {e}")
 
         # --------------------------
-        # 🔥 Strategy実行（一本化）
+        # STRATEGY LAYER
         # --------------------------
         if self.strategy_wrapper:
-            self.strategy_wrapper.on_bar(candle)
+            try:
+                self.strategy_wrapper.on_bar(candle)
+            except Exception as e:
+                self.logger.error(f"[STRATEGY ERROR] {e}")
 
+    # =====================================================
+    # WEBSOCKET LOOP
+    # =====================================================
     @safe_run
     async def run_websocket(self):
 
@@ -100,8 +122,13 @@ class MarketEngine:
                 self.logger.error(f"WebSocket error: {e}")
                 await asyncio.sleep(5)
 
+    # =====================================================
+    # MESSAGE PARSER
+    # =====================================================
     def parse_message(self, message: str) -> dict:
+
         import json
+
         data = json.loads(message)
         k = data.get("k", {})
 

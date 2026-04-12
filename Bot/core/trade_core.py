@@ -123,9 +123,6 @@ class TradeCore:
         if now - self.last_entry_time < self.entry_cooldown:
             return
 
-        # =========================
-        # 🧠 AI FEATURES
-        # =========================
         features = {
             "execution_latency": event.get("latency", 100),
             "retry_count": event.get("retry", 0),
@@ -133,18 +130,12 @@ class TradeCore:
             "volatility": event.get("volatility", 10)
         }
 
-        # =========================
-        # 🧠 AI EVALUATION
-        # =========================
         score = self.ai_filter.evaluate(features)
         ai_decision = self.ai_filter.decision(score)
 
         self.ai_last_score = score
         self.ai_last_decision = ai_decision
 
-        # =========================
-        # 🚨 BLOCK
-        # =========================
         if ai_decision == "BLOCK":
 
             self.ai_logger.log_decision(
@@ -158,9 +149,6 @@ class TradeCore:
             print(f"[AI BLOCKED] {event['symbol']} score={score}")
             return
 
-        # =========================
-        # EXECUTION SIGNAL
-        # =========================
         signal = {
             "position_id": str(uuid.uuid4()),
             "symbol": event["symbol"],
@@ -178,9 +166,6 @@ class TradeCore:
 
         self.last_entry_time = now
 
-        # =========================
-        # 🧠 AI LOG (APPROVED)
-        # =========================
         self.ai_logger.log_decision(
             symbol=event["symbol"],
             bot_signal="ENTRY",
@@ -420,3 +405,13 @@ class TradeCore:
 
                 del self.positions[pid]
                 break
+
+    # =====================================================
+    # COMPATIBILITY LAYER（DEPRECATED）
+    # =====================================================
+    def check_orders(self, price_dict):
+        """
+        ⚠️ DEPRECATED
+        旧MarketEngine互換用（将来削除予定）
+        """
+        return self._handle_price_update(price_dict)
