@@ -8,7 +8,7 @@ export default function RightPanel() {
   const [loading, setLoading] = useState(true)
 
   // --------------------------
-  // 取得
+  // データ取得
   // --------------------------
   const fetchData = async () => {
     try {
@@ -20,13 +20,21 @@ export default function RightPanel() {
       ])
 
       const statusData = await statusRes.json()
-      const logsData = await logsRes.json()
+
+      // logsはTEXTで受ける（重要修正）
+      const logsText = await logsRes.text()
 
       setStatus(statusData.running ? 'RUNNING' : 'STOPPED')
-      setLogs(Array.isArray(logsData) ? logsData : [])
+
+      const parsedLogs = logsText
+        .split('\n')
+        .filter(Boolean)
+        .slice(-50)
+
+      setLogs(parsedLogs)
 
     } catch (err) {
-      console.error(err)
+      console.error('RightPanel error:', err)
       setStatus('ERROR')
       setLogs([])
     } finally {
@@ -35,13 +43,11 @@ export default function RightPanel() {
   }
 
   // --------------------------
-  // Bot操作
+  // BOT操作（VPS仕様）
   // --------------------------
   const startBot = async () => {
     try {
-      await fetch(`${API_BASE}/bot/start`, {
-        method: 'POST'
-      })
+      await fetch(`${API_BASE}/start`)
       fetchData()
     } catch (err) {
       console.error(err)
@@ -50,9 +56,7 @@ export default function RightPanel() {
 
   const stopBot = async () => {
     try {
-      await fetch(`${API_BASE}/bot/stop`, {
-        method: 'POST'
-      })
+      await fetch(`${API_BASE}/stop`)
       fetchData()
     } catch (err) {
       console.error(err)
@@ -62,9 +66,7 @@ export default function RightPanel() {
   // --------------------------
   useEffect(() => {
     fetchData()
-
     const interval = setInterval(fetchData, 3000)
-
     return () => clearInterval(interval)
   }, [])
 
@@ -86,9 +88,7 @@ export default function RightPanel() {
       ) : (
         <ul>
           {logs.map((log, index) => (
-            <li key={index}>
-              [{log.time}] {log.type} - {log.message}
-            </li>
+            <li key={index}>{log}</li>
           ))}
         </ul>
       )}

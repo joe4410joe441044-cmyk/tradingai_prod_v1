@@ -4,23 +4,30 @@ export default function TestPositions() {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // データ取得 + 自動更新（10秒ごと）
+  // データ取得 + 自動更新
   useEffect(() => {
-    const fetchPositions = () => {
-      fetch('http://localhost:8000/positions')
-        .then(res => res.json())
-        .then(data => {
+    const fetchPositions = async () => {
+      try {
+        const res = await fetch('/api/positions');
+        const data = await res.json();
+
+        // 配列保証（安全対策）
+        if (Array.isArray(data)) {
           setPositions(data);
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error('Positions fetch error:', err);
-          setLoading(false);
-        });
+        } else {
+          console.error('Positions is not array:', data);
+          setPositions([]);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        console.error('Positions fetch error:', err);
+        setLoading(false);
+      }
     };
 
     fetchPositions();
-    const interval = setInterval(fetchPositions, 10000); // 10秒ごと更新
+    const interval = setInterval(fetchPositions, 10000);
 
     return () => clearInterval(interval);
   }, []);
@@ -42,12 +49,12 @@ export default function TestPositions() {
           </tr>
         </thead>
         <tbody>
-          {positions.map(p => (
-            <tr key={p.id}>
-              <td>{p.pair}</td>
+          {positions.map((p, i) => (
+            <tr key={i}>
+              <td>{p.symbol}</td>
               <td>{p.side}</td>
-              <td>{p.entry}</td>
-              <td>{p.current}</td>
+              <td>{p.entry_price}</td>
+              <td>{p.mark_price}</td>
               <td>{p.pnl}</td>
               <td>{p.size}</td>
             </tr>

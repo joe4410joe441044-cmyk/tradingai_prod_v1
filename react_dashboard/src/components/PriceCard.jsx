@@ -10,10 +10,19 @@ export default function PriceCard() {
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_BASE}/price`);
+      const res = await fetch(`${API_BASE}/positions`);
       const data = await res.json();
 
-      setPrice(data.price ?? 0);
+      if (!Array.isArray(data) || data.length === 0) {
+        setPrice(null);
+        return;
+      }
+
+      // 🔥 最新ポジションの価格を使用
+      const latest = data[data.length - 1];
+
+      setPrice(latest.mark_price ?? latest.entry_price ?? 0);
+
     } catch (err) {
       console.error("Price fetch error:", err);
       setPrice("ERROR");

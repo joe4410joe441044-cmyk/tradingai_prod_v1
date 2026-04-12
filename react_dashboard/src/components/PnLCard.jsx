@@ -10,10 +10,21 @@ export default function PnLCard() {
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_BASE}/pnl`);
+      const res = await fetch(`${API_BASE}/positions`);
       const data = await res.json();
 
-      setPnl(data.pnl ?? 0);
+      if (!Array.isArray(data)) {
+        setPnl(0);
+        return;
+      }
+
+      // 🔥 合計PnL計算
+      const totalPnL = data.reduce((sum, p) => {
+        return sum + (Number(p.pnl) || 0);
+      }, 0);
+
+      setPnl(totalPnL);
+
     } catch (err) {
       console.error("PnL fetch error:", err);
       setPnl("ERROR");

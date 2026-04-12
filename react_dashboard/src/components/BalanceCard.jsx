@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const API_BASE = 'http://34.85.66.137:8000';
+const API_BASE = '/api';
 
 export default function BalanceCard() {
   const [balance, setBalance] = useState(null);
@@ -11,9 +11,16 @@ export default function BalanceCard() {
       setLoading(true);
 
       const res = await fetch(`${API_BASE}/balance`);
+
+      if (!res.ok) {
+        throw new Error('API error');
+      }
+
       const data = await res.json();
 
-      setBalance(data.balance ?? 0);
+      // 🔥 安全対策（APIがobjectでも壊れないように）
+      setBalance(data?.balance ?? data ?? 0);
+
     } catch (err) {
       console.error('Balance fetch error:', err);
       setBalance('ERROR');
@@ -34,9 +41,7 @@ export default function BalanceCard() {
       <h3>Balance</h3>
 
       <h2>
-        {loading
-          ? 'Loading...'
-          : balance}
+        {loading ? 'Loading...' : balance}
       </h2>
     </div>
   );

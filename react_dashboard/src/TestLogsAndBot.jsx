@@ -4,20 +4,29 @@ export default function TestLogsAndBot() {
   const [logs, setLogs] = useState([]);
   const [botStatus, setBotStatus] = useState('STOPPED');
 
-  // Logs 取得
+  // Logs & Bot Status 取得
   useEffect(() => {
-    const fetchLogs = () => {
-      fetch('http://localhost:8000/logs')
-        .then(res => res.json())
-        .then(data => setLogs(data))
-        .catch(err => console.error('Logs fetch error:', err));
+    const fetchLogs = async () => {
+      try {
+        const res = await fetch('/api/logs');
+        const text = await res.text(); // ← HTML対策
+
+        // 改行で配列化
+        const logArray = text.split('\n').filter(line => line.trim() !== '');
+        setLogs(logArray);
+      } catch (err) {
+        console.error('Logs fetch error:', err);
+      }
     };
 
-    const fetchBotStatus = () => {
-      fetch('http://localhost:8000/bot_status')
-        .then(res => res.json())
-        .then(data => setBotStatus(data.status))
-        .catch(err => console.error('Bot status fetch error:', err));
+    const fetchBotStatus = async () => {
+      try {
+        const res = await fetch('/api/bot_status');
+        const data = await res.json();
+        setBotStatus(data.status);
+      } catch (err) {
+        console.error('Bot status fetch error:', err);
+      }
     };
 
     fetchLogs();
@@ -26,17 +35,24 @@ export default function TestLogsAndBot() {
     const interval = setInterval(() => {
       fetchLogs();
       fetchBotStatus();
-    }, 10000); // 10秒ごと更新
+    }, 10000);
 
     return () => clearInterval(interval);
   }, []);
 
-  const handleBotToggle = () => {
+  // BOT ON/OFF
+  const handleBotToggle = async () => {
     const action = botStatus === 'RUNNING' ? 'stop' : 'start';
-    fetch(`http://localhost:8000/bot/${action}`, { method: 'POST' })
-      .then(res => res.json())
-      .then(data => setBotStatus(data.status))
-      .catch(err => console.error('Bot toggle error:', err));
+
+    try {
+      await fetch(`/api/${action}`);
+      // 再取得
+      const res = await fetch('/api/bot_status');
+      const data = await res.json();
+      setBotStatus(data.status);
+    } catch (err) {
+      console.error('Bot toggle error:', err);
+    }
   };
 
   return (

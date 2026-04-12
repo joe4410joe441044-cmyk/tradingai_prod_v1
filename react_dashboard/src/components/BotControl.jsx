@@ -1,83 +1,80 @@
 import React, { useState, useEffect } from "react";
 
+const API_BASE = "http://34.85.66.137:8000";
+
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
   const [positions, setPositions] = useState([]);
   const [logs, setLogs] = useState([]);
 
-  const API_BASE = "http://34.85.66.137:8000";
-
   // --------------------------
-  // Bot Status
+  // BOT STATUS（修正）
   // --------------------------
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE}/bot/status`);
+      const res = await fetch(`${API_BASE}/bot_status`);
       const data = await res.json();
       setStatus(data);
     } catch (err) {
-      console.error("Error fetching bot status:", err);
+      console.error("Bot status error:", err);
       setStatus({ running: false });
     }
   };
 
   // --------------------------
-  // Positions & Logs
+  // POSITIONS（修正）
   // --------------------------
-  const fetchSummary = async () => {
+  const fetchPositions = async () => {
     try {
-      const res = await fetch(`${API_BASE}/bot/summary`);
+      const res = await fetch(`${API_BASE}/positions`);
       const data = await res.json();
-
-      setPositions(data.positions || []);
-
-      const logList = (data.positions || []).map(
-        (p) => `${p.status} ${p.side} @ ${p.entry}`
-      );
-
-      setLogs(logList);
+      setPositions(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Error fetching summary:", err);
+      console.error("Positions error:", err);
       setPositions([]);
+    }
+  };
+
+  // --------------------------
+  // LOGS（修正）
+  // --------------------------
+  const fetchLogs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/logs`);
+      const text = await res.text();
+      setLogs(text.split("\n").filter(Boolean));
+    } catch (err) {
+      console.error("Logs error:", err);
       setLogs([]);
     }
   };
 
   // --------------------------
-  // Start Bot
+  // START / STOP（VPS仕様）
   // --------------------------
   const startBot = async () => {
-    try {
-      await fetch(`${API_BASE}/bot/start`, { method: "POST" });
-      await fetchStatus();
-      await fetchSummary();
-    } catch (err) {
-      console.error("Error starting bot:", err);
-    }
+    await fetch(`${API_BASE}/start`);
+    fetchStatus();
+    fetchPositions();
   };
 
-  // --------------------------
-  // Stop Bot
-  // --------------------------
   const stopBot = async () => {
-    try {
-      await fetch(`${API_BASE}/bot/stop`, { method: "POST" });
-      await fetchStatus();
-      await fetchSummary();
-    } catch (err) {
-      console.error("Error stopping bot:", err);
-    }
+    await fetch(`${API_BASE}/stop`);
+    fetchStatus();
+    fetchPositions();
   };
 
   // --------------------------
   useEffect(() => {
     fetchStatus();
-    fetchSummary();
+    fetchPositions();
+    fetchLogs();
 
     const interval = setInterval(() => {
       fetchStatus();
-      fetchSummary();
-    }, 1000);
+      fetchPositions();
+      fetchLogs();
+    }, 5000);
 
     return () => clearInterval(interval);
   }, []);
@@ -94,23 +91,20 @@ export default function BotControl() {
         Stop
       </button>
 
-      <h4 style={{ marginTop: "20px" }}>Positions</h4>
-
+      <h4>Positions</h4>
       {positions.length === 0 ? (
         <p>No positions</p>
       ) : (
         <ul>
           {positions.map((p, i) => (
             <li key={i}>
-              {p.status} {p.side} @ {p.entry} | Current: {p.current} | PnL:{" "}
-              {p.pnl}
+              {p.side} @ {p.entry_price} | PnL: {p.pnl}
             </li>
           ))}
         </ul>
       )}
 
-      <h4 style={{ marginTop: "20px" }}>Logs</h4>
-
+      <h4>Logs</h4>
       {logs.length === 0 ? (
         <p>No logs</p>
       ) : (
