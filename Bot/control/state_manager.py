@@ -10,55 +10,39 @@ class StateManager:
 
     def sync_on_startup(self):
         """
-        起動時に必ず呼ぶ
-        exchangeとlocal stateを同期
+        起動時チェック（監視専用）
         """
         print("[StateManager] Sync start...")
 
-        # 🔥 exchange安全取得
         try:
             exchange_positions = self.exchange.get_open_positions()
         except Exception as e:
             print("[ERROR] exchange.get_open_positions failed:", e)
             exchange_positions = []
 
-        # 🔥 stateはdictとして扱う（save()ベース）
-        local_state = self.state.save()
-        if local_state is None:
-            local_state = {}
-
-        self._rebuild_state(exchange_positions, local_state)
-        self._resolve_inconsistencies(exchange_positions, local_state)
+        # ログ用（状態修正はしない）
+        self._log_exchange_state(exchange_positions)
 
         print("[StateManager] Sync completed")
 
-    def _rebuild_state(self, exchange_positions, local_state):
+    def _log_exchange_state(self, exchange_positions):
         """
-        exchangeにあるがlocalにないものを補完
+        状態不整合の検出のみ
         """
+
+        if not exchange_positions:
+            print("[STATE] No open positions on exchange")
+            return
+
         for pos in exchange_positions:
             pos_id = pos.get("id")
+            symbol = pos.get("symbol")
 
-            if not pos_id:
-                continue
-
-            if pos_id not in local_state:
-                # stateへ反映（BotStateはdict管理ではないのでログ用途）
-                print(f"[SYNC] missing local position -> {pos_id}")
-
-    def _resolve_inconsistencies(self, exchange_positions, local_state):
-        """
-        localとexchangeの不整合チェック（ログのみ）
-        """
-        exchange_ids = {p.get("id") for p in exchange_positions if p.get("id")}
-
-        for local_id in list(local_state.keys()):
-            if local_id not in exchange_ids:
-                print(f"[SYNC WARNING] local-only position detected: {local_id}")
+            print(f"[STATE] OPEN POSITION: {pos_id} {symbol}")
 
     def _convert(self, position):
         """
-        変換ユーティリティ（将来用）
+        将来用（未使用だが保持）
         """
         return {
             "position_id": position.get("id"),

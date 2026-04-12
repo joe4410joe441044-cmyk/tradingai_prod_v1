@@ -3,7 +3,6 @@
 class BotState:
     """
     シンプル単一状態管理（static統一）
-    ※ state managerとの互換のため instanceも許可
     """
 
     # =========================
@@ -31,7 +30,7 @@ class BotState:
             BotState.max_positions = data.get("max_positions", 1)
             BotState.last_command = data.get("last_command", None)
 
-        return BotState
+        return self
 
     def save(self):
         return {
