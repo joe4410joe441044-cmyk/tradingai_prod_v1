@@ -14,13 +14,12 @@ from Bot.engine.market_engine import MarketEngine
 from Bot.control.state_manager import StateManager
 from Bot.control.bot_state import BotState
 
-# ✅ 重要：実体を使う（ここが正解）
+# ▼ Exchange
 from Bot.exchanges.mock_exchange import MockExchange
 
 # ▼ Telegram
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.control.telegram_controller import TelegramController
-from Bot.control.telegram_listener import TelegramListener
 
 # -------------------------
 # ログ設定
@@ -41,28 +40,33 @@ live_mode = True
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
 # -------------------------
-# Telegram
+# Telegram（安全化）
 # -------------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
-controller = TelegramController(notifier)
-listener = TelegramListener(token=TOKEN, controller=controller)
+notifier = None
+controller = None
 
-threading.Thread(target=listener.start, daemon=True).start()
+if TOKEN and CHAT_ID:
+    notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
+    controller = TelegramController(notifier)
+else:
+    logging.warning("Telegram環境変数未設定（通知無効）")
+
 
 # -------------------------
 # 例外通知
 # -------------------------
 def send_telegram_alert(message: str):
     try:
-        if TOKEN and CHAT_ID:
-            notifier.send_message(message)
+        if notifier:
+            notifier.send(message)
         else:
-            logging.warning("Telegram環境変数未設定: 通知スキップ")
+            logging.warning("Telegram未設定: 通知スキップ")
     except Exception as e:
         logging.error(f"Telegram通知失敗: {e}")
+
 
 # -------------------------
 # コア初期化
@@ -78,9 +82,9 @@ market_engine = MarketEngine(
 )
 
 # -------------------------
-# 🟢 StateManager（重要）
+# StateManager
 # -------------------------
-exchange = MockExchange()   # ← 必ず実体
+exchange = MockExchange()
 state = BotState()
 
 state_manager = StateManager(exchange, state)
@@ -92,22 +96,29 @@ logging.info("===================================")
 logging.info(f"🚀 BOT START (LIVE MODE = {live_mode})")
 logging.info("===================================")
 
+
 # -------------------------
 # ENTRY通知
 # -------------------------
 def notify_entry(ctx):
     try:
+        if not controller:
+            return
+
         controller.notify_entry(
             ctx.trade_type,
             ctx.entry_price,
             ctx.stop_loss_price,
             ctx.take_profit_price
         )
+
     except Exception as e:
         logging.error(f"ENTRY通知エラー: {e}")
         send_telegram_alert(f"⚠️ ENTRY通知エラー: {e}\n{traceback.format_exc()}")
 
+
 strategy_wrapper.on_entry = notify_entry
+
 
 # -------------------------
 # ポジション監視
@@ -126,10 +137,12 @@ async def monitor_positions():
                             else (pos.entry_price - pos.close_price)
                         )
 
-                        if pnl >= 0:
-                            controller.notify_take_profit(pnl)
-                        else:
-                            controller.notify_stop_loss(abs(pnl))
+                        if controller:
+                            if pnl >= 0:
+                                controller.notify_take_profit(pnl)
+                            else:
+                                controller.notify_stop_loss(abs(pnl))
+
                     else:
                         logging.warning("close_price が無いので通知スキップ")
 
@@ -141,6 +154,7 @@ async def monitor_positions():
                 logging.info("[MONITOR] closed position detected")
 
         await asyncio.sleep(1)
+
 
 # -------------------------
 # メイン
@@ -172,6 +186,7 @@ async def main():
     finally:
         market_engine._running = False
         logging.info("BOT安全停止完了")
+
 
 # -------------------------
 # 実行
