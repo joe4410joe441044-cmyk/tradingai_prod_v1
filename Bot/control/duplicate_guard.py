@@ -1,5 +1,3 @@
-# Bot/control/duplicate_guard.py
-
 import time
 import threading
 import hashlib
@@ -85,34 +83,34 @@ class ExecutionGuard:
             pass
 
     # -----------------------------------------------------
-    def _get_state_safe(self):
+    def _get_state_safe(self) -> dict:
         """
-        🛡 StateManager構造揺れ対策（ここが重要）
+        StateManager構造揺れ完全吸収（最終安定版）
         """
+
         if not self.state_manager:
             return {}
 
-        # ① 新設計：save()がある場合
-        if hasattr(self.state_manager, "save"):
-            try:
+        # ① 新構造：state_manager.save()
+        try:
+            if hasattr(self.state_manager, "save"):
                 state = self.state_manager.save()
                 if isinstance(state, dict):
                     return state
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-        # ② 旧設計：state.save()構造
-        if hasattr(self.state_manager, "state"):
-            try:
-                state_obj = self.state_manager.state
-                if hasattr(state_obj, "save"):
-                    state = state_obj.save()
-                    if isinstance(state, dict):
-                        return state
-            except Exception:
-                pass
+        # ② 旧構造：state_manager.state.save()
+        try:
+            state_obj = getattr(self.state_manager, "state", None)
+            if state_obj and hasattr(state_obj, "save"):
+                state = state_obj.save()
+                if isinstance(state, dict):
+                    return state
+        except Exception:
+            pass
 
-        # ③ フォールバック
+        # ③ 完全フォールバック
         return {}
 
     # -----------------------------------------------------
@@ -136,7 +134,7 @@ class ExecutionGuard:
     # -----------------------------------------------------
     def can_execute(self, symbol: str, direction: str) -> bool:
 
-        # ① 実行中フラグ
+        # ① 実行ロック中
         if self._execution_flag:
             return False
 

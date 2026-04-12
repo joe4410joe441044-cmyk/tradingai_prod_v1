@@ -1,6 +1,4 @@
-﻿# Bot/control/state_manager.py
-
-from Bot.control.bot_state import BotState
+﻿from Bot.control.bot_state import BotState
 
 
 class StateManager:
@@ -8,6 +6,34 @@ class StateManager:
         self.exchange = exchange
         self.state = state
 
+    # =====================================================
+    # 🟢 追加：統一インターフェース（重要）
+    # =====================================================
+    def save(self) -> dict:
+        """
+        外部（duplicate_guard等）用の統一API
+        """
+        try:
+            if hasattr(self.state, "save"):
+                return self.state.save()
+        except Exception:
+            pass
+
+        return {}
+
+    def load(self, data: dict):
+        """
+        状態復元用（将来拡張）
+        """
+        try:
+            if hasattr(self.state, "load"):
+                self.state.load(data)
+        except Exception:
+            pass
+
+    # =====================================================
+    # startup sync
+    # =====================================================
     def sync_on_startup(self):
         """
         起動時チェック（監視専用）
@@ -20,11 +46,13 @@ class StateManager:
             print("[ERROR] exchange.get_open_positions failed:", e)
             exchange_positions = []
 
-        # ログ用（状態修正はしない）
         self._log_exchange_state(exchange_positions)
 
         print("[StateManager] Sync completed")
 
+    # =====================================================
+    # debug log only
+    # =====================================================
     def _log_exchange_state(self, exchange_positions):
         """
         状態不整合の検出のみ
@@ -40,10 +68,10 @@ class StateManager:
 
             print(f"[STATE] OPEN POSITION: {pos_id} {symbol}")
 
+    # =====================================================
+    # optional converter
+    # =====================================================
     def _convert(self, position):
-        """
-        将来用（未使用だが保持）
-        """
         return {
             "position_id": position.get("id"),
             "symbol": position.get("symbol"),
