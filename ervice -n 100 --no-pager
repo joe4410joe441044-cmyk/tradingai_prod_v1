@@ -1,0 +1,9 @@
+● tradingbot.service - Trading AI Bot Service (本番運用)
+     Loaded: loaded (]8;;file://tradingai-prod-v1/etc/systemd/system/tradingbot.service/etc/systemd/system/tradingbot.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: activating (auto-restart) (Result: exit-code) since Sun 2026-04-12 05:17:47 UTC; 332ms ago
+    Process: 489725 ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python /home/joe4410joe/TradingAI_Bot_Prod_v1/run_prod.py [0;1;31m(code=exited, status=1/FAILURE)[0m
+   Main PID: 489725 (code=exited, status=1/FAILURE)
+        CPU: 768ms
+
+Apr 12 05:17:47 tradingai-prod-v1 systemd[1]: [0;1;39m[0;1;31m[0;1;39mtradingbot.service: Main process exited, code=exited, status=1/FAILURE[0m
+Apr 12 05:17:47 tradingai-prod-v1 systemd[1]: [0;1;38;5;185m[0;1;39m[0;1;38;5;185mtradingbot.service: Failed with result 'exit-code'.[0m
