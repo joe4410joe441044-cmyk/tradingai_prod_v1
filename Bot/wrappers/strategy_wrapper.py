@@ -12,7 +12,7 @@ class StrategyWrapper:
     def __init__(self, trade_core):
         self.trade_core = trade_core
         self.strategies: List = []
-        self.on_entry = None  # ENTRY通知フック
+        self.on_entry = None  # 互換用（現在未使用）
 
     # ---------------------------------
     # Strategy登録
@@ -37,10 +37,8 @@ class StrategyWrapper:
                 continue
 
             try:
-                ctx = self.trade_core.try_enter(signal)
-
-                if ctx and self.on_entry:
-                    self.on_entry(ctx)
+                # ★ 完全統一済みフロー
+                self.trade_core.try_enter(signal)
 
             except Exception as e:
                 logging.error(f"TradeCore error: {e}")
@@ -51,20 +49,18 @@ class StrategyWrapper:
     def on_test_signal(self, trade_type, price, sl, tp, volume):
 
         try:
-            from Bot.core.trade_core import StrategyContext
+            signal = {
+                "symbol": "BTCUSDT",
+                "side": trade_type,
+                "price": price,
+                "sl": sl,
+                "tp": tp,
+                "qty": volume,
+                "strategy": "test",
+                "timeframe": "1m"
+            }
 
-            ctx = StrategyContext(
-                strategy_name="test",
-                trade_type=trade_type,
-                entry_price=price,
-                stop_loss_price=sl,
-                take_profit_price=tp
-            )
-
-            result = self.trade_core.try_enter(ctx)
-
-            if result and self.on_entry:
-                self.on_entry(result)
+            self.trade_core.try_enter(signal)
 
         except Exception as e:
             logging.error(f"[TEST SIGNAL ERROR] {e}")

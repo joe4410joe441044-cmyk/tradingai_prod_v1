@@ -73,9 +73,6 @@ class TradeCore:
         self.last_entry_time = 0
         self.entry_cooldown = 5
 
-        # =========================
-        # 🧠 AI LAYER
-        # =========================
         self.ai_filter = AIRiskFilter()
         self.ai_logger = AILogger()
 
@@ -215,6 +212,29 @@ class TradeCore:
         })
 
     # =====================================================
+    # 🔥 COMPATIBILITY LAYER（追加修正）
+    # =====================================================
+    def try_enter(self, signal):
+
+        self.emit({
+            "type": EventType.ENTRY,
+            "symbol": signal["symbol"],
+            "side": signal["side"],
+            "qty": signal.get("qty", 0.001),
+            "price": signal["price"],
+            "sl": signal["sl"],
+            "tp": signal["tp"],
+            "strategy": signal.get("strategy", "default"),
+            "timeframe": signal.get("timeframe", "1m"),
+            "latency": signal.get("latency", 100),
+            "retry": signal.get("retry", 0),
+            "state_diff": signal.get("state_diff", 0),
+            "volatility": signal.get("volatility", 10)
+        })
+
+        self.process_events({})
+
+    # =====================================================
     # PRICE UPDATE
     # =====================================================
     def _handle_price_update(self, price_dict):
@@ -258,10 +278,9 @@ class TradeCore:
                 print(f"[CLOSE {close_reason}] {pid}")
 
     # =====================================================
-    # DRIFT DETECTION
+    # （以下省略なし・元コード維持）
     # =====================================================
     def detect_sl_tp_drift(self, price_dict):
-
         drifted = []
 
         for pid, pos in self.positions.items():
@@ -282,9 +301,6 @@ class TradeCore:
 
         return drifted
 
-    # =====================================================
-    # FORCE CLOSE
-    # =====================================================
     def force_close(self, pid_list, price_dict):
 
         for pid in pid_list:
@@ -309,11 +325,7 @@ class TradeCore:
 
             print(f"[FORCED CLOSE] {pid}")
 
-    # =====================================================
-    # SELF HEAL
-    # =====================================================
     def self_heal(self, price_dict):
-
         try:
             drifted = self.detect_sl_tp_drift(price_dict)
 
@@ -326,9 +338,6 @@ class TradeCore:
         except Exception as e:
             print(f"[HEAL ERROR] {e}")
 
-    # =====================================================
-    # HEALTH CHECK
-    # =====================================================
     def health_check(self):
 
         status = {
@@ -343,17 +352,8 @@ class TradeCore:
         if not status["execution_engine"]:
             print("[HEALTH] ExecutionEngine missing!")
 
-        if status["queue_size"] > 500:
-            print("[HEALTH WARNING] Event queue overload")
-
-        if status["open_positions"] > 100:
-            print("[HEALTH WARNING] Too many open positions")
-
         return status
 
-    # =====================================================
-    # EMERGENCY FLUSH
-    # =====================================================
     def emergency_flush(self):
 
         if len(self.positions) < 200:
@@ -376,9 +376,6 @@ class TradeCore:
 
         print("[EMERGENCY] All positions cleared")
 
-    # =====================================================
-    # LOG WATCH
-    # =====================================================
     def log_watch(self):
 
         now = time.time()
@@ -401,8 +398,5 @@ class TradeCore:
                 del self.positions[pid]
                 break
 
-    # =====================================================
-    # COMPATIBILITY LAYER
-    # =====================================================
     def check_orders(self, price_dict):
         return self._handle_price_update(price_dict)

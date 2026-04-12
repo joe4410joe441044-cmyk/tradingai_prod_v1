@@ -31,6 +31,7 @@ class StateManager:
 class ExecutionEngine:
 
     def __init__(self, live=False, logger=None, notifier=None, trade_core=None, state_manager=None):
+
         self.live = live
         self.logger = logger or logging.getLogger(__name__)
         self.notifier = notifier
@@ -104,7 +105,11 @@ class ExecutionEngine:
         self.logger.info(f"[EXECUTION] Processing signal: {signal}")
 
         if self.trade_core:
-            pid = signal.get("position_id", f"pos_{time.time()}")
+
+            # ★ ID整合性修正（重要）
+            pid = signal.get("position_id")
+            if not pid:
+                pid = f"{signal['symbol']}_{time.time()}"
 
             position = {
                 "position_id": pid,
@@ -122,7 +127,7 @@ class ExecutionEngine:
             self.trade_core.on_position_opened(position)
 
     # =================================================
-    # CLOSE ORDER ★追加（これが今回の修正ポイント）
+    # CLOSE ORDER
     # =================================================
     @safe_run
     def close_order(self, order):
