@@ -18,12 +18,19 @@ class GlobalSignalRegistry:
         return time.time()
 
     @classmethod
-    def generate_fingerprint(cls, symbol, strategy, timeframe, direction, price_bucket):
+    def generate_fingerprint(
+        cls,
+        symbol: str,
+        strategy: str,
+        timeframe: str,
+        direction: str,
+        price_bucket: str
+    ) -> str:
         raw = f"{symbol}:{strategy}:{timeframe}:{direction}:{price_bucket}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @classmethod
-    def is_duplicate(cls, fingerprint, cooldown_sec=60):
+    def is_duplicate(cls, fingerprint: str, cooldown_sec: int = 60) -> bool:
 
         with cls._lock:
             now = cls._now()
@@ -36,7 +43,7 @@ class GlobalSignalRegistry:
             return False
 
     @classmethod
-    def cleanup(cls, expire_sec=3600):
+    def cleanup(cls, expire_sec: int = 3600):
 
         with cls._lock:
             now = cls._now()
@@ -47,7 +54,7 @@ class GlobalSignalRegistry:
 
 
 # =========================================================
-# 🟢 EXECUTION GUARD
+# 🟢 EXECUTION GUARD（PRODUCTION SAFE VERSION）
 # =========================================================
 class ExecutionGuard:
 
@@ -56,8 +63,8 @@ class ExecutionGuard:
         self._lock = threading.Lock()
         self._execution_flag = False
 
-    # -----------------------------
-    def acquire(self):
+    # -----------------------------------------------------
+    def acquire(self) -> bool:
         if self._execution_flag:
             return False
 
@@ -67,37 +74,73 @@ class ExecutionGuard:
         self._execution_flag = True
         return True
 
+    # -----------------------------------------------------
     def release(self):
         self._execution_flag = False
-        if self._lock.locked():
-            self._lock.release()
 
-    # -----------------------------
-    def has_position(self, symbol, direction):
+        try:
+            if self._lock.locked():
+                self._lock.release()
+        except Exception:
+            pass
+
+    # -----------------------------------------------------
+    def _get_state_safe(self):
         """
-        ⚠️ StateManager依存を避ける安全版
+        🛡 StateManager構造揺れ対策（ここが重要）
         """
         if not self.state_manager:
-            return False
+            return {}
 
-        # safe fallback（saveベース）
-        state = self.state_manager.state.save()
+        # ① 新設計：save()がある場合
+        if hasattr(self.state_manager, "save"):
+            try:
+                state = self.state_manager.save()
+                if isinstance(state, dict):
+                    return state
+            except Exception:
+                pass
 
-        # もしpositions構造がない場合は無視
+        # ② 旧設計：state.save()構造
+        if hasattr(self.state_manager, "state"):
+            try:
+                state_obj = self.state_manager.state
+                if hasattr(state_obj, "save"):
+                    state = state_obj.save()
+                    if isinstance(state, dict):
+                        return state
+            except Exception:
+                pass
+
+        # ③ フォールバック
+        return {}
+
+    # -----------------------------------------------------
+    def has_position(self, symbol: str, direction: str) -> bool:
+
+        state = self._get_state_safe()
         positions = state.get("positions", [])
 
+        if not isinstance(positions, list):
+            return False
+
         for p in positions:
+            if not isinstance(p, dict):
+                continue
+
             if p.get("symbol") == symbol and p.get("direction") == direction:
                 return True
 
         return False
 
-    # -----------------------------
-    def can_execute(self, symbol, direction):
+    # -----------------------------------------------------
+    def can_execute(self, symbol: str, direction: str) -> bool:
 
+        # ① 実行中フラグ
         if self._execution_flag:
             return False
 
+        # ② ポジション重複チェック
         if self.has_position(symbol, direction):
             return False
 

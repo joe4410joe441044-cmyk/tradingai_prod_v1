@@ -15,7 +15,7 @@ app = FastAPI(title="TradingAI Backend")
 # --------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 本番は後で制限OK
+    allow_origins=["*"],  # 本番は制限推奨
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,21 +33,15 @@ bot = BotManager()
 def startup_event():
     bot.start()
 
-# --------------------------
-# API
-# --------------------------
+# ==========================
+# 🟢 EXISTING API
+# ==========================
 
-# --------------------------
-# Logs
-# --------------------------
 @app.get("/logs")
 def get_logs():
     return bot.get_logs()
 
 
-# --------------------------
-# Bot Status（React統一）
-# --------------------------
 @app.get("/bot_status")
 def get_bot_status():
     return {
@@ -55,17 +49,11 @@ def get_bot_status():
     }
 
 
-# --------------------------
-# Positions（直接）
-# --------------------------
 @app.get("/positions")
 def get_positions():
     return bot.get_positions()
 
 
-# --------------------------
-# Summary（React用統合）
-# --------------------------
 @app.get("/bot/summary")
 def get_summary():
     return {
@@ -73,53 +61,60 @@ def get_summary():
     }
 
 
-# --------------------------
-# PnL（重要）
-# --------------------------
 @app.get("/pnl")
 def get_pnl():
     try:
-        return {
-            "pnl": bot.get_pnl()
-        }
+        return {"pnl": bot.get_pnl()}
     except Exception:
-        return {
-            "pnl": 0
-        }
+        return {"pnl": 0}
 
 
-# --------------------------
-# Price（重要）
-# --------------------------
 @app.get("/price")
 def get_price():
     try:
-        return {
-            "price": bot.get_price()
-        }
+        return {"price": bot.get_price()}
     except Exception:
-        return {
-            "price": 0
-        }
+        return {"price": 0}
 
 
-# --------------------------
-# Start Bot
-# --------------------------
 @app.post("/bot/start")
 def start_bot():
     bot.start()
-    return {
-        "status": "RUNNING"
-    }
+    return {"status": "RUNNING"}
 
 
-# --------------------------
-# Stop Bot
-# --------------------------
 @app.post("/bot/stop")
 def stop_bot():
     bot.stop()
-    return {
-        "status": "STOPPED"
-    }
+    return {"status": "STOPPED"}
+
+
+# ==========================
+# 🧠 NEW: Asset Dashboard API
+# ==========================
+@app.get("/api/getAssetSummary")
+def get_asset_summary():
+    try:
+        positions = bot.get_positions()
+        pnl = bot.get_pnl()
+
+        # 安全なbalance取得（存在しない場合に備える）
+        balance = getattr(bot, "get_balance", lambda: 0)()
+
+        return {
+            "balance": balance,
+            "pnl": pnl,
+            "equity": balance + pnl,
+            "open_positions": len(positions) if positions else 0,
+            "risk": getattr(bot, "get_risk", lambda: 0.3)()
+        }
+
+    except Exception as e:
+        return {
+            "balance": 0,
+            "pnl": 0,
+            "equity": 0,
+            "open_positions": 0,
+            "risk": 0,
+            "error": str(e)
+        }
