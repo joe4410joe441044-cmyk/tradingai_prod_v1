@@ -231,14 +231,11 @@ class TradeCore:
             close_reason = None
 
             if pos.trade_type == "BUY":
-
                 if price <= pos.sl:
                     close_reason = "SL"
                 elif price >= pos.tp:
                     close_reason = "TP"
-
             else:
-
                 if price >= pos.sl:
                     close_reason = "SL"
                 elif price <= pos.tp:
@@ -279,7 +276,6 @@ class TradeCore:
             if pos.trade_type == "BUY":
                 if price <= pos.sl or price >= pos.tp:
                     drifted.append(pid)
-
             else:
                 if price >= pos.sl or price <= pos.tp:
                     drifted.append(pid)
@@ -319,7 +315,6 @@ class TradeCore:
     def self_heal(self, price_dict):
 
         try:
-
             drifted = self.detect_sl_tp_drift(price_dict)
 
             if drifted:
@@ -407,11 +402,7 @@ class TradeCore:
                 break
 
     # =====================================================
-    # COMPATIBILITY LAYER（DEPRECATED）
+    # COMPATIBILITY LAYER
     # =====================================================
     def check_orders(self, price_dict):
-        """
-        ⚠️ DEPRECATED
-        旧MarketEngine互換用（将来削除予定）
-        """
         return self._handle_price_update(price_dict)

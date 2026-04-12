@@ -20,7 +20,7 @@ class CandleBuffer:
         self.candles = deque(maxlen=maxlen)
         self.df_M1 = pd.DataFrame()
 
-    def add_candle(self, candle: dict, timeframe="M1"):
+    def add_candle(self, candle: dict):
         new_row = pd.DataFrame([candle])
         self.df_M1 = pd.concat([self.df_M1, new_row], ignore_index=True)
         self.candles.append(candle)
@@ -61,7 +61,15 @@ class MarketEngine:
         if not candle:
             return
 
-        print(f"[MARKET] is_closed={candle.get('is_closed')} price={candle.get('close')}")
+        symbol = candle.get("symbol")
+        close_price = candle.get("close")
+
+        # 🚨 完全防御（ここ重要）
+        if symbol is None or close_price is None:
+            self.logger.error(f"[MARKET] invalid candle: {candle}")
+            return
+
+        print(f"[MARKET] is_closed={candle.get('is_closed')} price={close_price}")
 
         # Candle保存
         self.candle_buffer.add_candle(candle)
@@ -72,15 +80,13 @@ class MarketEngine:
         if self.trade_core:
 
             try:
-                price_dict = {
-                    candle.get("symbol"): candle.get("close")
-                }
+                price_dict = {symbol: float(close_price)}
 
                 print(f"[TICK] {price_dict}")
 
-                # 安全チェック
-                if None in price_dict.values():
-                    self.logger.error("[PRICE UPDATE ERROR] invalid price_dict")
+                # 追加防御
+                if price_dict[symbol] is None:
+                    self.logger.error("[PRICE UPDATE ERROR] None price detected")
                     return
 
                 # =================================================
@@ -116,7 +122,10 @@ class MarketEngine:
                 async with websockets.connect(self.ws_url) as ws:
                     async for message in ws:
                         candle = self.parse_message(message)
-                        self.process_data(candle)
+
+                        # 🚨 非同期ループでも安全
+                        if candle:
+                            self.process_data(candle)
 
             except Exception as e:
                 self.logger.error(f"WebSocket error: {e}")
@@ -129,17 +138,26 @@ class MarketEngine:
 
         import json
 
-        data = json.loads(message)
-        k = data.get("k", {})
+        try:
+            data = json.loads(message)
+            k = data.get("k", {})
 
-        return {
-            "symbol": data.get("s"),
-            "time": datetime.fromtimestamp(k.get("t", 0)/1000).strftime("%Y-%m-%d %H:%M:%S"),
-            "open": float(k.get("o", 0)),
-            "high": float(k.get("h", 0)),
-            "low": float(k.get("l", 0)),
-            "close": float(k.get("c", 0)),
-            "volume": float(k.get("v", 0)),
-            "timeframe": k.get("i", "1m"),
-            "is_closed": k.get("x", False)
-        }
+            close = k.get("c")
+            if close is None:
+                return None
+
+            return {
+                "symbol": data.get("s"),
+                "time": datetime.fromtimestamp(k.get("t", 0) / 1000).strftime("%Y-%m-%d %H:%M:%S"),
+                "open": float(k.get("o", 0)),
+                "high": float(k.get("h", 0)),
+                "low": float(k.get("l", 0)),
+                "close": float(close),
+                "volume": float(k.get("v", 0)),
+                "timeframe": k.get("i", "1m"),
+                "is_closed": k.get("x", False)
+            }
+
+        except Exception as e:
+            self.logger.error(f"[PARSE ERROR] {e}")
+            return None

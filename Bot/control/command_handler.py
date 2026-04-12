@@ -2,37 +2,59 @@
 
 from Bot.control.bot_state import BotState
 
+
 class CommandHandler:
+    def __init__(self):
+        # instance stateを持つ（staticと同期）
+        self.state = BotState()
+        self.state.sync_from_class()
 
     def handle(self, text: str) -> str:
-        BotState.last_command = text
+        # 最新状態を反映
+        self.state.sync_from_class()
+
+        self.state.last_command = text
 
         if text == "/start":
-            BotState.running = True
+            self.state.running = True
+            self.state.sync_to_class()
             return "✅ BOT STARTED"
+
         elif text == "/stop":
-            BotState.running = False
+            self.state.running = False
+            self.state.sync_to_class()
             return "⛔ BOT STOPPED"
+
         elif text == "/pause":
-            BotState.entry_enabled = False
+            self.state.entry_enabled = False
+            self.state.sync_to_class()
             return "⏸ ENTRY PAUSED"
+
         elif text == "/resume":
-            BotState.entry_enabled = True
+            self.state.entry_enabled = True
+            self.state.sync_to_class()
             return "▶ ENTRY RESUMED"
+
         elif text == "/status":
             return self.status()
+
         elif text == "/close_all":
-            BotState.close_all_flag = True
+            self.state.close_all_flag = True
+            self.state.sync_to_class()
             return "🚨 CLOSE ALL TRIGGERED"
+
         else:
+            self.state.sync_to_class()
             return "❓ Unknown command"
 
     def status(self) -> str:
+        self.state.sync_from_class()
+
         return (
             f"📊 STATUS\n"
-            f"Running: {BotState.running}\n"
-            f"Entry Enabled: {BotState.entry_enabled}\n"
-            f"Risk: {BotState.risk}\n"
-            f"Max Positions: {BotState.max_positions}\n"
-            f"Last Command: {BotState.last_command}"
+            f"Running: {self.state.running}\n"
+            f"Entry Enabled: {self.state.entry_enabled}\n"
+            f"Risk: {self.state.risk}\n"
+            f"Max Positions: {self.state.max_positions}\n"
+            f"Last Command: {self.state.last_command}"
         )
