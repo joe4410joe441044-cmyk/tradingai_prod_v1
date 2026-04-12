@@ -75,16 +75,21 @@ bot_running = False
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     global bot_running
     try:
         state_manager.sync_on_startup()
         bot_running = True
+
+        # 🔥 非同期タスク起動
         asyncio.create_task(market_engine.run_websocket())
         asyncio.create_task(monitor_positions())
+
         logging.info("BOT STARTED")
+
     except Exception as e:
         logging.error(f"startup error: {e}")
+        logging.error(traceback.format_exc())
 
 
 # -------------------------
@@ -92,24 +97,36 @@ def startup():
 # -------------------------
 @app.get("/bot_status")
 def bot_status():
-    return {
-        "status": "RUNNING" if bot_running else "STOPPED"
-    }
+    try:
+        return {
+            "status": "RUNNING" if bot_running else "STOPPED"
+        }
+    except Exception as e:
+        return {"status": "ERROR", "detail": str(e)}
 
 
 @app.get("/positions")
 def positions():
     try:
-        return [
-            {
-                "pair": p.symbol,
-                "side": p.trade_type,
-                "entry": p.entry_price,
-                "current": p.close_price or p.entry_price,
-                "size": p.volume
-            }
-            for p in trade_core.positions
-        ]
+        pos_list = []
+
+        positions = trade_core.positions
+
+        # 🔥 dict / list 両対応
+        if isinstance(positions, dict):
+            positions = positions.values()
+
+        for p in positions:
+            pos_list.append({
+                "pair": getattr(p, "symbol", "UNKNOWN"),
+                "side": getattr(p, "trade_type", "UNKNOWN"),
+                "entry": getattr(p, "entry_price", 0),
+                "current": getattr(p, "close_price", getattr(p, "entry_price", 0)),
+                "size": getattr(p, "volume", 0)
+            })
+
+        return pos_list
+
     except Exception as e:
         return {"error": str(e), "data": []}
 
@@ -125,12 +142,20 @@ def logs():
 async def monitor_positions():
     while True:
         try:
-            for pos in trade_core.positions:
-                if pos.status == "closed" and not getattr(pos, "notified", False):
+            positions = trade_core.positions
+
+            if isinstance(positions, dict):
+                positions = positions.values()
+
+            for pos in positions:
+                if getattr(pos, "status", None) == "closed" and not getattr(pos, "notified", False):
                     pos.notified = True
+
             await asyncio.sleep(1)
+
         except Exception as e:
-            logging.error(e)
+            logging.error(f"monitor error: {e}")
+            logging.error(traceback.format_exc())
 
 
 # -------------------------
