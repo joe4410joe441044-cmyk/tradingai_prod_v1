@@ -5,25 +5,25 @@ import threading
 import os
 import traceback
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from Bot.engine.execution_engine import ExecutionEngine
 from Bot.core.trade_core import TradeCore
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
 from Bot.engine.market_engine import MarketEngine
 
-# ▼ State Manager
 from Bot.control.state_manager import StateManager
 from Bot.control.bot_state import BotState
 
-# ▼ Exchange
 from Bot.exchanges.mock_exchange import MockExchange
 
-# ▼ Telegram
 from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.control.telegram_controller import TelegramController
 
-# -------------------------
-# ログ設定
-# -------------------------
+# =========================
+# LOG CONFIG
+# =========================
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
@@ -33,15 +33,15 @@ logging.basicConfig(
     ]
 )
 
-# -------------------------
-# 設定
-# -------------------------
+# =========================
+# CONFIG
+# =========================
 live_mode = True
 ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_15m"
 
-# -------------------------
-# Telegram（安全化）
-# -------------------------
+# =========================
+# TELEGRAM
+# =========================
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -52,25 +52,20 @@ if TOKEN and CHAT_ID:
     notifier = TelegramNotifier(token=TOKEN, chat_id=CHAT_ID)
     controller = TelegramController(notifier)
 else:
-    logging.warning("Telegram環境変数未設定（通知無効）")
+    logging.warning("Telegram未設定（無効）")
 
 
-# -------------------------
-# 例外通知
-# -------------------------
 def send_telegram_alert(message: str):
     try:
         if notifier:
             notifier.send(message)
-        else:
-            logging.warning("Telegram未設定: 通知スキップ")
     except Exception as e:
-        logging.error(f"Telegram通知失敗: {e}")
+        logging.error(f"Telegram error: {e}")
 
 
-# -------------------------
-# コア初期化
-# -------------------------
+# =========================
+# CORE INIT
+# =========================
 exec_engine = ExecutionEngine(live=live_mode)
 trade_core = TradeCore(exec_engine)
 strategy_wrapper = StrategyWrapper(trade_core)
@@ -81,25 +76,13 @@ market_engine = MarketEngine(
     ws_url=ws_url
 )
 
-# -------------------------
-# StateManager
-# -------------------------
 exchange = MockExchange()
 state = BotState()
-
 state_manager = StateManager(exchange, state)
 
-# -------------------------
-# ログ
-# -------------------------
-logging.info("===================================")
-logging.info(f"🚀 BOT START (LIVE MODE = {live_mode})")
-logging.info("===================================")
-
-
-# -------------------------
-# ENTRY通知
-# -------------------------
+# =========================
+# ENTRY NOTIFY
+# =========================
 def notify_entry(ctx):
     try:
         if not controller:
@@ -111,85 +94,195 @@ def notify_entry(ctx):
             ctx.stop_loss_price,
             ctx.take_profit_price
         )
-
     except Exception as e:
-        logging.error(f"ENTRY通知エラー: {e}")
-        send_telegram_alert(f"⚠️ ENTRY通知エラー: {e}\n{traceback.format_exc()}")
+        logging.error(f"ENTRY error: {e}")
+        send_telegram_alert(str(e))
 
 
 strategy_wrapper.on_entry = notify_entry
 
-
-# -------------------------
-# ポジション監視
-# -------------------------
+# =========================
+# POSITION MONITOR
+# =========================
 async def monitor_positions():
-    logging.info("🔥 monitor_positions STARTED")
+    logging.info("monitor_positions STARTED")
 
     while True:
-        for pos in trade_core.positions:
-            if pos.status == "closed" and not getattr(pos, "notified", False):
+        try:
+            positions = getattr(trade_core, "positions", {})
+
+            if not isinstance(positions, dict):
+                await asyncio.sleep(1)
+                continue
+
+            for pos in list(positions.values()):
                 try:
-                    if hasattr(pos, "close_price"):
-                        pnl = (
-                            (pos.close_price - pos.entry_price)
-                            if pos.trade_type == "BUY"
-                            else (pos.entry_price - pos.close_price)
-                        )
+                    if getattr(pos, "status", None) != "closed":
+                        continue
 
-                        if controller:
-                            if pnl >= 0:
-                                controller.notify_take_profit(pnl)
-                            else:
-                                controller.notify_stop_loss(abs(pnl))
+                    if getattr(pos, "notified", False):
+                        continue
 
-                    else:
-                        logging.warning("close_price が無いので通知スキップ")
+                    entry = getattr(pos, "entry_price", 0)
+                    close = getattr(pos, "close_price", entry)
+                    side = getattr(pos, "trade_type", "BUY")
+
+                    pnl = (
+                        (close - entry) if side == "BUY"
+                        else (entry - close)
+                    )
+
+                    if controller:
+                        if pnl >= 0:
+                            controller.notify_take_profit(pnl)
+                        else:
+                            controller.notify_stop_loss(abs(pnl))
+
+                    pos.notified = True
+                    logging.info(f"[MONITOR] closed position pnl={pnl}")
 
                 except Exception as e:
-                    logging.error(f"通知エラー: {e}")
-                    send_telegram_alert(f"⚠️ 監視通知エラー: {e}\n{traceback.format_exc()}")
+                    logging.error(f"Position error: {e}")
+                    send_telegram_alert(str(e))
 
-                pos.notified = True
-                logging.info("[MONITOR] closed position detected")
+        except Exception as e:
+            logging.error(f"monitor_positions crash: {e}")
+            send_telegram_alert(str(e))
 
         await asyncio.sleep(1)
 
 
-# -------------------------
-# メイン
-# -------------------------
-async def main():
+# =========================
+# FASTAPI APP
+# =========================
+app = FastAPI(title="TradingAI Unified Bot")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =========================
+# BOT CONTROL
+# =========================
+bot_thread = None
+
+
+def start_bot():
+    global bot_thread
+
+    if bot_thread and bot_thread.is_alive():
+        return
+
+    async def runner():
+        try:
+            state_manager.sync_on_startup()
+
+            await asyncio.gather(
+                market_engine.run_websocket(),
+                monitor_positions()
+            )
+
+        except Exception as e:
+            logging.error(f"BOT ERROR: {e}")
+            send_telegram_alert(str(e))
+
+        finally:
+            market_engine._running = False
+
+    bot_thread = threading.Thread(
+        target=lambda: asyncio.run(runner()),
+        daemon=True
+    )
+    bot_thread.start()
+
+
+@app.on_event("startup")
+def startup():
+    start_bot()
+
+
+# =========================
+# API ENDPOINTS
+# =========================
+@app.get("/bot_status")
+def bot_status():
     try:
-        state_manager.sync_on_startup()
-    except Exception as e:
-        logging.error(f"State復元失敗: {e}")
-        send_telegram_alert(f"⚠️ State復元失敗: {e}\n{traceback.format_exc()}")
+        return {
+            "running": True,
+            "thread_alive": bot_thread.is_alive() if bot_thread else False
+        }
+    except:
+        return {"running": False, "thread_alive": False}
 
-    tasks = [
-        asyncio.create_task(market_engine.run_websocket()),
-        asyncio.create_task(monitor_positions())
-    ]
 
+@app.get("/positions")
+def positions():
     try:
-        await asyncio.gather(*tasks)
+        return [
+            {
+                "pair": p.symbol,
+                "side": p.trade_type,
+                "entry": p.entry_price,
+                "current": getattr(p, "close_price", p.entry_price),
+                "pnl": 0,
+                "size": p.volume
+            }
+            for p in trade_core.positions.values()
+        ]
+    except:
+        return []
 
-    except KeyboardInterrupt:
-        logging.info("BOT手動停止 (Ctrl+C)")
 
-    except Exception as e:
-        logging.exception(f"BOT例外発生: {e}")
-        send_telegram_alert(f"⚠️ BOT例外発生: {e}\n{traceback.format_exc()}")
-        raise
-
-    finally:
-        market_engine._running = False
-        logging.info("BOT安全停止完了")
+@app.get("/logs")
+def logs():
+    return []
 
 
-# -------------------------
-# 実行
-# -------------------------
-if __name__ == "__main__":
-    asyncio.run(main())
+@app.get("/pnl")
+def pnl():
+    try:
+        return {"pnl": 0}
+    except:
+        return {"pnl": 0}
+
+
+@app.get("/price")
+def price():
+    try:
+        return {"price": 0}
+    except:
+        return {"price": 0}
+
+
+@app.post("/bot/start")
+def start():
+    start_bot()
+    return {"status": "RUNNING"}
+
+
+@app.post("/bot/stop")
+def stop():
+    market_engine._running = False
+    return {"status": "STOPPED"}
+
+
+@app.get("/api/getAssetSummary")
+def asset_summary():
+    try:
+        return {
+            "balance": 0,
+            "pnl": 0,
+            "equity": 0,
+            "open_positions": len(trade_core.positions)
+        }
+    except:
+        return {
+            "balance": 0,
+            "pnl": 0,
+            "equity": 0,
+            "open_positions": 0
+        }

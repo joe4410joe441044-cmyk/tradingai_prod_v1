@@ -28,20 +28,20 @@ class BotManager:
         self.running = False
 
         # --------------------------
-        # ExecutionEngine（正しい実行層）
+        # ExecutionEngine
         # --------------------------
         self.execution_engine = ExecutionEngine(
-            live=False,   # 本番 True
+            live=False,
             notifier=None
         )
 
-        # TradeCore に ExecutionEngine を渡す
+        # TradeCore
         self.core = TradeCore(self.execution_engine)
 
         # 循環参照
         self.execution_engine.trade_core = self.core
 
-        # PriceManager 初期化
+        # PriceManager
         self.price_manager = PriceManager()
 
         # ログ
@@ -58,11 +58,14 @@ class BotManager:
     # ログ
     # --------------------------
     def add_log(self, log_type, message):
-        self.logs.append({
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "type": log_type,
-            "message": message
-        })
+        try:
+            self.logs.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "type": log_type,
+                "message": message
+            })
+        except Exception:
+            pass
 
     # --------------------------
     # Start / Stop
@@ -86,69 +89,111 @@ class BotManager:
     # --------------------------
     def run_loop(self):
         while self.running:
-            symbol = self.config["symbol"]
+            try:
+                symbol = self.config.get("symbol", "BTCUSDT")
 
-            # 仮価格（後でBinanceに差し替え）
-            price = random.uniform(70000, 75000)
+                price = random.uniform(70000, 75000)
 
-            if price is None:
-                self.add_log("ERROR", "Price fetch failed")
+                if price is None:
+                    self.add_log("ERROR", "Price fetch failed")
+                    time.sleep(1)
+                    continue
+
+                # Price update
+                self.price_manager.update(symbol, price)
+
+                self.add_log("PRICE", f"{symbol} {price}")
+
+                # TradeCore processing
+                if hasattr(self.core, "process_events"):
+                    self.core.process_events(self.price_manager.get_all())
+
+                # 仮エントリーイベント
+                side = "BUY" if random.random() > 0.5 else "SELL"
+
+                if hasattr(self.core, "emit"):
+                    self.core.emit({
+                        "type": "ENTRY",
+                        "symbol": symbol,
+                        "side": side,
+                        "qty": self.config.get("lot", 0.001),
+                        "price": price,
+                        "sl": price - 100,
+                        "tp": price + 100,
+                        "strategy": "test",
+                        "timeframe": "1m",
+                        "latency": 100,
+                        "retry": 0,
+                        "state_diff": 0,
+                        "volatility": 10
+                    })
+
                 time.sleep(1)
-                continue
 
-            # 価格更新
-            self.price_manager.update(symbol, price)
-
-            self.add_log("PRICE", f"{symbol} {price}")
-
-            # --------------------------
-            # TradeCore Event処理
-            # --------------------------
-            self.core.process_events(self.price_manager.get_all())
-
-            # --------------------------
-            # 仮エントリーイベント生成（テスト）
-            # --------------------------
-            side = "BUY" if random.random() > 0.5 else "SELL"
-
-            self.core.emit({
-                "type": "ENTRY",
-                "symbol": symbol,
-                "side": side,
-                "qty": self.config["lot"],
-                "price": price,
-                "sl": price - 100,
-                "tp": price + 100,
-                "strategy": "test",
-                "timeframe": "1m",
-                "latency": 100,
-                "retry": 0,
-                "state_diff": 0,
-                "volatility": 10
-            })
-
-            time.sleep(1)
+            except Exception as e:
+                self.add_log("ERROR", str(e))
+                time.sleep(1)
 
     # --------------------------
     # API用
     # --------------------------
     def get_positions(self):
-        result = []
+        try:
+            result = []
 
-        for p in self.core.positions.values():
-            result.append({
-                "pair": p.symbol,
-                "side": p.trade_type,
-                "entry": p.entry_price,
-                "current": p.close_price or p.entry_price,
-                "pnl": 0,
-                "size": p.volume
-            })
+            positions = getattr(self.core, "positions", None)
 
-        return result
+            if not positions:
+                return []
 
+            # dict以外対策
+            if not isinstance(positions, dict):
+                return []
+
+            for p in positions.values():
+                result.append({
+                    "pair": getattr(p, "symbol", ""),
+                    "side": getattr(p, "trade_type", ""),
+                    "entry": getattr(p, "entry_price", 0),
+                    "current": getattr(p, "close_price", None) or getattr(p, "entry_price", 0),
+                    "pnl": 0,
+                    "size": getattr(p, "volume", 0)
+                })
+
+            return result
+
+        except Exception:
+            return []
+
+    # --------------------------
+    # Logs
+    # --------------------------
     def get_logs(self):
-        return self.logs[-50:]
+        try:
+            return self.logs[-50:] if self.logs else []
+        except Exception:
+            return []
 
+    # --------------------------
+    # Status（安全版）
+    # --------------------------
     def get_status(self):
-        return {"running": self.running}
+        try:
+            return {
+                "running": self.running,
+                "thread_alive": self.thread.is_alive() if self.thread else False
+            }
+        except Exception:
+            return {
+                "running": False,
+                "thread_alive": False
+            }
+
+    # --------------------------
+    # Running check（重要）
+    # --------------------------
+    def is_running(self):
+        try:
+            return bool(self.running and self.thread and self.thread.is_alive())
+        except Exception:
+            return False

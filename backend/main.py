@@ -1,5 +1,3 @@
-# H:\マイドライブ\tradingai_prod_v1\backend\main.py
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -35,36 +33,91 @@ bot = BotManager()
 # --------------------------
 @app.on_event("startup")
 def startup_event():
-    bot.start()
+    try:
+        bot.start()
+    except Exception as e:
+        print(f"[STARTUP ERROR] {e}")
+
 
 # ==========================
-# 🟢 EXISTING API
+# 🟢 BASIC API
 # ==========================
 
 @app.get("/logs")
 def get_logs():
-    return bot.get_logs()
+    try:
+        return bot.get_logs()
+    except Exception as e:
+        return {"logs": [], "error": str(e)}
 
 
+# ==========================
+# 🔥 SAFE BOT STATUS（重要）
+# ==========================
 @app.get("/bot_status")
 def get_bot_status():
-    return {
-        "status": "RUNNING" if bot.is_running() else "STOPPED"
-    }
+    try:
+        running = False
+        thread_alive = False
+
+        # running（安全取得）
+        try:
+            running = getattr(bot, "running", False)
+        except:
+            running = False
+
+        # thread状態（安全取得）
+        try:
+            thread_alive = (
+                bot.thread.is_alive()
+                if hasattr(bot, "thread") and bot.thread
+                else False
+            )
+        except:
+            thread_alive = False
+
+        return {
+            "status": "RUNNING" if running else "STOPPED",
+            "running": running,
+            "thread_alive": thread_alive
+        }
+
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "running": False,
+            "thread_alive": False,
+            "detail": str(e)
+        }
 
 
+# ==========================
+# POSITIONS
+# ==========================
 @app.get("/positions")
 def get_positions():
-    return bot.get_positions()
+    try:
+        return bot.get_positions()
+    except Exception as e:
+        return []
 
 
 @app.get("/bot/summary")
 def get_summary():
-    return {
-        "positions": bot.get_positions()
-    }
+    try:
+        return {
+            "positions": bot.get_positions()
+        }
+    except Exception as e:
+        return {
+            "positions": [],
+            "error": str(e)
+        }
 
 
+# ==========================
+# PNL
+# ==========================
 @app.get("/pnl")
 def get_pnl():
     try:
@@ -73,6 +126,9 @@ def get_pnl():
         return {"pnl": 0}
 
 
+# ==========================
+# PRICE
+# ==========================
 @app.get("/price")
 def get_price():
     try:
@@ -81,20 +137,29 @@ def get_price():
         return {"price": 0}
 
 
+# ==========================
+# CONTROL
+# ==========================
 @app.post("/bot/start")
 def start_bot():
-    bot.start()
-    return {"status": "RUNNING"}
+    try:
+        bot.start()
+        return {"status": "RUNNING"}
+    except Exception as e:
+        return {"status": "ERROR", "detail": str(e)}
 
 
 @app.post("/bot/stop")
 def stop_bot():
-    bot.stop()
-    return {"status": "STOPPED"}
+    try:
+        bot.stop()
+        return {"status": "STOPPED"}
+    except Exception as e:
+        return {"status": "ERROR", "detail": str(e)}
 
 
 # ==========================
-# 🧠 NEW: Asset Dashboard API
+# 🧠 ASSET SUMMARY
 # ==========================
 @app.get("/api/getAssetSummary")
 def get_asset_summary():
@@ -102,14 +167,24 @@ def get_asset_summary():
         positions = bot.get_positions()
         pnl = bot.get_pnl()
 
-        balance = getattr(bot, "get_balance", lambda: 0)()
+        balance = 0
+        try:
+            balance = getattr(bot, "get_balance", lambda: 0)()
+        except:
+            balance = 0
+
+        risk = 0.3
+        try:
+            risk = getattr(bot, "get_risk", lambda: 0.3)()
+        except:
+            risk = 0.3
 
         return {
             "balance": balance,
             "pnl": pnl,
             "equity": balance + pnl,
             "open_positions": len(positions) if positions else 0,
-            "risk": getattr(bot, "get_risk", lambda: 0.3)()
+            "risk": risk
         }
 
     except Exception as e:
