@@ -1,9 +1,22 @@
 # Bot/control/bot_state.py
 
 class BotState:
-    running = False
-    entry_enabled = True
-    close_all_flag = False
-    risk = 1.0
-    max_positions = 1
-    last_command = None
+    def __init__(self):
+        self.running = False
+        self.entry_enabled = True
+        self.close_all_flag = False
+        self.risk = 1.0
+        self.max_positions = 1
+        self.last_command = None
+
+    def load(self):
+        """
+        旧互換用（状態復元未実装）
+        """
+        return self
+
+    def save(self):
+        """
+        将来用（まだ未実装）
+        """
+        pass
