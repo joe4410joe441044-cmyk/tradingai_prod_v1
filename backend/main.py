@@ -42,7 +42,6 @@ def startup_event():
 # ==========================
 # 🟢 BASIC API
 # ==========================
-
 @app.get("/logs")
 def get_logs():
     try:
@@ -60,13 +59,11 @@ def get_bot_status():
         running = False
         thread_alive = False
 
-        # running（安全取得）
         try:
             running = getattr(bot, "running", False)
         except:
             running = False
 
-        # thread状態（安全取得）
         try:
             thread_alive = (
                 bot.thread.is_alive()
@@ -98,7 +95,7 @@ def get_bot_status():
 def get_positions():
     try:
         return bot.get_positions()
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -196,3 +193,11 @@ def get_asset_summary():
             "risk": 0,
             "error": str(e)
         }
+
+
+# ==========================
+# 🧠 AI SCORE（★今回追加）
+# ==========================
+@app.get("/api/ai/scores")
+def ai_scores(symbol: str):
+    return []
