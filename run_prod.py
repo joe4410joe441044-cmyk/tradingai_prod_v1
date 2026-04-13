@@ -1,3 +1,4 @@
+```python
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
@@ -138,6 +139,14 @@ def logs():
 
 
 # -------------------------
+# 🧠 AI SCORE（★今回追加）
+# -------------------------
+@app.get("/api/ai/scores")
+def ai_scores(symbol: str):
+    return []
+
+
+# -------------------------
 # monitor
 # -------------------------
 async def monitor_positions():
@@ -174,3 +183,4 @@ app.mount(
 # -------------------------
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+```
