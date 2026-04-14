@@ -4,7 +4,8 @@ import PriceCard from "./components/PriceCard.jsx";
 import RightPanel from "./components/RightPanel.jsx";
 import AIScoreChart from "./AIScoreChart.jsx";
 
-const API_BASE = "http://34.85.66.137:8000";
+// ★ ここ重要（/api付きにする）
+const API_BASE = "http://34.85.66.137:8000/api";
 
 export default function App() {
   const [positions, setPositions] = useState([]);
@@ -45,6 +46,7 @@ export default function App() {
         if (!statusRes.ok) throw new Error("bot_status fetch failed");
 
         const statusData = await statusRes.json();
+
         setBotStatus({
           running: statusData?.running ?? false,
         });
@@ -54,11 +56,12 @@ export default function App() {
         // ----------------------
         if (safePositions.length > 0) {
           setCurrentPrice(
-            safePositions[safePositions.length - 1]?.mark_price ?? null
+            safePositions[safePositions.length - 1]?.current ?? null
           );
         } else {
           setCurrentPrice(null);
         }
+
       } catch (err) {
         if (err.name !== "AbortError") {
           console.error(err);

@@ -1,22 +1,13 @@
-# backend/bot_manager.py
-
-# --------------------------
-# パス修正（最重要）
-# --------------------------
 import sys
 import os
-
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-# --------------------------
-# 通常import
-# --------------------------
 import threading
 import time
 import random
 from datetime import datetime
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
 
 from Bot.core.trade_core import TradeCore
 from Bot.core.price_manager import PriceManager
@@ -24,51 +15,39 @@ from Bot.engine.execution_engine import ExecutionEngine
 
 
 class BotManager:
-    def __init__(self, api_key=None, api_secret=None):
+    def __init__(self):
         self.running = False
+        self.thread = None
 
-        # --------------------------
-        # ExecutionEngine
-        # --------------------------
         self.execution_engine = ExecutionEngine(
             live=False,
             notifier=None
         )
 
-        # TradeCore
         self.core = TradeCore(self.execution_engine)
-
-        # 循環参照
         self.execution_engine.trade_core = self.core
 
-        # PriceManager
         self.price_manager = PriceManager()
 
-        # ログ
         self.logs = []
-        self.thread = None
 
-        # 設定
         self.config = {
             "symbol": "BTCUSDT",
             "lot": 0.001
         }
 
     # --------------------------
-    # ログ
+    # LOG
     # --------------------------
     def add_log(self, log_type, message):
-        try:
-            self.logs.append({
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "type": log_type,
-                "message": message
-            })
-        except Exception:
-            pass
+        self.logs.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": log_type,
+            "message": message
+        })
 
     # --------------------------
-    # Start / Stop
+    # START / STOP
     # --------------------------
     def start(self):
         if self.running:
@@ -85,30 +64,23 @@ class BotManager:
         self.add_log("SYSTEM", "Bot Stopped")
 
     # --------------------------
-    # メインループ
+    # MAIN LOOP（統合版）
     # --------------------------
     def run_loop(self):
         while self.running:
             try:
-                symbol = self.config.get("symbol", "BTCUSDT")
-
+                symbol = self.config["symbol"]
                 price = random.uniform(70000, 75000)
 
-                if price is None:
-                    self.add_log("ERROR", "Price fetch failed")
-                    time.sleep(1)
-                    continue
-
-                # Price update
+                # price update
                 self.price_manager.update(symbol, price)
-
                 self.add_log("PRICE", f"{symbol} {price}")
 
-                # TradeCore processing
+                # core processing
                 if hasattr(self.core, "process_events"):
                     self.core.process_events(self.price_manager.get_all())
 
-                # 仮エントリーイベント
+                # entry simulation
                 side = "BUY" if random.random() > 0.5 else "SELL"
 
                 if hasattr(self.core, "emit"):
@@ -116,7 +88,7 @@ class BotManager:
                         "type": "ENTRY",
                         "symbol": symbol,
                         "side": side,
-                        "qty": self.config.get("lot", 0.001),
+                        "qty": self.config["lot"],
                         "price": price,
                         "sl": price - 100,
                         "tp": price + 100,
@@ -128,6 +100,9 @@ class BotManager:
                         "volatility": 10
                     })
 
+                # 🟡 run_prod機能吸収（簡易monitor）
+                self._monitor_positions()
+
                 time.sleep(1)
 
             except Exception as e:
@@ -135,65 +110,84 @@ class BotManager:
                 time.sleep(1)
 
     # --------------------------
-    # API用
+    # POSITION MONITOR（run_prod移植）
+    # --------------------------
+    def _monitor_positions(self):
+        try:
+            positions = getattr(self.core, "positions", None)
+
+            if isinstance(positions, dict):
+                positions = positions.values()
+
+            if not positions:
+                return
+
+            for p in positions:
+                if getattr(p, "status", None) == "closed" and not getattr(p, "notified", False):
+                    p.notified = True
+                    self.add_log("CLOSE", f"{p.symbol} closed")
+
+        except Exception:
+            pass
+
+    # --------------------------
+    # POSITIONS
     # --------------------------
     def get_positions(self):
         try:
-            result = []
-
             positions = getattr(self.core, "positions", None)
 
             if not positions:
                 return []
 
-            # dict以外対策
-            if not isinstance(positions, dict):
-                return []
+            if isinstance(positions, dict):
+                positions = positions.values()
 
-            for p in positions.values():
-                result.append({
-                    "pair": getattr(p, "symbol", ""),
-                    "side": getattr(p, "trade_type", ""),
-                    "entry": getattr(p, "entry_price", 0),
-                    "current": getattr(p, "close_price", None) or getattr(p, "entry_price", 0),
-                    "pnl": 0,
-                    "size": getattr(p, "volume", 0)
-                })
-
-            return result
+            return [
+                {
+                    "pair": p.symbol,
+                    "side": p.trade_type,
+                    "entry": p.entry_price,
+                    "current": getattr(p, "close_price", p.entry_price),
+                    "size": p.volume,
+                    "pnl": 0
+                }
+                for p in positions
+            ]
 
         except Exception:
             return []
 
     # --------------------------
-    # Logs
+    # LOGS
     # --------------------------
     def get_logs(self):
-        try:
-            return self.logs[-50:] if self.logs else []
-        except Exception:
-            return []
+        return self.logs[-50:]
 
     # --------------------------
-    # Status（安全版）
+    # STATUS
     # --------------------------
     def get_status(self):
-        try:
-            return {
-                "running": self.running,
-                "thread_alive": self.thread.is_alive() if self.thread else False
-            }
-        except Exception:
-            return {
-                "running": False,
-                "thread_alive": False
-            }
+        return {
+            "running": self.running,
+            "thread_alive": self.thread.is_alive() if self.thread else False
+        }
 
     # --------------------------
-    # Running check（重要）
+    # SAFE CHECK
     # --------------------------
     def is_running(self):
-        try:
-            return bool(self.running and self.thread and self.thread.is_alive())
-        except Exception:
-            return False
+        return bool(self.running and self.thread and self.thread.is_alive())
+
+    # --------------------------
+    # FALLBACKS
+    # --------------------------
+    def get_pnl(self):
+        return 0
+
+    def get_price(self):
+        logs = reversed(self.logs)
+        for l in logs:
+            if l["type"] == "PRICE":
+                return float(l["message"].split()[-1])
+        return 0

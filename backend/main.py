@@ -1,15 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.bot_manager import BotManager
 
-# --------------------------
-# FastAPI
-# --------------------------
 app = FastAPI(title="TradingAI Backend")
 
 # --------------------------
-# CORS（本番対応）
+# CORS
 # --------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -24,180 +22,99 @@ app.add_middleware(
 )
 
 # --------------------------
-# BotManager
+# BOT CORE
 # --------------------------
 bot = BotManager()
 
 # --------------------------
-# Startup（安全起動）
+# STARTUP
 # --------------------------
 @app.on_event("startup")
-def startup_event():
-    try:
-        bot.start()
-    except Exception as e:
-        print(f"[STARTUP ERROR] {e}")
+def startup():
+    bot.start()
 
+# --------------------------
+# STATUS
+# --------------------------
+@app.get("/api/bot_status")
+def bot_status():
+    return bot.get_status()
 
-# ==========================
-# 🟢 BASIC API
-# ==========================
-@app.get("/logs")
-def get_logs():
-    try:
-        return bot.get_logs()
-    except Exception as e:
-        return {"logs": [], "error": str(e)}
-
-
-# ==========================
-# 🔥 SAFE BOT STATUS（重要）
-# ==========================
-@app.get("/bot_status")
-def get_bot_status():
-    try:
-        running = False
-        thread_alive = False
-
-        try:
-            running = getattr(bot, "running", False)
-        except:
-            running = False
-
-        try:
-            thread_alive = (
-                bot.thread.is_alive()
-                if hasattr(bot, "thread") and bot.thread
-                else False
-            )
-        except:
-            thread_alive = False
-
-        return {
-            "status": "RUNNING" if running else "STOPPED",
-            "running": running,
-            "thread_alive": thread_alive
-        }
-
-    except Exception as e:
-        return {
-            "status": "ERROR",
-            "running": False,
-            "thread_alive": False,
-            "detail": str(e)
-        }
-
-
-# ==========================
+# --------------------------
 # POSITIONS
-# ==========================
-@app.get("/positions")
-def get_positions():
-    try:
-        return bot.get_positions()
-    except Exception:
-        return []
+# --------------------------
+@app.get("/api/positions")
+def positions():
+    return bot.get_positions()
 
+# --------------------------
+# LOGS
+# --------------------------
+@app.get("/api/logs")
+def logs():
+    return {"logs": bot.get_logs()}
 
-@app.get("/bot/summary")
-def get_summary():
-    try:
-        return {
-            "positions": bot.get_positions()
-        }
-    except Exception as e:
-        return {
-            "positions": [],
-            "error": str(e)
-        }
-
-
-# ==========================
-# PNL
-# ==========================
-@app.get("/pnl")
-def get_pnl():
-    try:
-        return {"pnl": bot.get_pnl()}
-    except Exception:
-        return {"pnl": 0}
-
-
-# ==========================
-# PRICE
-# ==========================
-@app.get("/price")
-def get_price():
-    try:
-        return {"price": bot.get_price()}
-    except Exception:
-        return {"price": 0}
-
-
-# ==========================
+# --------------------------
 # CONTROL
-# ==========================
-@app.post("/bot/start")
-def start_bot():
-    try:
-        bot.start()
-        return {"status": "RUNNING"}
-    except Exception as e:
-        return {"status": "ERROR", "detail": str(e)}
+# --------------------------
+@app.post("/api/bot/start")
+def start():
+    bot.start()
+    return {"status": "RUNNING"}
 
+@app.post("/api/bot/stop")
+def stop():
+    bot.stop()
+    return {"status": "STOPPED"}
 
-@app.post("/bot/stop")
-def stop_bot():
-    try:
-        bot.stop()
-        return {"status": "STOPPED"}
-    except Exception as e:
-        return {"status": "ERROR", "detail": str(e)}
+# --------------------------
+# PRICE
+# --------------------------
+@app.get("/price")
+def price():
+    return {"price": bot.get_price()}
 
+# --------------------------
+# PNL
+# --------------------------
+@app.get("/pnl")
+def pnl():
+    return {"pnl": bot.get_pnl()}
 
-# ==========================
-# 🧠 ASSET SUMMARY
-# ==========================
+# --------------------------
+# SUMMARY
+# --------------------------
 @app.get("/api/getAssetSummary")
-def get_asset_summary():
-    try:
-        positions = bot.get_positions()
-        pnl = bot.get_pnl()
+def summary():
+    positions = bot.get_positions()
 
-        balance = 0
-        try:
-            balance = getattr(bot, "get_balance", lambda: 0)()
-        except:
-            balance = 0
+    return {
+        "balance": 0,
+        "pnl": bot.get_pnl(),
+        "equity": 0,
+        "open_positions": len(positions),
+        "risk": 0.3
+    }
 
-        risk = 0.3
-        try:
-            risk = getattr(bot, "get_risk", lambda: 0.3)()
-        except:
-            risk = 0.3
-
-        return {
-            "balance": balance,
-            "pnl": pnl,
-            "equity": balance + pnl,
-            "open_positions": len(positions) if positions else 0,
-            "risk": risk
-        }
-
-    except Exception as e:
-        return {
-            "balance": 0,
-            "pnl": 0,
-            "equity": 0,
-            "open_positions": 0,
-            "risk": 0,
-            "error": str(e)
-        }
-
-
-# ==========================
-# 🧠 AI SCORE（★今回追加）
-# ==========================
+# --------------------------
+# AI SCORE
+# --------------------------
 @app.get("/api/ai/scores")
 def ai_scores(symbol: str):
     return []
+
+# --------------------------
+# FRONTEND
+# --------------------------
+app.mount(
+    "/",
+    StaticFiles(directory="react_dashboard/dist", html=True),
+    name="react"
+)
+
+# --------------------------
+# MAIN
+# --------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
