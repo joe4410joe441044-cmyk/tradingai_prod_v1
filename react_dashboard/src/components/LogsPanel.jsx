@@ -1,7 +1,7 @@
 // src/components/LogsPanel.jsx
 
 export default function LogsPanel({ logs }) {
-  // logsの型ゆれ対策（壊れ防止）
+  // logsの型ゆれ対策（壊れ防止�E�E
   const safeLogs = Array.isArray(logs)
     ? logs
     : typeof logs === "string"

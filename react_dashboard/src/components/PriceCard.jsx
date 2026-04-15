@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-const API_BASE = "http://34.85.66.137:8000";
+const API_BASE = "http://35.194.104.74:8000";
 
 export default function PriceCard() {
   const [price, setPrice] = useState(null);

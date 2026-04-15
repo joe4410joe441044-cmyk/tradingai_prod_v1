@@ -5,7 +5,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # --------------------------
-# ダミー or BOT連携用関数
+# ダミ�E or BOT連携用関数
 # --------------------------
 def get_balance():
     return 12000
@@ -24,7 +24,7 @@ def get_risk():
 
 
 # --------------------------
-# 統合API（UI用）
+# 統吁EPI�E�EI用�E�E
 # --------------------------
 @router.get("/getAssetSummary")
 def get_asset_summary():

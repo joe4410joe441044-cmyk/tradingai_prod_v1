@@ -6,9 +6,9 @@ from backend.bot_manager import BotManager
 
 app = FastAPI(title="TradingAI Backend")
 
-# --------------------------
+# =========================
 # CORS
-# --------------------------
+# =========================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -21,100 +21,83 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --------------------------
+# =========================
 # BOT CORE
-# --------------------------
+# =========================
 bot = BotManager()
 
-# --------------------------
+# =========================
 # STARTUP
-# --------------------------
+# =========================
 @app.on_event("startup")
 def startup():
     bot.start()
 
-# --------------------------
-# STATUS
-# --------------------------
-@app.get("/api/bot_status")
+# =========================
+# BOT CONTROL（統一API）
+# =========================
+
+@app.post("/api/bot/start")
+def start_bot():
+    return bot.start()
+
+@app.post("/api/bot/stop")
+def stop_bot():
+    return bot.stop()
+
+@app.get("/api/bot/status")
 def bot_status():
     return bot.get_status()
 
-# --------------------------
-# POSITIONS
-# --------------------------
-@app.get("/api/positions")
-def positions():
-    return bot.get_positions()
-
-# --------------------------
-# LOGS
-# --------------------------
-@app.get("/api/logs")
-def logs():
-    return {"logs": bot.get_logs()}
-
-# --------------------------
-# CONTROL
-# --------------------------
-@app.post("/api/bot/start")
-def start():
-    bot.start()
-    return {"status": "RUNNING"}
-
-@app.post("/api/bot/stop")
-def stop():
-    bot.stop()
-    return {"status": "STOPPED"}
-
-# --------------------------
-# PRICE
-# --------------------------
-@app.get("/price")
-def price():
-    return {"price": bot.get_price()}
-
-# --------------------------
-# PNL
-# --------------------------
-@app.get("/pnl")
-def pnl():
-    return {"pnl": bot.get_pnl()}
-
-# --------------------------
-# SUMMARY
-# --------------------------
-@app.get("/api/getAssetSummary")
-def summary():
-    positions = bot.get_positions()
-
+@app.get("/api/bot/summary")
+def bot_summary():
     return {
         "balance": 0,
         "pnl": bot.get_pnl(),
         "equity": 0,
-        "open_positions": len(positions),
+        "open_positions": len(bot.get_positions()),
         "risk": 0.3
     }
 
-# --------------------------
+# =========================
+# DATA API（統一整理）
+# =========================
+
+@app.get("/api/positions")
+def positions():
+    return bot.get_positions()
+
+@app.get("/api/logs")
+def logs():
+    return {"logs": bot.get_logs()}
+
+@app.get("/api/price")
+def price():
+    return {"price": bot.get_price()}
+
+@app.get("/api/pnl")
+def pnl():
+    return {"pnl": bot.get_pnl()}
+
+# =========================
 # AI SCORE
-# --------------------------
+# =========================
 @app.get("/api/ai/scores")
 def ai_scores(symbol: str):
     return []
 
-# --------------------------
-# FRONTEND
-# --------------------------
+# =========================
+# FRONTEND（React配信）
+# =========================
 app.mount(
     "/",
     StaticFiles(directory="react_dashboard/dist", html=True),
     name="react"
 )
 
-# --------------------------
+# =========================
 # MAIN
-# --------------------------
+# =========================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

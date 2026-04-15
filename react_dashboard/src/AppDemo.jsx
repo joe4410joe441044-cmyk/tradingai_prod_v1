@@ -4,7 +4,7 @@ export default function AppDemo() {
   const [running, setRunning] = useState(false);
   const [positions, setPositions] = useState([]);
 
-  // Bot Status 取得
+  // Bot Status 取征E
   const fetchStatus = async () => {
     try {
       const res = await fetch("http://127.0.0.1:8000/bot/status");
@@ -15,7 +15,7 @@ export default function AppDemo() {
     }
   };
 
-  // Summary 取得
+  // Summary 取征E
   const fetchSummary = async () => {
     try {
       const res = await fetch("http://127.0.0.1:8000/bot/summary");

@@ -17,23 +17,33 @@ class Position(BaseModel):
     pnl: float
     size: float
 
+
 class Log(BaseModel):
     id: int
     time: str
     type: str
     message: str
 
-class BotStatus(BaseModel):
-    running: bool
 
 # =========================
-# Bot 状態管理
+# ログ管理
 # =========================
-class BotState:
-    def __init__(self):
-        self.running = False
+logs_data: List[Log] = []
+MAX_LOGS = 100  # 最大保持数
 
-bot_state = BotState()
+
+def add_log(log_type: str, message: str):
+    logs_data.append({
+        "id": len(logs_data) + 1,
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "type": log_type,
+        "message": message
+    })
+
+    # 古いログを削除
+    if len(logs_data) > MAX_LOGS:
+        logs_data.pop(0)
+
 
 # =========================
 # Positions
@@ -52,6 +62,7 @@ def get_positions():
         }
     ]
 
+
 # =========================
 # Trade History（ダミー）
 # =========================
@@ -59,50 +70,10 @@ def get_positions():
 def get_history():
     return []
 
-# =========================
-# Logs（改善版）
-# =========================
-logs_data: List[Log] = []
-MAX_LOGS = 100  # 最大保持数
 
-def add_log(log_type: str, message: str):
-    logs_data.append({
-        "id": len(logs_data) + 1,
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "type": log_type,
-        "message": message
-    })
-    # 古いログを削除
-    if len(logs_data) > MAX_LOGS:
-        logs_data.pop(0)
-
+# =========================
+# Logs
+# =========================
 @router.get("/logs", response_model=List[Log])
 def get_logs():
     return logs_data
-
-# =========================
-# Bot Control（強化版）
-# =========================
-@router.post("/bot/start")
-def start_bot():
-    if bot_state.running:
-        add_log("WARN", "Bot already running")
-        return {"status": "already_running"}
-
-    bot_state.running = True
-    add_log("INFO", "Bot started")
-    return {"status": "started"}
-
-@router.post("/bot/stop")
-def stop_bot():
-    if not bot_state.running:
-        add_log("WARN", "Bot already stopped")
-        return {"status": "already_stopped"}
-
-    bot_state.running = False
-    add_log("INFO", "Bot stopped")
-    return {"status": "stopped"}
-
-@router.get("/bot/status", response_model=BotStatus)
-def get_status():
-    return {"running": bot_state.running}

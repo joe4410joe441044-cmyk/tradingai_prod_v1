@@ -5,7 +5,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
-// root要素の存在チェック付き（クラッシュ防止）
+// root要素の存在チェチE��付き�E�クラチE��ュ防止�E�E
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {

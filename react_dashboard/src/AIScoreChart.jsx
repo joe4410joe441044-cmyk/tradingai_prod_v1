@@ -1,7 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
 import { useEffect, useState } from "react";
 
-const API_BASE = "http://34.85.66.137:8000";
+const API_BASE = "http://35.194.104.74:8000";
 
 export default function AIScoreChart({ symbol }) {
 

@@ -4,14 +4,14 @@ export default function TestPositions() {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // データ取得 + 自動更新
+  // チE�Eタ取征E+ 自動更新
   useEffect(() => {
     const fetchPositions = async () => {
       try {
         const res = await fetch('/api/positions');
         const data = await res.json();
 
-        // 配列保証（安全対策）
+        // 配�E保証�E�安�E対策！E
         if (Array.isArray(data)) {
           setPositions(data);
         } else {

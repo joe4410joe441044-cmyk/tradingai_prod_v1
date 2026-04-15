@@ -9,7 +9,7 @@ export default function BalanceCard() {
   const [error, setError] = useState(false);
 
   // --------------------------
-  // BALANCE取得（API統一版）
+  // BALANCE取得！EPI統一版！E
   // --------------------------
   const fetchBalance = async () => {
     try {
@@ -18,7 +18,7 @@ export default function BalanceCard() {
 
       const data = await getBalance();
 
-      // 型ガード（API崩れ対策）
+      // 型ガード！EPI崩れ対策！E
       const normalized =
         typeof data === "number"
           ? data

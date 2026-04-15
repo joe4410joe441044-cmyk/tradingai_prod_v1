@@ -17,7 +17,7 @@ export default function AssetDashboard() {
   const [error, setError] = useState(false);
 
   // --------------------------
-  // 資産データ取得（統合API）
+  // 賁E��チE�Eタ取得（統吁EPI�E�E
   // --------------------------
   const fetchAsset = async () => {
     try {

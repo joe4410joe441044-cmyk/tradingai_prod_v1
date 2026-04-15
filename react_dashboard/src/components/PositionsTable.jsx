@@ -1,7 +1,7 @@
 // src/components/monitor/PositionsTable.jsx
 
 export default function PositionsTable({ positions, loading }) {
-  // 安全化（APIが壊れてても落とさない）
+  // 安�E化！EPIが壊れてても落とさなぁE��E
   const safePositions = Array.isArray(positions) ? positions : [];
 
   if (loading) return <div>Loading...</div>;
@@ -32,7 +32,7 @@ export default function PositionsTable({ positions, loading }) {
 
         <tbody>
           {safePositions.map((p, i) => {
-            // フォールバック整形（formatPositionが無くても動く）
+            // フォールバック整形�E�EormatPositionが無くても動く！E
             const f = {
               pair: p?.pair ?? "-",
               side: p?.side ?? "-",
@@ -70,7 +70,7 @@ export default function PositionsTable({ positions, loading }) {
 }
 
 // --------------------
-// style定義（見やすく統一）
+// style定義�E�見やすく統一�E�E
 // --------------------
 const th = {
   padding: "8px",

@@ -10,7 +10,7 @@ export default function App() {
   const [currentPrice, setCurrentPrice] = useState(null)
 
   // --------------------------
-  // データ取得用
+  // チE�Eタ取得用
   // --------------------------
   useEffect(() => {
     const controller = new AbortController()
@@ -19,22 +19,19 @@ export default function App() {
       try {
         setLoading(true)
 
-        // ポジション取得
-        const posRes = await fetch('http://localhost:8000/positions', {
+        // ポジション取征E        const posRes = await fetch('http://localhost:8000/positions', {
           signal: controller.signal
         })
         const posData = await posRes.json()
         setPositions(Array.isArray(posData) ? posData : [])
 
-        // Botステータス取得
-        const statusRes = await fetch('http://localhost:8000/bot_status', {
+        // BotスチE�Eタス取征E        const statusRes = await fetch('http://localhost:8000/bot_status', {
           signal: controller.signal
         })
         const statusData = await statusRes.json()
         setBotStatus(statusData)
 
-        // 現在価格は positions の最新価格で取得
-        if (posData.length > 0) {
+        // 現在価格は positions の最新価格で取征E        if (posData.length > 0) {
           setCurrentPrice(posData[posData.length - 1].current)
         } else {
           setCurrentPrice(null)
@@ -50,8 +47,7 @@ export default function App() {
       }
     }
 
-    // 初回取得
-    fetchData()
+    // 初回取征E    fetchData()
 
     // 5秒ごと更新
     const interval = setInterval(fetchData, 5000)
@@ -63,8 +59,7 @@ export default function App() {
   }, [])
 
   // --------------------------
-  // Bot操作
-  // --------------------------
+  // Bot操佁E  // --------------------------
   const startBot = async () => {
     try {
       await fetch('http://localhost:8000/bot/start', { method: 'POST' })
@@ -89,13 +84,13 @@ export default function App() {
   return (
     <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
       <div style={{ flex: 1 }}>
-        {/* 現在価格をPriceCardに渡す */}
+        {/* 現在価格をPriceCardに渡ぁE*/}
         <PriceCard currentPrice={currentPrice} />
 
         {/* ポジション表示 */}
         <PositionsTable positions={positions} loading={loading} />
 
-        {/* Bot操作ボタン */}
+        {/* Bot操作�Eタン */}
         <div style={{ marginTop: '20px' }}>
           <button onClick={startBot} disabled={botStatus.running} style={{ marginRight: '10px' }}>
             Start Bot

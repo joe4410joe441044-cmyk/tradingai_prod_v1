@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-// API層（新設）
+// API層�E�新設�E�E
 import {
   getBotStatus,
   getPositions,
@@ -18,7 +18,7 @@ export default function BotControl() {
   const [loading, setLoading] = useState(true);
 
   // --------------------------
-  // 全データ取得統合
+  // 全チE�Eタ取得統吁E
   // --------------------------
   const fetchAll = async () => {
     try {

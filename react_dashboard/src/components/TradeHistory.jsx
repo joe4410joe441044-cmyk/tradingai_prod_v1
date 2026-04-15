@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API_BASE = 'http://34.85.66.137:8000'
+const API_BASE = '/api'
 
 export default function TradeHistory() {
   const [logs, setLogs] = useState([])
@@ -8,7 +8,7 @@ export default function TradeHistory() {
   const [history, setHistory] = useState([])
 
   // --------------------------
-  // データ取得
+  // チE�Eタ取征E
   // --------------------------
   const fetchData = async () => {
     try {
@@ -29,7 +29,7 @@ export default function TradeHistory() {
 
       setBotStatus(statusData.running ? 'RUNNING' : 'STOPPED')
 
-      // trade_historyはVPSに無い可能性 → fallback
+      // trade_historyはVPSに無ぁE��能性 ↁEfallback
       setHistory([])
 
     } catch (err) {
@@ -49,7 +49,7 @@ export default function TradeHistory() {
   }, [])
 
   // --------------------------
-  // BOT操作（VPS仕様）
+  // BOT操作！EPS仕様！E
   // --------------------------
   const handleBotToggle = async () => {
     try {
@@ -93,7 +93,7 @@ export default function TradeHistory() {
         )}
       </div>
 
-      {/* HISTORY（将来拡張） */}
+      {/* HISTORY�E�封E��拡張�E�E*/}
       <div className="card">
         <h3>Trade History</h3>
         <p>{history.length === 0 ? 'No data' : JSON.stringify(history)}</p>

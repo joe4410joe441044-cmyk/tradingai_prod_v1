@@ -1,4 +1,4 @@
-const API_BASE = "http://34.85.66.137:8000";
+const API_BASE = "http://35.194.104.74:8000";
 
 // --------------------
 // BOT STATUS
@@ -10,7 +10,7 @@ export async function getBotStatus() {
 }
 
 // --------------------
-// BALANCE（新規追加）
+// BALANCE�E�新規追加�E�E
 // --------------------
 export async function getBalance() {
   const res = await fetch(`${API_BASE}/balance`);
@@ -21,7 +21,7 @@ export async function getBalance() {
 
   const data = await res.json();
 
-  // 安全化
+  // 安�E匁E
   return data?.balance ?? data ?? 0;
 }
 
@@ -37,7 +37,7 @@ export async function getPositions() {
 }
 
 // --------------------
-// LOGS（text → array変換まで吸収）
+// LOGS�E�Eext ↁEarray変換まで吸収！E
 // --------------------
 export async function getLogs() {
   const res = await fetch(`${API_BASE}/logs`);

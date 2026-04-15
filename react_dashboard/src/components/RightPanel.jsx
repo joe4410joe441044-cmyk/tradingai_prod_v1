@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API_BASE = 'http://34.85.66.137:8000'
+const API_BASE = '/api'
 
 export default function RightPanel() {
   const [status, setStatus] = useState('STOPPED')
@@ -8,7 +8,7 @@ export default function RightPanel() {
   const [loading, setLoading] = useState(true)
 
   // --------------------------
-  // データ取得
+  // チE�Eタ取征E
   // --------------------------
   const fetchData = async () => {
     try {
@@ -21,7 +21,7 @@ export default function RightPanel() {
 
       const statusData = await statusRes.json()
 
-      // logsはTEXTで受ける（重要修正）
+      // logsはTEXTで受ける（重要修正�E�E
       const logsText = await logsRes.text()
 
       setStatus(statusData.running ? 'RUNNING' : 'STOPPED')
@@ -43,7 +43,7 @@ export default function RightPanel() {
   }
 
   // --------------------------
-  // BOT操作（VPS仕様）
+  // BOT操作！EPS仕様！E
   // --------------------------
   const startBot = async () => {
     try {
