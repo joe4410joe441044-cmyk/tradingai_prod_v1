@@ -12,7 +12,7 @@ app = FastAPI(title="TradingAI Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://34.85.66.137",
+        "http://35.194.104.74",
         "http://localhost",
         "http://localhost:3000"
     ],
