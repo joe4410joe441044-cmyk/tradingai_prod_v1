@@ -40,7 +40,7 @@ bot = BotManager()
 
 @app.on_event("startup")
 def startup():
-bot.start()
+    bot.start()
 
 # =========================
 
