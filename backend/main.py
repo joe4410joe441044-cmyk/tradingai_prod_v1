@@ -91,7 +91,7 @@ def ai_scores(symbol: str):
 # =========================
 app.mount(
     "/",
-    StaticFiles(directory="react_dashboard/dist", html=True),
+    StaticFiles(directory="react_dashboard_dist", html=True),
     name="react"
 )
 
