@@ -3,23 +3,26 @@ import { useState, useEffect } from "react";
 const API_BASE = "http://35.194.104.74:8000";
 
 export default function PnLCard() {
-  const [pnl, setPnl] = useState(null);
+  const [pnl, setPnl] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const fetchPnL = async () => {
     try {
       setLoading(true);
+      setError(false);
 
       const res = await fetch(`${API_BASE}/positions`);
-      const data = await res.json();
 
-      if (!Array.isArray(data)) {
-        setPnl(0);
-        return;
+      if (!res.ok) {
+        throw new Error(`HTTP error: ${res.status}`);
       }
 
-      // 🔥 合訁EnL計箁E
-      const totalPnL = data.reduce((sum, p) => {
+      const data = await res.json();
+
+      const safeData = Array.isArray(data) ? data : [];
+
+      const totalPnL = safeData.reduce((sum, p) => {
         return sum + (Number(p.pnl) || 0);
       }, 0);
 
@@ -27,7 +30,8 @@ export default function PnLCard() {
 
     } catch (err) {
       console.error("PnL fetch error:", err);
-      setPnl("ERROR");
+      setError(true);
+      setPnl(0);
     } finally {
       setLoading(false);
     }
@@ -40,14 +44,26 @@ export default function PnLCard() {
     return () => clearInterval(interval);
   }, []);
 
-  const isPositive = typeof pnl === "number" && pnl >= 0;
+  // --------------------------
+  // 安全化（表示クラッシュ防止）
+  // --------------------------
+  const safePnL =
+    typeof pnl === "number" && !isNaN(pnl)
+      ? pnl
+      : 0;
+
+  const isPositive = safePnL >= 0;
 
   return (
     <div className="card">
       <h3>PnL</h3>
 
       <h2 style={{ color: isPositive ? "lime" : "red" }}>
-        {loading ? "Loading..." : pnl}
+        {loading
+          ? "Loading..."
+          : error
+            ? "ERROR"
+            : safePnL}
       </h2>
     </div>
   );

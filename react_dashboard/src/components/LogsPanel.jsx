@@ -1,36 +1,46 @@
-// src/components/LogsPanel.jsx
+import { useState, useEffect } from "react";
+import { API } from "../api";
 
-export default function LogsPanel({ logs }) {
-  // logsの型ゆれ対策（壊れ防止�E�E
-  const safeLogs = Array.isArray(logs)
-    ? logs
-    : typeof logs === "string"
-    ? [{ message: logs }]
-    : [];
+export default function LogsPanel() {
+  const [logs, setLogs] = useState([]);
+
+  const fetchData = async () => {
+    try {
+      const res = await fetch(API.logs());
+
+      if (!res.ok) {
+        console.error(await res.text());
+        return;
+      }
+
+      const data = await res.json();
+
+      setLogs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setLogs([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div>
       <h3>Logs</h3>
 
-      <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-        {safeLogs.length > 0 ? (
-          safeLogs.map((log, index) => (
-            <div
-              key={log.id ?? index}
-              style={{
-                fontSize: "12px",
-                padding: "2px 0",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              [{log.time ?? "-"}] {log.type ?? "INFO"} -{" "}
-              {log.message ?? log}
-            </div>
-          ))
-        ) : (
-          <p>No logs</p>
-        )}
-      </div>
+      {logs.length === 0 ? (
+        <p>No logs</p>
+      ) : (
+        <ul>
+          {logs.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

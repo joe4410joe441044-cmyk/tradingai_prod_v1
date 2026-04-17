@@ -1,15 +1,5 @@
-// src/components/BotControl.jsx
-
 import { useState, useEffect } from "react";
-
-// API螻､・域眠險ｭ・・
-import {
-  getBotStatus,
-  getPositions,
-  getLogs,
-  startBot,
-  stopBot
-} from "../api/bot";
+import { API } from "../api";
 
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
@@ -18,21 +8,26 @@ export default function BotControl() {
   const [loading, setLoading] = useState(true);
 
   // --------------------------
-  // 蜈ｨ繝・・繧ｿ蜿門ｾ礼ｵｱ蜷・
-  // --------------------------
   const fetchAll = async () => {
     try {
       setLoading(true);
 
-      const [s, p, l] = await Promise.all([
-        getBotStatus(),
-        getPositions(),
-        getLogs()
+      const [sRes, pRes, lRes] = await Promise.all([
+        fetch(API.botStatus()),
+        fetch(API.positions()),
+        fetch(API.logs()),
       ]);
 
-      setStatus(s);
-      setPositions(p);
-      setLogs(l);
+      const [s, p, l] = await Promise.all([
+        sRes.json(),
+        pRes.json(),
+        lRes.json(),
+      ]);
+
+      setStatus(s || { running: false });
+      setPositions(Array.isArray(p) ? p : []);
+      setLogs(Array.isArray(l) ? l : []);
+
     } catch (err) {
       console.error("BotControl fetch error:", err);
 
@@ -45,13 +40,29 @@ export default function BotControl() {
   };
 
   // --------------------------
+  const handleStart = async () => {
+    try {
+      await fetch(API.botStart(), { method: "POST" });
+      fetchAll();
+    } catch (err) {
+      console.error("Start error:", err);
+    }
+  };
+
+  const handleStop = async () => {
+    try {
+      await fetch(API.botStop(), { method: "POST" });
+      fetchAll();
+    } catch (err) {
+      console.error("Stop error:", err);
+    }
+  };
+
+  // --------------------------
   useEffect(() => {
     fetchAll();
 
-    const interval = setInterval(() => {
-      fetchAll();
-    }, 5000);
-
+    const interval = setInterval(fetchAll, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -69,16 +80,12 @@ export default function BotControl() {
           : "STOPPED"}
       </p>
 
-      <button onClick={startBot}>Start</button>
-      <button onClick={stopBot} style={{ marginLeft: "10px" }}>
+      <button onClick={handleStart}>Start</button>
+      <button onClick={handleStop} style={{ marginLeft: "10px" }}>
         Stop
       </button>
 
-      {/* ---------------------- */}
-      {/* POSITIONS */}
-      {/* ---------------------- */}
       <h4>Positions</h4>
-
       {positions.length === 0 ? (
         <p>No positions</p>
       ) : (
@@ -91,11 +98,7 @@ export default function BotControl() {
         </ul>
       )}
 
-      {/* ---------------------- */}
-      {/* LOGS */}
-      {/* ---------------------- */}
       <h4>Logs</h4>
-
       {logs.length === 0 ? (
         <p>No logs</p>
       ) : (
