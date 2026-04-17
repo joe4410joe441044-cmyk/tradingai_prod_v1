@@ -8,7 +8,7 @@ export default function RightPanel() {
   const [loading, setLoading] = useState(true)
 
   // --------------------------
-  // チE�Eタ取征E
+  // 郢昴・繝ｻ郢ｧ・ｿ陷ｿ髢・ｾ繝ｻ
   // --------------------------
   const fetchData = async () => {
     try {
@@ -21,7 +21,7 @@ export default function RightPanel() {
 
       const statusData = await statusRes.json()
 
-      // logsはTEXTで受ける（重要修正�E�E
+      // logs邵ｺ・ｯTEXT邵ｺ・ｧ陷ｿ蜉ｱ・郢ｧ蜈ｷ・ｼ逎ｯ纃ｾ髫補或・ｿ・ｮ雎・ｽ｣繝ｻ繝ｻ
       const logsText = await logsRes.text()
 
       setStatus(statusData.running ? 'RUNNING' : 'STOPPED')
@@ -43,7 +43,7 @@ export default function RightPanel() {
   }
 
   // --------------------------
-  // BOT操作！EPS仕様！E
+  // BOT隰ｫ蝣ｺ・ｽ諛ｶ・ｼ繝ｻPS闔牙｢難ｽｧ蛛・ｽｼ繝ｻ
   // --------------------------
   const startBot = async () => {
     try {

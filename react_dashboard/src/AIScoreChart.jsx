@@ -1,7 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
 import { useEffect, useState } from "react";
 
-const API_BASE = "http://35.194.104.74:8000";
+const API_BASE = "";
 
 export default function AIScoreChart({ symbol }) {
   const [data, setData] = useState([]);
@@ -18,7 +18,7 @@ export default function AIScoreChart({ symbol }) {
 
       const json = await res.json();
 
-      // FastAPIは単体オブジェクト返却前提
+      // FastAPI縺ｮ繝ｬ繧ｹ繝昴Φ繧ｹ縺九ｉ繧ｹ繧ｳ繧｢蜿門ｾ・
       const score = typeof json?.score === "number" ? json.score : 0;
 
       setData((prev) => {
@@ -27,14 +27,14 @@ export default function AIScoreChart({ symbol }) {
           ai_score: score,
         };
 
-        // 最新50件だけ保持（メモリ安全）
+        // 譛譁ｰ50莉ｶ縺縺台ｿ晄戟・医Γ繝｢繝ｪ蟇ｾ遲厄ｼ・
         const updated = [...prev, newPoint];
         return updated.slice(-50);
       });
     } catch (e) {
       console.error("AI score fetch error:", e);
 
-      // エラー時も落とさない
+      // 繧ｨ繝ｩ繝ｼ譎ゅ・0縺ｧ蝓九ａ繧・
       setData((prev) => {
         const newPoint = {
           time: new Date().toLocaleTimeString(),

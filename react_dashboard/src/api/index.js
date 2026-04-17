@@ -21,7 +21,7 @@ export const API = {
   logs: () => `${API_BASE}/api/logs`,
 
   // --------------------------
-  // Bot Control（ここが重要）
+  // Bot Control繝ｻ蛹ｻ・・ｸｺ阮吮ｲ鬩･蟠趣ｽｦ繝ｻ・ｼ繝ｻ
   // --------------------------
   botStatus: () => `${API_BASE}/api/bot/status`,
   botStart: () => `${API_BASE}/api/bot/start`,

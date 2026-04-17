@@ -17,7 +17,7 @@ export default function AssetDashboard() {
   const [error, setError] = useState(false);
 
   // --------------------------
-  // 賁E��チE�Eタ取得（統吁EPI�E�E
+  // 髮峨・閧・ｹ昴・繝ｻ郢ｧ・ｿ陷ｿ髢・ｾ證ｦ・ｼ閧ｲ・ｵ・ｱ陷ｷ繝ｻPI繝ｻ繝ｻ
   // --------------------------
   const fetchAsset = async () => {
     try {
@@ -42,7 +42,7 @@ export default function AssetDashboard() {
   };
 
   // --------------------------
-  // 初回 + 10秒更新
+  // 陋ｻ譎丞ｱ・+ 10驕伜争蟲ｩ隴・ｽｰ
   // --------------------------
   useEffect(() => {
     fetchAsset();
@@ -99,7 +99,7 @@ export default function AssetDashboard() {
       {/* STATUS */}
       {error && (
         <div className="error-bar">
-          ⚠ Asset API Error
+          隨橸｣ｰ Asset API Error
         </div>
       )}
 

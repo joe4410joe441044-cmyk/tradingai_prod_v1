@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-const API_BASE = "http://35.194.104.74:8000";
+const API_BASE = "";
 
 export default function PnLCard() {
   const [pnl, setPnl] = useState(0);
@@ -12,7 +12,7 @@ export default function PnLCard() {
       setLoading(true);
       setError(false);
 
-      const res = await fetch(`${API_BASE}/positions`);
+      const res = await fetch(`${API_BASE}/api/positions`);
 
       if (!res.ok) {
         throw new Error(`HTTP error: ${res.status}`);
@@ -45,7 +45,7 @@ export default function PnLCard() {
   }, []);
 
   // --------------------------
-  // 安全化（表示クラッシュ防止）
+  // 陦ｨ遉ｺ逕ｨ縺ｮ螳牙・蜃ｦ逅・
   // --------------------------
   const safePnL =
     typeof pnl === "number" && !isNaN(pnl)

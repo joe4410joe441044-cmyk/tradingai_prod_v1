@@ -4,14 +4,14 @@ export default function TestPositions() {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // チE�Eタ取征E+ 自動更新
+  // 郢昴・繝ｻ郢ｧ・ｿ陷ｿ髢・ｾ繝ｻ+ 髢ｾ・ｪ陷榊｢灘ｳｩ隴・ｽｰ
   useEffect(() => {
     const fetchPositions = async () => {
       try {
         const res = await fetch('/api/positions');
         const data = await res.json();
 
-        // 配�E保証�E�安�E対策！E
+        // 鬩滓ｦ翫・闖ｫ譎・ｽｨ・ｼ繝ｻ莠･・ｮ迚吶・陝・ｽｾ驕ｲ蜴・ｽｼ繝ｻ
         if (Array.isArray(data)) {
           setPositions(data);
         } else {

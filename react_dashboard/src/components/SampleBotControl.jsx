@@ -1,7 +1,7 @@
 // src/components/SampleBotControl.jsx
 import React, { useState } from "react";
 
-const API_BASE = "http://35.194.104.74:8000";
+const API_BASE = "";
 
 export default function SampleBotControl() {
   const [status, setStatus] = useState(null);
@@ -19,7 +19,7 @@ export default function SampleBotControl() {
 
       const data = await res.json();
 
-      // 安�Eに整形�E�壊れてても落ちなぁE��E
+      // 陞ｳ莨夲ｽｿ・ｽE邵ｺ・ｫ隰ｨ・ｴ陟厄ｽ｢繝ｻ・ｽE繝ｻ・ｽ陞｢鄙ｫ・檎ｸｺ・ｦ邵ｺ・ｦ郢ｧ繧願ｪ邵ｺ・｡邵ｺ・ｪ邵ｺ繝ｻ繝ｻ・ｽ繝ｻ・ｽE
       setStatus({
         running: data?.running ?? false,
         raw: data,
@@ -27,7 +27,7 @@ export default function SampleBotControl() {
 
     } catch (err) {
       console.error("Bot status error:", err);
-      setStatus({ error: "接続失敁E/ API未起勁E });
+      setStatus({ error: "隰暦ｽ･驍ｯ螢ｼ・､・ｱ隰ｨ繝ｻ/ API隴幢ｽｪ隘搾ｽｷ陷阪・ });
     } finally {
       setLoading(false);
     }
@@ -38,7 +38,7 @@ export default function SampleBotControl() {
       <h3>Sample BOT Status</h3>
 
       <button onClick={checkBotStatus} disabled={loading}>
-        {loading ? "error" : "状態確誁E}
+        {loading ? "error" : "霑･・ｶ隲ｷ迢暦ｽ｢・ｺ髫ｱ繝ｻ}
       </button>
 
       <div style={{ marginTop: "10px" }}>
@@ -47,7 +47,7 @@ export default function SampleBotControl() {
             {JSON.stringify(status, null, 2)}
           </pre>
         ) : (
-          <p>ここにBOT状態が表示されまぁE/p>
+          <p>邵ｺ阮呻ｼ・ｸｺ・ｫBOT霑･・ｶ隲ｷ荵昶ｲ髯ｦ・ｨ驕会ｽｺ邵ｺ霈費ｽ檎ｸｺ・ｾ邵ｺ繝ｻ/p>
         )}
       </div>
     </div>

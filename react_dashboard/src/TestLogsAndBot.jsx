@@ -4,14 +4,14 @@ export default function TestLogsAndBot() {
   const [logs, setLogs] = useState([]);
   const [botStatus, setBotStatus] = useState('STOPPED');
 
-  // Logs & Bot Status 取征E
+  // Logs & Bot Status 陷ｿ髢・ｾ繝ｻ
   useEffect(() => {
     const fetchLogs = async () => {
       try {
         const res = await fetch('/api/logs');
-        const text = await res.text(); // ↁEHTML対筁E
+        const text = await res.text(); // 遶翫・HTML陝・ｽｾ驕ｲ繝ｻ
 
-        // 改行で配�E匁E
+        // 隰ｾ・ｹ髯ｦ蠕後帝ｩ滓ｦ翫・陋ｹ繝ｻ
         const logArray = text.split('\n').filter(line => line.trim() !== '');
         setLogs(logArray);
       } catch (err) {
@@ -46,7 +46,7 @@ export default function TestLogsAndBot() {
 
     try {
       await fetch(`/api/${action}`);
-      // 再取征E
+      // 陷讎雁徐陟輔・
       const res = await fetch('/api/bot_status');
       const data = await res.json();
       setBotStatus(data.status);
