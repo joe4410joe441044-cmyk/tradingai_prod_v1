@@ -5,11 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "set PORT=5173 && vite",
-
-    "// ⚠️ 本番ビルド（重要：distをVPS用フォルダへ反映）": "",
-
-    "build": "vite build && node scripts/sync_dist.js",
-
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
