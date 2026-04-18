@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index"; // ← 修正
 
 export default function LogsPanel() {
   const [logs, setLogs] = useState([]);
@@ -15,7 +15,8 @@ export default function LogsPanel() {
 
       const data = await res.json();
 
-      setLogs(Array.isArray(data) ? data : []);
+      // 安全化
+      setLogs(data?.logs ?? data ?? []);
     } catch (err) {
       console.error(err);
       setLogs([]);
@@ -37,7 +38,9 @@ export default function LogsPanel() {
       ) : (
         <ul>
           {logs.map((l, i) => (
-            <li key={i}>{l}</li>
+            <li key={i}>
+              {typeof l === "string" ? l : JSON.stringify(l)}
+            </li>
           ))}
         </ul>
       )}

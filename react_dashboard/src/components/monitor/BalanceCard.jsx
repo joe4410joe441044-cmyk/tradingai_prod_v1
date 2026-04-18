@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { API } from "../api";
+﻿import { useState, useEffect } from "react";
+import { API } from "../../api/index";
 
 export default function BalanceCard() {
   const [balance, setBalance] = useState(0);
@@ -7,8 +7,6 @@ export default function BalanceCard() {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-
       const res = await fetch(API.balance());
 
       if (!res.ok) {
@@ -29,6 +27,9 @@ export default function BalanceCard() {
 
   useEffect(() => {
     fetchData();
+
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   return (

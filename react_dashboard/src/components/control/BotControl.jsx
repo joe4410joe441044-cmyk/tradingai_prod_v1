@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index"; // ← 修正ポイント
 
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
@@ -7,6 +7,8 @@ export default function BotControl() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // --------------------------
+  // データ取得（統合）
   // --------------------------
   const fetchAll = async () => {
     try {
@@ -19,14 +21,17 @@ export default function BotControl() {
       ]);
 
       const [s, p, l] = await Promise.all([
-        sRes.json(),
-        pRes.json(),
-        lRes.json(),
+        sRes.ok ? sRes.json() : null,
+        pRes.ok ? pRes.json() : null,
+        lRes.ok ? lRes.json() : null,
       ]);
 
-      setStatus(s || { running: false });
-      setPositions(Array.isArray(p) ? p : []);
-      setLogs(Array.isArray(l) ? l : []);
+      setStatus(s ?? { running: false });
+
+      // 安全化（FastAPI想定：配列 or {logs: []} 両対応）
+      setPositions(Array.isArray(p) ? p : p?.positions ?? []);
+
+      setLogs(Array.isArray(l) ? l : l?.logs ?? []);
 
     } catch (err) {
       console.error("BotControl fetch error:", err);
@@ -40,24 +45,37 @@ export default function BotControl() {
   };
 
   // --------------------------
+  // Bot Start
+  // --------------------------
   const handleStart = async () => {
     try {
-      await fetch(API.botStart(), { method: "POST" });
+      const res = await fetch(API.botStart(), { method: "POST" });
+
+      if (!res.ok) throw new Error("Failed to start bot");
+
       fetchAll();
     } catch (err) {
       console.error("Start error:", err);
     }
   };
 
+  // --------------------------
+  // Bot Stop
+  // --------------------------
   const handleStop = async () => {
     try {
-      await fetch(API.botStop(), { method: "POST" });
+      const res = await fetch(API.botStop(), { method: "POST" });
+
+      if (!res.ok) throw new Error("Failed to stop bot");
+
       fetchAll();
     } catch (err) {
       console.error("Stop error:", err);
     }
   };
 
+  // --------------------------
+  // 初期ロード + ポーリング
   // --------------------------
   useEffect(() => {
     fetchAll();
@@ -66,6 +84,8 @@ export default function BotControl() {
     return () => clearInterval(interval);
   }, []);
 
+  // --------------------------
+  // UI
   // --------------------------
   return (
     <div style={{ marginTop: "20px" }}>
@@ -104,7 +124,9 @@ export default function BotControl() {
       ) : (
         <ul>
           {logs.map((l, i) => (
-            <li key={i}>{l}</li>
+            <li key={i}>
+              {typeof l === "string" ? l : JSON.stringify(l)}
+            </li>
           ))}
         </ul>
       )}

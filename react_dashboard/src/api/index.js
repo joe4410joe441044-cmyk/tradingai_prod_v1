@@ -1,29 +1,39 @@
 const API_BASE = process.env.REACT_APP_API_BASE || "";
 
+// --------------------------
+// パス結合ヘルパー（事故防止）
+// --------------------------
+const join = (path) => `${API_BASE}${path}`;
+
 export const API = {
   // --------------------------
   // Market Data
   // --------------------------
-  price: () => `${API_BASE}/api/price`,
-  balance: () => `${API_BASE}/api/balance`,
-  positions: () => `${API_BASE}/api/positions`,
-  trades: () => `${API_BASE}/api/trades`,
+  price: () => join("/api/price"),
+  balance: () => join("/api/balance"),
+  positions: () => join("/api/positions"),
+  trades: () => join("/api/trades"),
 
   // --------------------------
   // AI / Analysis
   // --------------------------
   scores: (symbol = "BTCUSDT") =>
-    `${API_BASE}/api/ai/scores?symbol=${symbol}`,
+    join(`/api/ai/scores?symbol=${symbol}`),
 
   // --------------------------
   // System Logs
   // --------------------------
-  logs: () => `${API_BASE}/api/logs`,
+  logs: () => join("/api/logs"),
 
   // --------------------------
-  // Bot Control繝ｻ蛹ｻ・・ｸｺ阮吮ｲ鬩･蟠趣ｽｦ繝ｻ・ｼ繝ｻ
+  // Bot Control / System Control
   // --------------------------
-  botStatus: () => `${API_BASE}/api/bot/status`,
-  botStart: () => `${API_BASE}/api/bot/start`,
-  botStop: () => `${API_BASE}/api/bot/stop`,
+  botStatus: () => join("/api/bot/status"),
+  botStart: () => join("/api/bot/start"),
+  botStop: () => join("/api/bot/stop"),
+
+  // --------------------------
+  // Asset / Summary（bot.js統合済み）
+  // --------------------------
+  summary: () => join("/api/bot/summary"),
 };

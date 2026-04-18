@@ -1,16 +1,13 @@
-import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
+﻿import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
 import { useEffect, useState } from "react";
-
-const API_BASE = "";
+import { API } from "./api";
 
 export default function AIScoreChart({ symbol }) {
   const [data, setData] = useState([]);
 
   const load = async () => {
     try {
-      const res = await fetch(
-        `${API_BASE}/api/ai/scores?symbol=${symbol}`
-      );
+      const res = await fetch(API.scores(symbol));
 
       if (!res.ok) {
         throw new Error(`HTTP error: ${res.status}`);
@@ -18,7 +15,7 @@ export default function AIScoreChart({ symbol }) {
 
       const json = await res.json();
 
-      // FastAPI縺ｮ繝ｬ繧ｹ繝昴Φ繧ｹ縺九ｉ繧ｹ繧ｳ繧｢蜿門ｾ・
+      // score取得（安全化）
       const score = typeof json?.score === "number" ? json.score : 0;
 
       setData((prev) => {
@@ -27,14 +24,12 @@ export default function AIScoreChart({ symbol }) {
           ai_score: score,
         };
 
-        // 譛譁ｰ50莉ｶ縺縺台ｿ晄戟・医Γ繝｢繝ｪ蟇ｾ遲厄ｼ・
         const updated = [...prev, newPoint];
         return updated.slice(-50);
       });
     } catch (e) {
       console.error("AI score fetch error:", e);
 
-      // 繧ｨ繝ｩ繝ｼ譎ゅ・0縺ｧ蝓九ａ繧・
       setData((prev) => {
         const newPoint = {
           time: new Date().toLocaleTimeString(),

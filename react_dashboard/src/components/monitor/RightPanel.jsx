@@ -1,30 +1,26 @@
 import { useState, useEffect } from 'react'
-
-const API_BASE = '/api'
+import { API } from "../../api";
 
 export default function RightPanel() {
   const [status, setStatus] = useState('STOPPED')
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // --------------------------
-  // 郢昴・繝ｻ郢ｧ・ｿ陷ｿ髢・ｾ繝ｻ
-  // --------------------------
   const fetchData = async () => {
     try {
-      setLoading(true)
-
       const [statusRes, logsRes] = await Promise.all([
-        fetch(`${API_BASE}/bot_status`),
-        fetch(`${API_BASE}/logs`)
+        fetch(API.botStatus()),
+        fetch(API.logs())
       ])
 
-      const statusData = await statusRes.json()
+      if (!statusRes.ok) {
+        setStatus('ERROR')
+      } else {
+        const statusData = await statusRes.json()
+        setStatus(statusData?.running ? 'RUNNING' : 'STOPPED')
+      }
 
-      // logs邵ｺ・ｯTEXT邵ｺ・ｧ陷ｿ蜉ｱ・郢ｧ蜈ｷ・ｼ逎ｯ纃ｾ髫補或・ｿ・ｮ雎・ｽ｣繝ｻ繝ｻ
-      const logsText = await logsRes.text()
-
-      setStatus(statusData.running ? 'RUNNING' : 'STOPPED')
+      const logsText = logsRes.ok ? await logsRes.text() : ""
 
       const parsedLogs = logsText
         .split('\n')
@@ -42,12 +38,9 @@ export default function RightPanel() {
     }
   }
 
-  // --------------------------
-  // BOT隰ｫ蝣ｺ・ｽ諛ｶ・ｼ繝ｻPS闔牙｢難ｽｧ蛛・ｽｼ繝ｻ
-  // --------------------------
   const startBot = async () => {
     try {
-      await fetch(`${API_BASE}/start`)
+      await fetch(API.botStart(), { method: "POST" })
       fetchData()
     } catch (err) {
       console.error(err)
@@ -56,21 +49,19 @@ export default function RightPanel() {
 
   const stopBot = async () => {
     try {
-      await fetch(`${API_BASE}/stop`)
+      await fetch(API.botStop(), { method: "POST" })
       fetchData()
     } catch (err) {
       console.error(err)
     }
   }
 
-  // --------------------------
   useEffect(() => {
     fetchData()
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
   }, [])
 
-  // --------------------------
   return (
     <div>
       <h3>Bot Status</h3>

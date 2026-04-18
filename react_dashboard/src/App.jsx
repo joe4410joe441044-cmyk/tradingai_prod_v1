@@ -1,53 +1,88 @@
 import { useEffect, useState } from "react";
 
-import BalanceCard from "./components/BalanceCard";
-import PnLCard from "./components/PnLCard";
-
-const API_BASE = "";
+import BalanceCard from "./components/monitor/BalanceCard";
+import PnLCard from "./components/monitor/PnLCard";
+import { API } from "./api";
 
 export default function App() {
   const [status, setStatus] = useState("loading");
   const [price, setPrice] = useState(0);
 
+  // --------------------------
+  // 初期データ取得（統一API）
+  // --------------------------
   useEffect(() => {
-    fetch(`${API_BASE}/api/bot/status`)
-      .then(res => res.json())
-      .then(data => setStatus(data?.status ?? "error"))
-      .catch(() => setStatus("error"));
+    const fetchData = async () => {
+      try {
+        const [statusRes, priceRes] = await Promise.all([
+          fetch(API.botStatus()),
+          fetch(API.price()),
+        ]);
 
-    fetch(`${API_BASE}/api/price`)
-      .then(res => res.json())
-      .then(data => setPrice(data?.price ?? 0))
-      .catch(() => setPrice(0));
+        const statusData = statusRes.ok ? await statusRes.json() : null;
+        const priceData = priceRes.ok ? await priceRes.json() : null;
+
+        setStatus(statusData?.status ?? "error");
+        setPrice(priceData?.price ?? 0);
+
+      } catch (err) {
+        console.error(err);
+        setStatus("error");
+        setPrice(0);
+      }
+    };
+
+    fetchData();
   }, []);
 
-  const startBot = () => {
-    fetch(`${API_BASE}/api/bot/start`, { method: "POST" })
-      .then(() => setStatus("STARTING"))
-      .catch(() => setStatus("error"));
+  // --------------------------
+  // BOT START
+  // --------------------------
+  const startBot = async () => {
+    try {
+      const res = await fetch(API.botStart(), { method: "POST" });
+
+      if (!res.ok) throw new Error("Start failed");
+
+      setStatus("STARTING");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+    }
   };
 
-  const stopBot = () => {
-    fetch(`${API_BASE}/api/bot/stop`, { method: "POST" })
-      .then(() => setStatus("STOPPING"))
-      .catch(() => setStatus("error"));
+  // --------------------------
+  // BOT STOP
+  // --------------------------
+  const stopBot = async () => {
+    try {
+      const res = await fetch(API.botStop(), { method: "POST" });
+
+      if (!res.ok) throw new Error("Stop failed");
+
+      setStatus("STOPPING");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+    }
   };
 
+  // --------------------------
   return (
     <div style={{ padding: "20px" }}>
       <h1>TradingAI Dashboard</h1>
 
-      {/* ?? 蝓ｺ譛ｬ諠・ｱ */}
+      {/* 基本情報 */}
       <p>Status: {status}</p>
       <p>Price: {price}</p>
 
-      {/* ?? 繧ｫ繝ｼ繝臥ｾ､・医％縺薙′驥崎ｦ・ｼ・*/}
+      {/* カード群 */}
       <div style={{ display: "grid", gap: "20px", marginTop: "20px" }}>
         <BalanceCard />
         <PnLCard />
       </div>
 
-      {/* 謫堺ｽ懊・繧ｿ繝ｳ */}
+      {/* ボタン */}
       <div style={{ marginTop: "20px" }}>
         <button onClick={startBot}>Start Bot</button>
         <button onClick={stopBot}>Stop Bot</button>
