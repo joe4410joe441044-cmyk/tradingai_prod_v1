@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index"; // ← 修正
 
 export default function PriceCard() {
   const [price, setPrice] = useState(0);

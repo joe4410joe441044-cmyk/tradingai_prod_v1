@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import BalanceCard from "./components/BalanceCard";
-import PnLCard from "./components/PnLCard";
+import BalanceCard from "./components/monitor/BalanceCard";
+import PnLCard from "./components/monitor/PnLCard";
 import { API } from "./api";
 
 export default function App() {

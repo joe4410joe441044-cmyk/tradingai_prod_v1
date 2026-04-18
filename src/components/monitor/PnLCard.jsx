@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index";
 
 export default function PnLCard() {
   const [pnl, setPnl] = useState(0);
@@ -13,9 +13,7 @@ export default function PnLCard() {
 
       const res = await fetch(API.positions());
 
-      if (!res.ok) {
-        throw new Error(`HTTP error: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
 
       const data = await res.json();
 
@@ -43,13 +41,8 @@ export default function PnLCard() {
     return () => clearInterval(interval);
   }, []);
 
-  // --------------------------
-  // 表示用
-  // --------------------------
   const safePnL =
-    typeof pnl === "number" && !isNaN(pnl)
-      ? pnl
-      : 0;
+    typeof pnl === "number" && !isNaN(pnl) ? pnl : 0;
 
   const isPositive = safePnL >= 0;
 
@@ -58,12 +51,10 @@ export default function PnLCard() {
       <h3>PnL</h3>
 
       <h2 style={{ color: isPositive ? "lime" : "red" }}>
-        {loading
-          ? "Loading..."
-          : error
-            ? "ERROR"
-            : safePnL}
+        {loading ? "Loading..." : error ? "ERROR" : safePnL}
       </h2>
+
+      {error && <p style={{ color: "red" }}>Fetch error</p>}
     </div>
   );
 }

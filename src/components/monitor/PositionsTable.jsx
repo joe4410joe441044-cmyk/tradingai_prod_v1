@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index";
 
 export default function PositionsTable() {
   const [positions, setPositions] = useState([]);
@@ -15,7 +15,8 @@ export default function PositionsTable() {
 
       const data = await res.json();
 
-      setPositions(Array.isArray(data) ? data : []);
+      // 安全化
+      setPositions(data?.positions ?? data ?? []);
     } catch (err) {
       console.error(err);
       setPositions([]);
@@ -24,6 +25,9 @@ export default function PositionsTable() {
 
   useEffect(() => {
     fetchData();
+
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   return (

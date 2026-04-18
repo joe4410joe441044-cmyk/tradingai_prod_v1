@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API } from "../../api/index"; // ← 修正ポイント
 
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
@@ -20,16 +20,18 @@ export default function BotControl() {
         fetch(API.logs()),
       ]);
 
-      // JSON安全化（壊れ防止）
       const [s, p, l] = await Promise.all([
         sRes.ok ? sRes.json() : null,
         pRes.ok ? pRes.json() : null,
         lRes.ok ? lRes.json() : null,
       ]);
 
-      setStatus(s || { running: false });
-      setPositions(Array.isArray(p) ? p : []);
-      setLogs(Array.isArray(l) ? l : []);
+      setStatus(s ?? { running: false });
+
+      // 安全化（FastAPI想定：配列 or {logs: []} 両対応）
+      setPositions(Array.isArray(p) ? p : p?.positions ?? []);
+
+      setLogs(Array.isArray(l) ? l : l?.logs ?? []);
 
     } catch (err) {
       console.error("BotControl fetch error:", err);
@@ -49,9 +51,7 @@ export default function BotControl() {
     try {
       const res = await fetch(API.botStart(), { method: "POST" });
 
-      if (!res.ok) {
-        throw new Error("Failed to start bot");
-      }
+      if (!res.ok) throw new Error("Failed to start bot");
 
       fetchAll();
     } catch (err) {
@@ -66,9 +66,7 @@ export default function BotControl() {
     try {
       const res = await fetch(API.botStop(), { method: "POST" });
 
-      if (!res.ok) {
-        throw new Error("Failed to stop bot");
-      }
+      if (!res.ok) throw new Error("Failed to stop bot");
 
       fetchAll();
     } catch (err) {
@@ -86,6 +84,8 @@ export default function BotControl() {
     return () => clearInterval(interval);
   }, []);
 
+  // --------------------------
+  // UI
   // --------------------------
   return (
     <div style={{ marginTop: "20px" }}>
@@ -124,7 +124,9 @@ export default function BotControl() {
       ) : (
         <ul>
           {logs.map((l, i) => (
-            <li key={i}>{l}</li>
+            <li key={i}>
+              {typeof l === "string" ? l : JSON.stringify(l)}
+            </li>
           ))}
         </ul>
       )}
