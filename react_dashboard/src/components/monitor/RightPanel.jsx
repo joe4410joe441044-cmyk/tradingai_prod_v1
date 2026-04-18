@@ -6,21 +6,24 @@ export default function RightPanel() {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // --------------------------
+  // データ取得（統一API版）
+  // --------------------------
   const fetchData = async () => {
     try {
+      setLoading(true)
+
       const [statusRes, logsRes] = await Promise.all([
         fetch(API.botStatus()),
         fetch(API.logs())
       ])
 
-      if (!statusRes.ok) {
-        setStatus('ERROR')
-      } else {
-        const statusData = await statusRes.json()
-        setStatus(statusData?.running ? 'RUNNING' : 'STOPPED')
-      }
+      const statusData = statusRes.ok ? await statusRes.json() : null
 
+      // logsはテキスト形式維持（互換性優先）
       const logsText = logsRes.ok ? await logsRes.text() : ""
+
+      setStatus(statusData?.running ? 'RUNNING' : 'STOPPED')
 
       const parsedLogs = logsText
         .split('\n')
@@ -38,6 +41,9 @@ export default function RightPanel() {
     }
   }
 
+  // --------------------------
+  // BOT START（統一API）
+  // --------------------------
   const startBot = async () => {
     try {
       await fetch(API.botStart(), { method: "POST" })
@@ -47,6 +53,9 @@ export default function RightPanel() {
     }
   }
 
+  // --------------------------
+  // BOT STOP（統一API）
+  // --------------------------
   const stopBot = async () => {
     try {
       await fetch(API.botStop(), { method: "POST" })
@@ -56,12 +65,14 @@ export default function RightPanel() {
     }
   }
 
+  // --------------------------
   useEffect(() => {
     fetchData()
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
   }, [])
 
+  // --------------------------
   return (
     <div>
       <h3>Bot Status</h3>
