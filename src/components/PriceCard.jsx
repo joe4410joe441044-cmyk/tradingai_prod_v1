@@ -1,50 +1,37 @@
 import { useState, useEffect } from "react";
-
-const API_BASE = "http://35.194.104.74:8000";
+import { API } from "../api";
 
 export default function PriceCard() {
-  const [price, setPrice] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [price, setPrice] = useState(0);
 
-  const fetchPrice = async () => {
+  const fetchData = async () => {
     try {
-      setLoading(true);
+      const res = await fetch(API.price());
 
-      const res = await fetch(`${API_BASE}/positions`);
-      const data = await res.json();
-
-      if (!Array.isArray(data) || data.length === 0) {
-        setPrice(null);
+      if (!res.ok) {
+        console.error(await res.text());
         return;
       }
 
-      // 🔥 最新ポジションの価格を使用
-      const latest = data[data.length - 1];
+      const data = await res.json();
 
-      setPrice(latest.mark_price ?? latest.entry_price ?? 0);
-
+      setPrice(data?.price ?? 0);
     } catch (err) {
-      console.error("Price fetch error:", err);
-      setPrice("ERROR");
-    } finally {
-      setLoading(false);
+      console.error("PriceCard error:", err);
+      setPrice(0);
     }
   };
 
   useEffect(() => {
-    fetchPrice();
-
-    const interval = setInterval(fetchPrice, 10000);
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="card">
+    <div>
       <h3>Price</h3>
-
-      <h2>
-        {loading ? "Loading..." : price}
-      </h2>
+      <p>{price}</p>
     </div>
   );
 }

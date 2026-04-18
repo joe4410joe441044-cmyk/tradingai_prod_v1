@@ -1,7 +1,5 @@
-// src/components/SampleBotControl.jsx
 import React, { useState } from "react";
-
-const API_BASE = "http://35.194.104.74:8000";
+import { API } from "../api";
 
 export default function SampleBotControl() {
   const [status, setStatus] = useState(null);
@@ -11,7 +9,7 @@ export default function SampleBotControl() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/bot_status`);
+      const res = await fetch(API.botStatus());
 
       if (!res.ok) {
         throw new Error("API Error");
@@ -19,7 +17,6 @@ export default function SampleBotControl() {
 
       const data = await res.json();
 
-      // 安�Eに整形�E�壊れてても落ちなぁE��E
       setStatus({
         running: data?.running ?? false,
         raw: data,
@@ -27,7 +24,11 @@ export default function SampleBotControl() {
 
     } catch (err) {
       console.error("Bot status error:", err);
-      setStatus({ error: "接続失敁E/ API未起勁E });
+
+      setStatus({
+        error: "API接続エラー",
+      });
+
     } finally {
       setLoading(false);
     }
@@ -38,7 +39,7 @@ export default function SampleBotControl() {
       <h3>Sample BOT Status</h3>
 
       <button onClick={checkBotStatus} disabled={loading}>
-        {loading ? "error" : "状態確誁E}
+        {loading ? "Loading..." : "Check Status"}
       </button>
 
       <div style={{ marginTop: "10px" }}>
@@ -47,7 +48,7 @@ export default function SampleBotControl() {
             {JSON.stringify(status, null, 2)}
           </pre>
         ) : (
-          <p>ここにBOT状態が表示されまぁE/p>
+          <p>Click button to check bot status</p>
         )}
       </div>
     </div>

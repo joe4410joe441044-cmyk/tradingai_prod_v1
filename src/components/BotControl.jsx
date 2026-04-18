@@ -1,15 +1,5 @@
-// src/components/BotControl.jsx
-
 import { useState, useEffect } from "react";
-
-// API層�E�新設�E�E
-import {
-  getBotStatus,
-  getPositions,
-  getLogs,
-  startBot,
-  stopBot
-} from "../api/bot";
+import { API } from "../api";
 
 export default function BotControl() {
   const [status, setStatus] = useState({ running: false });
@@ -18,21 +8,29 @@ export default function BotControl() {
   const [loading, setLoading] = useState(true);
 
   // --------------------------
-  // 全チE�Eタ取得統吁E
+  // データ取得（統合）
   // --------------------------
   const fetchAll = async () => {
     try {
       setLoading(true);
 
-      const [s, p, l] = await Promise.all([
-        getBotStatus(),
-        getPositions(),
-        getLogs()
+      const [sRes, pRes, lRes] = await Promise.all([
+        fetch(API.botStatus()),
+        fetch(API.positions()),
+        fetch(API.logs()),
       ]);
 
-      setStatus(s);
-      setPositions(p);
-      setLogs(l);
+      // JSON安全化（壊れ防止）
+      const [s, p, l] = await Promise.all([
+        sRes.ok ? sRes.json() : null,
+        pRes.ok ? pRes.json() : null,
+        lRes.ok ? lRes.json() : null,
+      ]);
+
+      setStatus(s || { running: false });
+      setPositions(Array.isArray(p) ? p : []);
+      setLogs(Array.isArray(l) ? l : []);
+
     } catch (err) {
       console.error("BotControl fetch error:", err);
 
@@ -45,13 +43,46 @@ export default function BotControl() {
   };
 
   // --------------------------
+  // Bot Start
+  // --------------------------
+  const handleStart = async () => {
+    try {
+      const res = await fetch(API.botStart(), { method: "POST" });
+
+      if (!res.ok) {
+        throw new Error("Failed to start bot");
+      }
+
+      fetchAll();
+    } catch (err) {
+      console.error("Start error:", err);
+    }
+  };
+
+  // --------------------------
+  // Bot Stop
+  // --------------------------
+  const handleStop = async () => {
+    try {
+      const res = await fetch(API.botStop(), { method: "POST" });
+
+      if (!res.ok) {
+        throw new Error("Failed to stop bot");
+      }
+
+      fetchAll();
+    } catch (err) {
+      console.error("Stop error:", err);
+    }
+  };
+
+  // --------------------------
+  // 初期ロード + ポーリング
+  // --------------------------
   useEffect(() => {
     fetchAll();
 
-    const interval = setInterval(() => {
-      fetchAll();
-    }, 5000);
-
+    const interval = setInterval(fetchAll, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -69,16 +100,12 @@ export default function BotControl() {
           : "STOPPED"}
       </p>
 
-      <button onClick={startBot}>Start</button>
-      <button onClick={stopBot} style={{ marginLeft: "10px" }}>
+      <button onClick={handleStart}>Start</button>
+      <button onClick={handleStop} style={{ marginLeft: "10px" }}>
         Stop
       </button>
 
-      {/* ---------------------- */}
-      {/* POSITIONS */}
-      {/* ---------------------- */}
       <h4>Positions</h4>
-
       {positions.length === 0 ? (
         <p>No positions</p>
       ) : (
@@ -91,11 +118,7 @@ export default function BotControl() {
         </ul>
       )}
 
-      {/* ---------------------- */}
-      {/* LOGS */}
-      {/* ---------------------- */}
       <h4>Logs</h4>
-
       {logs.length === 0 ? (
         <p>No logs</p>
       ) : (

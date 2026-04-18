@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-
-const API_BASE = '/api'
+import { API } from "../api";
 
 export default function RightPanel() {
   const [status, setStatus] = useState('STOPPED')
@@ -8,23 +7,23 @@ export default function RightPanel() {
   const [loading, setLoading] = useState(true)
 
   // --------------------------
-  // チE�Eタ取征E
+  // データ取得（統一API版）
   // --------------------------
   const fetchData = async () => {
     try {
       setLoading(true)
 
       const [statusRes, logsRes] = await Promise.all([
-        fetch(`${API_BASE}/bot_status`),
-        fetch(`${API_BASE}/logs`)
+        fetch(API.botStatus()),
+        fetch(API.logs())
       ])
 
-      const statusData = await statusRes.json()
+      const statusData = statusRes.ok ? await statusRes.json() : null
 
-      // logsはTEXTで受ける（重要修正�E�E
-      const logsText = await logsRes.text()
+      // logsはテキスト形式維持（互換性優先）
+      const logsText = logsRes.ok ? await logsRes.text() : ""
 
-      setStatus(statusData.running ? 'RUNNING' : 'STOPPED')
+      setStatus(statusData?.running ? 'RUNNING' : 'STOPPED')
 
       const parsedLogs = logsText
         .split('\n')
@@ -43,20 +42,23 @@ export default function RightPanel() {
   }
 
   // --------------------------
-  // BOT操作！EPS仕様！E
+  // BOT START（統一API）
   // --------------------------
   const startBot = async () => {
     try {
-      await fetch(`${API_BASE}/start`)
+      await fetch(API.botStart(), { method: "POST" })
       fetchData()
     } catch (err) {
       console.error(err)
     }
   }
 
+  // --------------------------
+  // BOT STOP（統一API）
+  // --------------------------
   const stopBot = async () => {
     try {
-      await fetch(`${API_BASE}/stop`)
+      await fetch(API.botStop(), { method: "POST" })
       fetchData()
     } catch (err) {
       console.error(err)
