@@ -45,7 +45,11 @@ app.add_middleware(
 
 bot = BotManager()
 
-DIST_PATH = "react_dashboard_dist"
+# ✔ 安全なパス（backendから見た相対位置）
+DIST_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "../react_dashboard/dist"
+)
 
 # =========================
 # STARTUP（唯一の起動制御）
@@ -75,7 +79,7 @@ def startup():
 🚨 [ERROR_CODE: FRONT_DIST_MISSING]
 
 ■ 問題
-react_dashboard_dist が存在しません
+react_dashboard/dist が存在しません
 
 ■ 影響
 - UI表示不可
@@ -93,7 +97,6 @@ react_dashboard_dist が存在しません
 4. npm run build
 5. systemctl restart tradingbot.service
 """
-
             logging.error(error_msg)
             raise RuntimeError(error_msg)
 
