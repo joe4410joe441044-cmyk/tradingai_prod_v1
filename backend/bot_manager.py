@@ -15,15 +15,24 @@ from Bot.engine.execution_engine import ExecutionEngine
 
 
 class BotManager:
+    """
+    🧠 API専用Facade（安全ゲート）
+    - core/engineの違いを吸収
+    - APIはここだけ見る
+    - 常にfallbackあり（クラッシュ防止）
+    """
+
     def __init__(self):
         self.running = False
         self.thread = None
 
+        # execution engine
         self.execution_engine = ExecutionEngine(
             live=False,
             notifier=None
         )
 
+        # trade core
         self.core = TradeCore(self.execution_engine)
         self.execution_engine.trade_core = self.core
 
@@ -37,7 +46,7 @@ class BotManager:
         }
 
     # --------------------------
-    # LOG
+    # LOG SYSTEM
     # --------------------------
     def add_log(self, log_type, message):
         self.logs.append({
@@ -64,7 +73,7 @@ class BotManager:
         self.add_log("SYSTEM", "Bot Stopped")
 
     # --------------------------
-    # MAIN LOOP（統合版）
+    # MAIN LOOP
     # --------------------------
     def run_loop(self):
         while self.running:
@@ -72,15 +81,12 @@ class BotManager:
                 symbol = self.config["symbol"]
                 price = random.uniform(70000, 75000)
 
-                # price update
                 self.price_manager.update(symbol, price)
                 self.add_log("PRICE", f"{symbol} {price}")
 
-                # core processing
                 if hasattr(self.core, "process_events"):
                     self.core.process_events(self.price_manager.get_all())
 
-                # entry simulation
                 side = "BUY" if random.random() > 0.5 else "SELL"
 
                 if hasattr(self.core, "emit"):
@@ -100,9 +106,7 @@ class BotManager:
                         "volatility": 10
                     })
 
-                # 🟡 run_prod機能吸収（簡易monitor）
                 self._monitor_positions()
-
                 time.sleep(1)
 
             except Exception as e:
@@ -110,7 +114,7 @@ class BotManager:
                 time.sleep(1)
 
     # --------------------------
-    # POSITION MONITOR（run_prod移植）
+    # POSITION MONITOR
     # --------------------------
     def _monitor_positions(self):
         try:
@@ -131,7 +135,7 @@ class BotManager:
             pass
 
     # --------------------------
-    # POSITIONS
+    # POSITIONS (SAFE)
     # --------------------------
     def get_positions(self):
         try:
@@ -173,21 +177,63 @@ class BotManager:
             "thread_alive": self.thread.is_alive() if self.thread else False
         }
 
+    # ======================================================
+    # 💥 CRITICAL SAFE API LAYER（今回の修正本体）
+    # ======================================================
+
+    # --------------------------
+    # BALANCE（NEW）
+    # --------------------------
+    def get_balance(self):
+        try:
+            if hasattr(self.core, "get_balance"):
+                return self.core.get_balance()
+
+            if hasattr(self.execution_engine, "get_balance"):
+                return self.execution_engine.get_balance()
+
+            return 0
+        except Exception:
+            return 0
+
+    # --------------------------
+    # PNL
+    # --------------------------
+    def get_pnl(self):
+        try:
+            if hasattr(self.core, "get_pnl"):
+                return self.core.get_pnl()
+
+            return 0
+        except Exception:
+            return 0
+
+    # --------------------------
+    # PRICE
+    # --------------------------
+    def get_price(self):
+        try:
+            logs = reversed(self.logs)
+            for l in logs:
+                if l["type"] == "PRICE":
+                    return float(l["message"].split()[-1])
+            return 0
+        except Exception:
+            return 0
+
+    # --------------------------
+    # EQUITY（将来拡張用）
+    # --------------------------
+    def get_equity(self):
+        try:
+            balance = self.get_balance()
+            pnl = self.get_pnl()
+            return balance + pnl
+        except Exception:
+            return 0
+
     # --------------------------
     # SAFE CHECK
     # --------------------------
     def is_running(self):
         return bool(self.running and self.thread and self.thread.is_alive())
-
-    # --------------------------
-    # FALLBACKS
-    # --------------------------
-    def get_pnl(self):
-        return 0
-
-    def get_price(self):
-        logs = reversed(self.logs)
-        for l in logs:
-            if l["type"] == "PRICE":
-                return float(l["message"].split()[-1])
-        return 0
