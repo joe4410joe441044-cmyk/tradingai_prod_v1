@@ -1,47 +1,47 @@
-const API_BASE = import.meta.env.VITE_API_BASE;
-
-if (!API_BASE) {
-  throw new Error("VITE_API_BASE is not defined");
-}
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 // --------------------------
-// safety normalize
+// safe join（唯一の責務）
 // --------------------------
-const normalize = (path) =>
-  path.startsWith("/") ? path : `/${path}`;
-
-// /api/api 防止
-const safePath = (path) =>
-  path.replace(/^\/api\/api/, "/api");
-
-// --------------------------
-// join
-// --------------------------
-const join = (path) =>
-  `${API_BASE}${safePath(normalize(path))}`;
+const join = (path) => {
+  const cleanBase = API_BASE.replace(/\/$/, ""); // 末尾スラッシュ削除
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${cleanBase}${cleanPath}`;
+};
 
 // --------------------------
-// API Layer
+// API Layer（統一ルール）
+// ※ ここは絶対に /api を書かない
 // --------------------------
 export const API = {
-  // Market
-  price: () => join("/api/price"),
-  balance: () => join("/api/balance"),
-  positions: () => join("/api/positions"),
-  trades: () => join("/api/trades"),
+  // =========================
+  // Market Data
+  // =========================
+  price: () => join("/price"),
+  balance: () => join("/balance"),
+  positions: () => join("/positions"),
+  trades: () => join("/trades"),
 
-  // AI
+  // =========================
+  // AI / Analysis
+  // =========================
   scores: (symbol = "BTCUSDT") =>
-    join(`/api/ai/scores?symbol=${symbol}`),
+    join(`/ai/scores?symbol=${encodeURIComponent(symbol)}`),
 
-  // logs
-  logs: () => join("/api/logs"),
+  // =========================
+  // Logs
+  // =========================
+  logs: () => join("/logs"),
 
-  // bot
-  botStatus: () => join("/api/bot/status"),
-  botStart: () => join("/api/bot/start"),
-  botStop: () => join("/api/bot/stop"),
+  // =========================
+  // Bot Control
+  // =========================
+  botStatus: () => join("/bot/status"),
+  botStart: () => join("/bot/start"),
+  botStop: () => join("/bot/stop"),
 
-  // summary
-  summary: () => join("/api/bot/summary"),
+  // =========================
+  // Summary
+  // =========================
+  summary: () => join("/bot/summary"),
 };
