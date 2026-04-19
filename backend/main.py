@@ -50,7 +50,7 @@ bot = BotManager()
 # =========================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DIST_PATH = os.path.join(BASE_DIR, "../react_dashboard/dist")
+DIST_PATH = "/home/joe4410joe/TradingAI_Bot_Prod_v1/react_dashboard/dist"
 
 # =========================
 # STARTUP
