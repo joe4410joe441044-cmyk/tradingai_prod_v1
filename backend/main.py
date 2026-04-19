@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 
 import os
 import logging
@@ -162,13 +162,30 @@ def global_error_handler(request: Request, exc: Exception):
     )
 
 # =========================
-# FRONTEND ROUTE（重要修正）
+# FRONTEND ROUTE（修正版）
 # =========================
 
 @app.get("/")
 def serve_frontend():
+
     index_path = os.path.join(DIST_PATH, "index.html")
-    return FileResponse(index_path)
+
+    logging.info(f"INDEX PATH: {index_path}")
+    logging.info(f"EXISTS: {os.path.exists(index_path)}")
+
+    if not os.path.exists(index_path):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "index.html not found",
+                "path": index_path
+            }
+        )
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    return HTMLResponse(content=html)
 
 # =========================
 # STATIC ASSETS
