@@ -1,41 +1,27 @@
-﻿import { useState, useEffect } from "react";
-import { API } from "../../api/index";
+﻿// src/components/monitor/BalanceCard.jsx
 
-export default function BalanceCard() {
-  const [balance, setBalance] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API.balance());
-
-      if (!res.ok) {
-        console.error(await res.text());
-        return;
-      }
-
-      const data = await res.json();
-
-      setBalance(data?.balance ?? 0);
-    } catch (err) {
-      console.error("BalanceCard error:", err);
-      setBalance(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
+export default function BalanceCard({
+  balance = 0,
+  loading = false,
+  error = false,
+}) {
   return (
-    <div>
+    <div style={{ padding: "10px", border: "1px solid #333" }}>
+
       <h3>Balance</h3>
-      {loading ? "Loading..." : <p>{balance}</p>}
+
+      {/* VALUE */}
+      <h2>
+        {loading ? "Loading..." : Number(balance).toFixed(2)}
+      </h2>
+
+      {/* ERROR */}
+      {error && (
+        <p style={{ color: "red" }}>
+          Fetch error
+        </p>
+      )}
+
     </div>
   );
 }

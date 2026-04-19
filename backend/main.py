@@ -5,8 +5,10 @@ from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 
 import os
 import logging
+import time
 
 from backend.bot_manager import BotManager
+from backend.services.summary_builder import build_summary
 
 # =========================
 # APP INIT
@@ -109,15 +111,17 @@ def stop_bot():
 def bot_status():
     return bot.get_status()
 
+# =========================
+# 🔥 FIXED: SUMMARY（統一スキーマ）
+# =========================
+
 @app.get("/api/bot/summary")
 def bot_summary():
-    return {
-        "balance": bot.get_balance(),
-        "pnl": bot.get_pnl(),
-        "equity": bot.get_balance(),
-        "open_positions": len(bot.get_positions()),
-        "risk": 0.3
-    }
+    return build_summary(bot)
+
+# =========================
+# LEGACY / SIMPLE API
+# =========================
 
 @app.get("/api/balance")
 def get_balance():
@@ -162,7 +166,7 @@ def global_error_handler(request: Request, exc: Exception):
     )
 
 # =========================
-# FRONTEND ROUTE（修正版）
+# FRONTEND ROUTE
 # =========================
 
 @app.get("/")
@@ -197,7 +201,6 @@ app.mount(
     name="assets"
 )
 
-# favicon（安全化）
 @app.get("/favicon.ico")
 def favicon():
     ico_path = os.path.join(DIST_PATH, "favicon.svg")

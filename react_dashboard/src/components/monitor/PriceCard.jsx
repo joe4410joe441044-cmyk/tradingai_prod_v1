@@ -1,37 +1,15 @@
-import { useState, useEffect } from "react";
-import { API } from "../../api/index"; // ← 修正
+// src/components/monitor/PriceCard.jsx
 
-export default function PriceCard() {
-  const [price, setPrice] = useState(0);
-
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API.price());
-
-      if (!res.ok) {
-        console.error(await res.text());
-        return;
-      }
-
-      const data = await res.json();
-
-      setPrice(data?.price ?? 0);
-    } catch (err) {
-      console.error("PriceCard error:", err);
-      setPrice(0);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
+export default function PriceCard({ price = 0 }) {
   return (
-    <div>
+    <div style={{ padding: "10px", border: "1px solid #333" }}>
+      
       <h3>Price</h3>
-      <p>{price}</p>
+
+      <p style={{ fontSize: "18px", fontWeight: "bold" }}>
+        {price}
+      </p>
+
     </div>
   );
 }

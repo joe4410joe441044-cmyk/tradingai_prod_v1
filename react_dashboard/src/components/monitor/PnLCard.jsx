@@ -1,60 +1,30 @@
-﻿import { useState, useEffect } from "react";
-import { API } from "../../api/index";
+﻿// src/components/monitor/PnLCard.jsx
 
-export default function PnLCard() {
-  const [pnl, setPnl] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+export default function PnLCard({
+  pnl = 0,
+  loading = false,
+  error = false,
+}) {
 
-  const fetchPnL = async () => {
-    try {
-      setLoading(true);
-      setError(false);
-
-      const res = await fetch(API.positions());
-
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
-
-      const data = await res.json();
-
-      const safeData = Array.isArray(data) ? data : [];
-
-      const totalPnL = safeData.reduce((sum, p) => {
-        return sum + (Number(p.pnl) || 0);
-      }, 0);
-
-      setPnl(totalPnL);
-
-    } catch (err) {
-      console.error("PnL fetch error:", err);
-      setError(true);
-      setPnl(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPnL();
-
-    const interval = setInterval(fetchPnL, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const safePnL =
-    typeof pnl === "number" && !isNaN(pnl) ? pnl : 0;
-
-  const isPositive = safePnL >= 0;
+  const isPositive = pnl >= 0;
 
   return (
-    <div className="card">
+    <div style={{ padding: "10px", border: "1px solid #333" }}>
+
       <h3>PnL</h3>
 
+      {/* VALUE */}
       <h2 style={{ color: isPositive ? "lime" : "red" }}>
-        {loading ? "Loading..." : error ? "ERROR" : safePnL}
+        {loading ? "Loading..." : Number(pnl).toFixed(2)}
       </h2>
 
-      {error && <p style={{ color: "red" }}>Fetch error</p>}
+      {/* ERROR */}
+      {error && (
+        <p style={{ color: "red" }}>
+          Fetch error
+        </p>
+      )}
+
     </div>
   );
 }

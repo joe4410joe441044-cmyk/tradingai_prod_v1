@@ -1,50 +1,65 @@
-import { useState, useEffect } from "react";
-import { API } from "../../api/index";
+import usePolling from "../../hooks/usePolling";
+import { API } from "../../api";
 
 export default function PositionsTable() {
-  const [positions, setPositions] = useState([]);
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API.positions());
+  // --------------------------
+  // fetch positions
+  // --------------------------
+  const fetchPositions = async () => {
+    const res = await fetch(API.positions());
 
-      if (!res.ok) {
-        console.error(await res.text());
-        return;
-      }
-
-      const data = await res.json();
-
-      // 安全化
-      setPositions(data?.positions ?? data ?? []);
-    } catch (err) {
-      console.error(err);
-      setPositions([]);
+    if (!res.ok) {
+      throw new Error("Positions API error");
     }
+
+    const data = await res.json();
+
+    return (data?.positions ?? []).slice(-50);
   };
 
-  useEffect(() => {
-    fetchData();
+  // --------------------------
+  // polling
+  // --------------------------
+  const {
+    data,
+    error,
+    loading
+  } = usePolling(fetchPositions, 5000);
 
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  // --------------------------
+  // safety guard
+  // --------------------------
+  const positions = Array.isArray(data) ? data : [];
 
   return (
-    <div>
+    <div style={{ padding: "10px", border: "1px solid #333" }}>
+
       <h3>Positions</h3>
 
-      {positions.length === 0 ? (
+      {/* LOADING */}
+      {loading && <p>Loading...</p>}
+
+      {/* ERROR */}
+      {error && (
+        <p style={{ color: "red" }}>
+          Fetch error
+        </p>
+      )}
+
+      {/* EMPTY STATE */}
+      {!loading && positions.length === 0 ? (
         <p>No positions</p>
       ) : (
-        <ul>
+        <ul style={{ maxHeight: "300px", overflowY: "auto" }}>
           {positions.map((p, i) => (
-            <li key={i}>
-              {p.symbol} | {p.side} | {p.pnl}
+            <li key={`${p.symbol}-${p.side}-${i}`}>
+              {p.symbol ?? "?"} | {p.side ?? "?"} | {Number(p.pnl ?? 0).toFixed(2)}
             </li>
           ))}
         </ul>
       )}
+
     </div>
   );
 }

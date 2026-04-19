@@ -1,55 +1,41 @@
 ﻿import { LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
+import usePolling from "./hooks/usePolling";
 import { API } from "./api";
 
 export default function AIScoreChart({ symbol }) {
-  const [data, setData] = useState([]);
 
-  const load = async () => {
-    try {
-      const res = await fetch(API.scores(symbol));
+  // --------------------------
+  // API fetch（純関数化）
+  // --------------------------
+  const fetchScore = async () => {
+    const res = await fetch(API.scores(symbol));
 
-      if (!res.ok) {
-        throw new Error(`HTTP error: ${res.status}`);
-      }
-
-      const json = await res.json();
-
-      // score取得（安全化）
-      const score = typeof json?.score === "number" ? json.score : 0;
-
-      setData((prev) => {
-        const newPoint = {
-          time: new Date().toLocaleTimeString(),
-          ai_score: score,
-        };
-
-        const updated = [...prev, newPoint];
-        return updated.slice(-50);
-      });
-    } catch (e) {
-      console.error("AI score fetch error:", e);
-
-      setData((prev) => {
-        const newPoint = {
-          time: new Date().toLocaleTimeString(),
-          ai_score: 0,
-        };
-
-        const updated = [...prev, newPoint];
-        return updated.slice(-50);
-      });
+    if (!res.ok) {
+      throw new Error(`HTTP error: ${res.status}`);
     }
+
+    const json = await res.json();
+
+    return {
+      time: new Date().toLocaleTimeString(),
+      ai_score: typeof json?.score === "number" ? json.score : 0,
+    };
   };
 
-  useEffect(() => {
-    if (!symbol) return;
+  // --------------------------
+  // polling（完全統一）
+  // --------------------------
+  const { data: point } = usePolling(fetchScore, 2000);
 
-    load();
-    const t = setInterval(load, 2000);
+  // --------------------------
+  // chart data（蓄積）
+  // --------------------------
+  const data = useMemo(() => {
+    if (!point) return [];
 
-    return () => clearInterval(t);
-  }, [symbol]);
+    return [point]; // 単発取得
+  }, [point]);
 
   return (
     <div>

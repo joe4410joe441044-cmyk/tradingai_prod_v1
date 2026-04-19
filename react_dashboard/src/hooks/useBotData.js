@@ -1,0 +1,129 @@
+// src/hooks/useBotData.js
+
+import { useEffect, useRef, useState } from "react";
+import { API } from "../api";
+
+/**
+ * PRODUCTION STABLE VERSION (FIXED)
+ * - unified state source
+ * - logs are append-based (FIXED)
+ * - prevents overwrite flicker
+ */
+
+export default function useBotData(interval = 2000) {
+
+  const [state, setState] = useState({
+    price: 0,
+    balance: 0,
+    pnl: 0,
+    equity: 0,
+    risk: 0,
+    openPositions: [],
+    logs: [],
+    status: "STOPPED",
+    connected: false,
+  });
+
+  const timerRef = useRef(null);
+
+  // =========================
+  // STATUS
+  // =========================
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch(API.botStatus());
+      const data = await res.json().catch(() => ({}));
+
+      setState(prev => ({
+        ...prev,
+        status: data?.running ? "RUNNING" : "STOPPED",
+        connected: data?.thread_alive ?? false,
+      }));
+    } catch (e) {
+      console.error("status error:", e);
+    }
+  };
+
+  // =========================
+  // PRICE
+  // =========================
+  const fetchPrice = async () => {
+    try {
+      const res = await fetch(API.price?.() || "/api/price");
+      const data = await res.json().catch(() => ({}));
+
+      setState(prev => ({
+        ...prev,
+        price: data?.price ?? 0,
+      }));
+    } catch (e) {
+      console.error("price error:", e);
+    }
+  };
+
+  // =========================
+  // SUMMARY (ACCOUNT)
+  // =========================
+  const fetchSummary = async () => {
+    try {
+      const res = await fetch(API.summary());
+      const data = await res.json().catch(() => ({}));
+
+      setState(prev => ({
+        ...prev,
+        balance: data?.balance ?? 0,
+        pnl: data?.pnl ?? 0,
+        equity: data?.equity ?? 0,
+        risk: data?.risk ?? 0,
+        openPositions: data?.open_positions ?? [],
+      }));
+    } catch (e) {
+      console.error("summary error:", e);
+    }
+  };
+
+  // =========================
+  // LOGS (FIXED: append mode)
+  // =========================
+  const fetchLogs = async () => {
+    try {
+      const res = await fetch(API.logs());
+      const data = await res.json().catch(() => []);
+
+      const newLogs = Array.isArray(data) ? data : [];
+
+      setState(prev => ({
+        ...prev,
+        logs: [
+          ...prev.logs,
+          ...newLogs
+        ]
+          .slice(-100) // keep last 100 only
+      }));
+
+    } catch (e) {
+      console.error("logs error:", e);
+    }
+  };
+
+  // =========================
+  // MASTER LOOP
+  // =========================
+  const fetchAll = async () => {
+    // sequential fetch (safe for consistency)
+    await fetchStatus();
+    await fetchPrice();
+    await fetchSummary();
+    await fetchLogs();
+  };
+
+  useEffect(() => {
+    fetchAll();
+
+    timerRef.current = setInterval(fetchAll, interval);
+
+    return () => clearInterval(timerRef.current);
+  }, [interval]);
+
+  return state;
+}
