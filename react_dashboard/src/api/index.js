@@ -1,46 +1,47 @@
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_BASE ||
-  "http://35.194.104.74:8000";
+const API_BASE = import.meta.env.VITE_API_BASE;
+
+if (!API_BASE) {
+  throw new Error("VITE_API_BASE is not defined");
+}
 
 // --------------------------
-// 安全なパス結合（/api/api防止）
+// safety normalize
 // --------------------------
-const build = (path) => {
-  const base = API_BASE.replace(/\/$/, ""); // 末尾スラッシュ削除
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${p}`;
-};
+const normalize = (path) =>
+  path.startsWith("/") ? path : `/${path}`;
 
+// /api/api 防止
+const safePath = (path) =>
+  path.replace(/^\/api\/api/, "/api");
+
+// --------------------------
+// join
+// --------------------------
+const join = (path) =>
+  `${API_BASE}${safePath(normalize(path))}`;
+
+// --------------------------
+// API Layer
+// --------------------------
 export const API = {
-  // --------------------------
-  // Market Data
-  // --------------------------
-  price: () => build("/api/price"),
-  balance: () => build("/api/balance"),
-  positions: () => build("/api/positions"),
-  trades: () => build("/api/trades"),
+  // Market
+  price: () => join("/api/price"),
+  balance: () => join("/api/balance"),
+  positions: () => join("/api/positions"),
+  trades: () => join("/api/trades"),
 
-  // --------------------------
-  // AI / Analysis
-  // --------------------------
+  // AI
   scores: (symbol = "BTCUSDT") =>
-    build(`/api/ai/scores?symbol=${encodeURIComponent(symbol)}`),
+    join(`/api/ai/scores?symbol=${symbol}`),
 
-  // --------------------------
-  // System Logs
-  // --------------------------
-  logs: () => build("/api/logs"),
+  // logs
+  logs: () => join("/api/logs"),
 
-  // --------------------------
-  // Bot Control / System Control
-  // --------------------------
-  botStatus: () => build("/api/bot/status"),
-  botStart: () => build("/api/bot/start"),
-  botStop: () => build("/api/bot/stop"),
+  // bot
+  botStatus: () => join("/api/bot/status"),
+  botStart: () => join("/api/bot/start"),
+  botStop: () => join("/api/bot/stop"),
 
-  // --------------------------
-  // Summary
-  // --------------------------
-  summary: () => build("/api/bot/summary"),
+  // summary
+  summary: () => join("/api/bot/summary"),
 };

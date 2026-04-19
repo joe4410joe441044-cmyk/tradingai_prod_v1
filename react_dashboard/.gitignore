@@ -1,72 +1,27 @@
-
-# =========================
-# Env（最重要：絶対漏らさない）
-# =========================
-.env
-.env.*
-*.env
-
-# =========================
-# Python 仮想環境（最重要）
-# =========================
-venv/
-.venv/
-env/
-backend/venv/
-venv_new/
-ENV/
-
-# =========================
-# Python キャッシュ
-# =========================
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pydc
-
-# =========================
-# Python build / distribution
-# =========================
-*.egg-info/
-dist/
-build/
-pip-wheel-metadata/
-
-# =========================
-# Node / Frontend
-# =========================
-node_modules/
-dist/
-dist-ssr/
-.vite/
-*.local
-
-# =========================
 # Logs
-# =========================
-logs/
+logs
 *.log
 npm-debug.log*
 yarn-debug.log*
+yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# =========================
-# Editor / OS
-# =========================
-.vscode/
-.idea/
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-
-# =========================
-# Project specific
-# =========================
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 react_dashboard_dist/
-backend/__pycache__/
-
-# =========================
-# accidental large folders
-# =========================
-site-packages/
+node_modules/
+dist/
