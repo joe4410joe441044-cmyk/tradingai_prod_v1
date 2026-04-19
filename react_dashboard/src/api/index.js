@@ -1,39 +1,46 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  "http://35.194.104.74:8000";
 
 // --------------------------
-// パス結合ヘルパー（事故防止）
+// 安全なパス結合（/api/api防止）
 // --------------------------
-const join = (path) => `${API_BASE}${path}`;
+const build = (path) => {
+  const base = API_BASE.replace(/\/$/, ""); // 末尾スラッシュ削除
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${p}`;
+};
 
 export const API = {
   // --------------------------
   // Market Data
   // --------------------------
-  price: () => join("/api/price"),
-  balance: () => join("/api/balance"),
-  positions: () => join("/api/positions"),
-  trades: () => join("/api/trades"),
+  price: () => build("/api/price"),
+  balance: () => build("/api/balance"),
+  positions: () => build("/api/positions"),
+  trades: () => build("/api/trades"),
 
   // --------------------------
   // AI / Analysis
   // --------------------------
   scores: (symbol = "BTCUSDT") =>
-    join(`/api/ai/scores?symbol=${symbol}`),
+    build(`/api/ai/scores?symbol=${encodeURIComponent(symbol)}`),
 
   // --------------------------
   // System Logs
   // --------------------------
-  logs: () => join("/api/logs"),
+  logs: () => build("/api/logs"),
 
   // --------------------------
   // Bot Control / System Control
   // --------------------------
-  botStatus: () => join("/api/bot/status"),
-  botStart: () => join("/api/bot/start"),
-  botStop: () => join("/api/bot/stop"),
+  botStatus: () => build("/api/bot/status"),
+  botStart: () => build("/api/bot/start"),
+  botStop: () => build("/api/bot/stop"),
 
   // --------------------------
-  // Asset / Summary（bot.js統合済み）
+  // Summary
   // --------------------------
-  summary: () => join("/api/bot/summary"),
+  summary: () => build("/api/bot/summary"),
 };
