@@ -1,33 +1,72 @@
-# 仮想環境
-venv/
-venv_new/
 
+# =========================
+# Env（最重要：絶対漏らさない）
+# =========================
+.env
+.env.*
+*.env
+
+# =========================
+# Python 仮想環境（最重要）
+# =========================
+venv/
+.venv/
+env/
+backend/venv/
+venv_new/
+ENV/
+
+# =========================
 # Python キャッシュ
+# =========================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.pydc
 
-# ローカルログや一時ファイル
-logs/
-*.log
-prod_tree.txt
-token_chatID.txt
-
-# pip / setuptools 関連
-*.egg
+# =========================
+# Python build / distribution
+# =========================
 *.egg-info/
 dist/
 build/
+pip-wheel-metadata/
 
-# VS Code 関連
-.vscode/
-
-# OS 一時ファイル
-Thumbs.db
-.DS_Store
-
-# Jupyter Notebook チェックポイント
-.ipynb_checkpoints/
+# =========================
+# Node / Frontend
+# =========================
 node_modules/
 dist/
+dist-ssr/
+.vite/
+*.local
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# Editor / OS
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Project specific
+# =========================
+react_dashboard_dist/
+backend/__pycache__/
+
+# =========================
+# accidental large folders
+# =========================
+site-packages/
