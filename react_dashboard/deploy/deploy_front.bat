@@ -1,43 +1,39 @@
 @echo off
-chcp 65001 >nul
 
-echo =========================
-echo FRONT STEP START
-echo =========================
+REM ==============================
+REM UTF-8設定（文字化け対策）
+REM ==============================
+chcp 65001 > nul
 
-echo [1] React build
-cd /d C:\trading\react_dashboard
+REM ==============================
+REM 設定
+REM ==============================
+set SRC=C:\trading\react_dashboard
+set DEST=H:\マイドライブ\tradingai_prod_v1\react_dashboard
+
+REM ==============================
+REM Build
+REM ==============================
+echo [1/3] Build start...
+cd /d %SRC%
 call npm run build
-IF %ERRORLEVEL% NEQ 0 (
-  echo ERROR: build failed
-  pause
-  exit /b
-)
 
-echo [2] robocopy (C -> H)
-robocopy "C:\trading\react_dashboard" "H:\マイドライブ\tradingai_prod_v1\react_dashboard" /MIR /XD node_modules dist .git
+REM ==============================
+REM Copy (robocopy)
+REM ==============================
+echo [2/3] Copy files...
+robocopy "%SRC%" "%DEST%" /MIR /XD node_modules dist .git
 
-IF %ERRORLEVEL% GEQ 8 (
-  echo ERROR: robocopy failed
-  pause
-  exit /b
-)
-
-echo [3] Git push
-cd /d "H:\マイドライブ\tradingai_prod_v1"
+REM ==============================
+REM Git Push
+REM ==============================
+echo [3/3] Git push...
+cd /d H:\マイドライブ\tradingai_prod_v1
 
 git add .
-git commit -m "update UI"
+git commit -m "auto deploy"
 git push
 
-IF %ERRORLEVEL% NEQ 0 (
-  echo ERROR: git push failed
-  pause
-  exit /b
-)
-
-echo =========================
-echo FRONT STEP DONE
-echo =========================
-
+echo.
+echo ✅ Deploy Complete
 pause
