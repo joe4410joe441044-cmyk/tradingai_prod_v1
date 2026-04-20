@@ -1,0 +1,67 @@
+============================== 
+DEPLOY START 2026/04/21  3:44:35.28 
+============================== 
+
+up to date, audited 192 packages in 4s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...âœ“ 27 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB â”‚ gzip:  0.29 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB â”‚ gzip:  0.10 kB
+dist/assets/index-DtZMCUlt.js   196.26 kB â”‚ gzip: 61.84 kB
+
+[32mâœ“ built in 365ms[39m
+C:\trading\tradingai_prod_v1\react_dashboard\dist\favicon.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\icons.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\index.html
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-C-FsNcTt.css
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DtZMCUlt.js
+5 File(s) copied
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026å¹´4æœˆ21æ—¥ 3:44:42
+   Source : C:\trading\tradingai_prod_v1\react_dashboard\
+     Dest = H:\ƒ}ƒCƒhƒ‰ƒCƒu\tradingai_prod_v1\react_dashboard\
+
+    Files : *.*
+	    
+ Exc Dirs : node_modules
+	    dist
+	    .git
+	    
+  Options : *.* /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /R:1000000 /W:30 
+
+------------------------------------------------------------------------------
+
+	                  10	C:\trading\tradingai_prod_v1\react_dashboard\
+	    Newer     		  106145	package-lock.json100%  
+	  New Dir          3	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\
+	    New File  		    9522	favicon.svg100%  
+	    New File  		    5031	icons.svg100%  
+	    New File  		     465	index.html100%  
+	  New Dir          2	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\assets\
+	    New File  		     101	index-C-FsNcTt.css100%  
+	    New File  		  196266	index-DtZMCUlt.js100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
+	  *EXTRA File 		     908	deploy_front.bat
+	  *EXTRA File 		     779	deploy_prod.bat
+	    New File  		    2800	deploy_all.bat100%  
+	    New File  		    1860	deploy_log.txt
