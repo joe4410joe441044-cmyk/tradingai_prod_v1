@@ -64,4 +64,128 @@ C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DtZMCUlt.js
 	  *EXTRA File 		     908	deploy_front.bat
 	  *EXTRA File 		     779	deploy_prod.bat
 	    New File  		    2800	deploy_all.bat100%  
-	    New File  		    1860	deploy_log.txt
+	    New File  		    1860	deploy_log.txt100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\public\
+	                   7	C:\trading\tradingai_prod_v1\react_dashboard\src\
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\api\
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\src\assets\
+	                   0	C:\trading\tradingai_prod_v1\react_dashboard\src\components\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\control\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\dashboard\
+	                   6	C:\trading\tradingai_prod_v1\react_dashboard\src\components\monitor\
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\hooks\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\utils\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :        17         2        15         0         0         0
+   Files :        43         8        35         0         0         2
+   Bytes :   411.1 k   314.6 k    96.4 k         0         0     1.6 k
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :             768,949 Bytes/sec.
+   Speed :              44.000 MegaBytes/min.
+   Ended : 2026å¹´4æœˆ21æ—¥ 3:44:44
+
+warning: in the working copy of 'react_dashboard/backup_dist/icons.svg', LF will be replaced by CRLF the next time Git touches it
+[main f389197] auto deploy 2026/04/21  3:44:44.81
+ 9 files changed, 230 insertions(+), 75 deletions(-)
+ create mode 100644 react_dashboard/backup_dist/assets/index-C-FsNcTt.css
+ create mode 100644 react_dashboard/backup_dist/assets/index-DtZMCUlt.js
+ create mode 100644 react_dashboard/backup_dist/favicon.svg
+ create mode 100644 react_dashboard/backup_dist/icons.svg
+ create mode 100644 react_dashboard/backup_dist/index.html
+ create mode 100644 react_dashboard/deploy/deploy_all.bat
+ delete mode 100644 react_dashboard/deploy/deploy_front.bat
+ create mode 100644 react_dashboard/deploy/deploy_log.txt
+ delete mode 100644 react_dashboard/deploy/deploy_prod.bat
+To https://github.com/joe4410joe/TradingAI_Bot_Prod_v1.git
+   3aefe37..f389197  main -> main
+Updating 3aefe37..f389197
+Fast-forward
+ .../backup_dist/assets/index-C-FsNcTt.css          |   1 +
+ .../backup_dist/assets/index-DtZMCUlt.js           |   9 ++
+ react_dashboard/backup_dist/favicon.svg            |   1 +
+ react_dashboard/backup_dist/icons.svg              |  24 +++++
+ react_dashboard/backup_dist/index.html             |  14 +++
+ react_dashboard/deploy/deploy_all.bat              | 114 +++++++++++++++++++++
+ react_dashboard/deploy/deploy_front.bat            |  39 -------
+ react_dashboard/deploy/deploy_log.txt              |  67 ++++++++++++
+ react_dashboard/deploy/deploy_prod.bat             |  36 -------
+ 9 files changed, 230 insertions(+), 75 deletions(-)
+ create mode 100644 react_dashboard/backup_dist/assets/index-C-FsNcTt.css
+ create mode 100644 react_dashboard/backup_dist/assets/index-DtZMCUlt.js
+ create mode 100644 react_dashboard/backup_dist/favicon.svg
+ create mode 100644 react_dashboard/backup_dist/icons.svg
+ create mode 100644 react_dashboard/backup_dist/index.html
+ create mode 100644 react_dashboard/deploy/deploy_all.bat
+ delete mode 100644 react_dashboard/deploy/deploy_front.bat
+ create mode 100644 react_dashboard/deploy/deploy_log.txt
+ delete mode 100644 react_dashboard/deploy/deploy_prod.bat
+============================== 
+DEPLOY SUCCESS 2026/04/21  3:44:55.95 
+============================== 
+============================== 
+DEPLOY START 2026/04/21  3:48:04.68 
+============================== 
+
+up to date, audited 192 packages in 2s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...âœ“ 27 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB â”‚ gzip:  0.29 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB â”‚ gzip:  0.10 kB
+dist/assets/index-DtZMCUlt.js   196.26 kB â”‚ gzip: 61.84 kB
+
+[32mâœ“ built in 593ms[39m
+C:\trading\tradingai_prod_v1\react_dashboard\dist\favicon.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\icons.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\index.html
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-C-FsNcTt.css
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DtZMCUlt.js
+5 File(s) copied
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026å¹´4æœˆ21æ—¥ 3:48:10
+   Source : C:\trading\tradingai_prod_v1\react_dashboard\
+     Dest = H:\ƒ}ƒCƒhƒ‰ƒCƒu\tradingai_prod_v1\react_dashboard\
+
+    Files : *.*
+	    
+ Exc Dirs : node_modules
+	    dist
+	    .git
+	    
+  Options : *.* /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /R:1000000 /W:30 
+
+------------------------------------------------------------------------------
+
+	                  10	C:\trading\tradingai_prod_v1\react_dashboard\
+	    Newer     		  106145	package-lock.json100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\
+	    Newer     		     465	index.html100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\assets\
+	    Newer     		     101	index-C-FsNcTt.css100%  
+	    Newer     		  196266	index-DtZMCUlt.js100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
+	    Newer     		    7274	deploy_log.txt
