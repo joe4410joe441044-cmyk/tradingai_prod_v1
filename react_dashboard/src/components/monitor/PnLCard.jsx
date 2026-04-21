@@ -5,26 +5,64 @@ export default function PnLCard({
   loading = false,
   error = false,
 }) {
-
   const isPositive = pnl >= 0;
 
-  return (
-    <div style={{ padding: "10px", border: "1px solid #333" }}>
+  const value = loading ? "Loading..." : Number(pnl).toFixed(2);
 
-      <h3>PnL</h3>
+  const color = isPositive ? "#4ade80" : "#f87171";
+
+  return (
+    <div
+      style={{
+        background: "#111",
+        borderRadius: "16px",
+        padding: "16px",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        textAlign: "center",
+        transition: "0.2s",
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.transform = "translateY(-4px)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.transform = "translateY(0)")
+      }
+    >
+      {/* TITLE */}
+      <div
+        style={{
+          fontSize: "12px",
+          opacity: 0.6,
+          marginBottom: "8px",
+        }}
+      >
+        PnL
+      </div>
 
       {/* VALUE */}
-      <h2 style={{ color: isPositive ? "lime" : "red" }}>
-        {loading ? "Loading..." : Number(pnl).toFixed(2)}
-      </h2>
+      <div
+        style={{
+          fontSize: "28px",
+          fontWeight: "bold",
+          color,
+        }}
+      >
+        {value}
+      </div>
 
       {/* ERROR */}
       {error && (
-        <p style={{ color: "red" }}>
+        <div
+          style={{
+            marginTop: "6px",
+            fontSize: "12px",
+            color: "#f87171",
+          }}
+        >
           Fetch error
-        </p>
+        </div>
       )}
-
     </div>
   );
 }

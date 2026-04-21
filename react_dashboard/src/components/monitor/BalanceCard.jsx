@@ -5,23 +5,60 @@ export default function BalanceCard({
   loading = false,
   error = false,
 }) {
-  return (
-    <div style={{ padding: "10px", border: "1px solid #333" }}>
+  const value = loading ? "Loading..." : Number(balance).toFixed(2);
 
-      <h3>Balance</h3>
+  return (
+    <div
+      style={{
+        background: "#111",
+        borderRadius: "16px",
+        padding: "16px",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        transition: "0.2s",
+        cursor: "pointer",
+        textAlign: "center",
+      }}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.transform = "translateY(-4px)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.transform = "translateY(0)")
+      }
+    >
+      {/* TITLE */}
+      <div
+        style={{
+          fontSize: "12px",
+          opacity: 0.6,
+          marginBottom: "8px",
+        }}
+      >
+        Balance
+      </div>
 
       {/* VALUE */}
-      <h2>
-        {loading ? "Loading..." : Number(balance).toFixed(2)}
-      </h2>
+      <div
+        style={{
+          fontSize: "28px",
+          fontWeight: "bold",
+          color: "#4ade80", // 緑（資産）
+        }}
+      >
+        {value}
+      </div>
 
       {/* ERROR */}
       {error && (
-        <p style={{ color: "red" }}>
+        <div
+          style={{
+            marginTop: "6px",
+            fontSize: "12px",
+            color: "#f87171",
+          }}
+        >
           Fetch error
-        </p>
+        </div>
       )}
-
     </div>
   );
 }
