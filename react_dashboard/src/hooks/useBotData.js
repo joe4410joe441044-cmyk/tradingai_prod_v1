@@ -1,13 +1,10 @@
-// src/hooks/useBotData.js
-
 import { useEffect, useRef, useState } from "react";
 import { API } from "../api";
 
 /**
- * PRODUCTION STABLE VERSION (FIXED)
- * - unified state source
- * - logs are append-based (FIXED)
- * - prevents overwrite flicker
+ * PRODUCTION STABLE VERSION + WS UPGRADE
+ * - REST: full sync (safety)
+ * - WS: price realtime override
  */
 
 export default function useBotData(interval = 2000) {
@@ -45,7 +42,7 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // PRICE
+  // PRICE (REST fallback only)
   // =========================
   const fetchPrice = async () => {
     try {
@@ -83,7 +80,7 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // LOGS (FIXED: append mode)
+  // LOGS (append safe)
   // =========================
   const fetchLogs = async () => {
     try {
@@ -94,11 +91,7 @@ export default function useBotData(interval = 2000) {
 
       setState(prev => ({
         ...prev,
-        logs: [
-          ...prev.logs,
-          ...newLogs
-        ]
-          .slice(-100) // keep last 100 only
+        logs: [...prev.logs, ...newLogs].slice(-100),
       }));
 
     } catch (e) {
@@ -107,10 +100,9 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // MASTER LOOP
+  // MASTER LOOP (REST)
   // =========================
   const fetchAll = async () => {
-    // sequential fetch (safe for consistency)
     await fetchStatus();
     await fetchPrice();
     await fetchSummary();
@@ -119,11 +111,41 @@ export default function useBotData(interval = 2000) {
 
   useEffect(() => {
     fetchAll();
-
     timerRef.current = setInterval(fetchAll, interval);
 
     return () => clearInterval(timerRef.current);
   }, [interval]);
+
+  // =========================
+  // 🚀 WEBSOCKET (REALTIME PRICE)
+  // =========================
+  useEffect(() => {
+    const ws = new WebSocket("ws://localhost:8000/ws/price");
+
+    ws.onopen = () => {
+      console.log("WS connected");
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // 🔥 ONLY price override (no state clash)
+      setState(prev => ({
+        ...prev,
+        price: data.price,
+      }));
+    };
+
+    ws.onerror = (err) => {
+      console.error("WS error:", err);
+    };
+
+    ws.onclose = () => {
+      console.log("WS closed");
+    };
+
+    return () => ws.close();
+  }, []);
 
   return state;
 }

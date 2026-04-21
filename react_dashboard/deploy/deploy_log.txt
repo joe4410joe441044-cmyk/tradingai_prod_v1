@@ -631,4 +631,135 @@ C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-D1BL_oPW.js
 	    Newer     		     101	index-C-FsNcTt.css100%  
 	    New File  		  199888	index-D1BL_oPW.js100%  
 	                   3	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
-	    Newer     		   24057	deploy_log.txt
+	    Newer     		   24057	deploy_log.txt100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\public\
+	                   7	C:\trading\tradingai_prod_v1\react_dashboard\src\
+	    Newer     		    2374	App.jsx100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\api\
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\src\assets\
+	                   0	C:\trading\tradingai_prod_v1\react_dashboard\src\components\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\control\
+	    Newer     		    1648	BotControl.jsx100%  
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\dashboard\
+	    Newer     		    1515	AssetDashboard.jsx100%  
+	                   6	C:\trading\tradingai_prod_v1\react_dashboard\src\components\monitor\
+	    Newer     		    1360	BalanceCard.jsx100%  
+	    Newer     		    1421	LogsPanel.jsx100%  
+	    Newer     		    1399	PnLCard.jsx100%  
+	    Newer     		    1576	PositionsTable.jsx100%  
+	    Newer     		    1292	PriceCard.jsx100%  
+	    Newer     		    1312	RightPanel.jsx100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\hooks\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\utils\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :        17         0        17         0         0         0
+   Files :        44        14        30         0         0         1
+   Bytes :   445.8 k   336.4 k   109.4 k         0         0   191.6 k
+   Times :   0:00:01   0:00:01                       0:00:00   0:00:00
+
+
+   Speed :             214,942 Bytes/sec.
+   Speed :              12.299 MegaBytes/min.
+   Ended : 2026å¹´4æœˆ22æ—¥ 5:42:44
+
+warning: in the working copy of 'react_dashboard/src/App.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/control/BotControl.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/dashboard/AssetDashboard.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/BalanceCard.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/LogsPanel.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/PnLCard.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/PositionsTable.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/PriceCard.jsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'react_dashboard/src/components/monitor/RightPanel.jsx', CRLF will be replaced by LF the next time Git touches it
+[main fba0900] auto deploy 2026/04/22  5:42:46.24
+ 12 files changed, 583 insertions(+), 138 deletions(-)
+ rename react_dashboard/backup_dist/assets/{index-DtZMCUlt.js => index-D1BL_oPW.js} (96%)
+To https://github.com/joe4410joe/TradingAI_Bot_Prod_v1.git
+   93fcd1e..fba0900  main -> main
+Updating 93fcd1e..fba0900
+Fast-forward
+ .../{index-DtZMCUlt.js => index-D1BL_oPW.js}       |   2 +-
+ react_dashboard/backup_dist/index.html             |   2 +-
+ react_dashboard/deploy/deploy_log.txt              | 106 +++++++++++++++++++-
+ react_dashboard/src/App.jsx                        | 107 ++++++++++++++++-----
+ .../src/components/control/BotControl.jsx          |  64 ++++++++++--
+ .../src/components/dashboard/AssetDashboard.jsx    |  52 ++++++++--
+ .../src/components/monitor/BalanceCard.jsx         |  55 +++++++++--
+ .../src/components/monitor/LogsPanel.jsx           |  65 +++++++++----
+ react_dashboard/src/components/monitor/PnLCard.jsx |  58 +++++++++--
+ .../src/components/monitor/PositionsTable.jsx      | 102 ++++++++++----------
+ .../src/components/monitor/PriceCard.jsx           |  56 +++++++++--
+ .../src/components/monitor/RightPanel.jsx          |  52 +++++++++-
+ 12 files changed, 583 insertions(+), 138 deletions(-)
+ rename react_dashboard/backup_dist/assets/{index-DtZMCUlt.js => index-D1BL_oPW.js} (96%)
+/home/joe4410joe/TradingAI_Bot_Prod_v1/react_dashboard_dist/index.html
+VPS OK 
+============================== 
+DEPLOY SUCCESS 2026/04/22  5:43:05.77 
+============================== 
+============================== 
+DEPLOY START 2026/04/22  6:12:16.08 
+============================== 
+
+up to date, audited 192 packages in 4s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...âœ“ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB â”‚ gzip:  0.29 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB â”‚ gzip:  0.10 kB
+dist/assets/index-DYFXafoL.js   200.18 kB â”‚ gzip: 62.47 kB
+
+[32mâœ“ built in 1.04s[39m
+C:\trading\tradingai_prod_v1\react_dashboard\dist\favicon.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\icons.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\index.html
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-C-FsNcTt.css
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DYFXafoL.js
+5 File(s) copied
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026å¹´4æœˆ22æ—¥ 6:12:27
+   Source : C:\trading\tradingai_prod_v1\react_dashboard\
+     Dest = H:\ƒ}ƒCƒhƒ‰ƒCƒu\tradingai_prod_v1\react_dashboard\
+
+    Files : *.*
+	    
+ Exc Dirs : node_modules
+	    dist
+	    .git
+	    
+  Options : *.* /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /R:1000000 /W:30 
+
+------------------------------------------------------------------------------
+
+	                  10	C:\trading\tradingai_prod_v1\react_dashboard\
+	    Newer     		  106145	package-lock.json100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\
+	    Newer     		     465	index.html100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\assets\
+	  *EXTRA File 		  199888	index-D1BL_oPW.js
+	    Newer     		     101	index-C-FsNcTt.css100%  
+	    New File  		  200186	index-DYFXafoL.js100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
+	    Newer     		   31059	deploy_log.txt
