@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { API } from "../api";
+import { API, WS } from "../api";
 
 /**
- * PRODUCTION STABLE VERSION + WS UPGRADE
- * - REST: full sync (safety)
- * - WS: price realtime override
+ * PRODUCTION STABLE VERSION + WS UPGRADE (FIXED)
  */
 
 export default function useBotData(interval = 2000) {
@@ -24,7 +22,7 @@ export default function useBotData(interval = 2000) {
   const timerRef = useRef(null);
 
   // =========================
-  // STATUS
+  // REST: STATUS
   // =========================
   const fetchStatus = async () => {
     try {
@@ -42,11 +40,11 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // PRICE (REST fallback only)
+  // REST: PRICE (fallback only)
   // =========================
   const fetchPrice = async () => {
     try {
-      const res = await fetch(API.price?.() || "/api/price");
+      const res = await fetch(API.price());
       const data = await res.json().catch(() => ({}));
 
       setState(prev => ({
@@ -59,7 +57,7 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // SUMMARY (ACCOUNT)
+  // REST: SUMMARY
   // =========================
   const fetchSummary = async () => {
     try {
@@ -80,7 +78,7 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // LOGS (append safe)
+  // REST: LOGS
   // =========================
   const fetchLogs = async () => {
     try {
@@ -100,13 +98,13 @@ export default function useBotData(interval = 2000) {
   };
 
   // =========================
-  // MASTER LOOP (REST)
+  // MASTER LOOP (REST SYNC)
   // =========================
   const fetchAll = async () => {
     await fetchStatus();
-    await fetchPrice();
     await fetchSummary();
     await fetchLogs();
+    await fetchPrice(); // fallback only
   };
 
   useEffect(() => {
@@ -117,23 +115,28 @@ export default function useBotData(interval = 2000) {
   }, [interval]);
 
   // =========================
-  // 🚀 WEBSOCKET (REALTIME PRICE)
+  // 🚀 WEBSOCKET (REALTIME PRICE ONLY)
   // =========================
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8000/ws/price");
+
+    const ws = new WebSocket(WS.price);
 
     ws.onopen = () => {
       console.log("WS connected");
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      try {
+        const data = JSON.parse(event.data);
 
-      // 🔥 ONLY price override (no state clash)
-      setState(prev => ({
-        ...prev,
-        price: data.price,
-      }));
+        setState(prev => ({
+          ...prev,
+          price: data.price, // ONLY overwrite price
+        }));
+
+      } catch (e) {
+        console.error("WS parse error:", e);
+      }
     };
 
     ws.onerror = (err) => {

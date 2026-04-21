@@ -762,4 +762,155 @@ C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DYFXafoL.js
 	    Newer     		     101	index-C-FsNcTt.css100%  
 	    New File  		  200186	index-DYFXafoL.js100%  
 	                   3	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
-	    Newer     		   31059	deploy_log.txt
+	    Newer     		   31059	deploy_log.txt100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\public\
+	                   7	C:\trading\tradingai_prod_v1\react_dashboard\src\
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\api\
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\src\assets\
+	                   0	C:\trading\tradingai_prod_v1\react_dashboard\src\components\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\control\
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\components\dashboard\
+	                   6	C:\trading\tradingai_prod_v1\react_dashboard\src\components\monitor\
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\src\hooks\
+	    Newer     		    3552	useBotData.js100%  
+	                   1	C:\trading\tradingai_prod_v1\react_dashboard\src\utils\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :        17         0        17         0         0         0
+   Files :        44         6        38         0         0         1
+   Bytes :   453.5 k   333.5 k   120.0 k         0         0   195.2 k
+   Times :   0:00:01   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :             455,344 Bytes/sec.
+   Speed :              26.055 MegaBytes/min.
+   Ended : 2026年4月22日 6:12:29
+
+warning: in the working copy of 'react_dashboard/src/hooks/useBotData.js', CRLF will be replaced by LF the next time Git touches it
+[main 286a145] auto deploy 2026/04/22  6:12:31.15
+ 4 files changed, 172 insertions(+), 19 deletions(-)
+ rename react_dashboard/backup_dist/assets/{index-D1BL_oPW.js => index-DYFXafoL.js} (95%)
+To https://github.com/joe4410joe/TradingAI_Bot_Prod_v1.git
+   fba0900..286a145  main -> main
+Updating fba0900..286a145
+Fast-forward
+ .../{index-D1BL_oPW.js => index-DYFXafoL.js}       |   2 +-
+ react_dashboard/backup_dist/index.html             |   2 +-
+ react_dashboard/deploy/deploy_log.txt              | 133 ++++++++++++++++++++-
+ react_dashboard/src/hooks/useBotData.js            |  54 ++++++---
+ 4 files changed, 172 insertions(+), 19 deletions(-)
+ rename react_dashboard/backup_dist/assets/{index-D1BL_oPW.js => index-DYFXafoL.js} (95%)
+/home/joe4410joe/TradingAI_Bot_Prod_v1/react_dashboard_dist/index.html
+VPS OK 
+============================== 
+DEPLOY SUCCESS 2026/04/22  6:12:50.29 
+============================== 
+============================== 
+DEPLOY START 2026/04/22  6:20:51.35 
+============================== 
+
+up to date, audited 192 packages in 4s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+[31m✗[39m Build failed in 562ms
+[31merror during build:
+[31mBuild failed with 1 error:
+
+[31m[MISSING_EXPORT] Error:[0m "WS" is not exported by "src/api/index.js".
+   [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/hooks/useBotData.js:2:15 [38;5;246m][0m
+   [38;5;246m│[0m
+ [38;5;246m2 │[0m [38;5;249mi[0m[38;5;249mm[0m[38;5;249mp[0m[38;5;249mo[0m[38;5;249mr[0m[38;5;249mt[0m[38;5;249m [0m[38;5;249m{[0m[38;5;249m [0m[38;5;249mA[0m[38;5;249mP[0m[38;5;249mI[0m[38;5;249m,[0m[38;5;249m [0mWS[38;5;249m [0m[38;5;249m}[0m[38;5;249m [0m[38;5;249mf[0m[38;5;249mr[0m[38;5;249mo[0m[38;5;249mm[0m[38;5;249m [0m[38;5;249m"[0m[38;5;249m.[0m[38;5;249m.[0m[38;5;249m/[0m[38;5;249ma[0m[38;5;249mp[0m[38;5;249mi[0m[38;5;249m"[0m[38;5;249m;[0m
+ [38;5;240m  │[0m               ─┬  
+ [38;5;240m  │[0m                ╰── Missing export
+[38;5;246m───╯[0m
+[31m
+    at aggregateBindingErrorsIntoJsError (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/rolldown/dist/shared/error-BLhcSyeg.mjs:48:18)
+    at unwrapBindingResult (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/rolldown/dist/shared/error-BLhcSyeg.mjs:18:128)
+    at #build (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/rolldown/dist/shared/rolldown-build-CPrIX9V6.mjs:3313:34)
+    at async buildEnvironment (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/vite/dist/node/chunks/node.js:32849:64)
+    at async Object.build (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/vite/dist/node/chunks/node.js:33271:19)
+    at async Object.buildApp (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/vite/dist/node/chunks/node.js:33268:153)
+    at async CAC.<anonymous> (file:///C:/trading/tradingai_prod_v1/react_dashboard/node_modules/vite/dist/node/cli.js:778:3) {
+  errors: [Getter/Setter]
+}[39m
+BUILD FAILED 
+============================== 
+DEPLOY START 2026/04/22  6:24:00.68 
+============================== 
+
+up to date, audited 192 packages in 3s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.29 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-DvhCvuBw.js   200.31 kB │ gzip: 62.47 kB
+
+[32m✓ built in 871ms[39m
+C:\trading\tradingai_prod_v1\react_dashboard\dist\favicon.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\icons.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\index.html
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-C-FsNcTt.css
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-DvhCvuBw.js
+5 File(s) copied
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026年4月22日 6:24:09
+   Source : C:\trading\tradingai_prod_v1\react_dashboard\
+     Dest = H:\�}�C�h���C�u\tradingai_prod_v1\react_dashboard\
+
+    Files : *.*
+	    
+ Exc Dirs : node_modules
+	    dist
+	    .git
+	    
+  Options : *.* /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /R:1000000 /W:30 
+
+------------------------------------------------------------------------------
+
+	                  10	C:\trading\tradingai_prod_v1\react_dashboard\
+	    Newer     		  106145	package-lock.json100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\
+	    Newer     		     465	index.html100%  
+	                   2	C:\trading\tradingai_prod_v1\react_dashboard\backup_dist\assets\
+	  *EXTRA File 		  200186	index-DYFXafoL.js
+	    Newer     		     101	index-C-FsNcTt.css100%  
+	    New File  		  200317	index-DvhCvuBw.js100%  
+	                   3	C:\trading\tradingai_prod_v1\react_dashboard\deploy\
+	    Newer     		   39299	deploy_log.txt

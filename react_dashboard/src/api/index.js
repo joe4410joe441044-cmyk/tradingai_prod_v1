@@ -1,6 +1,6 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE?.replace(/\/$/, "") ||
-  "http://35.194.104.74:8000";
+  "http://127.0.0.1:8000";
 
 // --------------------------
 // safe join
@@ -17,35 +17,44 @@ export const API = {
   // ------------------
   // Market Data
   // ------------------
-  price: () => join("/price"),
-  balance: () => join("/balance"),
-  positions: () => join("/positions"),
+  price: () => join("/api/price"),
+  balance: () => join("/api/balance"),
+  positions: () => join("/api/positions"),
 
   // ------------------
   // AI
   // ------------------
   scores: (symbol = "BTCUSDT") =>
-    join(`/ai/scores?symbol=${encodeURIComponent(symbol)}`),
+    join(`/api/ai/scores?symbol=${encodeURIComponent(symbol)}`),
 
   // ------------------
   // Logs
   // ------------------
-  logs: () => join("/logs"),
+  logs: () => join("/api/logs"),
 
   // ------------------
   // Bot Control
   // ------------------
-  botStatus: () => join("/bot/status"),
-  botStart: () => join("/bot/start"),
-  botStop: () => join("/bot/stop"),
+  botStatus: () => join("/api/bot/status"),
+  botStart: () => join("/api/bot/start"),
+  botStop: () => join("/api/bot/stop"),
 
   // ------------------
   // Summary / Dashboard
   // ------------------
-  summary: () => join("/bot/summary"), // ←ここ修正
+  summary: () => join("/api/bot/summary"),
 
   // ------------------
   // PnL
   // ------------------
-  pnl: () => join("/pnl"),
+  pnl: () => join("/api/pnl"),
+};
+
+// --------------------------
+// WebSocket Layer (FIXED)
+// --------------------------
+export const WS = {
+  price:
+    (import.meta.env.VITE_WS_BASE?.replace(/\/$/, "") ||
+      "ws://127.0.0.1:8000") + "/ws/price",
 };
