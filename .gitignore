@@ -1,4 +1,3 @@
-
 # =========================
 # Env（最重要：絶対漏らさない）
 # =========================
@@ -17,9 +16,10 @@ venv_new/
 ENV/
 
 # =========================
-# Python キャッシュ
+# Python キャッシュ（全階層）
 # =========================
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -37,13 +37,16 @@ pip-wheel-metadata/
 # Node / Frontend
 # =========================
 node_modules/
-dist/
-dist-ssr/
 .vite/
 *.local
 
+# React build（明示的に限定）
+react_dashboard/dist/
+react_dashboard/dist-ssr/
+react_dashboard/backup_dist/
+
 # =========================
-# Logs
+# Logs（全体）
 # =========================
 logs/
 *.log
@@ -51,6 +54,19 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Trading / Bot logs
+trading_logs/
+execution_logs/
+dryrun_logs/
+
+# =========================
+# Cache / temp
+# =========================
+tmp/
+temp/
+*.cache
+.parcel-cache
 
 # =========================
 # Editor / OS
@@ -61,12 +77,19 @@ lerna-debug.log*
 Thumbs.db
 
 # =========================
-# Project specific
+# Python project artifacts
 # =========================
-react_dashboard_dist/
-backend/__pycache__/
+*.sqlite
+*.sqlite3
+*.db
 
 # =========================
-# accidental large folders
+# Project specific accidental folders
 # =========================
 site-packages/
+
+# =========================
+# Deployment / CI leftovers
+# =========================
+deploy/*.log
+deploy/%LOG%
