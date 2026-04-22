@@ -1,6 +1,8 @@
+// ==========================
+// API BASE
+// ==========================
 const API_BASE =
-  import.meta.env.VITE_API_BASE?.replace(/\/$/, "") ||
-  "http://127.0.0.1:8000";
+  (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 
 // --------------------------
 // safe join
@@ -10,51 +12,52 @@ const join = (path) => {
   return `${API_BASE}${cleanPath}`;
 };
 
-// --------------------------
-// API Layer
-// --------------------------
+// ==========================
+// API Layer（🔥 /api は付けない）
+// ==========================
 export const API = {
-  // ------------------
   // Market Data
-  // ------------------
-  price: () => join("/api/price"),
-  balance: () => join("/api/balance"),
-  positions: () => join("/api/positions"),
+  price: () => join("/price"),
+  balance: () => join("/balance"),
+  positions: () => join("/positions"),
 
-  // ------------------
   // AI
-  // ------------------
   scores: (symbol = "BTCUSDT") =>
-    join(`/api/ai/scores?symbol=${encodeURIComponent(symbol)}`),
+    join(`/ai/scores?symbol=${encodeURIComponent(symbol)}`),
 
-  // ------------------
   // Logs
-  // ------------------
-  logs: () => join("/api/logs"),
+  logs: () => join("/logs"),
 
-  // ------------------
   // Bot Control
-  // ------------------
-  botStatus: () => join("/api/bot/status"),
-  botStart: () => join("/api/bot/start"),
-  botStop: () => join("/api/bot/stop"),
+  botStatus: () => join("/bot/status"),
+  botStart: () => join("/bot/start"),
+  botStop: () => join("/bot/stop"),
 
-  // ------------------
-  // Summary / Dashboard
-  // ------------------
-  summary: () => join("/api/bot/summary"),
+  // Summary
+  summary: () => join("/bot/summary"),
 
-  // ------------------
   // PnL
-  // ------------------
-  pnl: () => join("/api/pnl"),
+  pnl: () => join("/pnl"),
 };
 
-// --------------------------
-// WebSocket Layer (FIXED)
-// --------------------------
+// ==========================
+// WebSocket BASE（🔥完全安定版）
+// ==========================
+const WS_BASE =
+  import.meta.env.VITE_WS_BASE ||
+  (
+    location.hostname === "localhost" || location.hostname === "127.0.0.1"
+      // ローカル開発
+      ? "ws://127.0.0.1:8000"
+      // 本番（HTTP / HTTPS 両対応）
+      : (location.protocol === "https:"
+          ? `wss://${location.host}`
+          : `ws://${location.host}:8000`)
+  );
+
+// ==========================
+// WebSocket Layer
+// ==========================
 export const WS = {
-  price:
-    (import.meta.env.VITE_WS_BASE?.replace(/\/$/, "") ||
-      "ws://127.0.0.1:8000") + "/ws/price",
+  price: `${WS_BASE}/ws/price`,
 };
