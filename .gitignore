@@ -23,7 +23,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pydc
 
 # =========================
 # Python build / distribution
@@ -40,13 +39,15 @@ node_modules/
 .vite/
 *.local
 
-# React build（明示的に限定）
+# =========================
+# React build（最重要）
+# =========================
 react_dashboard/dist/
 react_dashboard/dist-ssr/
 react_dashboard/backup_dist/
 
 # =========================
-# Logs（全体）
+# Logs（最重要：今回の原因）
 # =========================
 logs/
 *.log
@@ -59,6 +60,11 @@ lerna-debug.log*
 trading_logs/
 execution_logs/
 dryrun_logs/
+
+# ★追加（今回の事故対策）
+react_dashboard/deploy/deploy_log.txt
+react_dashboard/deploy/%LOG%
+deploy/*.log
 
 # =========================
 # Cache / temp
@@ -77,19 +83,13 @@ temp/
 Thumbs.db
 
 # =========================
-# Python project artifacts
+# Database files
 # =========================
 *.sqlite
 *.sqlite3
 *.db
 
 # =========================
-# Project specific accidental folders
+# Accidental folders
 # =========================
 site-packages/
-
-# =========================
-# Deployment / CI leftovers
-# =========================
-deploy/*.log
-deploy/%LOG%
