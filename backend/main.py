@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 
 import os
 import logging
-import time
+import asyncio
 
 from backend.bot_manager import BotManager
 from backend.services.summary_builder import build_summary
@@ -33,8 +33,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://35.194.104.74",
+        "http://35.194.104.74:3000",
         "http://localhost",
-        "http://localhost:3000"
+        "http://localhost:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -52,7 +53,12 @@ bot = BotManager()
 # =========================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DIST_PATH = "/home/joe4410joe/TradingAI_Bot_Prod_v1/react_dashboard/dist"
+
+DIST_PATH = os.path.abspath(
+    os.path.join(BASE_DIR, "..", "react_dashboard", "dist")
+)
+
+ASSETS_PATH = os.path.join(DIST_PATH, "assets")
 
 # =========================
 # STARTUP
@@ -66,7 +72,6 @@ def startup():
     env = os.getenv("ENV", "dev")
     logging.info(f"ENV = {env}")
 
-    # React build check（prodのみ）
     if env == "prod":
         logging.info("🧠 Checking React build...")
 
@@ -76,24 +81,24 @@ def startup():
 
 DIST_PATH = {DIST_PATH}
 
-対処:
+Fix:
 1. cd react_dashboard
 2. npm install
 3. npm run build
-4. systemctl restart tradingbot.service
+4. restart backend
 """
             logging.error(error_msg)
             raise RuntimeError(error_msg)
 
         logging.info("✅ React build OK")
 
-    # Bot start
     try:
         bot.start()
         logging.info("✅ Bot started successfully")
     except Exception as e:
         logging.error(f"BOT START ERROR: {e}")
         raise
+
 
 # =========================
 # API
@@ -111,17 +116,9 @@ def stop_bot():
 def bot_status():
     return bot.get_status()
 
-# =========================
-# 🔥 FIXED: SUMMARY（統一スキーマ）
-# =========================
-
 @app.get("/api/bot/summary")
 def bot_summary():
     return build_summary(bot)
-
-# =========================
-# LEGACY / SIMPLE API
-# =========================
 
 @app.get("/api/balance")
 def get_balance():
@@ -147,8 +144,32 @@ def pnl():
 def ai_scores(symbol: str):
     return []
 
+
 # =========================
-# ERROR HANDLER
+# WEBSOCKET (FIXED + STABLE)
+# =========================
+
+@app.websocket("/ws/price")
+async def ws_price(websocket: WebSocket):
+
+    # 🔥 重要：403対策（明示的accept）
+    await websocket.accept()
+
+    logging.info(f"📡 WebSocket connected: /ws/price | origin={websocket.headers.get('origin')}")
+
+    try:
+        while True:
+            await websocket.send_json({
+                "price": bot.get_price()
+            })
+            await asyncio.sleep(1)
+
+    except Exception as e:
+        logging.warning(f"WS disconnected: {e}")
+
+
+# =========================
+# GLOBAL ERROR HANDLER
 # =========================
 
 @app.exception_handler(Exception)
@@ -161,9 +182,10 @@ def global_error_handler(request: Request, exc: Exception):
         content={
             "error_code": "BACKEND_RUNTIME_ERROR",
             "message": str(exc),
-            "hint": "Bot / API内部エラー",
+            "hint": "Bot / API internal error",
         }
     )
+
 
 # =========================
 # FRONTEND ROUTE
@@ -173,9 +195,6 @@ def global_error_handler(request: Request, exc: Exception):
 def serve_frontend():
 
     index_path = os.path.join(DIST_PATH, "index.html")
-
-    logging.info(f"INDEX PATH: {index_path}")
-    logging.info(f"EXISTS: {os.path.exists(index_path)}")
 
     if not os.path.exists(index_path):
         return JSONResponse(
@@ -191,15 +210,26 @@ def serve_frontend():
 
     return HTMLResponse(content=html)
 
+
 # =========================
 # STATIC ASSETS
 # =========================
 
-app.mount(
-    "/assets",
-    StaticFiles(directory=os.path.join(DIST_PATH, "assets")),
-    name="assets"
-)
+try:
+    if os.path.exists(ASSETS_PATH):
+        app.mount(
+            "/assets",
+            StaticFiles(directory=ASSETS_PATH),
+            name="assets"
+        )
+        logging.info("✅ Static assets mounted")
+except Exception as e:
+    logging.warning(f"Static mount skipped: {e}")
+
+
+# =========================
+# FAVICON
+# =========================
 
 @app.get("/favicon.ico")
 def favicon():
@@ -207,6 +237,7 @@ def favicon():
     if os.path.exists(ico_path):
         return FileResponse(ico_path)
     return JSONResponse(status_code=204, content={})
+
 
 # =========================
 # MAIN
