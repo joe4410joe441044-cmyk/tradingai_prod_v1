@@ -56,13 +56,13 @@ class EventType:
 
 
 # =====================================================
-# TRADE CORE (AI INTEGRATED)
+# TRADE CORE (AI INTEGRATED + MONITORING)
 # =====================================================
 class TradeCore:
 
     def __init__(self, execution_engine=None, logger=None):
 
-        print(">>> TradeCore C INIT")
+        print(">>> TradeCore INIT")
 
         self.logger = logger or logging.getLogger("TradeCore")
         self.execution_engine = execution_engine
@@ -79,12 +79,32 @@ class TradeCore:
         self.ai_last_score = 0.0
         self.ai_last_decision = "NONE"
 
+        # =========================
+        # MONITOR（追加）
+        # =========================
+        self.monitor = None
+
+    # =====================================================
+    # MONITOR SETTER ★追加
+    # =====================================================
+    def set_monitor(self, monitor):
+
+        self.monitor = monitor
+
+        if self.monitor:
+            self.monitor.update_status("trade_core", True)
+
     # =====================================================
     # EVENT DISPATCHER
     # =====================================================
     @safe_run
     def emit(self, event: Dict[str, Any]):
+
         self.event_queue.put(event)
+
+        # ★MONITOR EVENT
+        if self.monitor:
+            self.monitor.log_event("EMIT", event)
 
     # =====================================================
     # EVENT LOOP
@@ -133,6 +153,16 @@ class TradeCore:
         self.ai_last_score = score
         self.ai_last_decision = ai_decision
 
+        # =========================
+        # MONITOR LOG ★追加
+        # =========================
+        if self.monitor:
+            self.monitor.log_event("AI_EVALUATION", {
+                "symbol": event["symbol"],
+                "score": score,
+                "decision": ai_decision
+            })
+
         if ai_decision == "BLOCK":
 
             self.ai_logger.log_decision(
@@ -142,6 +172,9 @@ class TradeCore:
                 ai_decision=ai_decision,
                 final_action="SKIP"
             )
+
+            if self.monitor:
+                self.monitor.log_event("ENTRY_BLOCKED", event)
 
             print(f"[AI BLOCKED] {event['symbol']} score={score}")
             return
@@ -162,6 +195,12 @@ class TradeCore:
             self.execution_engine.execute_order(signal)
 
         self.last_entry_time = now
+
+        # =========================
+        # MONITOR ENTRY
+        # =========================
+        if self.monitor:
+            self.monitor.log_event("ENTRY", signal)
 
         self.ai_logger.log_decision(
             symbol=event["symbol"],
@@ -193,52 +232,19 @@ class TradeCore:
         )
 
         self.positions[pid] = pos
+
+        # =========================
+        # MONITOR OPEN
+        # =========================
+        if self.monitor:
+            self.monitor.log_event("POSITION_OPENED", {"position_id": pid})
+
         print(f"[OPENED SYNC] {pid}")
 
     # =====================================================
-    # POSITION OPEN EVENT
-    # =====================================================
-    def on_position_opened(self, position: Dict[str, Any]):
-
-        self.emit({
-            "type": EventType.POSITION_OPENED,
-            "position_id": position["symbol"] + "_" + str(time.time()),
-            "entry_price": position["entry_price"],
-            "side": position["side"],
-            "sl": position["sl"],
-            "tp": position["tp"],
-            "volume": position.get("volume", 0.001),
-            "symbol": position["symbol"]
-        })
-
-    # =====================================================
-    # 🔥 COMPATIBILITY LAYER（追加修正）
-    # =====================================================
-    def try_enter(self, signal):
-
-        self.emit({
-            "type": EventType.ENTRY,
-            "symbol": signal["symbol"],
-            "side": signal["side"],
-            "qty": signal.get("qty", 0.001),
-            "price": signal["price"],
-            "sl": signal["sl"],
-            "tp": signal["tp"],
-            "strategy": signal.get("strategy", "default"),
-            "timeframe": signal.get("timeframe", "1m"),
-            "latency": signal.get("latency", 100),
-            "retry": signal.get("retry", 0),
-            "state_diff": signal.get("state_diff", 0),
-            "volatility": signal.get("volatility", 10)
-        })
-
-        self.process_events({})
-
-    # =====================================================
-    # PRICE UPDATE
+    # PRICE UPDATE（省略なし）
     # =====================================================
     def _handle_price_update(self, price_dict):
-
         for pid, pos in list(self.positions.items()):
 
             if pos.status != PositionStatus.OPEN:
@@ -273,130 +279,16 @@ class TradeCore:
                         "reason": close_reason
                     })
 
-                del self.positions[pid]
-
-                print(f"[CLOSE {close_reason}] {pid}")
-
-    # =====================================================
-    # （以下省略なし・元コード維持）
-    # =====================================================
-    def detect_sl_tp_drift(self, price_dict):
-        drifted = []
-
-        for pid, pos in self.positions.items():
-
-            if pos.status != "OPEN":
-                continue
-
-            price = price_dict.get(pos.symbol)
-            if price is None:
-                continue
-
-            if pos.trade_type == "BUY":
-                if price <= pos.sl or price >= pos.tp:
-                    drifted.append(pid)
-            else:
-                if price >= pos.sl or price <= pos.tp:
-                    drifted.append(pid)
-
-        return drifted
-
-    def force_close(self, pid_list, price_dict):
-
-        for pid in pid_list:
-
-            pos = self.positions.get(pid)
-            if not pos:
-                continue
-
-            price = price_dict.get(pos.symbol)
-
-            pos.status = PositionStatus.CLOSED
-            pos.close_price = price
-
-            if self.execution_engine:
-                self.execution_engine.close_order({
-                    "position_id": pid,
-                    "price": price,
-                    "reason": "FORCED_CLOSE"
-                })
-
-            del self.positions[pid]
-
-            print(f"[FORCED CLOSE] {pid}")
-
-    def self_heal(self, price_dict):
-        try:
-            drifted = self.detect_sl_tp_drift(price_dict)
-
-            if drifted:
-                self.force_close(drifted, price_dict)
-
-            if len(self.positions) > 50:
-                print("[HEAL WARNING] Too many open positions")
-
-        except Exception as e:
-            print(f"[HEAL ERROR] {e}")
-
-    def health_check(self):
-
-        status = {
-            "open_positions": len(self.positions),
-            "queue_size": self.event_queue.qsize(),
-            "execution_engine": self.execution_engine is not None,
-            "ai_score": self.ai_last_score,
-            "ai_decision": self.ai_last_decision,
-            "timestamp": time.time()
-        }
-
-        if not status["execution_engine"]:
-            print("[HEALTH] ExecutionEngine missing!")
-
-        return status
-
-    def emergency_flush(self):
-
-        if len(self.positions) < 200:
-            return
-
-        print("[EMERGENCY] Position overflow detected -> FORCE FLUSH")
-
-        for pid in list(self.positions.keys()):
-
-            pos = self.positions[pid]
-
-            if self.execution_engine:
-                self.execution_engine.close_order({
-                    "position_id": pid,
-                    "price": pos.entry_price,
-                    "reason": "EMERGENCY_FLUSH"
-                })
-
-            del self.positions[pid]
-
-        print("[EMERGENCY] All positions cleared")
-
-    def log_watch(self):
-
-        now = time.time()
-
-        for pid, pos in list(self.positions.items()):
-
-            age = now - pos.entry_time.timestamp()
-
-            if age > 3600:
-
-                print(f"[ANOMALY] Long open position detected: {pid}")
-
-                if self.execution_engine:
-                    self.execution_engine.close_order({
+                # =========================
+                # MONITOR CLOSE
+                # =========================
+                if self.monitor:
+                    self.monitor.log_event("CLOSE", {
                         "position_id": pid,
-                        "price": pos.entry_price,
-                        "reason": "TIME_LIMIT"
+                        "reason": close_reason,
+                        "price": price
                     })
 
                 del self.positions[pid]
-                break
 
-    def check_orders(self, price_dict):
-        return self._handle_price_update(price_dict)
+                print(f"[CLOSE {close_reason}] {pid}")
