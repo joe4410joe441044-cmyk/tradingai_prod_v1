@@ -7,10 +7,6 @@ from typing import Dict, Any
 class RiskManager:
     """
     Production-grade Risk Control System
-    - 破産防止
-    - 連敗制御
-    - エクスポージャー制御
-    - kill switch
     """
 
     def __init__(
@@ -20,8 +16,10 @@ class RiskManager:
         max_trade_size: float = 0.01,
         cooldown_sec: int = 5,
         max_consecutive_losses: int = 5,
+        logger=None  # 🔥 追加（ここが今回の核心）
     ):
-        self.logger = logging.getLogger(__name__)
+        # 🔥 外部logger優先
+        self.logger = logger or logging.getLogger(__name__)
 
         # =========================
         # CONFIG
@@ -40,7 +38,8 @@ class RiskManager:
         self.consecutive_losses = 0
         self.trading_disabled = False
 
-        self.current_positions = 0
+        # 🔥 ExecutionEngine互換
+        self.open_positions = 0
 
         self.start_of_day_balance = None
         self.peak_daily_pnl = 0.0
@@ -78,18 +77,15 @@ class RiskManager:
             self.logger.warning("[RISK] trading disabled (KILL SWITCH)")
             return False
 
-        # cooldown
         now = time.time()
         if now - self.last_trade_time < self.cooldown_sec:
             self.logger.warning("[RISK] cooldown active")
             return False
 
-        # position limit
-        if self.current_positions >= self.max_positions:
+        if self.open_positions >= self.max_positions:
             self.logger.warning("[RISK] max positions reached")
             return False
 
-        # trade size check
         qty = float(signal.get("qty", 0.0))
         if qty <= 0:
             self.logger.warning("[RISK] invalid qty")
@@ -101,15 +97,13 @@ class RiskManager:
             )
             return False
 
-        # consecutive losses
         if self.consecutive_losses >= self.max_consecutive_losses:
-            self.logger.error("[RISK] consecutive loss limit hit → KILL SWITCH")
+            self.logger.error("[RISK] consecutive loss limit → KILL SWITCH")
             self.trading_disabled = True
             return False
 
-        # daily loss limit
         if self.daily_pnl <= self.max_daily_loss:
-            self.logger.error("[RISK] daily loss limit hit → KILL SWITCH")
+            self.logger.error("[RISK] daily loss limit → KILL SWITCH")
             self.trading_disabled = True
             return False
 
@@ -118,27 +112,29 @@ class RiskManager:
     # =================================================
     # ENTRY REGISTER
     # =================================================
-    def on_entry(self):
+    def on_entry(self, signal: Dict[str, Any] = None):
         self.last_trade_time = time.time()
-        self.current_positions += 1
+        self.open_positions += 1
+
+        self.logger.info(
+            f"[RISK] entry | positions={self.open_positions}"
+        )
 
     # =================================================
     # EXIT REGISTER
     # =================================================
     def on_exit(self, pnl: float):
 
-        self.current_positions = max(0, self.current_positions - 1)
+        self.open_positions = max(0, self.open_positions - 1)
 
         self.daily_pnl += pnl
         self.peak_daily_pnl = max(self.peak_daily_pnl, self.daily_pnl)
 
-        # loss tracking
         if pnl < 0:
             self.consecutive_losses += 1
         else:
             self.consecutive_losses = 0
 
-        # safety escalation (soft kill)
         if self.daily_pnl <= self.max_daily_loss * 0.8:
             self.logger.warning("[RISK] approaching daily loss limit")
 
@@ -147,15 +143,15 @@ class RiskManager:
             f"daily_pnl={self.daily_pnl:.4f} "
             f"peak={self.peak_daily_pnl:.4f} "
             f"loss_streak={self.consecutive_losses} "
-            f"positions={self.current_positions}"
+            f"positions={self.open_positions}"
         )
 
     # =================================================
-    # KILL SWITCH CONTROL
+    # KILL SWITCH
     # =================================================
     def kill_switch(self, reason: str = "manual"):
         self.trading_disabled = True
-        self.logger.error(f"[RISK] KILL SWITCH ACTIVATED: {reason}")
+        self.logger.error(f"[RISK] KILL SWITCH: {reason}")
 
     def enable(self):
         self.trading_disabled = False
@@ -170,6 +166,6 @@ class RiskManager:
             "daily_pnl": self.daily_pnl,
             "peak_daily_pnl": self.peak_daily_pnl,
             "consecutive_losses": self.consecutive_losses,
-            "positions": self.current_positions,
+            "positions": self.open_positions,
             "last_trade_time": self.last_trade_time,
         }

@@ -1,49 +1,115 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, WebSocket
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 
-import os
 import logging
+import asyncio
 import threading
 from contextlib import asynccontextmanager
-
 from starlette.websockets import WebSocketDisconnect
 
 from backend.bot_manager import BotManager
-from backend.services.summary_builder import build_summary
-from backend.websocket_manager import WebSocketManager
-from backend.ws.price_ws import price_ws_handler
-
-# =========================
-# MONITORING IMPORT ★追加
-# =========================
 from monitoring.system_monitor import SystemMonitor
 
 # =========================
-# ENV LOAD
+# BOT IMPORT
+# =========================
+from Bot.engine.market_engine import MarketEngine
+from Bot.core.trade_core import TradeCore
+from Bot.strategies.fvg_strategy import FVGStrategy
+from Bot.engine.execution_engine import ExecutionEngine
+from Bot.wrappers.strategy_wrapper import StrategyWrapper
+from Bot.utils.telegram_notifier import TelegramNotifier
+from Bot.utils.logger import BotLogger
+
+# =========================
+# ENV
 # =========================
 load_dotenv()
 
-# =========================
-# LOGGING
-# =========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
 # =========================
-# CORE OBJECTS
+# CONFIG
+# =========================
+WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
+TOKEN = "YOUR_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
+LIVE_MODE = False
+
+# =========================
+# CORE
 # =========================
 bot = BotManager()
-ws_manager = WebSocketManager()
-
-# ★追加：monitor global
 monitor = SystemMonitor()
+
+# =========================
+# BOT INITIALIZE
+# =========================
+def initialize_bot():
+
+    logger = BotLogger("logs").get_logger()
+    notifier = TelegramNotifier(TOKEN, CHAT_ID)
+
+    execution_engine = ExecutionEngine(
+        live=LIVE_MODE,
+        logger=logger,
+        notifier=notifier
+    )
+
+    trade_core = TradeCore(
+        execution_engine=execution_engine,
+        logger=logger
+    )
+
+    execution_engine.trade_core = trade_core
+
+    fvg = FVGStrategy(
+        trade_core=trade_core,
+        logger=logger,
+        notifier=notifier
+    )
+
+    wrapper = StrategyWrapper(trade_core)
+    wrapper.register_strategy(fvg)
+
+    market_engine = MarketEngine(
+        strategy_wrapper=wrapper,
+        trade_core=trade_core,
+        ws_url=WS_URL,
+        debug=False
+    )
+
+    return market_engine
+
+# =========================
+# BOT RUNNER
+# =========================
+async def run_bot():
+
+    print("🔥 BOT LOOP START")
+
+    while True:
+        try:
+            market_engine = initialize_bot()
+
+            if hasattr(market_engine, "set_monitor"):
+                market_engine.set_monitor(monitor)
+
+            print("🔥 WS START")
+            logging.info("🚀 BOT STARTED")
+
+            await market_engine.run_websocket()
+
+        except Exception as e:
+            logging.error(f"[BOT ERROR] restarting: {e}")
+            await asyncio.sleep(3)
 
 # =========================
 # LIFESPAN
@@ -51,51 +117,10 @@ monitor = SystemMonitor()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logging.info("🚀 TradingAI startup sequence begin")
+    logging.info("🚀 Startup begin")
 
-    env = os.getenv("ENV", "dev")
-    logging.info(f"ENV = {env}")
-
-    logging.info(f"BYBIT KEY LOADED: {bool(os.getenv('BYBIT_API_KEY'))}")
-
-    # =========================
-    # WebSocket連携
-    # =========================
-    if hasattr(bot, "engines"):
-        for eng in bot.engines.values():
-            eng.ws_manager = ws_manager
-
-    # =========================
-    # 🔥 MONITORING INJECTION（ここが重要）
-    # =========================
-    try:
-        # BotManager → coreアクセス前提
-        if hasattr(bot, "trade_core") and bot.trade_core:
-            bot.trade_core.set_monitor(monitor)
-
-        if hasattr(bot, "risk_manager") and bot.risk_manager:
-            bot.risk_manager.set_monitor(monitor)
-
-        if hasattr(bot, "execution_engine") and bot.execution_engine:
-            bot.execution_engine.set_monitor(monitor)
-
-        monitor.update_status("backend", True)
-        logging.info("✅ SystemMonitor injected")
-
-    except Exception as e:
-        logging.error(f"Monitor injection failed: {e}")
-
-    # =========================
-    # React build確認
-    # =========================
-    DIST_PATH = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "react_dashboard", "dist")
-    )
-
-    if env == "prod":
-        if not os.path.exists(DIST_PATH):
-            raise RuntimeError(f"DIST not found: {DIST_PATH}")
-        logging.info("✅ React build OK")
+    monitor.set_loop(asyncio.get_running_loop())
+    monitor.update_status("backend", True)
 
     logging.info("✅ Startup complete")
 
@@ -103,233 +128,124 @@ async def lifespan(app: FastAPI):
 
     logging.info("🛑 Shutdown complete")
 
-
 # =========================
-# APP INIT
+# APP
 # =========================
 app = FastAPI(title="TradingAI Backend", lifespan=lifespan)
 
-# =========================
-# CORS
-# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://35.194.104.74",
-        "http://35.194.104.74:3000",
-        "http://localhost",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =========================
-# PATH
+# API
 # =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+@app.get("/api/monitor/status")
+def monitor_status():
+    return monitor.health_check()
 
-DIST_PATH = os.path.abspath(
-    os.path.join(BASE_DIR, "..", "react_dashboard", "dist")
-)
-
-ASSETS_PATH = os.path.join(DIST_PATH, "assets")
+@app.get("/api/monitor/logs")
+def monitor_logs():
+    return {"logs": monitor.get_logs()}
 
 # =========================
-# ROUTERS
+# BOT SUMMARY
 # =========================
-from backend.api.risk_router import router as risk_router
-app.include_router(risk_router)
+@app.get("/api/bot/summary")
+def get_bot_summary():
+    try:
+        if hasattr(monitor, "get_dashboard_data"):
+            data = monitor.get_dashboard_data()
+        else:
+            data = {}
+
+        def safe(v):
+            try:
+                return float(v)
+            except:
+                return 0
+
+        return {
+            "status": data.get("status", "RUNNING"),
+            "price": safe(data.get("price", 0)),
+            "balance": safe(data.get("balance", 0)),
+            "pnl": safe(data.get("pnl", 0)),
+            "positions": data.get("positions", []),
+            "logs": data.get("logs", [])[-20:],
+            "connection": data.get("connection", "ONLINE")
+        }
+
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "price": 0,
+            "balance": 0,
+            "pnl": 0,
+            "positions": [],
+            "logs": [str(e)],
+            "connection": "ERROR"
+        }
 
 # =========================
 # BOT CONTROL
 # =========================
 @app.post("/api/bot/start")
-def start_bot():
-    if bot.is_running():
-        return {"status": "already running"}
+async def start_bot():
 
-    thread = threading.Thread(target=bot.start, daemon=True)
-    thread.start()
+    def start():
+        print("🔥 BOT THREAD START")
+        asyncio.run(run_bot())
+
+    threading.Thread(target=start, daemon=True).start()
+
+    monitor.update_status("trade_core", True)
 
     return {"status": "started"}
 
 
 @app.post("/api/bot/stop")
 def stop_bot():
-    bot.stop()
-    return {"status": "stopped"}
-
+    return {"status": "not implemented yet"}
 
 # =========================
-# EXCHANGE SWITCH
-# =========================
-@app.post("/api/set-exchange")
-def set_exchange(req: dict):
-    exchange = req.get("exchange")
-
-    if not exchange:
-        return {"error": "exchange not provided"}
-
-    bot.set_exchange(exchange)
-    return {"status": "ok", "exchange": exchange}
-
-
-# =========================
-# API
-# =========================
-@app.get("/api/bot/status")
-def bot_status():
-    return bot.get_status()
-
-
-@app.get("/api/bot/summary")
-def bot_summary():
-    return build_summary(bot)
-
-
-@app.get("/api/balance")
-def balance():
-    return {"balance": bot.get_balance()}
-
-
-@app.get("/api/positions")
-def positions():
-    return {"positions": bot.get_positions()}
-
-
-@app.get("/api/logs")
-def logs():
-    return {"logs": bot.get_logs()}
-
-
-@app.get("/api/price")
-def price():
-    return {"price": bot.get_price()}
-
-
-@app.get("/api/pnl")
-def pnl():
-    return {"pnl": bot.get_pnl()}
-
-
-# =========================
-# MONITOR API（追加）
-# =========================
-@app.get("/api/monitor/status")
-def monitor_status():
-    return monitor.health_check()
-
-
-@app.get("/api/monitor/integration")
-def monitor_integration():
-    return monitor.integration_check()
-
-
-@app.get("/api/monitor/logs")
-def monitor_logs():
-    return {"logs": monitor.get_logs()}
-
-
-# =========================
-# WEBSOCKET ① PRICE
-# =========================
-@app.websocket("/ws/price")
-async def ws_price(websocket: WebSocket):
-    await price_ws_handler(websocket)
-
-
-# =========================
-# WEBSOCKET ② MARKET INPUT
-# =========================
-@app.websocket("/ws/market")
-async def ws_market(websocket: WebSocket):
-    await websocket.accept()
-
-    try:
-        while True:
-            data = await websocket.receive_json()
-
-            symbol = data.get("symbol")
-            price = data.get("price")
-
-            if symbol and price is not None:
-                bot.set_price(symbol, float(price))
-
-    except WebSocketDisconnect:
-        logging.info("WS market disconnected")
-
-    except Exception as e:
-        logging.warning(f"WS market error: {e}")
-
-
-# =========================
-# WEBSOCKET ③ EVENTS
+# WEBSOCKET
 # =========================
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket):
-    await ws_manager.connect(websocket)
+
+    await websocket.accept()
+    monitor.register_ws(websocket)
+    monitor.update_status("websocket", True)
+
+    logging.info("🔥 WS CONNECTED")
 
     try:
         while True:
-            await websocket.receive_text()
+            await asyncio.sleep(10)
 
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        monitor.unregister_ws(websocket)
 
+        if len(monitor.ws_clients) == 0:
+            monitor.update_status("websocket", False)
+
+        logging.info("❌ WS DISCONNECTED")
+
+    except Exception as e:
+        monitor.unregister_ws(websocket)
+
+        if len(monitor.ws_clients) == 0:
+            monitor.update_status("websocket", False)
+
+        logging.error(f"⚠ WS ERROR: {e}")
 
 # =========================
-# ERROR HANDLER
+# ROOT
 # =========================
-@app.exception_handler(Exception)
-def error_handler(request: Request, exc: Exception):
-    logging.error(str(exc))
-    return JSONResponse(
-        status_code=500,
-        content={"error": str(exc)}
-    )
-
-
-# =========================
-# SPA
-# =========================
-def serve_index():
-    index_path = os.path.join(DIST_PATH, "index.html")
-
-    if not os.path.exists(index_path):
-        return JSONResponse(status_code=500, content={"error": "no build"})
-
-    with open(index_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-
 @app.get("/")
 def root():
-    return serve_index()
-
-
-@app.get("/{path:path}")
-def spa(path: str):
-    if path.startswith(("api", "ws")):
-        return JSONResponse(status_code=404, content={"error": "not found"})
-    return serve_index()
-
-
-# =========================
-# STATIC
-# =========================
-if os.path.exists(ASSETS_PATH):
-    app.mount("/assets", StaticFiles(directory=ASSETS_PATH), name="assets")
-
-
-# =========================
-# FAVICON
-# =========================
-@app.get("/favicon.ico")
-def favicon():
-    path = os.path.join(DIST_PATH, "favicon.svg")
-    if os.path.exists(path):
-        return FileResponse(path)
-    return JSONResponse(status_code=204, content={})
+    return {"status": "TradingAI running"}

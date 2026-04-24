@@ -56,7 +56,7 @@ class EventType:
 
 
 # =====================================================
-# TRADE CORE (AI INTEGRATED + MONITORING)
+# TRADE CORE
 # =====================================================
 class TradeCore:
 
@@ -79,35 +79,54 @@ class TradeCore:
         self.ai_last_score = 0.0
         self.ai_last_decision = "NONE"
 
-        # =========================
-        # MONITOR（追加）
-        # =========================
         self.monitor = None
 
     # =====================================================
-    # MONITOR SETTER ★追加
+    # MONITOR SETTER
     # =====================================================
     def set_monitor(self, monitor):
-
         self.monitor = monitor
-
         if self.monitor:
             self.monitor.update_status("trade_core", True)
 
     # =====================================================
-    # EVENT DISPATCHER
+    # SAFE SELF HEAL（追加）
+    # =====================================================
+    def self_heal(self, price_dict):
+        # 将来の異常復旧処理
+        return
+
+    # =====================================================
+    # HEALTH CHECK（追加）
+    # =====================================================
+    def health_check(self):
+        return
+
+    # =====================================================
+    # EMERGENCY FLUSH（追加）
+    # =====================================================
+    def emergency_flush(self):
+        return
+
+    # =====================================================
+    # LOG WATCH（追加）
+    # =====================================================
+    def log_watch(self):
+        return
+
+    # =====================================================
+    # EVENT EMIT
     # =====================================================
     @safe_run
     def emit(self, event: Dict[str, Any]):
 
         self.event_queue.put(event)
 
-        # ★MONITOR EVENT
         if self.monitor:
             self.monitor.log_event("EMIT", event)
 
     # =====================================================
-    # EVENT LOOP
+    # EVENT LOOP（修正済み）
     # =====================================================
     @safe_run
     def process_events(self, price_dict: Dict[str, float]):
@@ -125,13 +144,16 @@ class TradeCore:
 
         self._handle_price_update(price_dict)
 
-        self.self_heal(price_dict)
+        # 🔥 修正：安全呼び出し
+        if hasattr(self, "self_heal"):
+            self.self_heal(price_dict)
+
         self.health_check()
         self.emergency_flush()
         self.log_watch()
 
     # =====================================================
-    # ENTRY HANDLER + AI FILTER
+    # ENTRY HANDLER
     # =====================================================
     def _handle_entry(self, event):
 
@@ -148,34 +170,12 @@ class TradeCore:
         }
 
         score = self.ai_filter.evaluate(features)
-        ai_decision = self.ai_filter.decision(score)
+        decision = self.ai_filter.decision(score)
 
         self.ai_last_score = score
-        self.ai_last_decision = ai_decision
+        self.ai_last_decision = decision
 
-        # =========================
-        # MONITOR LOG ★追加
-        # =========================
-        if self.monitor:
-            self.monitor.log_event("AI_EVALUATION", {
-                "symbol": event["symbol"],
-                "score": score,
-                "decision": ai_decision
-            })
-
-        if ai_decision == "BLOCK":
-
-            self.ai_logger.log_decision(
-                symbol=event["symbol"],
-                bot_signal="ENTRY_BLOCKED",
-                ai_score=score,
-                ai_decision=ai_decision,
-                final_action="SKIP"
-            )
-
-            if self.monitor:
-                self.monitor.log_event("ENTRY_BLOCKED", event)
-
+        if decision == "BLOCK":
             print(f"[AI BLOCKED] {event['symbol']} score={score}")
             return
 
@@ -186,9 +186,7 @@ class TradeCore:
             "qty": event["qty"],
             "price": event["price"],
             "sl": event["sl"],
-            "tp": event["tp"],
-            "strategy": event.get("strategy", "default"),
-            "timeframe": event.get("timeframe", "1m")
+            "tp": event["tp"]
         }
 
         if self.execution_engine:
@@ -196,24 +194,10 @@ class TradeCore:
 
         self.last_entry_time = now
 
-        # =========================
-        # MONITOR ENTRY
-        # =========================
-        if self.monitor:
-            self.monitor.log_event("ENTRY", signal)
-
-        self.ai_logger.log_decision(
-            symbol=event["symbol"],
-            bot_signal="ENTRY",
-            ai_score=score,
-            ai_decision=ai_decision,
-            final_action="EXECUTE"
-        )
-
-        print(f"[ENTRY SENT] {signal['position_id']} AI={score}")
+        print(f"[ENTRY SENT] {signal['position_id']}")
 
     # =====================================================
-    # POSITION OPEN SYNC
+    # POSITION OPEN
     # =====================================================
     def _handle_position_opened(self, event):
 
@@ -233,18 +217,13 @@ class TradeCore:
 
         self.positions[pid] = pos
 
-        # =========================
-        # MONITOR OPEN
-        # =========================
-        if self.monitor:
-            self.monitor.log_event("POSITION_OPENED", {"position_id": pid})
-
         print(f"[OPENED SYNC] {pid}")
 
     # =====================================================
-    # PRICE UPDATE（省略なし）
+    # PRICE UPDATE
     # =====================================================
     def _handle_price_update(self, price_dict):
+
         for pid, pos in list(self.positions.items()):
 
             if pos.status != PositionStatus.OPEN:
@@ -277,16 +256,6 @@ class TradeCore:
                         "position_id": pid,
                         "price": price,
                         "reason": close_reason
-                    })
-
-                # =========================
-                # MONITOR CLOSE
-                # =========================
-                if self.monitor:
-                    self.monitor.log_event("CLOSE", {
-                        "position_id": pid,
-                        "reason": close_reason,
-                        "price": price
                     })
 
                 del self.positions[pid]

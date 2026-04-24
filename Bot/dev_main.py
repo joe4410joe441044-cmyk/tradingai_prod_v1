@@ -16,7 +16,6 @@ from backend.api_ai import set_trade_core
 
 
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
-TOKEN = "8568714005:AAFlzofjXb1cDZyaM93Awq4TFMcBsFKizYc"
 CHAT_ID = "1040943428"
 LIVE_MODE = False
 

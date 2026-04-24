@@ -50,7 +50,20 @@ class MarketEngine:
         self.candle_buffer = CandleBuffer()
         self._running = False
 
+        # 🔥 追加
+        self.monitor = None
+
         self.logger.info("MarketEngine initialized.")
+
+    # =====================================================
+    # 🔥 MONITOR CONNECT
+    # =====================================================
+    def set_monitor(self, monitor):
+        self.monitor = monitor
+
+        if self.monitor:
+            self.monitor.update_status("websocket", True)
+            self.monitor.log_event("MARKET_ENGINE_CONNECTED", {})
 
     # =====================================================
     # DATA PIPELINE
@@ -64,7 +77,6 @@ class MarketEngine:
         symbol = candle.get("symbol")
         close_price = candle.get("close")
 
-        # 🚨 完全防御（ここ重要）
         if symbol is None or close_price is None:
             self.logger.error(f"[MARKET] invalid candle: {candle}")
             return
@@ -74,24 +86,26 @@ class MarketEngine:
         # Candle保存
         self.candle_buffer.add_candle(candle)
 
+        # 🔥 UIに価格反映（最重要）
+        if self.monitor:
+            try:
+                self.monitor.update_dashboard(price=float(close_price))
+            except Exception as e:
+                self.logger.error(f"[MONITOR ERROR] {e}")
+
         # --------------------------
         # PRICE UPDATE → TRADE CORE
         # --------------------------
         if self.trade_core:
-
             try:
                 price_dict = {symbol: float(close_price)}
 
                 print(f"[TICK] {price_dict}")
 
-                # 追加防御
                 if price_dict[symbol] is None:
                     self.logger.error("[PRICE UPDATE ERROR] None price detected")
                     return
 
-                # =================================================
-                # MAIN PIPELINE
-                # =================================================
                 self.trade_core.process_events(price_dict)
 
             except Exception as e:
@@ -120,15 +134,25 @@ class MarketEngine:
         while self._running:
             try:
                 async with websockets.connect(self.ws_url) as ws:
+
+                    # 🔥 接続状態ON
+                    if self.monitor:
+                        self.monitor.update_status("websocket", True)
+
                     async for message in ws:
                         candle = self.parse_message(message)
 
-                        # 🚨 非同期ループでも安全
                         if candle:
                             self.process_data(candle)
 
             except Exception as e:
                 self.logger.error(f"WebSocket error: {e}")
+
+                # 🔥 接続状態OFF
+                if self.monitor:
+                    self.monitor.update_status("websocket", False)
+                    self.monitor.log_event("WS_DISCONNECTED", {})
+
                 await asyncio.sleep(5)
 
     # =====================================================
