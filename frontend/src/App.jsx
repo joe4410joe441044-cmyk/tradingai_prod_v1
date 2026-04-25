@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 
 import useBotData from "../../react_dashboard/src/hooks/useBotData";
 import useEventWS from "../../react_dashboard/src/hooks/useEventWS";
@@ -36,15 +36,17 @@ function Card({ title, children, style = {} }) {
 // MAIN APP
 // =========================
 export default function App() {
-  // 🔥 修正①：引数削除
   const bot = useBotData();
 
   const [exchange, setExchange] = useState("bybit");
 
-  // 🔥 WS
-  const events = useEventWS((msg) => {
+  // 🔥 WS（修正：useCallbackで固定）
+  const handleWS = useCallback((msg) => {
     // 必要ならここで処理
-  });
+    // console.log("WS EVENT:", msg);
+  }, []);
+
+  const events = useEventWS(handleWS);
 
   // 🔥 安全イベント
   const safeEvents = useMemo(() => {
@@ -52,6 +54,7 @@ export default function App() {
     return events.slice(0, 100);
   }, [events]);
 
+  // 🔥 Exchange切り替え
   const handleExchangeChange = async (value) => {
     setExchange(value);
 

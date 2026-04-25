@@ -3,27 +3,13 @@
 from fastapi import FastAPI, WebSocket
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
 import logging
 import asyncio
-import threading
 from contextlib import asynccontextmanager
 from starlette.websockets import WebSocketDisconnect
 
 from backend.bot_manager import BotManager
 from monitoring.system_monitor import SystemMonitor
-
-# =========================
-# BOT IMPORT
-# =========================
-from Bot.engine.market_engine import MarketEngine
-from Bot.core.trade_core import TradeCore
-from Bot.strategies.fvg_strategy import FVGStrategy
-from Bot.engine.execution_engine import ExecutionEngine
-from Bot.wrappers.strategy_wrapper import StrategyWrapper
-from Bot.utils.telegram_notifier import TelegramNotifier
-from Bot.utils.logger import BotLogger
 
 # =========================
 # ENV
@@ -36,80 +22,10 @@ logging.basicConfig(
 )
 
 # =========================
-# CONFIG
-# =========================
-WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
-TOKEN = "YOUR_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
-LIVE_MODE = False
-
-# =========================
 # CORE
 # =========================
-bot = BotManager()
 monitor = SystemMonitor()
-
-# =========================
-# BOT INITIALIZE
-# =========================
-def initialize_bot():
-
-    logger = BotLogger("logs").get_logger()
-    notifier = TelegramNotifier(TOKEN, CHAT_ID)
-
-    execution_engine = ExecutionEngine(
-        live=LIVE_MODE,
-        logger=logger,
-        notifier=notifier
-    )
-
-    trade_core = TradeCore(
-        execution_engine=execution_engine,
-        logger=logger
-    )
-
-    execution_engine.trade_core = trade_core
-
-    fvg = FVGStrategy(
-        trade_core=trade_core,
-        logger=logger,
-        notifier=notifier
-    )
-
-    wrapper = StrategyWrapper(trade_core)
-    wrapper.register_strategy(fvg)
-
-    market_engine = MarketEngine(
-        strategy_wrapper=wrapper,
-        trade_core=trade_core,
-        ws_url=WS_URL,
-        debug=False
-    )
-
-    return market_engine
-
-# =========================
-# BOT RUNNER
-# =========================
-async def run_bot():
-
-    print("🔥 BOT LOOP START")
-
-    while True:
-        try:
-            market_engine = initialize_bot()
-
-            if hasattr(market_engine, "set_monitor"):
-                market_engine.set_monitor(monitor)
-
-            print("🔥 WS START")
-            logging.info("🚀 BOT STARTED")
-
-            await market_engine.run_websocket()
-
-        except Exception as e:
-            logging.error(f"[BOT ERROR] restarting: {e}")
-            await asyncio.sleep(3)
+bot = BotManager(monitor=monitor)
 
 # =========================
 # LIFESPAN
@@ -119,14 +35,36 @@ async def lifespan(app: FastAPI):
 
     logging.info("🚀 Startup begin")
 
-    monitor.set_loop(asyncio.get_running_loop())
-    monitor.update_status("backend", True)
+    try:
+        loop = asyncio.get_running_loop()
+        monitor.set_loop(loop)
 
-    logging.info("✅ Startup complete")
+        monitor.update_status("backend", True)
+        monitor.log_event("SYSTEM", {"msg": "backend started"})
+
+        logging.info("✅ Startup complete")
+
+    except Exception as e:
+        monitor.log_error("STARTUP", e)
 
     yield
 
+    # =========================
+    # SHUTDOWN（重要）
+    # =========================
+    logging.info("🛑 Shutdown begin")
+
+    try:
+        bot.stop()
+
+        monitor.update_status("backend", False)
+        monitor.log_event("SYSTEM", {"msg": "backend stopped"})
+
+    except Exception as e:
+        monitor.log_error("SHUTDOWN", e)
+
     logging.info("🛑 Shutdown complete")
+
 
 # =========================
 # APP
@@ -142,15 +80,17 @@ app.add_middleware(
 )
 
 # =========================
-# API
+# MONITOR API
 # =========================
 @app.get("/api/monitor/status")
 def monitor_status():
     return monitor.health_check()
 
+
 @app.get("/api/monitor/logs")
 def monitor_logs():
     return {"logs": monitor.get_logs()}
+
 
 # =========================
 # BOT SUMMARY
@@ -158,28 +98,29 @@ def monitor_logs():
 @app.get("/api/bot/summary")
 def get_bot_summary():
     try:
-        if hasattr(monitor, "get_dashboard_data"):
-            data = monitor.get_dashboard_data()
-        else:
-            data = {}
+        data = monitor.get_dashboard_data()
 
         def safe(v):
             try:
                 return float(v)
-            except:
+            except Exception:
                 return 0
 
         return {
-            "status": data.get("status", "RUNNING"),
+            "status": "RUNNING" if bot.is_running() else "STOPPED",
             "price": safe(data.get("price", 0)),
             "balance": safe(data.get("balance", 0)),
             "pnl": safe(data.get("pnl", 0)),
             "positions": data.get("positions", []),
             "logs": data.get("logs", [])[-20:],
-            "connection": data.get("connection", "ONLINE")
+            "connection": data.get(
+                "connection",
+                "ONLINE" if bot.is_running() else "OFFLINE"
+            )
         }
 
     except Exception as e:
+        monitor.log_error("SUMMARY_API", e)
         return {
             "status": "ERROR",
             "price": 0,
@@ -190,29 +131,36 @@ def get_bot_summary():
             "connection": "ERROR"
         }
 
+
 # =========================
 # BOT CONTROL
 # =========================
 @app.post("/api/bot/start")
-async def start_bot():
-
-    def start():
-        print("🔥 BOT THREAD START")
-        asyncio.run(run_bot())
-
-    threading.Thread(target=start, daemon=True).start()
-
-    monitor.update_status("trade_core", True)
-
-    return {"status": "started"}
+def start_bot():
+    try:
+        result = bot.start()
+        monitor.update_status("trade_core", True)
+        monitor.log_event("BOT", {"action": "start"})
+        return result
+    except Exception as e:
+        monitor.log_error("BOT_START", e)
+        return {"status": "error"}
 
 
 @app.post("/api/bot/stop")
 def stop_bot():
-    return {"status": "not implemented yet"}
+    try:
+        result = bot.stop()
+        monitor.update_status("trade_core", False)
+        monitor.log_event("BOT", {"action": "stop"})
+        return result
+    except Exception as e:
+        monitor.log_error("BOT_STOP", e)
+        return {"status": "error"}
+
 
 # =========================
-# WEBSOCKET
+# WEBSOCKET（強化版）
 # =========================
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket):
@@ -223,25 +171,36 @@ async def ws_events(websocket: WebSocket):
 
     logging.info("🔥 WS CONNECTED")
 
+    # 初回フルデータ
+    try:
+        data = monitor.get_dashboard_data()
+        await websocket.send_json({
+            "type": "dashboard_full",
+            "data": data
+        })
+    except Exception as e:
+        monitor.log_error("WS_INIT", e)
+
     try:
         while True:
-            await asyncio.sleep(10)
+            try:
+                # ping（接続維持）
+                await websocket.send_json({"type": "ping"})
+                await asyncio.sleep(20)
+
+            except Exception as e:
+                monitor.log_error("WS_LOOP", e)
+                break
 
     except WebSocketDisconnect:
-        monitor.unregister_ws(websocket)
-
-        if len(monitor.ws_clients) == 0:
-            monitor.update_status("websocket", False)
-
         logging.info("❌ WS DISCONNECTED")
 
-    except Exception as e:
+    finally:
         monitor.unregister_ws(websocket)
 
         if len(monitor.ws_clients) == 0:
             monitor.update_status("websocket", False)
 
-        logging.error(f"⚠ WS ERROR: {e}")
 
 # =========================
 # ROOT
