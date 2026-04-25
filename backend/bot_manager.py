@@ -27,15 +27,13 @@ class BotManager:
 
     def __init__(self, monitor=None):
 
-        self.running = False
+        # ✅ 状態はこれだけ
+        self._running = False
+
         self.thread = None
         self.lock = threading.Lock()
-
         self.monitor = monitor
 
-        # =========================
-        # RESULT（🔥 最重要）
-        # =========================
         self.last_result = {
             "realized_pnl": 0.0,
             "positions": {}
@@ -75,9 +73,6 @@ class BotManager:
             for name in self.trade_clients
         }
 
-        for eng in self.engines.values():
-            eng.active = False
-
         self.active_exchange = "bybit"
         self.engine = self.engines[self.active_exchange]
 
@@ -103,11 +98,11 @@ class BotManager:
     # =========================
     def _on_price_update(self, symbol, price):
         try:
+            if not self._running:
+                return
+
             engine = self.get_engine()
             engine.on_price(price)
-
-            if self.monitor:
-                self.monitor.update_dashboard(price=price)
 
         except Exception as e:
             if self.monitor:
@@ -123,7 +118,7 @@ class BotManager:
         return self.trade_clients[self.active_exchange]
 
     # =========================
-    # RESULT取得（🔥 API用）
+    # RESULT取得
     # =========================
     def get_result(self):
         return self.last_result
@@ -142,34 +137,23 @@ class BotManager:
             self.monitor.log_event("BOT_LOG", log)
 
     # =========================
-    # START（🔥 完全修正）
+    # START（完全版）
     # =========================
     def start(self):
 
         with self.lock:
-            if self.running:
+            if self._running:
                 return {"status": "already_running"}
-            self.running = True
+            self._running = True
 
-        # 最新エンジン取得
         self.engine = self.get_engine()
-
-        # 🔥 実行
-        result = self.engine.start()
-
-        # 🔥 結果を固定保存（これが全て）
-        self.last_result = self.engine.get_result()
-
-        print("🔥 BOT RESULT:", self.last_result)
+        self.engine.start()
 
         self.add_log("SYSTEM", "Bot Started")
 
         if self.monitor:
             self.monitor.log_event("BOT_START", {})
-            self.monitor.update_dashboard(
-                status="RUNNING",
-                connection="ONLINE"
-            )
+            self.monitor.update_dashboard(status="RUNNING")
 
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
@@ -177,14 +161,14 @@ class BotManager:
         return {"status": "started"}
 
     # =========================
-    # STOP
+    # STOP（完全版）
     # =========================
     def stop(self):
 
         with self.lock:
-            if not self.running:
+            if not self._running:
                 return {"status": "already_stopped"}
-            self.running = False
+            self._running = False
 
         for eng in self.engines.values():
             eng.stop()
@@ -193,10 +177,7 @@ class BotManager:
 
         if self.monitor:
             self.monitor.log_event("BOT_STOP", {})
-            self.monitor.update_dashboard(
-                status="STOPPED",
-                connection="OFFLINE"
-            )
+            self.monitor.update_dashboard(status="STOPPED")
 
         return {"status": "stopped"}
 
@@ -205,19 +186,14 @@ class BotManager:
     # =========================
     def run_loop(self):
 
-        while self.running:
+        while self._running:
             try:
                 engine = self.get_engine()
                 self.engine = engine
-
                 self.core.execution_engine = engine
 
-                try:
-                    if hasattr(self.core, "process_events"):
-                        self.core.process_events(self.price_manager.get_all())
-                except Exception as e:
-                    if self.monitor:
-                        self.monitor.log_error("CORE", e)
+                if hasattr(self.core, "process_events"):
+                    self.core.process_events(self.price_manager.get_all())
 
                 time.sleep(0.5)
 
@@ -226,12 +202,11 @@ class BotManager:
 
                 if self.monitor:
                     self.monitor.log_error("BOT_LOOP", err)
-                    self.monitor.update_dashboard(connection="ERROR")
 
                 time.sleep(1)
 
     # =========================
-    # STATUS
+    # STATUS（唯一の正解）
     # =========================
     def is_running(self):
-        return bool(self.running and self.thread and self.thread.is_alive())
+        return self._running

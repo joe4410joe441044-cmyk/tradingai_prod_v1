@@ -41,7 +41,7 @@ async def startup():
 
 
 # =========================
-# TEST ENTRY（ここに移動）
+# TEST ENTRY
 # =========================
 @app.post("/api/bot/test_entry")
 def test_entry():
@@ -57,6 +57,7 @@ def test_entry():
         return {"status": "ok", "position": pos}
 
     except Exception as e:
+        monitor.log_error("TEST_ENTRY", e)
         return {"status": "error", "error": str(e)}
 
 
@@ -67,9 +68,15 @@ def test_entry():
 def start_bot():
     try:
         result = bot.start()
+
         monitor.log_event("BOT", {"action": "start"})
-        monitor.update_dashboard(status="RUNNING", connection="ONLINE")
+        monitor.update_dashboard(
+            status="RUNNING",
+            connection="ONLINE"
+        )
+
         return result
+
     except Exception as e:
         monitor.log_error("BOT_START", e)
         return {"status": "error", "error": str(e)}
@@ -79,45 +86,44 @@ def start_bot():
 def stop_bot():
     try:
         result = bot.stop()
+
         monitor.log_event("BOT", {"action": "stop"})
-        monitor.update_dashboard(status="STOPPED", connection="OFFLINE")
+        monitor.update_dashboard(
+            status="STOPPED",
+            connection="OFFLINE"
+        )
+
         return result
+
     except Exception as e:
         monitor.log_error("BOT_STOP", e)
         return {"status": "error", "error": str(e)}
 
 
 # =========================
-# SUMMARY
+# SUMMARY（🔥 完全修正）
 # =========================
 @app.get("/api/bot/summary")
 def get_bot_summary():
     try:
+        # 🔥 唯一の表示ソース
         data = monitor.get_dashboard_data()
 
-        return {
-            "status": "RUNNING" if bot.is_running() else "STOPPED",
-            "price": float(data.get("price", 0)),
-            "balance": float(data.get("balance", 0)),
-            "pnl": float(data.get("pnl", 0)),
-            "realized_pnl": float(data.get("realized_pnl", 0)),
-            "positions": data.get("positions", []),
-            "logs": data.get("logs", [])[-50:],
-            "connection": data.get(
-                "connection",
-                "ONLINE" if bot.is_running() else "OFFLINE"
-            )
-        }
+        # 🔥 状態だけ別管理
+        data["status"] = "RUNNING" if bot.is_running() else "STOPPED"
+
+        return data
 
     except Exception as e:
         monitor.log_error("SUMMARY_API", e)
+
         return {
             "status": "ERROR",
             "price": 0,
             "balance": 0,
             "pnl": 0,
             "realized_pnl": 0,
-            "positions": [],
+            "positions": 0,
             "logs": [str(e)],
             "connection": "ERROR"
         }
