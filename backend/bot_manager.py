@@ -15,10 +15,12 @@ from Bot.core.trade_core import TradeCore
 from Bot.engine.execution_engine import ExecutionEngine
 from Bot.core.price_manager import PriceManager
 
-from backend.clients.bybit import BybitClient
-from backend.clients.binance import BinanceClient
-from backend.clients.kucoin import KucoinClient
-from backend.clients.okx import OkxClient
+from backend.market.binance_ws import BinanceClient
+
+from backend.execution.bybit_trade import BybitTradeClient
+from backend.execution.binance_trade import BinanceTradeClient
+from backend.execution.kucoin_trade import KucoinTradeClient
+from backend.execution.okx_trade import OkxTradeClient
 
 
 class BotManager:
@@ -32,13 +34,32 @@ class BotManager:
         self.monitor = monitor
 
         # =========================
-        # CLIENTS
+        # RESULT（🔥 最重要）
         # =========================
-        self.clients = {
-            "bybit": BybitClient(),
-            "binance": BinanceClient(),
-            "kucoin": KucoinClient(),
-            "okx": OkxClient(),
+        self.last_result = {
+            "realized_pnl": 0.0,
+            "positions": {}
+        }
+
+        # =========================
+        # PRICE
+        # =========================
+        self.price_manager = PriceManager()
+        self.price_manager.subscribe(self._on_price_update)
+
+        self.market_client = BinanceClient(price_manager=self.price_manager)
+
+        if hasattr(self.market_client, "start_ws"):
+            self.market_client.start_ws()
+
+        # =========================
+        # TRADE CLIENTS
+        # =========================
+        self.trade_clients = {
+            "bybit": BybitTradeClient(),
+            "binance": BinanceTradeClient(),
+            "kucoin": KucoinTradeClient(),
+            "okx": OkxTradeClient(),
         }
 
         # =========================
@@ -48,31 +69,25 @@ class BotManager:
             name: ExecutionEngine(
                 live=False,
                 notifier=None,
-                monitor=self.monitor
+                monitor=self.monitor,
+                trade_client=self.trade_clients[name]
             )
-            for name in self.clients
+            for name in self.trade_clients
         }
 
         for eng in self.engines.values():
             eng.active = False
 
+        self.active_exchange = "bybit"
+        self.engine = self.engines[self.active_exchange]
+
         # =========================
         # CORE
         # =========================
-        self.core = TradeCore(self.engines["bybit"])
+        self.core = TradeCore(self.engine)
 
         for eng in self.engines.values():
             eng.trade_core = self.core
-
-        self.active_exchange = "bybit"
-
-        # =========================
-        # PRICE（🔥最重要）
-        # =========================
-        self.price_manager = PriceManager()
-
-        # 🔥 Push型接続（ここが核心）
-        self.price_manager.subscribe(self._on_price_update)
 
         # =========================
         # CONFIG
@@ -84,16 +99,13 @@ class BotManager:
         }
 
     # =========================
-    # PRICE EVENT（🔥新規）
+    # PRICE EVENT
     # =========================
     def _on_price_update(self, symbol, price):
         try:
             engine = self.get_engine()
-
-            # Engineへ即時反映
             engine.on_price(price)
 
-            # UI更新
             if self.monitor:
                 self.monitor.update_dashboard(price=price)
 
@@ -107,8 +119,14 @@ class BotManager:
     def get_engine(self):
         return self.engines[self.active_exchange]
 
-    def get_client(self):
-        return self.clients[self.active_exchange]
+    def get_trade_client(self):
+        return self.trade_clients[self.active_exchange]
+
+    # =========================
+    # RESULT取得（🔥 API用）
+    # =========================
+    def get_result(self):
+        return self.last_result
 
     # =========================
     # LOG
@@ -124,7 +142,7 @@ class BotManager:
             self.monitor.log_event("BOT_LOG", log)
 
     # =========================
-    # START
+    # START（🔥 完全修正）
     # =========================
     def start(self):
 
@@ -133,8 +151,16 @@ class BotManager:
                 return {"status": "already_running"}
             self.running = True
 
-        engine = self.get_engine()
-        engine.start()
+        # 最新エンジン取得
+        self.engine = self.get_engine()
+
+        # 🔥 実行
+        result = self.engine.start()
+
+        # 🔥 結果を固定保存（これが全て）
+        self.last_result = self.engine.get_result()
+
+        print("🔥 BOT RESULT:", self.last_result)
 
         self.add_log("SYSTEM", "Bot Started")
 
@@ -175,18 +201,17 @@ class BotManager:
         return {"status": "stopped"}
 
     # =========================
-    # LOOP（軽量化済）
+    # LOOP
     # =========================
     def run_loop(self):
 
         while self.running:
             try:
                 engine = self.get_engine()
+                self.engine = engine
+
                 self.core.execution_engine = engine
 
-                # =========================
-                # COREのみ（価格はPushで来る）
-                # =========================
                 try:
                     if hasattr(self.core, "process_events"):
                         self.core.process_events(self.price_manager.get_all())
