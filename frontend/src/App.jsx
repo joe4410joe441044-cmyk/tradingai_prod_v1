@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useCallback } from "react";
 
-// ✅ ローカル参照に修正
+// ✅ ローカル参照
 import useBotData from "./hooks/useBotData";
 import useEventWS from "./hooks/useEventWS";
 
+import RiskPanel from "./components/monitor/RiskPanel";
 import AssetDashboard from "./components/dashboard/AssetDashboard";
 import RightPanel from "./components/monitor/RightPanel";
 import BotControl from "./components/control/BotControl";
@@ -134,7 +135,7 @@ export default function App() {
           </Card>
 
           <Card title="AI Timeline">
-            <AITimeline events={aiEvents} />
+            <AITimeline events={bot.aiEvents || []} />
           </Card>
 
           <Card title="Raw Events">
@@ -153,6 +154,11 @@ export default function App() {
               status={bot.status}
               connected={bot.connection === "ONLINE"}
             />
+          </Card>
+
+          {/* ★ 追加：Riskパネル */}
+          <Card title="Risk Control">
+            <RiskPanel risk={bot.risk} />
           </Card>
         </div>
       </div>

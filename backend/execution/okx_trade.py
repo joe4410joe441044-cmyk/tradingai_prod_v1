@@ -1,46 +1,71 @@
 # -*- coding: utf-8 -*-
 
 from .base import BaseClient
+import logging
 
 
 class OkxTradeClient(BaseClient):
-    """
-    OKX 実トレード用クライアント（現状はダミー）
-    将来的にREST API接続へ拡張
-    """
 
-    def __init__(self):
-        # TODO: APIキー読み込み（.envなど）
-        self.name = "OKX"
+    def __init__(self, api_key=None, api_secret=None, passphrase=None):
+        self.logger = logging.getLogger(__name__)
+
+        # ★ 本番はキー必須
+        if not api_key or not api_secret or not passphrase:
+            raise Exception("🚨 OKX API KEY / SECRET / PASSPHRASE REQUIRED")
+
+        # ★ 本来ここでOKXクライアント初期化
+        self.client = None
+
+        # ★ 未実装は即停止（重要）
+        raise Exception("🚨 OKX LIVE CLIENT NOT IMPLEMENTED")
 
     # =========================
     # BALANCE
     # =========================
     def get_balance(self):
-        # TODO: 実API接続
-        return 1000.0
+        raise Exception("🚨 OKX get_balance NOT IMPLEMENTED")
 
     # =========================
     # POSITIONS
     # =========================
-    def get_positions(self):
-        # TODO: 実API接続
-        return []
+    def get_positions(self, symbol=None):
+        raise Exception("🚨 OKX get_positions NOT IMPLEMENTED")
 
     # =========================
     # ORDER
     # =========================
-    def place_order(self, symbol, side, qty):
-        """
-        実トレード（現状はダミー）
-        """
-        print(f"[OKX ORDER] {side} {qty} {symbol}")
+    def create_order(self, symbol, side, qty, price=None):
+        raise Exception("🚨 OKX create_order NOT IMPLEMENTED")
 
     # =========================
-    # OPTIONAL（将来用）
+    # ExecutionEngine互換
+    # =========================
+    def place_order(self, symbol, side, qty, price=None):
+        return self.create_order(symbol, side, qty, price)
+
+    def execute_order(self, signal: dict):
+
+        if not isinstance(signal, dict):
+            raise Exception("🚨 SIGNAL MUST BE DICT")
+
+        required = ["symbol", "side", "qty"]
+
+        for k in required:
+            if k not in signal:
+                raise Exception(f"🚨 Missing {k}")
+
+        return self.create_order(
+            symbol=signal["symbol"],
+            side=signal["side"],
+            qty=signal["qty"],
+            price=signal.get("price")
+        )
+
+    # =========================
+    # OPTIONAL
     # =========================
     def cancel_order(self, order_id):
-        print(f"[OKX CANCEL] {order_id}")
+        raise Exception("🚨 OKX cancel_order NOT IMPLEMENTED")
 
     def get_order(self, order_id):
-        return {"order_id": order_id, "status": "UNKNOWN"}
+        raise Exception("🚨 OKX get_order NOT IMPLEMENTED")

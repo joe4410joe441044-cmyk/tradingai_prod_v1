@@ -22,26 +22,43 @@ from backend.execution.binance_trade import BinanceTradeClient
 from backend.execution.kucoin_trade import KucoinTradeClient
 from backend.execution.okx_trade import OkxTradeClient
 
+from backend.portfolio.portfolio_manager import PortfolioManager
+
+from backend.ai.trade_brain import TradeBrain
+from backend.ai.lstm_model import LSTMModel
+from backend.ai.llm_engine import LLMEngine
+from backend.ai.feature_engine import FeatureEngine
+
 
 class BotManager:
 
     def __init__(self, monitor=None):
 
-        # ✅ 状態はこれだけ
         self._running = False
-
         self.thread = None
         self.lock = threading.Lock()
         self.monitor = monitor
+
+        # Portfolio
+        self.portfolio = PortfolioManager(initial_balance=1000.0)
+        self.portfolio.set_balance(1000.0)
+
+        # AI
+        self.feature_engine = FeatureEngine()
+
+        self.ai = TradeBrain(
+            lstm_model=LSTMModel(),
+            llm_engine=LLMEngine()
+        )
+
+        self._last_ai_event_time = 0
 
         self.last_result = {
             "realized_pnl": 0.0,
             "positions": {}
         }
 
-        # =========================
         # PRICE
-        # =========================
         self.price_manager = PriceManager()
         self.price_manager.subscribe(self._on_price_update)
 
@@ -50,9 +67,7 @@ class BotManager:
         if hasattr(self.market_client, "start_ws"):
             self.market_client.start_ws()
 
-        # =========================
         # TRADE CLIENTS
-        # =========================
         self.trade_clients = {
             "bybit": BybitTradeClient(),
             "binance": BinanceTradeClient(),
@@ -60,15 +75,14 @@ class BotManager:
             "okx": OkxTradeClient(),
         }
 
-        # =========================
         # ENGINES
-        # =========================
         self.engines = {
             name: ExecutionEngine(
                 live=False,
                 notifier=None,
                 monitor=self.monitor,
-                trade_client=self.trade_clients[name]
+                trade_client=self.trade_clients[name],
+                portfolio=self.portfolio
             )
             for name in self.trade_clients
         }
@@ -76,22 +90,11 @@ class BotManager:
         self.active_exchange = "bybit"
         self.engine = self.engines[self.active_exchange]
 
-        # =========================
         # CORE
-        # =========================
         self.core = TradeCore(self.engine)
 
         for eng in self.engines.values():
             eng.trade_core = self.core
-
-        # =========================
-        # CONFIG
-        # =========================
-        self.config = {
-            "symbol": "BTCUSDT",
-            "lot": 0.001,
-            "entry_cooldown_sec": 3
-        }
 
     # =========================
     # PRICE EVENT
@@ -104,28 +107,61 @@ class BotManager:
             engine = self.get_engine()
             engine.on_price(price)
 
+            candles_map = self.price_manager.get_all()
+            candles = candles_map.get(symbol, [])
+
+            if not isinstance(candles, list):
+                return
+
+            if len(candles) < 20:
+                return
+
+            features = self.feature_engine.build(candles)
+
+            market_data = {
+                "symbol": symbol,
+                "price": price,
+                "features": features,
+                "trend": "up" if candles[-1]["close"] > candles[-2]["close"] else "down",
+                "volatility": abs(candles[-1]["close"] - candles[-1]["open"])
+            }
+
+            signal = self.ai.decide(market_data)
+
+            if signal and signal != "HOLD":
+                engine.handle_signal(signal)
+
+            # AI → UI
+            if self.monitor:
+                events = self.ai.get_events(1)
+                if events:
+                    latest = events[-1]
+
+                    if latest["time"] != self._last_ai_event_time:
+                        self._last_ai_event_time = latest["time"]
+                        self.monitor.log_event("AI", latest)
+
+                # ★★★ ここが今回の核心修正 ★★★
+                self.monitor.update_dashboard(
+                    balance=self.portfolio.get_balance(),
+                    equity=self.portfolio.get_equity()
+                )
+
         except Exception as e:
             if self.monitor:
                 self.monitor.log_error("PRICE_PUSH", e)
 
-    # =========================
     # ACCESS
-    # =========================
     def get_engine(self):
         return self.engines[self.active_exchange]
 
     def get_trade_client(self):
         return self.trade_clients[self.active_exchange]
 
-    # =========================
-    # RESULT取得
-    # =========================
     def get_result(self):
         return self.last_result
 
-    # =========================
     # LOG
-    # =========================
     def add_log(self, t, msg):
         log = {
             "time": datetime.now().strftime("%H:%M:%S"),
@@ -137,7 +173,7 @@ class BotManager:
             self.monitor.log_event("BOT_LOG", log)
 
     # =========================
-    # START（完全版）
+    # START
     # =========================
     def start(self):
 
@@ -151,18 +187,25 @@ class BotManager:
 
         self.add_log("SYSTEM", "Bot Started")
 
+        # 初期資金
+        self.portfolio.set_balance(1000.0)
+
         if self.monitor:
             self.monitor.log_event("BOT_START", {})
-            self.monitor.update_dashboard(status="RUNNING")
+
+            # ★★★ ここも追加 ★★★
+            self.monitor.update_dashboard(
+                status="RUNNING",
+                balance=self.portfolio.get_balance(),
+                equity=self.portfolio.get_equity()
+            )
 
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
 
         return {"status": "started"}
 
-    # =========================
-    # STOP（完全版）
-    # =========================
+    # STOP
     def stop(self):
 
         with self.lock:
@@ -181,9 +224,7 @@ class BotManager:
 
         return {"status": "stopped"}
 
-    # =========================
     # LOOP
-    # =========================
     def run_loop(self):
 
         while self._running:
@@ -205,8 +246,5 @@ class BotManager:
 
                 time.sleep(1)
 
-    # =========================
-    # STATUS（唯一の正解）
-    # =========================
     def is_running(self):
         return self._running

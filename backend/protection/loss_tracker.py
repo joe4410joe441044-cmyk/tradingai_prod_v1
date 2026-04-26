@@ -2,9 +2,13 @@ class LossTracker:
 
     def __init__(self):
         self.losses = []
+        self.max_size = 200
 
     def add(self, pnl):
         self.losses.append(pnl)
+
+        if len(self.losses) > self.max_size:
+            self.losses = self.losses[-self.max_size:]
 
     def streak(self):
         count = 0

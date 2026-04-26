@@ -1,91 +1,122 @@
+# -*- coding: utf-8 -*-
 import time
+
 
 def build_summary(bot):
 
-    def safe(fn, default=0):
-        try:
-            return fn() if callable(fn) else fn
-        except:
-            return default
+    # =========================
+    # 必須コンポーネントチェック
+    # =========================
+    if not hasattr(bot, "portfolio"):
+        raise Exception("portfolio未接続")
 
-    # ===== CORE =====
-    price = safe(bot.get_price, 0)
-    balance = safe(bot.get_balance, 0)
-    pnl = safe(bot.get_pnl, 0)
+    if not hasattr(bot, "exchange"):
+        raise Exception("exchange未接続")
 
-    # ===== CONNECTION =====
-    connection = "OFFLINE"
-    if hasattr(bot, "market"):
-        connection = "ONLINE" if getattr(bot.market, "connected", False) else "OFFLINE"
+    if not hasattr(bot, "get_price"):
+        raise Exception("price取得関数なし")
 
-    # ===== STATUS =====
-    status = "RUNNING" if safe(bot.is_running, False) else "STOPPED"
+    # =========================
+    # PORTFOLIO（唯一ソース）
+    # =========================
+    ps = bot.portfolio.summary()
 
-    # ===== POSITIONS（Execution）=====
+    balance = ps["balance"]
+    equity = ps["equity"]
+    pnl = ps["unrealized_pnl"]
+    realized_pnl = ps["realized_pnl"]
+    exposure = ps["exposure_ratio"]
+
+    # =========================
+    # PRICE（fail-fast）
+    # =========================
+    price = bot.get_price()
+    if price is None:
+        raise Exception("price未取得")
+
+    # =========================
+    # STATUS（厳密判定）
+    # =========================
+    if not bot.is_running():
+        status = "STOPPED"
+    elif not bot.exchange.is_connected():
+        status = "ERROR"
+    else:
+        status = "RUNNING"
+
+    # =========================
+    # CONNECTION（実通信）
+    # =========================
+    connection = "ONLINE" if bot.exchange.is_connected() else "OFFLINE"
+
+    # =========================
+    # POSITIONS（fail-fast）
+    # =========================
     positions = []
-    for p in safe(bot.get_positions, []):
+
+    raw_positions = bot.portfolio.get_positions()
+
+    if not isinstance(raw_positions, dict):
+        raise Exception("positions形式不正")
+
+    for p in raw_positions.values():
         positions.append({
-            "symbol": getattr(p, "symbol", ""),
-            "side": getattr(p, "side", ""),
-            "entry": getattr(p, "entry_price", 0),
-            "mark": getattr(p, "mark_price", getattr(p, "entry_price", 0)),
-            "size": getattr(p, "size", 0),
-            "pnl": getattr(p, "pnl", 0),
-            "pnl_percent": getattr(p, "pnl_percent", 0),
-            "time": getattr(p, "time", 0),
-            "status": getattr(p, "status", "OPEN"),  # ★追加
+            "symbol": p["symbol"],
+            "side": p["side"],
+            "entry": p["entry"],
+            "size": p["size"],
+            "pnl": p["pnl"],
+            "pnl_percent": p["pnl_percent"],
+            "duration": p["duration"],
+            "status": p["status"]
         })
 
-    # ===== LOGS =====
+    # =========================
+    # LOGS（存在時のみ）
+    # =========================
     logs = []
     if hasattr(bot, "logger"):
-        try:
-            logs = bot.logger.get_recent_logs()[-50:]
-        except:
-            logs = []
+        logs = bot.logger.get_recent_logs()
 
-    # ===== AI =====
+    # =========================
+    # AI EVENTS（存在時のみ）
+    # =========================
     ai_events = []
     if hasattr(bot, "ai"):
-        try:
-            ai_events = bot.ai.get_events()[-50:]
-        except:
-            pass
+        ai_events = bot.ai.get_events()
 
-    # ===== RISK =====
+    # =========================
+    # RISK（存在時のみ）
+    # =========================
     risk = {
         "drawdown": 0,
         "kill_switch": False,
-        "loss_streak": 0
+        "loss_streak": 0,
+        "peak_equity": 0
     }
 
     if hasattr(bot, "risk"):
-        r = bot.risk
-        risk = {
-            "drawdown": getattr(r, "drawdown", 0),
-            "kill_switch": getattr(r, "kill_active", False),
-            "loss_streak": getattr(r, "loss_streak", 0)
-        }
+        risk = bot.risk.get_status()
 
-    # ===== PORTFOLIO =====
-    if hasattr(bot, "portfolio"):
-        p = bot.portfolio
-        balance = getattr(p, "balance", balance)
-        pnl = getattr(p, "pnl", pnl)
-
-    # ===== FINAL =====
+    # =========================
+    # FINAL（完全な真実のみ）
+    # =========================
     return {
         "price": price,
+
         "balance": balance,
-        "equity": balance + pnl,
+        "equity": equity,
         "pnl": pnl,
+        "realized_pnl": realized_pnl,
+        "exposure": exposure,
 
         "status": status,
         "connection": connection,
 
         "positions": positions,
         "logs": logs,
-        "ai_events": ai_events,
+        "ai": ai_events,
+
         "risk": risk,
 
         "meta": {

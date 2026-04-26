@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.bot_manager import BotManager
 from monitoring.system_monitor import SystemMonitor
-
+from backend.services.summary_builder import build_summary  # ← 追加
 
 # =========================
 # APP
@@ -29,7 +29,6 @@ logging.basicConfig(level=logging.INFO)
 monitor = SystemMonitor()
 bot = BotManager(monitor=monitor)
 
-
 # =========================
 # STARTUP
 # =========================
@@ -38,7 +37,6 @@ async def startup():
     logging.info("🚀 Startup begin")
     monitor.log_event("SYSTEM", {"msg": "backend started"})
     logging.info("✅ Startup complete")
-
 
 # =========================
 # TEST ENTRY
@@ -59,7 +57,6 @@ def test_entry():
     except Exception as e:
         monitor.log_error("TEST_ENTRY", e)
         return {"status": "error", "error": str(e)}
-
 
 # =========================
 # BOT CONTROL
@@ -99,31 +96,14 @@ def stop_bot():
         monitor.log_error("BOT_STOP", e)
         return {"status": "error", "error": str(e)}
 
-
 # =========================
-# SUMMARY（🔥 完全修正）
+# SUMMARY（🔥 完全本物版）
 # =========================
 @app.get("/api/bot/summary")
 def get_bot_summary():
     try:
-        # 🔥 唯一の表示ソース
-        data = monitor.get_dashboard_data()
-
-        # 🔥 状態だけ別管理
-        data["status"] = "RUNNING" if bot.is_running() else "STOPPED"
-
-        return data
+        return build_summary(bot)  # ← ここが核心（唯一の真実）
 
     except Exception as e:
         monitor.log_error("SUMMARY_API", e)
-
-        return {
-            "status": "ERROR",
-            "price": 0,
-            "balance": 0,
-            "pnl": 0,
-            "realized_pnl": 0,
-            "positions": 0,
-            "logs": [str(e)],
-            "connection": "ERROR"
-        }
+        raise e  # ← fail-fast（嘘を返さない）
