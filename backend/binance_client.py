@@ -1,4 +1,5 @@
 # backend/binance_client.py
+
 from backend.exchange_client import ExchangeClient
 from binance.client import Client
 from binance.enums import *
@@ -16,6 +17,33 @@ class BinanceClient(ExchangeClient):
         self.logger = logging.getLogger(__name__)
 
     # ============================
+    # 内部ユーティリティ（超重要）
+    # ============================
+    def _adjust_quantity(self, symbol: str, qty: float) -> float:
+        info = self.client.futures_exchange_info()
+        symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
+
+        lot_size = next(f for f in symbol_info["filters"] if f["filterType"] == "LOT_SIZE")
+        step_size = float(lot_size["stepSize"])
+
+        qty = float(qty)
+        qty = qty - (qty % step_size)
+
+        return float(f"{qty:.8f}")
+
+    def _adjust_price(self, symbol: str, price: float) -> float:
+        info = self.client.futures_exchange_info()
+        symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
+
+        price_filter = next(f for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
+        tick_size = float(price_filter["tickSize"])
+
+        price = float(price)
+        price = price - (price % tick_size)
+
+        return float(f"{price:.8f}")
+
+    # ============================
     # 価格取得
     # ============================
     def get_price(self, symbol: str) -> float:
@@ -27,7 +55,7 @@ class BinanceClient(ExchangeClient):
             return 0.0
 
     # ============================
-    # 新規注文（内部本体）
+    # 新規注文（本体）
     # ============================
     def create_order(
         self,
@@ -40,11 +68,13 @@ class BinanceClient(ExchangeClient):
         try:
             order_side = SIDE_BUY if side.upper() == "BUY" else SIDE_SELL
 
-            # 数値バリデーション
-            qty = float(qty)
+            # =========================
+            # 数量調整（超重要）
+            # =========================
+            qty = self._adjust_quantity(symbol, qty)
 
             if qty <= 0:
-                raise ValueError("qty must be > 0")
+                raise ValueError("qty must be > 0 after adjustment")
 
             # =========================
             # MARKET ORDER
@@ -64,7 +94,7 @@ class BinanceClient(ExchangeClient):
                 if price is None:
                     raise ValueError("LIMIT order requires price")
 
-                price = float(price)
+                price = self._adjust_price(symbol, price)
 
                 return self.client.futures_create_order(
                     symbol=symbol,

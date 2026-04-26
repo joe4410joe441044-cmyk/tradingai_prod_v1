@@ -9,6 +9,7 @@ import AssetDashboard from "./components/dashboard/AssetDashboard";
 import RightPanel from "./components/monitor/RightPanel";
 import BotControl from "./components/control/BotControl";
 import AITimeline from "./components/AITimeline";
+import DebugPanel from "./components/DebugPanel"; // ← ★追加
 
 // =========================
 // 共通カード
@@ -135,7 +136,7 @@ export default function App() {
           </Card>
 
           <Card title="AI Timeline">
-            <AITimeline events={bot.aiEvents || []} />
+            <AITimeline events={bot.ai || []} /> {/* ← 修正（重要） */}
           </Card>
 
           <Card title="Raw Events">
@@ -144,6 +145,11 @@ export default function App() {
                 {e.type} - {JSON.stringify(e.data)}
               </div>
             ))}
+          </Card>
+
+          {/* ★★★ 追加：完全可視化 ★★★ */}
+          <Card title="FULL DEBUG DATA">
+            <DebugPanel data={bot} />
           </Card>
         </div>
 
@@ -156,7 +162,6 @@ export default function App() {
             />
           </Card>
 
-          {/* ★ 追加：Riskパネル */}
           <Card title="Risk Control">
             <RiskPanel risk={bot.risk} />
           </Card>

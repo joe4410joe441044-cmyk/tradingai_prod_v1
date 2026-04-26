@@ -1,4 +1,16 @@
 # -*- coding: utf-8 -*-
+
+# =========================
+# ENV（最初に必ず読む）
+# =========================
+from dotenv import load_dotenv
+import os
+
+load_dotenv("backend/.env")
+
+# =========================
+# IMPORT
+# =========================
 import logging
 
 from fastapi import FastAPI
@@ -6,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.bot_manager import BotManager
 from monitoring.system_monitor import SystemMonitor
-from backend.services.summary_builder import build_summary  # ← 追加
+from backend.services.summary_builder import build_summary
 
 # =========================
 # APP
@@ -97,13 +109,13 @@ def stop_bot():
         return {"status": "error", "error": str(e)}
 
 # =========================
-# SUMMARY（🔥 完全本物版）
+# SUMMARY（唯一の真実）
 # =========================
 @app.get("/api/bot/summary")
 def get_bot_summary():
     try:
-        return build_summary(bot)  # ← ここが核心（唯一の真実）
+        return build_summary(bot)
 
     except Exception as e:
         monitor.log_error("SUMMARY_API", e)
-        raise e  # ← fail-fast（嘘を返さない）
+        raise e
