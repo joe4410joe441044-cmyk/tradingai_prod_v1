@@ -1,13 +1,12 @@
 import React, { useState, useMemo, useCallback } from "react";
 
-// ✅ ローカル参照に修正
-import useBotData from "./hooks/useBotData";
-import useEventWS from "./hooks/useEventWS";
+import useBotData from "../../react_dashboard/src/hooks/useBotData";
+import useEventWS from "../../react_dashboard/src/hooks/useEventWS";
 
-import AssetDashboard from "./components/dashboard/AssetDashboard";
-import RightPanel from "./components/monitor/RightPanel";
-import BotControl from "./components/control/BotControl";
-import AITimeline from "./components/AITimeline";
+import AssetDashboard from "../../react_dashboard/src/components/dashboard/AssetDashboard";
+import RightPanel from "../../react_dashboard/src/components/monitor/RightPanel";
+import BotControl from "../../react_dashboard/src/components/control/BotControl";
+import AITimeline from "../../react_dashboard/src/components/AITimeline";
 
 // =========================
 // 共通カード
@@ -41,20 +40,21 @@ export default function App() {
 
   const [exchange, setExchange] = useState("bybit");
 
-  // WS
+  // 🔥 WS（修正：useCallbackで固定）
   const handleWS = useCallback((msg) => {
+    // 必要ならここで処理
     // console.log("WS EVENT:", msg);
   }, []);
 
   const events = useEventWS(handleWS);
 
-  // 安全イベント
+  // 🔥 安全イベント
   const safeEvents = useMemo(() => {
     if (!Array.isArray(events)) return [];
     return events.slice(0, 100);
   }, [events]);
 
-  // Exchange切り替え
+  // 🔥 Exchange切り替え
   const handleExchangeChange = async (value) => {
     setExchange(value);
 
@@ -71,7 +71,7 @@ export default function App() {
     }
   };
 
-  // AIイベント抽出
+  // 🔥 AIイベント抽出
   const aiEvents = useMemo(() => {
     return safeEvents
       .filter((e) =>
@@ -133,10 +133,12 @@ export default function App() {
             />
           </Card>
 
+          {/* AI TIMELINE */}
           <Card title="AI Timeline">
             <AITimeline events={aiEvents} />
           </Card>
 
+          {/* RAW EVENTS */}
           <Card title="Raw Events">
             {safeEvents.map((e, i) => (
               <div key={i}>
