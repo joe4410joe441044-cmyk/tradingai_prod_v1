@@ -1,30 +1,18 @@
-import React, { useState, useMemo, useCallback } from "react";
-
-// ✅ ローカル参照
+import React, { useState, useMemo } from "react";
 import useBotData from "./hooks/useBotData";
-import useEventWS from "./hooks/useEventWS";
+import TradeConfigPanel from "./components/control/TradeConfigPanel";
+import RiskPanel from "./components/RiskPanel";
+import StatusPanel from "./components/StatusPanel";
 
-import RiskPanel from "./components/monitor/RiskPanel";
-import AssetDashboard from "./components/dashboard/AssetDashboard";
-import RightPanel from "./components/monitor/RightPanel";
-import BotControl from "./components/control/BotControl";
-import AITimeline from "./components/AITimeline";
-import DebugPanel from "./components/DebugPanel"; // ← ★追加
-
-// =========================
-// 共通カード
-// =========================
-function Card({ title, children, style = {} }) {
+function Card({ title, children }) {
   return (
-    <div
-      style={{
-        background: "#111",
-        borderRadius: "16px",
-        padding: "16px",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
-        ...style,
-      }}
-    >
+    <div style={{
+      background: "#111",
+      borderRadius: "16px",
+      padding: "16px",
+      boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+      marginBottom: 16
+    }}>
       <div style={{ fontSize: "12px", opacity: 0.6, marginBottom: "8px" }}>
         {title}
       </div>
@@ -35,138 +23,171 @@ function Card({ title, children, style = {} }) {
   );
 }
 
-// =========================
-// MAIN APP
-// =========================
+function StatusBar({ status, logs }) {
+  return (
+    <div style={{
+      position: "fixed",
+      bottom: 0,
+      left: 0,
+      width: "100%",
+      background: "#111",
+      color: "#0f0",
+      padding: "8px",
+      fontSize: "12px",
+      borderTop: "1px solid #333"
+    }}>
+      <div>
+        STATUS: {status === "RUNNING" ? "🟢 RUNNING" : "🔴 STOPPED"}
+      </div>
+
+      <div style={{ marginTop: 4, maxHeight: 60, overflowY: "auto" }}>
+        {logs.slice(-5).map((log, i) => (
+          <div key={i}>{log}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const bot = useBotData();
 
-  const [exchange, setExchange] = useState("bybit");
+  const [config, setConfig] = useState(null);
+  const [logs, setLogs] = useState([]);
 
-  // WS
-  const handleWS = useCallback((msg) => {
-    // console.log("WS EVENT:", msg);
-  }, []);
+  const result = useMemo(() => {
+    if (!config || !bot.balance || !bot.price) {
+      return {
+        positionSize: "-",
+        qty: "-",
+        riskAmount: "-",
+        ddAfter: "-"
+      };
+    }
 
-  const events = useEventWS(handleWS);
+    const riskAmount = (bot.balance * (config.riskPercent || 0)) / 100;
+    const positionSize = riskAmount * (config.leverage || 1);
 
-  // 安全イベント
-  const safeEvents = useMemo(() => {
-    if (!Array.isArray(events)) return [];
-    return events.slice(0, 100);
-  }, [events]);
+    const qty = positionSize / bot.price;
+    const ddAfter = (riskAmount / bot.balance) * 100;
 
-  // Exchange切り替え
-  const handleExchangeChange = async (value) => {
-    setExchange(value);
+    return {
+      positionSize: positionSize.toFixed(2),
+      qty: qty.toFixed(4),
+      riskAmount: riskAmount.toFixed(2),
+      ddAfter: ddAfter.toFixed(2)
+    };
 
+  }, [config, bot.balance, bot.price]);
+
+  // =========================
+  // 🔥 修正済み START
+  // =========================
+  const handleStart = async () => {
     try {
-      await fetch("http://127.0.0.1:8000/api/set-exchange", {
+      if (!config) {
+        alert("設定が未入力");
+        setLogs(prev => [...prev, "⚠ 設定が未入力"]);
+        return;
+      }
+
+      const payload = {
+        symbol: config.symbol,
+        risk_percent: config.riskPercent,
+        sl_percent: config.slPercent,
+        leverage: config.leverage
+      };
+
+      console.log("🚀 START PAYLOAD:", payload);
+
+      setLogs(prev => [...prev, "▶ START送信"]);
+
+      const res = await fetch("http://127.0.0.1:8001/api/bot/start", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify({ exchange: value }),
+        body: JSON.stringify(payload)
       });
+
+      const json = await res.json();
+      console.log("START RESULT:", json);
+
+      setLogs(prev => [...prev, "🟢 Bot Started"]);
+
     } catch (e) {
-      console.error("[EXCHANGE SWITCH ERROR]", e);
+      console.error("START ERROR", e);
+      setLogs(prev => [...prev, "❌ START ERROR"]);
     }
   };
 
-  // AIイベント抽出
-  const aiEvents = useMemo(() => {
-    return safeEvents
-      .filter((e) =>
-        ["ENTRY", "EXIT", "ALERT"].includes(e?.type)
-      )
-      .map((e) => e.data);
-  }, [safeEvents]);
+  const handleStop = async () => {
+    try {
+      await fetch("http://127.0.0.1:8001/api/bot/stop", {
+        method: "POST"
+      });
+
+      setLogs(prev => [...prev, "🔴 Bot Stopped"]);
+
+    } catch (e) {
+      console.error("STOP ERROR", e);
+      setLogs(prev => [...prev, "❌ STOP ERROR"]);
+    }
+  };
 
   return (
-    <div
-      style={{
-        padding: 16,
-        background: "#0b0b0b",
-        minHeight: "100vh",
-        color: "#fff",
-      }}
-    >
-      <h2 style={{ marginBottom: 16 }}>TradingAI Dashboard</h2>
+    <div style={{
+      padding: 20,
+      paddingBottom: 100,
+      background: "#0b0b0b",
+      minHeight: "100vh",
+      color: "#fff",
+      fontFamily: "Arial"
+    }}>
+      <h2 style={{ marginBottom: 20 }}>TradingAI</h2>
 
-      {/* STATUS */}
-      <Card title="Status">
-        {bot.status} {bot.connection === "ONLINE" ? "🟢" : "🔴"}
+      <TradeConfigPanel onChange={setConfig} />
+
+      <Card title="Risk Settings">
+        <RiskPanel
+          onChange={(riskConfig) => {
+            setConfig(prev => ({
+              ...prev,
+              ...riskConfig
+            }));
+          }}
+          result={result}
+        />
       </Card>
 
-      {/* BOT CONTROL */}
-      <Card title="Bot Control">
-        <BotControl />
+      <Card title="Control">
+        <button onClick={handleStart} disabled={!config} style={{ marginRight: 10 }}>
+          ▶ START
+        </button>
+
+        <button onClick={handleStop}>
+          ■ STOP
+        </button>
       </Card>
 
-      {/* EXCHANGE */}
-      <Card title="Trading Exchange">
-        <select
-          value={exchange}
-          onChange={(e) => handleExchangeChange(e.target.value)}
-        >
-          <option value="bybit">BYBIT</option>
-          <option value="binance">BINANCE</option>
-          <option value="kucoin">KUCOIN</option>
-          <option value="okx">OKX</option>
-        </select>
+      <StatusPanel
+        balance={bot.balance}
+        equity={bot.equity}
+        pnl={bot.pnl}
+        price={bot.price}
+        currentDD={bot.risk?.current_dd}
+        lossStreak={bot.risk?.current_loss_streak}
+        killSwitch={bot.risk?.kill_switch}
+        botStatus={bot.status}
+      />
+
+      <Card title="Log">
+        {logs.slice(-10).map((log, i) => (
+          <div key={i}>{log}</div>
+        ))}
       </Card>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr",
-          gap: "16px",
-        }}
-      >
-        {/* LEFT */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card title="Dashboard">
-            <AssetDashboard
-              price={bot.price}
-              balance={bot.balance}
-              pnl={bot.pnl}
-              logs={bot.logs}
-              positions={bot.positions}
-            />
-          </Card>
-
-          <Card title="AI Timeline">
-            <AITimeline events={bot.ai || []} /> {/* ← 修正（重要） */}
-          </Card>
-
-          <Card title="Raw Events">
-            {safeEvents.map((e, i) => (
-              <div key={i}>
-                {e.type} - {JSON.stringify(e.data)}
-              </div>
-            ))}
-          </Card>
-
-          {/* ★★★ 追加：完全可視化 ★★★ */}
-          <Card title="FULL DEBUG DATA">
-            <DebugPanel data={bot} />
-          </Card>
-        </div>
-
-        {/* RIGHT */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card title="System Info">
-            <RightPanel
-              status={bot.status}
-              connected={bot.connection === "ONLINE"}
-            />
-          </Card>
-
-          <Card title="Risk Control">
-            <RiskPanel risk={bot.risk} />
-          </Card>
-        </div>
-      </div>
+      <StatusBar status={bot.status} logs={logs} />
     </div>
   );
 }

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import threading
 import time
 
@@ -6,7 +8,7 @@ class PriceManager:
 
     def __init__(self):
         self.prices = {}
-        self.candles = {}  # ★ 追加（ローソク足）
+        self.candles = {}  # ローソク足
         self.lock = threading.Lock()
 
         self.subscribers = []
@@ -18,12 +20,16 @@ class PriceManager:
     # SUBSCRIBE
     # =========================
     def subscribe(self, callback):
-        self.subscribers.append(callback)
+        if callable(callback):
+            self.subscribers.append(callback)
 
     # =========================
     # UPDATE（最重要）
     # =========================
     def update(self, symbol, price):
+
+        if not symbol:
+            return
 
         symbol = symbol.upper()
 
@@ -33,7 +39,7 @@ class PriceManager:
             self.prices[symbol] = price
 
             # =========================
-            # ★ ローソク足生成（簡易版）
+            # ローソク足生成
             # =========================
             if symbol not in self.candles:
                 self.candles[symbol] = []
@@ -42,7 +48,7 @@ class PriceManager:
 
             now = int(time.time())
 
-            # まだ無い場合
+            # 初回
             if not candle_list:
                 candle_list.append({
                     "time": now,
@@ -55,13 +61,13 @@ class PriceManager:
             else:
                 last = candle_list[-1]
 
-                # ★ 同一秒 → 更新
+                # 同一秒
                 if now == last["time"]:
                     last["high"] = max(last["high"], price)
                     last["low"] = min(last["low"], price)
                     last["close"] = price
 
-                # ★ 新しい足
+                # 新規足
                 else:
                     candle_list.append({
                         "time": now,
@@ -78,7 +84,7 @@ class PriceManager:
         # =========================
         # 通知
         # =========================
-        for cb in self.subscribers:
+        for cb in list(self.subscribers):
             try:
                 cb(symbol, price)
             except Exception as e:
@@ -88,15 +94,17 @@ class PriceManager:
     # GET
     # =========================
     def get(self, symbol):
+        if not symbol:
+            return 0.0
         with self.lock:
             return self.prices.get(symbol.upper(), 0.0)
 
-    # ★ ここが重要（修正）
     def get_all(self):
         with self.lock:
             return dict(self.candles)
 
-    # ★ デバッグ用
     def get_candles(self, symbol):
+        if not symbol:
+            return []
         with self.lock:
             return self.candles.get(symbol.upper(), [])

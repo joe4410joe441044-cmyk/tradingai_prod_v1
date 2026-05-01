@@ -1,6 +1,7 @@
 import redis
 import json
 
+
 class RedisClient:
 
     def __init__(self):
@@ -30,7 +31,10 @@ class RedisClient:
 
     def get_price(self):
         val = self.r.get("market:price")
-        return float(val) if val else 0.0
+        try:
+            return float(val) if val else 0.0
+        except:
+            return 0.0
 
     # =========================
     # POSITIONS
@@ -41,15 +45,59 @@ class RedisClient:
 
     def get_positions(self):
         val = self.r.get("positions:open")
-        return json.loads(val) if val else []
+        try:
+            return json.loads(val) if val else []
+        except:
+            return []
 
     # =========================
-    # RISK
+    # RISK（%統一）
     # =========================
 
     def set_risk(self, risk: dict):
+        """
+        risk = {
+            "risk_percent": 1,
+            "sl_percent": 1,
+            "leverage": 10
+        }
+        """
         self.r.set("risk:state", json.dumps(risk))
 
     def get_risk(self):
         val = self.r.get("risk:state")
-        return json.loads(val) if val else {}
+
+        # 安全読み込み
+        try:
+            data = json.loads(val) if val else {}
+        except:
+            data = {}
+
+        # =========================
+        # 🔥 %ベースで統一
+        # =========================
+        risk_percent = data.get("risk_percent", 1)
+        sl_percent = data.get("sl_percent", 1)
+        leverage = data.get("leverage", 10)
+
+        # 型安全（壊れ対策）
+        try:
+            risk_percent = float(risk_percent)
+        except:
+            risk_percent = 1
+
+        try:
+            sl_percent = float(sl_percent)
+        except:
+            sl_percent = 1
+
+        try:
+            leverage = float(leverage)
+        except:
+            leverage = 10
+
+        return {
+            "risk_percent": risk_percent,   # ← %（1 = 1%）
+            "sl_percent": sl_percent,       # ← %（追加）
+            "leverage": leverage
+        }

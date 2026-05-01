@@ -33,6 +33,7 @@ function Card({ title, children }) {
 export default function AssetDashboard({
   price,
   balance,
+  equity,   // ←追加
   pnl,
   positions,
   logs,
@@ -49,12 +50,26 @@ export default function AssetDashboard({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(4, 1fr)", // ←4列に変更
           gap: "16px",
         }}
       >
         <PriceCard price={price ?? 0} />
+
         <BalanceCard balance={balance ?? 0} />
+
+        {/* 🔥 Equity表示 */}
+        <Card title="Equity">
+          <div
+            style={{
+              fontSize: "20px",
+              fontWeight: "bold",
+            }}
+          >
+            {equity ?? 0}
+          </div>
+        </Card>
+
         <PnLCard pnl={pnl ?? 0} />
       </div>
 

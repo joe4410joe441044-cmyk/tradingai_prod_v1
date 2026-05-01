@@ -1,30 +1,16 @@
 # -*- coding: utf-8 -*-
 
-# =========================
-# ENV（最初に必ず読む）
-# =========================
-from dotenv import load_dotenv
-import os
-
-load_dotenv("backend/.env")
-
-# =========================
-# IMPORT
-# =========================
-import logging
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.bot_manager import BotManager
-from monitoring.system_monitor import SystemMonitor
-from backend.services.summary_builder import build_summary
-
 # =========================
-# APP
+# FastAPI本体
 # =========================
 app = FastAPI()
 
+# =========================
+# CORS
+# =========================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,88 +20,52 @@ app.add_middleware(
 )
 
 # =========================
-# INIT
+# 🔥 BOT取得（シングルトン）
 # =========================
-logging.basicConfig(level=logging.INFO)
+from backend.bot_manager import get_bot_manager
 
-monitor = SystemMonitor()
-bot = BotManager(monitor=monitor)
-
-# =========================
-# STARTUP
-# =========================
-@app.on_event("startup")
-async def startup():
-    logging.info("🚀 Startup begin")
-    monitor.log_event("SYSTEM", {"msg": "backend started"})
-    logging.info("✅ Startup complete")
+bot = get_bot_manager()
 
 # =========================
-# TEST ENTRY
+# APIルーター import
 # =========================
-@app.post("/api/bot/test_entry")
-def test_entry():
-    try:
-        engine = bot.get_engine()
+from backend.api import bot_api
+from backend.api import summary_api
+from backend.api import risk as risk_api
+from backend.api.trade_preview import router as preview_router
+from backend.api import websocket as websocket_api
+from backend.api import result as result_api
 
-        pos = engine.execute_order({
-            "symbol": "BTCUSDT",
-            "side": "BUY",
-            "qty": 0.001
-        })
-
-        return {"status": "ok", "position": pos}
-
-    except Exception as e:
-        monitor.log_error("TEST_ENTRY", e)
-        return {"status": "error", "error": str(e)}
+# 🔥 追加：symbol API
+from backend.api import symbol as symbol_api
 
 # =========================
-# BOT CONTROL
+# ROUTER登録
 # =========================
-@app.post("/api/bot/start")
-def start_bot():
-    try:
-        result = bot.start()
+app.include_router(bot_api.router, prefix="/api/bot")
+app.include_router(summary_api.router, prefix="/api")
 
-        monitor.log_event("BOT", {"action": "start"})
-        monitor.update_dashboard(
-            status="RUNNING",
-            connection="ONLINE"
-        )
+# preview（計算系）
+app.include_router(preview_router, prefix="/api/trade")
 
-        return result
+# risk（任意）
+try:
+    app.include_router(risk_api.router, prefix="/api/risk")
+except Exception:
+    pass
 
-    except Exception as e:
-        monitor.log_error("BOT_START", e)
-        return {"status": "error", "error": str(e)}
+# 🔥 result
+app.include_router(result_api.router, prefix="/api")
 
+# 🔥 symbol（Apply用）
+app.include_router(symbol_api.router, prefix="/api")
 
-@app.post("/api/bot/stop")
-def stop_bot():
-    try:
-        result = bot.stop()
-
-        monitor.log_event("BOT", {"action": "stop"})
-        monitor.update_dashboard(
-            status="STOPPED",
-            connection="OFFLINE"
-        )
-
-        return result
-
-    except Exception as e:
-        monitor.log_error("BOT_STOP", e)
-        return {"status": "error", "error": str(e)}
+# WebSocket
+app.include_router(websocket_api.router)
 
 # =========================
-# SUMMARY（唯一の真実）
+# root
 # =========================
-@app.get("/api/bot/summary")
-def get_bot_summary():
-    try:
-        return build_summary(bot)
-
-    except Exception as e:
-        monitor.log_error("SUMMARY_API", e)
-        raise e
+@app.get("/")
+def root():
+    return {"status": "ok"}

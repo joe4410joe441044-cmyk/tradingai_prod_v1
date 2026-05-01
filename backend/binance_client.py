@@ -1,4 +1,4 @@
-# backend/binance_client.py
+# -*- coding: utf-8 -*-
 
 from backend.exchange_client import ExchangeClient
 from binance.client import Client
@@ -17,34 +17,69 @@ class BinanceClient(ExchangeClient):
         self.logger = logging.getLogger(__name__)
 
     # ============================
-    # 内部ユーティリティ（超重要）
+    # 🔥 シンボル制約取得（最重要）
+    # ============================
+    def get_symbol_filters(self, symbol: str):
+        try:
+            info = self.client.futures_exchange_info()
+
+            for s in info["symbols"]:
+                if s["symbol"] == symbol:
+                    for f in s["filters"]:
+                        if f["filterType"] == "LOT_SIZE":
+                            return {
+                                "min_qty": float(f["minQty"]),
+                                "step_size": float(f["stepSize"])
+                            }
+
+            raise Exception(f"Symbol not found: {symbol}")
+
+        except Exception as e:
+            self.logger.error(f"[get_symbol_filters ERROR] {e}")
+            raise
+
+    # ============================
+    # 🔧 数量最終調整（補助）
     # ============================
     def _adjust_quantity(self, symbol: str, qty: float) -> float:
-        info = self.client.futures_exchange_info()
-        symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
+        try:
+            info = self.client.futures_exchange_info()
+            symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
 
-        lot_size = next(f for f in symbol_info["filters"] if f["filterType"] == "LOT_SIZE")
-        step_size = float(lot_size["stepSize"])
+            lot_size = next(f for f in symbol_info["filters"] if f["filterType"] == "LOT_SIZE")
+            step_size = float(lot_size["stepSize"])
 
-        qty = float(qty)
-        qty = qty - (qty % step_size)
+            qty = float(qty)
+            qty = qty - (qty % step_size)
 
-        return float(f"{qty:.8f}")
+            return float(f"{qty:.8f}")
 
-    def _adjust_price(self, symbol: str, price: float) -> float:
-        info = self.client.futures_exchange_info()
-        symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
-
-        price_filter = next(f for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
-        tick_size = float(price_filter["tickSize"])
-
-        price = float(price)
-        price = price - (price % tick_size)
-
-        return float(f"{price:.8f}")
+        except Exception as e:
+            self.logger.error(f"[adjust_quantity ERROR] {e}")
+            return 0.0
 
     # ============================
-    # 価格取得
+    # 🔧 価格調整
+    # ============================
+    def _adjust_price(self, symbol: str, price: float) -> float:
+        try:
+            info = self.client.futures_exchange_info()
+            symbol_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
+
+            price_filter = next(f for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
+            tick_size = float(price_filter["tickSize"])
+
+            price = float(price)
+            price = price - (price % tick_size)
+
+            return float(f"{price:.8f}")
+
+        except Exception as e:
+            self.logger.error(f"[adjust_price ERROR] {e}")
+            return 0.0
+
+    # ============================
+    # 📊 価格取得
     # ============================
     def get_price(self, symbol: str) -> float:
         try:
@@ -55,7 +90,7 @@ class BinanceClient(ExchangeClient):
             return 0.0
 
     # ============================
-    # 新規注文（本体）
+    # 🚀 新規注文
     # ============================
     def create_order(
         self,
@@ -69,7 +104,7 @@ class BinanceClient(ExchangeClient):
             order_side = SIDE_BUY if side.upper() == "BUY" else SIDE_SELL
 
             # =========================
-            # 数量調整（超重要）
+            # 🔥 最終調整のみ（ここ重要）
             # =========================
             qty = self._adjust_quantity(symbol, qty)
 
@@ -118,7 +153,7 @@ class BinanceClient(ExchangeClient):
             }
 
     # ============================
-    # ポジション取得
+    # 📦 ポジション取得
     # ============================
     def get_positions(self, symbol: str):
         try:
@@ -128,20 +163,9 @@ class BinanceClient(ExchangeClient):
             return []
 
     # ============================
-    # 統一エントリーポイント
+    # 🎯 統一エントリー
     # ============================
     def execute_order(self, signal: dict):
-        """
-        signal:
-        {
-            "symbol": "BTCUSDT",
-            "side": "BUY",
-            "qty": 0.001,
-            "price": 12345,        # optional (LIMIT用)
-            "order_type": "MARKET"
-        }
-        """
-
         try:
             if not isinstance(signal, dict):
                 raise TypeError("signal must be dict")

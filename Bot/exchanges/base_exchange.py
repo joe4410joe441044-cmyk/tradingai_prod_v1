@@ -1,26 +1,39 @@
-# Bot/exchanges/base_exchange.py
-
 from abc import ABC, abstractmethod
+from typing import List, Dict
 
 
 class BaseExchange(ABC):
 
     @abstractmethod
-    def get_open_positions(self):
-        """現在のポジション一覧を取得"""
+    def get_positions(self) -> List[Dict]:
+        """
+        統一フォーマットでポジション取得
+        必須キー:
+        symbol, side, size, entry, pnl
+        """
         pass
 
     @abstractmethod
-    def get_price(self, symbol: str):
-        """現在価格取得"""
+    def get_balance(self) -> float:
+        """残高"""
         pass
 
     @abstractmethod
-    def create_order(self, symbol: str, side: str, qty: float, order_type: str = "market"):
-        """注文作成"""
+    def get_pnl(self) -> float:
+        """合計PnL"""
         pass
 
     @abstractmethod
-    def close_position(self, position_id: str):
+    def get_price(self, symbol: str) -> float:
+        """現在価格"""
+        pass
+
+    @abstractmethod
+    def create_order(self, symbol: str, side: str, size: float):
+        """注文"""
+        pass
+
+    @abstractmethod
+    def close_position(self, symbol: str):
         """ポジションクローズ"""
         pass

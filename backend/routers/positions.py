@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
@@ -5,15 +7,21 @@ from datetime import datetime
 
 router = APIRouter()
 
+# 🔥 Engine参照（外部から注入）
+engine = None
+
+def set_engine(e):
+    global engine
+    engine = e
+
+
 # =========================
-# モデル定義（Swagger用）
+# モデル定義（UI統一）
 # =========================
 class Position(BaseModel):
-    id: int
-    pair: str
+    symbol: str
     side: str
     entry: float
-    current: float
     pnl: float
     size: float
 
@@ -28,43 +36,54 @@ class Log(BaseModel):
 # =========================
 # ログ管理
 # =========================
-logs_data: List[Log] = []
-MAX_LOGS = 100  # 最大保持数
+logs_data: List[dict] = []
+MAX_LOGS = 100
 
 
 def add_log(log_type: str, message: str):
-    logs_data.append({
+    log = {
         "id": len(logs_data) + 1,
         "time": datetime.now().strftime("%H:%M:%S"),
         "type": log_type,
         "message": message
-    })
+    }
 
-    # 古いログを削除
+    logs_data.append(log)
+
     if len(logs_data) > MAX_LOGS:
         logs_data.pop(0)
 
 
 # =========================
-# Positions
+# Positions（実データ）
 # =========================
 @router.get("/positions", response_model=List[Position])
 def get_positions():
-    return [
-        {
-            "id": 1,
-            "pair": "BTCUSDT",
-            "side": "LONG",
-            "entry": 65000,
-            "current": 65200,
-            "pnl": 200,
-            "size": 0.01
-        }
-    ]
+    if not engine:
+        return []
+
+    try:
+        positions = engine.state_manager.get_positions()
+
+        result = []
+
+        for p in positions.values():
+            result.append({
+                "symbol": p.get("symbol"),
+                "side": p.get("side"),
+                "entry": p.get("entry"),
+                "pnl": p.get("pnl", 0),
+                "size": p.get("size")
+            })
+
+        return result
+
+    except Exception as e:
+        return []
 
 
 # =========================
-# Trade History（ダミー）
+# Trade History（後で実装）
 # =========================
 @router.get("/history")
 def get_history():

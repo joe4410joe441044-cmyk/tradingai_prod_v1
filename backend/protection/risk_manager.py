@@ -1,72 +1,95 @@
-import time
+# backend/protection/risk_manager.py
 
-from backend.protection.capital_protection_ai import CapitalProtectionAI
-from backend.protection.drawdown_guard import DrawdownGuard
-from backend.protection.kill_switch import KillSwitch
-from backend.protection.loss_tracker import LossTracker
+class KillSwitch:
+    def __init__(self):
+        self.active = False
+        self.reason = None  # 発動理由
+
+    def trigger(self, reason=""):
+        # 多重発火防止
+        if self.active:
+            return
+
+        self.active = True
+        self.reason = reason
+
+        print(f"⛔ KILL SWITCH: {reason}")
 
 
 class RiskManager:
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, max_drawdown_pct=10, max_loss_streak=3):
         self.logger = logger
 
-        self.capital_ai = CapitalProtectionAI()
-        self.drawdown_guard = DrawdownGuard()
+        self.max_drawdown_pct = max_drawdown_pct
+        self.max_loss_streak = max_loss_streak
+
         self.kill_switch = KillSwitch()
-        self.loss_tracker = LossTracker()
 
-        self.peak_equity = 0
-        self.current_drawdown = 0
+        # 🔴 初期値修正（Noneで管理）
+        self.peak_equity = None
+        self.current_equity = 0.0
 
-    # =====================================================
-    # UPDATE（毎トレード or 毎tick）
-    # =====================================================
-    def update(self, equity: float, pnl: float):
+        self.consecutive_losses = 0
 
-        # ===== peak更新 =====
+    # =========================
+    # 🔴 ExecutionEngine対応
+    def update_equity(self, equity):
+        self.current_equity = equity
+
+        # 🔴 初回のみピーク設定
+        if self.peak_equity is None:
+            self.peak_equity = equity
+            return
+
+        # ピーク更新
         if equity > self.peak_equity:
             self.peak_equity = equity
 
-        # ===== drawdown =====
-        if self.peak_equity > 0:
-            self.current_drawdown = (equity - self.peak_equity) / self.peak_equity
+        self._check_drawdown()
 
-        # ===== 損失トラッカー =====
-        self.loss_tracker.add(pnl)
+    # =========================
+    def record_trade_result(self, pnl):
 
-        # ===== streak =====
-        streak = self.loss_tracker.streak()
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
 
-        # ===== AI protection =====
-        self.capital_ai.update(pnl)
+        self._check_loss_streak()
 
-        # ===== kill条件 =====
-        if (
-            not self.drawdown_guard.check(equity, self.peak_equity)
-            or streak >= self.capital_ai.max_streak
-        ):
-            self.kill_switch.trigger()
+    # =========================
+    def _check_drawdown(self):
 
-            if self.logger:
-                self.logger.log({
-                    "type": "RISK",
-                    "message": "Kill switch triggered"
-                })
+        if self.peak_equity is None:
+            return
 
-    # =====================================================
-    # CHECK
-    # =====================================================
+        dd = (self.peak_equity - self.current_equity) / self.peak_equity * 100
+
+        if dd >= self.max_drawdown_pct:
+            self.kill_switch.trigger("MAX DRAWDOWN")
+
+    # =========================
+    def _check_loss_streak(self):
+
+        if self.consecutive_losses >= self.max_loss_streak:
+            self.kill_switch.trigger("LOSS STREAK")
+
+    # =========================
     def allow_trade(self):
         return not self.kill_switch.active
 
-    # =====================================================
-    # UI用（超重要）
-    # =====================================================
-    def get_status(self):
-        return {
-            "drawdown": self.current_drawdown,
-            "kill_switch": self.kill_switch.active,
-            "loss_streak": self.loss_tracker.streak(),
-            "peak_equity": self.peak_equity
-        }
+    # =========================
+    def reset(self):
+        """🔴 手動復帰（UI・API用）"""
+        self.kill_switch = KillSwitch()
+        self.consecutive_losses = 0
+        self.peak_equity = self.current_equity
+
+    # =========================
+    def update_config(self, dd=None, streak=None):
+        """🔴 UIから設定変更"""
+        if dd is not None:
+            self.max_drawdown_pct = dd
+        if streak is not None:
+            self.max_loss_streak = streak

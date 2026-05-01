@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import time
 import logging
 from typing import Dict, Any
@@ -7,6 +8,7 @@ from typing import Dict, Any
 class RiskManager:
     """
     Production-grade Risk Control System
+    ※ %表記に統一（Engineと一致）
     """
 
     def __init__(
@@ -16,9 +18,10 @@ class RiskManager:
         max_trade_size: float = 0.01,
         cooldown_sec: int = 5,
         max_consecutive_losses: int = 5,
-        logger=None  # 🔥 追加（ここが今回の核心）
+        logger=None
     ):
-        # 🔥 外部logger優先
+        print("🔥 NEW RISK MANAGER LOADED")
+
         self.logger = logger or logging.getLogger(__name__)
 
         # =========================
@@ -30,15 +33,22 @@ class RiskManager:
         self.cooldown_sec = cooldown_sec
         self.max_consecutive_losses = max_consecutive_losses
 
+        # 🔥 DD設定（%）
+        self.max_drawdown_pct = 10.0
+
         # =========================
         # STATE
         # =========================
         self.last_trade_time = 0.0
         self.daily_pnl = 0.0
         self.consecutive_losses = 0
-        self.trading_disabled = False
 
-        # 🔥 ExecutionEngine互換
+        self.trading_disabled = False
+        self.kill_reason = ""
+
+        self.initial_equity = None
+        self.peak_equity = None
+
         self.open_positions = 0
 
         self.start_of_day_balance = None
@@ -67,7 +77,50 @@ class RiskManager:
             self.start_of_day_balance = None
 
     # =================================================
-    # ENTRY CHECK
+    # DD UPDATE（%ベース）
+    # =================================================
+    def update_equity(self, equity: float):
+
+        if self.initial_equity is None:
+            self.initial_equity = equity
+            self.peak_equity = equity
+            self.logger.info(f"[RISK] initial equity set: {equity}")
+            return
+
+        if equity > self.peak_equity:
+            self.peak_equity = equity
+
+        if self.peak_equity == 0:
+            return
+
+        drawdown = (equity - self.peak_equity) / self.peak_equity * 100
+
+        self.logger.info(
+            f"[RISK] equity={equity:.2f} peak={self.peak_equity:.2f} DD={drawdown:.2f}%"
+        )
+
+        if drawdown <= -self.max_drawdown_pct:
+            self.trading_disabled = True
+            self.kill_reason = "MAX DRAWDOWN"
+            self.logger.error("[RISK] KILL SWITCH TRIGGERED (DD)")
+
+    # =================================================
+    # RESET
+    # =================================================
+    def reset(self):
+        self.initial_equity = None
+        self.peak_equity = None
+
+        self.trading_disabled = False
+        self.kill_reason = ""
+
+        self.consecutive_losses = 0
+        self.daily_pnl = 0.0
+
+        self.logger.info("[RISK] reset")
+
+    # =================================================
+    # ENTRY CHECK（qtyベース）
     # =================================================
     def can_enter(self, signal: Dict[str, Any]) -> bool:
 
@@ -100,11 +153,13 @@ class RiskManager:
         if self.consecutive_losses >= self.max_consecutive_losses:
             self.logger.error("[RISK] consecutive loss limit → KILL SWITCH")
             self.trading_disabled = True
+            self.kill_reason = "CONSECUTIVE LOSSES"
             return False
 
         if self.daily_pnl <= self.max_daily_loss:
             self.logger.error("[RISK] daily loss limit → KILL SWITCH")
             self.trading_disabled = True
+            self.kill_reason = "DAILY LOSS"
             return False
 
         return True
@@ -115,10 +170,7 @@ class RiskManager:
     def on_entry(self, signal: Dict[str, Any] = None):
         self.last_trade_time = time.time()
         self.open_positions += 1
-
-        self.logger.info(
-            f"[RISK] entry | positions={self.open_positions}"
-        )
+        self.logger.info(f"[RISK] entry | positions={self.open_positions}")
 
     # =================================================
     # EXIT REGISTER
@@ -149,12 +201,14 @@ class RiskManager:
     # =================================================
     # KILL SWITCH
     # =================================================
-    def kill_switch(self, reason: str = "manual"):
+    def trigger_kill_switch(self, reason: str = "manual"):
         self.trading_disabled = True
+        self.kill_reason = reason
         self.logger.error(f"[RISK] KILL SWITCH: {reason}")
 
     def enable(self):
         self.trading_disabled = False
+        self.kill_reason = ""
         self.logger.info("[RISK] trading enabled")
 
     # =================================================
@@ -163,9 +217,11 @@ class RiskManager:
     def status(self) -> Dict[str, Any]:
         return {
             "trading_disabled": self.trading_disabled,
+            "kill_reason": self.kill_reason,
             "daily_pnl": self.daily_pnl,
             "peak_daily_pnl": self.peak_daily_pnl,
             "consecutive_losses": self.consecutive_losses,
             "positions": self.open_positions,
             "last_trade_time": self.last_trade_time,
+            "peak_equity": self.peak_equity,
         }
