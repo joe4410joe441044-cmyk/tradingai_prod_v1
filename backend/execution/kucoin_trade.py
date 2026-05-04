@@ -25,10 +25,9 @@ class KucoinTradeClient(BaseClient):
         self.base_url = "https://api-futures.kucoin.com"
 
     # =========================
-    # 🔥 Symbol変換（完全版）
+    # SYMBOL
     # =========================
     def normalize_symbol(self, symbol: str) -> str:
-        # 🔥 強制補正（ここが核心）
         symbol = str(symbol).strip().upper()
 
         mapping = {
@@ -40,9 +39,7 @@ class KucoinTradeClient(BaseClient):
         }
 
         mapped = mapping.get(symbol, symbol)
-
         print(f"[SYMBOL MAP] '{symbol}' -> '{mapped}'")
-
         return mapped
 
     # =========================
@@ -78,7 +75,7 @@ class KucoinTradeClient(BaseClient):
         }
 
     # =========================
-    # 🔥 BALANCE
+    # BALANCE
     # =========================
     def get_balance(self):
         endpoint = "/api/v1/account-overview?currency=USDT"
@@ -100,13 +97,13 @@ class KucoinTradeClient(BaseClient):
             balance = float(d.get("availableBalance", 0))
 
         print(f"[BALANCE PARSED] {balance}")
-
         return balance
 
     # =========================
-    # POSITIONS
+    # 🔥 POSITIONS（完全版）
     # =========================
-    def get_positions(self):
+    def get_positions(self, symbol=None):
+
         endpoint = "/api/v1/positions"
         headers = self._headers("GET", endpoint)
 
@@ -116,15 +113,33 @@ class KucoinTradeClient(BaseClient):
         if data.get("code") != "200000":
             raise Exception(f"KUCOIN ERROR: {data}")
 
-        return data["data"]
+        positions = data["data"]
+
+        active = []
+
+        for p in positions:
+            size = float(p.get("currentQty", 0))
+
+            if size != 0:
+                active.append({
+                    "symbol": p["symbol"],
+                    "qty": abs(size),
+                    "side": "BUY" if size > 0 else "SELL",
+                    "entry_price": float(p.get("avgEntryPrice", 0))
+                })
+
+        # symbol指定フィルタ
+        if symbol:
+            symbol = self.normalize_symbol(symbol)
+            active = [p for p in active if p["symbol"] == symbol]
+
+        return active[0] if active else None
 
     # =========================
     # PRICE
     # =========================
     def get_price(self, symbol: str):
         symbol = self.normalize_symbol(symbol)
-
-        print(f"[PRICE REQUEST] '{symbol}'")
 
         endpoint = f"/api/v1/ticker?symbol={symbol}"
         res = requests.get(self.base_url + endpoint)
@@ -133,20 +148,15 @@ class KucoinTradeClient(BaseClient):
         return float(data["data"]["price"])
 
     # =========================
-    # 🔥 Symbol Rules（完全版＋デバッグ）
+    # SYMBOL RULES
     # =========================
     def get_symbol_rules(self, symbol: str):
-        # 🔥 二重補正（安全対策）
-        symbol = str(symbol).strip().upper()
-        symbol = self.normalize_symbol(symbol)
 
-        print(f"[RULE REQUEST] '{symbol}'")
+        symbol = self.normalize_symbol(symbol)
 
         endpoint = f"/api/v1/contracts/{symbol}"
         res = requests.get(self.base_url + endpoint)
         data = res.json()
-
-        print(f"[RULE RESPONSE] {data}")
 
         if data.get("code") != "200000":
             raise Exception(f"KUCOIN SYMBOL ERROR: {data}")
@@ -159,23 +169,51 @@ class KucoinTradeClient(BaseClient):
         }
 
     # =========================
-    # 🔥 数量補正（contract）
+    # 🔥 MIN QTY
+    # =========================
+    def get_min_qty(self, symbol):
+        rules = self.get_symbol_rules(symbol)
+        return rules["min_size"]
+
+    # =========================
+    # QTY NORMALIZE
     # =========================
     def normalize_qty(self, symbol: str, qty: float) -> int:
-        try:
-            rules = self.get_symbol_rules(symbol)
-            min_size = rules["min_size"]
 
-            qty = int(qty)
+        rules = self.get_symbol_rules(symbol)
+        min_size = rules["min_size"]
 
-            if qty < min_size:
-                return 0
+        qty = int(qty)
 
-            return qty
-
-        except Exception as e:
-            print("[NORMALIZE QTY ERROR]", e)
+        if qty < min_size:
             return 0
+
+        return qty
+
+    # =========================
+    # 🔥 LEVERAGE（必須）
+    # =========================
+    def set_leverage(self, symbol: str, leverage: int):
+
+        symbol = self.normalize_symbol(symbol)
+
+        endpoint = "/api/v1/position/risk-limit-level/change"
+
+        body_dict = {
+            "symbol": symbol,
+            "leverage": str(leverage)
+        }
+
+        body = json.dumps(body_dict)
+        headers = self._headers("POST", endpoint, body)
+
+        res = requests.post(self.base_url + endpoint, headers=headers, data=body)
+        data = res.json()
+
+        if data.get("code") != "200000":
+            print("⚠️ LEVERAGE ERROR:", data)
+        else:
+            print("✅ LEVERAGE SET:", leverage)
 
     # =========================
     # ORDER
@@ -183,7 +221,6 @@ class KucoinTradeClient(BaseClient):
     def create_order(self, symbol, side, qty, price=None):
 
         symbol = self.normalize_symbol(symbol)
-
         qty = self.normalize_qty(symbol, qty)
 
         if qty <= 0:
@@ -214,5 +251,21 @@ class KucoinTradeClient(BaseClient):
     def place_order(self, symbol, side, qty, price=None):
         return self.create_order(symbol, side, qty, price)
 
+    # =========================
+    # CLOSE（簡易版）
+    # =========================
     def close_position(self, symbol):
-        raise Exception("KUCOIN CLOSE NOT IMPLEMENTED")
+
+        pos = self.get_positions(symbol)
+
+        if not pos:
+            print("⚠️ NO POSITION TO CLOSE")
+            return
+
+        side = "SELL" if pos["side"] == "BUY" else "BUY"
+
+        return self.create_order(
+            symbol=symbol,
+            side=side,
+            qty=pos["qty"]
+        )

@@ -20,21 +20,17 @@ function Row({ label, children }) {
 }
 
 // =========================
-// Trade Settings（純入力 + Apply対応）
+// Trade Settings（完全同期版）
 // =========================
 export default function TradeConfigPanel({ onChange }) {
 
   const [config, setConfig] = useState({
-    riskPercent: "1",
-    slPercent: "1",
+    risk_percent: "1",
+    sl_percent: "1",
     leverage: "10",
     symbol: "BTCUSDT"
   });
 
-  // 🔥 状態表示（Apply結果）
-  const [status, setStatus] = useState("");
-
-  // 🔥 選択可能銘柄
   const symbols = [
     "BTCUSDT",
     "ETHUSDT",
@@ -42,30 +38,6 @@ export default function TradeConfigPanel({ onChange }) {
     "SOLUSDT",
     "BNBUSDT"
   ];
-
-  // =========================
-  // 数字入力制御
-  // =========================
-  const handleNumberInput = (key, value) => {
-    if (/^\d*\.?\d*$/.test(value)) {
-      setConfig(prev => ({ ...prev, [key]: value }));
-    }
-  };
-
-  // =========================
-  // 親へ渡す（プレビュー用）
-  // =========================
-  useEffect(() => {
-    if (!onChange) return;
-
-    onChange({
-      symbol: config.symbol,
-      riskPercent: Number(config.riskPercent || 0),
-      slPercent: Number(config.slPercent || 0),
-      leverage: Number(config.leverage || 0)
-    });
-
-  }, [config]);
 
   const inputStyle = {
     width: 200,
@@ -76,44 +48,46 @@ export default function TradeConfigPanel({ onChange }) {
     color: "#fff"
   };
 
-  const buttonStyle = {
-    padding: "6px 12px",
-    borderRadius: 6,
-    border: "1px solid #555",
-    background: "#333",
-    color: "#fff",
-    cursor: "pointer"
+  // =========================
+  // 🔥 親へ通知（唯一のデータルート）
+  // =========================
+  const emitChange = (cfg) => {
+    if (onChange) {
+      onChange({
+        symbol: cfg.symbol,
+        risk_percent: Number(cfg.risk_percent || 0),
+        sl_percent: Number(cfg.sl_percent || 0),
+        leverage: Number(cfg.leverage || 0)
+      });
+    }
   };
 
   // =========================
-  // 🔥 Apply（symbol即反映）
+  // 🔥 初回同期
   // =========================
-  const handleApplySymbol = async () => {
-    try {
-      setStatus("Applying...");
+  useEffect(() => {
+    emitChange(config);
+  }, []);
 
-      const res = await fetch("http://localhost:8001/api/symbol", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ symbol: config.symbol })
-      });
+  // =========================
+  // 🔥 更新処理（常に親へ通知）
+  // =========================
+  const updateConfig = (key, value) => {
+    const newConfig = {
+      ...config,
+      [key]: value
+    };
 
-      const data = await res.json();
+    setConfig(newConfig);
+    emitChange(newConfig);
+  };
 
-      if (data.error) {
-        setStatus("❌ Failed");
-        console.error(data.error);
-        return;
-      }
-
-      setStatus("✅ Applied");
-      console.log("Symbol Applied:", data);
-
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Error");
+  // =========================
+  // 数字入力制御
+  // =========================
+  const handleNumberInput = (key, value) => {
+    if (/^\d*\.?\d*$/.test(value)) {
+      updateConfig(key, value);
     }
   };
 
@@ -130,51 +104,41 @@ export default function TradeConfigPanel({ onChange }) {
     >
       <h2>🟢 Trade Settings</h2>
 
-      {/* Symbol + Apply */}
+      {/* Symbol */}
       <Row label="Symbol">
-        <div style={{ display: "flex", gap: 8 }}>
-          <select
-            value={config.symbol}
-            style={inputStyle}
-            onChange={e =>
-              setConfig(prev => ({ ...prev, symbol: e.target.value }))
-            }
-          >
-            {symbols.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-
-          <button style={buttonStyle} onClick={handleApplySymbol}>
-            Apply
-          </button>
-        </div>
+        <select
+          value={config.symbol}
+          style={inputStyle}
+          onChange={e => updateConfig("symbol", e.target.value)}
+        >
+          {symbols.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
       </Row>
 
-      {/* Applyステータス表示 */}
-      {status && (
-        <div style={{ fontSize: 12, marginBottom: 10, color: "#aaa" }}>
-          {status}
-        </div>
-      )}
+      {/* 🔥 追加：現在選択中 */}
+      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 12 }}>
+        選択中: {config.symbol}
+      </div>
 
       <Row label="Risk %">
         <input
           type="text"
-          value={config.riskPercent}
+          value={config.risk_percent}
           style={inputStyle}
-          onChange={e => handleNumberInput("riskPercent", e.target.value)}
+          onChange={e => handleNumberInput("risk_percent", e.target.value)}
         />
       </Row>
 
       <Row label="SL %">
         <input
           type="text"
-          value={config.slPercent}
+          value={config.sl_percent}
           style={inputStyle}
-          onChange={e => handleNumberInput("slPercent", e.target.value)}
+          onChange={e => handleNumberInput("sl_percent", e.target.value)}
         />
       </Row>
 

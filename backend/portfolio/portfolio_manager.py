@@ -9,28 +9,49 @@ class PortfolioManager:
 
         self.initial_balance = initial_balance
         self.balance = initial_balance
-        self.unrealized_pnl = 0.0
         self.realized_pnl = 0.0
 
+        # symbol単位で管理（シンプル版）
         self.positions: Dict[str, dict] = {}
 
         self.max_exposure = 0.25
-
         self.lock = threading.Lock()
 
     # =========================
-    def set_balance(self, balance: float):
-        with self.lock:
-            self.balance = balance
-
+    # 基本
+    # =========================
     def get_balance(self) -> float:
         with self.lock:
             return self.balance
 
-    # =========================
-    def get_equity(self) -> float:
-        return self.balance + self.unrealized_pnl
+    def get_equity(self, price_map: Dict[str, float]) -> float:
+        # equity = 現金 + 含み損益
+        return self.balance + self._calc_total_unrealized(price_map)
 
+    # =========================
+    # PnL計算（内部でやる）
+    # =========================
+    def _calc_unrealized(self, pos: dict, current_price: float) -> float:
+        entry = pos["entry"]
+        qty = pos["size"]
+        side = pos["side"]
+
+        if side == "BUY":
+            return (current_price - entry) * qty
+        else:
+            return (entry - current_price) * qty
+
+    def _calc_total_unrealized(self, price_map: Dict[str, float]) -> float:
+        total = 0.0
+        for symbol, pos in self.positions.items():
+            price = price_map.get(symbol)
+            if price is None:
+                continue
+            total += self._calc_unrealized(pos, price)
+        return total
+
+    # =========================
+    # エクスポージャ
     # =========================
     def get_total_exposure(self) -> float:
         total = 0.0
@@ -38,61 +59,76 @@ class PortfolioManager:
             total += p["entry"] * p["size"]
         return total
 
-    def get_exposure_ratio(self) -> float:
-        equity = self.get_equity()
+    def get_exposure_ratio(self, price_map: Dict[str, float]) -> float:
+        equity = self.get_equity(price_map)
         if equity == 0:
             return 0
         return self.get_total_exposure() / equity
 
-    # =========================
-    def can_open(self, symbol: str, price: float, size: float) -> bool:
-
+    def can_open(self, symbol: str, price: float, size: float, price_map: Dict[str, float]) -> bool:
         with self.lock:
             new_exposure = price * size
             total = self.get_total_exposure()
+            equity = self.get_equity(price_map)
 
-            equity = self.get_equity()
             if equity <= 0:
                 return False
 
             next_ratio = (total + new_exposure) / equity
-
             return next_ratio <= self.max_exposure
 
     # =========================
-    def add(self, position: dict):
-        with self.lock:
-            self.positions[position["position_id"]] = position
-
-    def remove(self, pid: str, realized_pnl: float):
+    # エントリー
+    # =========================
+    def open_position(self, symbol: str, price: float, size: float, side: str):
 
         with self.lock:
-            if pid in self.positions:
-                del self.positions[pid]
-
-                self.realized_pnl += realized_pnl
-                self.balance += realized_pnl
+            # シンプル：1銘柄1ポジ（上書き）
+            self.positions[symbol] = {
+                "symbol": symbol,
+                "entry": price,
+                "size": size,
+                "side": side
+            }
 
     # =========================
-    def update_unrealized_pnl(self, pnl: float):
-        with self.lock:
-            self.unrealized_pnl = pnl
+    # クローズ
+    # =========================
+    def close_position(self, symbol: str, price: float):
 
+        with self.lock:
+            pos = self.positions.get(symbol)
+            if not pos:
+                return 0.0
+
+            pnl = self._calc_unrealized(pos, price)
+
+            # 実現損益
+            self.realized_pnl += pnl
+            self.balance += pnl
+
+            del self.positions[symbol]
+
+            return pnl
+
+    # =========================
+    # 情報取得
     # =========================
     def get_positions(self):
         with self.lock:
             return dict(self.positions)
 
-    # =========================
-    def summary(self):
+    def summary(self, price_map: Dict[str, float]):
 
-        with self.lock:
-            return {
-                "balance": self.balance,
-                "equity": self.get_equity(),
-                "unrealized_pnl": self.unrealized_pnl,
-                "realized_pnl": self.realized_pnl,
-                "positions": len(self.positions),
-                "exposure_ratio": self.get_exposure_ratio(),
-                "symbols": list(set(p["symbol"] for p in self.positions.values()))
-            }
+        unrealized = self._calc_total_unrealized(price_map)
+        equity = self.balance + unrealized
+
+        return {
+            "balance": self.balance,
+            "equity": equity,
+            "unrealized_pnl": unrealized,
+            "realized_pnl": self.realized_pnl,
+            "positions": len(self.positions),
+            "exposure_ratio": self.get_exposure_ratio(price_map),
+            "symbols": list(self.positions.keys())
+        }

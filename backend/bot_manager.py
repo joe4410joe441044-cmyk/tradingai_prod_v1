@@ -10,9 +10,6 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-# =========================
-# 🔥 正しいimport（ここが本質）
-# =========================
 from Bot.engine.execution_engine import ExecutionEngine
 from Bot.core.price_manager import PriceManager
 from backend.portfolio.portfolio_manager import PortfolioManager
@@ -32,78 +29,42 @@ class BotManager:
 
         self.logger = logging.getLogger(__name__)
 
-        self.config = {
-            "exchange": "kucoin"
-        }
-
         self.portfolio = PortfolioManager(initial_balance=1000.0)
-
         self.price_manager = PriceManager()
-        self.price_manager.subscribe(self._on_price_update)
 
         self.engine = None
         self.exchange = None
+        self.ws = None
+
         self._engine_lock = threading.Lock()
 
         print("BOT MANAGER ID:", id(self))
 
     # =========================
+    # Exchange
+    # =========================
     def _create_exchange(self):
 
-        exchange_name = self.config.get("exchange", "kucoin")
+        from backend.execution.kucoin_trade import KucoinTradeClient
 
-        if exchange_name == "kucoin":
-            from backend.execution.kucoin_trade import KucoinTradeClient
+        print("USING KUCOIN FUTURES")
 
-            print("USING KUCOIN FUTURES")
-
-            return KucoinTradeClient(
-                api_key=os.getenv("KUCOIN_API_KEY"),
-                api_secret=os.getenv("KUCOIN_API_SECRET"),
-                passphrase=os.getenv("KUCOIN_API_PASSPHRASE")
-            )
-
-        else:
-            raise Exception(f"Unsupported exchange: {exchange_name}")
+        return KucoinTradeClient(
+            api_key=os.getenv("KUCOIN_API_KEY"),
+            api_secret=os.getenv("KUCOIN_API_SECRET"),
+            passphrase=os.getenv("KUCOIN_API_PASSPHRASE")
+        )
 
     # =========================
-    def _create_ws(self):
-
-        try:
-            from backend.market.binance_ws import BinanceClient
-
-            symbol = "BTCUSDT"
-            if self.engine and hasattr(self.engine, "symbol"):
-                symbol = self.engine.symbol
-
-            print(f"🧠 WS SYMBOL: {symbol}")
-
-            ws = BinanceClient(
-                price_manager=self.price_manager,
-                symbol=symbol,
-                engine=self.engine
-            )
-
-            ws.start_ws()
-
-            print("✅ WS CREATED")
-
-            return ws
-
-        except Exception as e:
-            print("[WS CREATE ERROR]", e)
-            return None
-
+    # Engine生成
     # =========================
     def get_engine(self):
 
         if self.engine:
-            if not hasattr(self.engine, "ws_client") or self.engine.ws_client is None:
-                print("⚠️ WS CLIENT MISSING → FIXING")
-                self.engine.ws_client = self._create_ws()
             return self.engine
 
         with self._engine_lock:
+
             if self.engine:
                 return self.engine
 
@@ -114,35 +75,92 @@ class BotManager:
             self.engine = ExecutionEngine(
                 exchange=self.exchange,
                 logger=self.logger,
-                portfolio=self.portfolio
+                portfolio=self.portfolio,
+                price_manager=self.price_manager
             )
 
-            self.engine.ws_client = self._create_ws()
-
-            print("ENGINE ID:", id(self.engine))
-
-        return self.engine
+            return self.engine
 
     # =========================
-    def _on_price_update(self, symbol, price):
-
-        print("PRICE FLOW OK", symbol, price)
-
-        try:
-            engine = self.get_engine()
-            engine.on_price(price)
-        except Exception as e:
-            print("[PRICE PUSH ERROR]", e)
-
+    # START（完全版：symbol完全支配）
     # =========================
-    def start(self):
+    def start(self, config: dict = None):
 
         with self.lock:
+
             if self._running:
+                print("⚠️ ALREADY RUNNING")
                 return {"status": "already_running"}
+
+            print("🚀 START REQUEST")
+
+            # =========================
+            # 完全停止
+            # =========================
+            if self.ws:
+                print("🛑 STOP OLD WS")
+                try:
+                    self.ws.stop()
+                except Exception as e:
+                    print("WS STOP ERROR:", e)
+                self.ws = None
+
+            if self.engine:
+                print("🛑 STOP OLD ENGINE")
+                try:
+                    self.engine.stop()
+                except Exception as e:
+                    print("ENGINE STOP ERROR:", e)
+                self.engine = None
+
             self._running = True
 
+        # =========================
+        # 🔥 symbol確定（唯一・fallback禁止）
+        # =========================
+        if not config or "symbol" not in config or not config["symbol"]:
+            raise ValueError("symbol is required")
+
+        symbol = config["symbol"].upper()
+
+        print(f"🎯 SYMBOL LOCKED: {symbol}")
+
+        # =========================
+        # Engine生成
+        # =========================
         engine = self.get_engine()
+
+        # =========================
+        # 🔥 configからsymbol削除
+        # =========================
+        safe_config = dict(config)
+        safe_config.pop("symbol", None)
+
+        if safe_config:
+            print("🔥 APPLY CONFIG:", safe_config)
+            engine.set_config(safe_config)
+
+        # 🔥 最後に強制注入（最重要）
+        engine.symbol = symbol
+
+        # =========================
+        # WS生成（symbol完全一致）
+        # =========================
+        from backend.binance_ws_client import BinanceWSClient
+
+        self.ws = BinanceWSClient(
+            price_manager=self.price_manager,
+            symbol=symbol,
+            engine=engine
+        )
+
+        self.ws.start()
+
+        engine.ws_client = self.ws
+
+        # =========================
+        # Engine起動
+        # =========================
         result = engine.start()
 
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
@@ -151,49 +169,56 @@ class BotManager:
         return result
 
     # =========================
+    # STOP
+    # =========================
     def stop(self):
 
         with self.lock:
             if not self._running:
                 return {"status": "already_stopped"}
+
             self._running = False
 
+        print("🛑 STOP ALL")
+
+        if self.ws:
+            try:
+                self.ws.stop()
+            except Exception as e:
+                print("WS STOP ERROR:", e)
+            self.ws = None
+
         if self.engine:
-            self.engine.stop()
+            try:
+                self.engine.stop()
+            except Exception as e:
+                print("ENGINE STOP ERROR:", e)
+            self.engine = None
 
         return {"status": "stopped"}
 
     # =========================
     def run_loop(self):
-
         while self._running:
-            try:
-                time.sleep(0.5)
-            except Exception:
-                time.sleep(1)
+            time.sleep(0.5)
 
-    def is_running(self):
-        return self._running
-
+    # =========================
     def get_status(self):
 
         if self.engine is None:
-            return {
-                "status": "STOPPED",
-                "price": 0,
-                "balance": 0,
-                "pnl": 0,
-                "positions": {},
-            }
+            return {"status": "STOPPED"}
 
-        result = self.engine.get_result()
+        result = self.engine.get_result() or {}
 
         return {
-            "status": "RUNNING" if self._running else "STOPPED",
-            **result
+            **result,
+            "status": result.get("status") or ("RUNNING" if self._running else "STOPPED"),
         }
 
 
+# =========================
+# Singleton
+# =========================
 _bot_manager = None
 _lock = threading.Lock()
 

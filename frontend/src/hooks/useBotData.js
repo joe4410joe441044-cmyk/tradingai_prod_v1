@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 
 const WS_URL = "ws://127.0.0.1:8001/ws";
-const API_URL = "http://127.0.0.1:8001/api/bot/summary";
 
 export default function useBotData() {
   const wsRef = useRef(null);
@@ -9,7 +8,7 @@ export default function useBotData() {
   const isConnectingRef = useRef(false);
 
   const [data, setData] = useState({
-    status: "LOADING",
+    status: "STOPPED",
     price: 0,
     balance: 0,
     equity: 0,
@@ -17,35 +16,9 @@ export default function useBotData() {
     positions: [],
     logs: [],
     connection: "OFFLINE",
-    risk: null
+    risk: null,
+    symbol: null
   });
-
-  // =========================
-  // 初回API取得（完全上書き）
-  // =========================
-  const fetchInitial = async () => {
-    try {
-      const res = await fetch(API_URL);
-      const json = await res.json();
-
-      console.log("📡 INIT API:", json);
-
-      setData({
-        status: json.status ?? "UNKNOWN",
-        price: json.price ?? 0,
-        balance: json.balance ?? 0,
-        equity: json.equity ?? 0,
-        pnl: json.pnl ?? 0,
-        positions: json.positions ?? [],
-        logs: json.logs ?? [],
-        connection: "ONLINE",
-        risk: json.risk ?? null
-      });
-
-    } catch (e) {
-      console.error("❌ INIT FETCH ERROR", e);
-    }
-  };
 
   // =========================
   // WebSocket接続
@@ -70,23 +43,23 @@ export default function useBotData() {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
-        console.log("📡 WS RAW:", msg);
+        const payload = JSON.parse(event.data);
 
-        const payload = msg.data ?? msg;
+        console.log("📡 WS DATA:", payload);
 
-        // 🔥 必要項目だけ更新（崩さない）
-        setData(prev => ({
-          status: payload.status ?? prev.status,
-          price: payload.price ?? prev.price,
-          balance: payload.balance ?? prev.balance,
-          equity: payload.equity ?? prev.equity,
-          pnl: payload.pnl ?? prev.pnl,
-          positions: payload.positions ?? prev.positions ?? [],
-          logs: payload.logs ?? prev.logs ?? [],
+        // 🔥 完全上書き（←これ重要）
+        setData({
+          status: payload.status ?? "STOPPED",
+          price: payload.price ?? 0,
+          balance: payload.balance ?? 0,
+          equity: payload.equity ?? 0,
+          pnl: payload.pnl ?? 0,
+          positions: payload.positions ?? [],
+          logs: payload.logs ?? [],
           connection: "ONLINE",
-          risk: payload.risk ?? prev.risk
-        }));
+          risk: payload.risk ?? null,
+          symbol: payload.symbol ?? null
+        });
 
       } catch (e) {
         console.error("❌ WS PARSE ERROR", event.data);
@@ -108,6 +81,7 @@ export default function useBotData() {
       wsRef.current = null;
       isConnectingRef.current = false;
 
+      // 正常終了なら再接続しない
       if (event.code === 1000) return;
 
       if (!reconnectTimerRef.current) {
@@ -123,7 +97,6 @@ export default function useBotData() {
   // 初期化
   // =========================
   useEffect(() => {
-    fetchInitial();
     connect();
 
     return () => {
@@ -140,5 +113,8 @@ export default function useBotData() {
     };
   }, []);
 
+  // =========================
+  // UIに渡す
+  // =========================
   return data;
 }

@@ -1,8 +1,12 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import useBotData from "./hooks/useBotData";
 import TradeConfigPanel from "./components/control/TradeConfigPanel";
-import RiskPanel from "./components/RiskPanel";
 import StatusPanel from "./components/StatusPanel";
+import TradeControl from "./components/TradeControl";
+
+// 🔥 ファイル実行確認
+console.log("🔥🔥🔥 APP ROOT FILE LOADED 🔥🔥🔥");
+document.body.style.background = "#200";
 
 function Card({ title, children }) {
   return (
@@ -23,7 +27,7 @@ function Card({ title, children }) {
   );
 }
 
-function StatusBar({ status, logs }) {
+function StatusBar({ status }) {
   return (
     <div style={{
       position: "fixed",
@@ -39,135 +43,153 @@ function StatusBar({ status, logs }) {
       <div>
         STATUS: {status === "RUNNING" ? "🟢 RUNNING" : "🔴 STOPPED"}
       </div>
-
-      <div style={{ marginTop: 4, maxHeight: 60, overflowY: "auto" }}>
-        {logs.slice(-5).map((log, i) => (
-          <div key={i}>{log}</div>
-        ))}
-      </div>
     </div>
   );
 }
 
 export default function App() {
+
   const bot = useBotData();
 
-  const [config, setConfig] = useState(null);
-  const [logs, setLogs] = useState([]);
+  // 🔥 初期値OFF
+  const [config, setConfig] = useState({
+    symbol: "BTCUSDT",
+    risk_percent: 1,
+    sl_percent: 1,
+    leverage: 10,
+    tp_percent: 2,
+    dry_run: false
+  });
 
-  const result = useMemo(() => {
-    if (!config || !bot.balance || !bot.price) {
-      return {
-        positionSize: "-",
-        qty: "-",
-        riskAmount: "-",
-        ddAfter: "-"
-      };
-    }
+  const [mode, setMode] = useState("paper");
 
-    const riskAmount = (bot.balance * (config.riskPercent || 0)) / 100;
-    const positionSize = riskAmount * (config.leverage || 1);
+  useEffect(() => {
+    console.log("📊 CONFIG STATE UPDATED:", config);
+  }, [config]);
 
-    const qty = positionSize / bot.price;
-    const ddAfter = (riskAmount / bot.balance) * 100;
+  const handleStart = async () => {
 
-    return {
-      positionSize: positionSize.toFixed(2),
-      qty: qty.toFixed(4),
-      riskAmount: riskAmount.toFixed(2),
-      ddAfter: ddAfter.toFixed(2)
+    console.log("🔥 CURRENT CONFIG:", config);
+
+    const finalConfig = {
+      symbol: config.symbol,
+      risk_percent: Number(config.risk_percent),
+      sl_percent: Number(config.sl_percent),
+      leverage: Number(config.leverage),
+      tp_percent: Number(config.tp_percent),
+      mode: mode,
+
+      // 🔥 念のため強制OFF
+      dry_run: false
     };
 
-  }, [config, bot.balance, bot.price]);
+    console.log("🚀 FINAL CONFIG:", finalConfig);
 
-  // =========================
-  // 🔥 修正済み START
-  // =========================
-  const handleStart = async () => {
+    if (!finalConfig.symbol) {
+      alert("❌ SYMBOLなし");
+      return;
+    }
+
+    if (bot.status === "RUNNING") {
+      alert("すでに稼働中");
+      return;
+    }
+
     try {
-      if (!config) {
-        alert("設定が未入力");
-        setLogs(prev => [...prev, "⚠ 設定が未入力"]);
-        return;
-      }
-
-      const payload = {
-        symbol: config.symbol,
-        risk_percent: config.riskPercent,
-        sl_percent: config.slPercent,
-        leverage: config.leverage
-      };
-
-      console.log("🚀 START PAYLOAD:", payload);
-
-      setLogs(prev => [...prev, "▶ START送信"]);
-
       const res = await fetch("http://127.0.0.1:8001/api/bot/start", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(finalConfig)
       });
 
-      const json = await res.json();
-      console.log("START RESULT:", json);
+      console.log("📡 FETCH RESPONSE:", res);
 
-      setLogs(prev => [...prev, "🟢 Bot Started"]);
-
-    } catch (e) {
-      console.error("START ERROR", e);
-      setLogs(prev => [...prev, "❌ START ERROR"]);
+    } catch (err) {
+      console.error("❌ START ERROR:", err);
     }
   };
 
   const handleStop = async () => {
+    console.log("🛑 STOP CLICKED");
+
     try {
       await fetch("http://127.0.0.1:8001/api/bot/stop", {
         method: "POST"
       });
-
-      setLogs(prev => [...prev, "🔴 Bot Stopped"]);
-
-    } catch (e) {
-      console.error("STOP ERROR", e);
-      setLogs(prev => [...prev, "❌ STOP ERROR"]);
+    } catch (err) {
+      console.error("❌ STOP ERROR:", err);
     }
   };
 
   return (
-    <div style={{
-      padding: 20,
-      paddingBottom: 100,
-      background: "#0b0b0b",
-      minHeight: "100vh",
-      color: "#fff",
-      fontFamily: "Arial"
-    }}>
-      <h2 style={{ marginBottom: 20 }}>TradingAI</h2>
+    <div style={{ padding: 20, color: "#fff", background: "#0b0b0b" }}>
 
-      <TradeConfigPanel onChange={setConfig} />
-
-      <Card title="Risk Settings">
-        <RiskPanel
-          onChange={(riskConfig) => {
-            setConfig(prev => ({
-              ...prev,
-              ...riskConfig
-            }));
-          }}
-          result={result}
-        />
-      </Card>
+      {/* 設定入力 */}
+      <TradeConfigPanel
+        onChange={(cfg) => {
+          console.log("📥 CONFIG UPDATE FROM PANEL:", cfg);
+          setConfig((prev) => ({
+            ...prev,
+            ...cfg
+          }));
+        }}
+      />
 
       <Card title="Control">
-        <button onClick={handleStart} disabled={!config} style={{ marginRight: 10 }}>
+
+        <button
+          onClick={handleStart}
+          disabled={bot.status === "RUNNING"}
+        >
           ▶ START
         </button>
 
         <button onClick={handleStop}>
           ■ STOP
         </button>
+
+        <div style={{ marginTop: 10 }}>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            disabled={bot.status === "RUNNING"}
+          >
+            <option value="paper">🟡 PAPER</option>
+            <option value="live">🔴 LIVE</option>
+          </select>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          MODE: {mode === "paper" ? "🟡 PAPER" : "🔴 LIVE"}
+        </div>
+
+        {/* 🔥 ここが修正ポイント */}
+        <TradeControl
+          config={{ ...config, mode }}
+          onChange={(newConfig) => {
+            setConfig((prev) => ({
+              ...prev,
+              ...newConfig   // ← 上書きではなくマージ
+            }));
+          }}
+        />
+
+        <div style={{ marginTop: 10 }}>
+          CONFIG SYMBOL: {config.symbol}
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          BOT SYMBOL: {bot.symbol ?? "-"}
+        </div>
+
+        {bot.symbol && config.symbol !== bot.symbol && (
+          <div style={{ color: "red", fontWeight: "bold", marginTop: 10 }}>
+            ⚠️ SYMBOL MISMATCH
+          </div>
+        )}
+
       </Card>
 
       <StatusPanel
@@ -175,19 +197,11 @@ export default function App() {
         equity={bot.equity}
         pnl={bot.pnl}
         price={bot.price}
-        currentDD={bot.risk?.current_dd}
-        lossStreak={bot.risk?.current_loss_streak}
-        killSwitch={bot.risk?.kill_switch}
         botStatus={bot.status}
       />
 
-      <Card title="Log">
-        {logs.slice(-10).map((log, i) => (
-          <div key={i}>{log}</div>
-        ))}
-      </Card>
+      <StatusBar status={bot.status} />
 
-      <StatusBar status={bot.status} logs={logs} />
     </div>
   );
 }

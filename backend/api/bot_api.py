@@ -1,52 +1,67 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException
 from backend.bot_manager import get_bot_manager
+
+from pydantic import BaseModel, Field
+from enum import Enum
+from typing import Optional
 
 router = APIRouter()
 
-bot_manager = get_bot_manager()
+
+# =========================
+# MODE（固定）
+# =========================
+class Mode(str, Enum):
+    paper = "paper"
+    live = "live"
+
+
+# =========================
+# CONFIG（仕様書）
+# =========================
+class StartConfig(BaseModel):
+    symbol: str = Field(..., example="BTCUSDT")
+    risk_percent: float = Field(..., gt=0)
+    sl_percent: float = Field(..., gt=0)
+    leverage: float = Field(..., gt=0)
+    tp_percent: float = Field(2.0, gt=0)
+    mode: Mode
+
+
+# =========================
+# STATUS RESPONSE（仕様書）
+# =========================
+class StatusResponse(BaseModel):
+    status: str
+    price: float
+    pnl: float
+    balance: float
+    equity: float
+    symbol: Optional[str]
 
 
 # =========================
 # BOT START
 # =========================
 @router.post("/start")
-def start_bot(config: dict):
+def start_bot(config: StartConfig):
 
-    print("🔥 START CONFIG RECEIVED:", config)
+    bot_manager = get_bot_manager()
 
-    engine = bot_manager.get_engine()
+    config_dict = config.dict()
 
-    # =========================
-    # Engine存在チェック
-    # =========================
-    if not engine:
-        print("🚨 ENGINE NOT FOUND")
-        return {"status": "error", "message": "engine not initialized"}
+    # 🔥 正規化（安全）
+    config_dict["symbol"] = config_dict["symbol"].upper()
 
-    # =========================
-    # 🔥 config反映（最重要）
-    # =========================
+    print("START BOT ID:", id(bot_manager))
+    print("🔥 START CONFIG RECEIVED:", config_dict)
+
     try:
-        engine.set_config(config)
-        print("🔥 ENGINE CONFIG APPLIED")
+        result = bot_manager.start(config_dict)
     except Exception as e:
-        print("[CONFIG APPLY ERROR]", e)
-
-    # =========================
-    # Riskリセット
-    # =========================
-    try:
-        if hasattr(engine, "risk") and engine.risk:
-            engine.risk.reset()
-    except Exception as e:
-        print("[RISK RESET ERROR]", e)
-
-    # =========================
-    # 🔥 WSはBotManagerに任せる
-    # =========================
-    result = bot_manager.start()
+        raise HTTPException(status_code=400, detail=str(e))
 
     print("🚀 BOT START COMPLETE")
 
@@ -58,47 +73,22 @@ def start_bot(config: dict):
 # =========================
 @router.post("/stop")
 def stop_bot():
+
+    bot_manager = get_bot_manager()
+    print("STOP BOT ID:", id(bot_manager))
+
     result = bot_manager.stop()
+
     print("🛑 BOT STOPPED")
+
     return result
 
 
 # =========================
-# ステータス取得
+# STATUS
 # =========================
-@router.get("/status")
+@router.get("/status", response_model=StatusResponse)
 def get_status():
+
+    bot_manager = get_bot_manager()
     return bot_manager.get_status()
-
-
-# =========================
-# SYMBOL変更（任意API）
-# =========================
-@router.post("/set_symbol")
-def set_symbol(symbol: str = Query(...)):
-    try:
-        engine = bot_manager.get_engine()
-
-        if not engine:
-            return {"status": "error", "message": "engine not found"}
-
-        engine.symbol = symbol
-
-        if hasattr(engine, "ws_client") and engine.ws_client:
-            engine.ws_client.set_symbol(symbol)
-            print(f"🔄 WS SYMBOL SWITCH → {symbol}")
-        else:
-            return {"status": "error", "message": "ws_client not found"}
-
-        print(f"🔄 SYMBOL CHANGED → {symbol}")
-
-        return {
-            "status": "ok",
-            "symbol": symbol
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }

@@ -1,62 +1,67 @@
-from fastapi import APIRouter
-from backend.bot_manager import bot_manager
+# -*- coding: utf-8 -*-
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from backend.bot_manager import get_bot_manager
 
 router = APIRouter()
 
+bot_manager = get_bot_manager()
 
+
+# =========================
+# CONFIG MODEL
+# =========================
+class StartConfig(BaseModel):
+    symbol: str
+    risk_percent: float
+    sl_percent: float
+    leverage: float
+    mode: str
+
+
+# =========================
+# START
+# =========================
 @router.post("/start")
-def start_bot(config: dict):
+def start_bot(config: StartConfig):
 
-    # =========================
-    # 🔥 受信ログ（最重要）
-    # =========================
-    print("🔥 START CONFIG RECEIVED:", config)
+    config_dict = config.dict()
 
-    engine = bot_manager.get_engine()
+    # 🔥 symbol正規化（ここで固定）
+    config_dict["symbol"] = config_dict["symbol"].upper()
 
-    # =========================
-    # 🔥 config反映
-    # =========================
-    try:
-        engine.set_config(config)
-        print("🔥 ENGINE CONFIG APPLIED")
-    except Exception as e:
-        print("[CONFIG APPLY ERROR]", e)
+    # 🔥 modeチェック（事故防止）
+    if config_dict["mode"] not in ["paper", "live"]:
+        raise HTTPException(status_code=400, detail="invalid mode")
 
-    # =========================
-    # 🔥 KillSwitchリセット
-    # =========================
-    try:
-        if hasattr(engine, "risk"):
-            if hasattr(engine.risk, "reset"):
-                engine.risk.reset()
-            else:
-                engine.risk.kill_switch.active = False
-                engine.risk.kill_switch.reason = None
-                engine.risk.consecutive_losses = 0
+    print("===================================")
+    print("🔥 START CONFIG RECEIVED:", config_dict)
+    print("===================================")
 
-        print("🔥 RISK RESET DONE")
-
-    except Exception as e:
-        print("[RISK RESET ERROR]", e)
-
-    # =========================
-    # 🔥 起動
-    # =========================
-    result = bot_manager.start()
-
-    print("🔥 BOT START RESULT:", result)
-
-    return result
+    return bot_manager.start(config_dict)
 
 
+# =========================
+# STOP
+# =========================
 @router.post("/stop")
 def stop_bot():
 
     print("🛑 STOP REQUEST")
 
-    result = bot_manager.stop()
+    return bot_manager.stop()
 
-    print("🛑 BOT STOP RESULT:", result)
 
-    return result
+# =========================
+# SYMBOL（完全無効）
+# =========================
+@router.post("/symbol")
+def set_symbol(data: dict):
+
+    print("⚠️ SYMBOL API DISABLED")
+
+    return {
+        "status": "error",
+        "reason": "symbol must be set via /start only"
+    }
