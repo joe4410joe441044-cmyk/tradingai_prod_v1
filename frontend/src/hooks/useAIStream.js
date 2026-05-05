@@ -5,7 +5,7 @@ export default function useAIStream() {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8000/ws");
+    const ws = new WebSocket(`${window.location.origin.replace("http", "ws")}/ws/`);
     wsRef.current = ws;
 
     ws.onopen = () => {

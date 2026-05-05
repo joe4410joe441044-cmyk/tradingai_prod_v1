@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function useWebSocket(url) {
+export default function useWebSocket() {
   const wsRef = useRef(null);
   const [data, setData] = useState({});
 
   useEffect(() => {
-    const ws = new WebSocket(url);
+
+    // ✅ URLを先に定義
+    const wsUrl = `${window.location.origin.replace("http", "ws")}/ws/`;
+
+    console.log("🌐 WS CONNECT:", wsUrl);
+
+    // ✅ WebSocket生成
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -16,7 +23,7 @@ export default function useWebSocket(url) {
       try {
         const parsed = JSON.parse(event.data);
 
-        // 🔥 完全置き換え（これが最重要）
+        // 🔥 完全置き換え
         setData(parsed);
 
       } catch (e) {
@@ -24,8 +31,8 @@ export default function useWebSocket(url) {
       }
     };
 
-    ws.onclose = () => {
-      console.log("🔴 WS CLOSED");
+    ws.onclose = (e) => {
+      console.log("🔴 WS CLOSED", e.code);
     };
 
     ws.onerror = (e) => {
@@ -35,7 +42,8 @@ export default function useWebSocket(url) {
     return () => {
       ws.close();
     };
-  }, [url]);
+
+  }, []);
 
   return data;
 }

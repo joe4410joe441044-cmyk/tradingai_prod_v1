@@ -51,7 +51,6 @@ export default function App() {
 
   const bot = useBotData();
 
-  // 🔥 初期値OFF
   const [config, setConfig] = useState({
     symbol: "BTCUSDT",
     risk_percent: 1,
@@ -67,6 +66,9 @@ export default function App() {
     console.log("📊 CONFIG STATE UPDATED:", config);
   }, [config]);
 
+  // =========================
+  // START
+  // =========================
   const handleStart = async () => {
 
     console.log("🔥 CURRENT CONFIG:", config);
@@ -78,8 +80,6 @@ export default function App() {
       leverage: Number(config.leverage),
       tp_percent: Number(config.tp_percent),
       mode: mode,
-
-      // 🔥 念のため強制OFF
       dry_run: false
     };
 
@@ -96,7 +96,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch("http://127.0.0.1:8001/api/bot/start", {
+      const res = await fetch("/api/bot/start", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -111,11 +111,14 @@ export default function App() {
     }
   };
 
+  // =========================
+  // STOP
+  // =========================
   const handleStop = async () => {
     console.log("🛑 STOP CLICKED");
 
     try {
-      await fetch("http://127.0.0.1:8001/api/bot/stop", {
+      await fetch("/api/bot/stop", {
         method: "POST"
       });
     } catch (err) {
@@ -165,13 +168,12 @@ export default function App() {
           MODE: {mode === "paper" ? "🟡 PAPER" : "🔴 LIVE"}
         </div>
 
-        {/* 🔥 ここが修正ポイント */}
         <TradeControl
           config={{ ...config, mode }}
           onChange={(newConfig) => {
             setConfig((prev) => ({
               ...prev,
-              ...newConfig   // ← 上書きではなくマージ
+              ...newConfig
             }));
           }}
         />

@@ -51,7 +51,7 @@ def disconnect(ws: WebSocket):
 # =========================
 # WebSocket
 # =========================
-@router.websocket("/ws")
+@router.websocket("/ws/")
 async def websocket_endpoint(ws: WebSocket):
 
     await connect(ws)

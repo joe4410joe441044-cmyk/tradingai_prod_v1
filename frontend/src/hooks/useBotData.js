@@ -18,12 +18,12 @@ export default function useBotData() {
 
     const connect = () => {
 
-      // ✅ 本番対応（超重要）
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const wsUrl = `${protocol}://${window.location.host}/ws`;
+      // ✅ WebSocket URL（最優先で定義）
+      const wsUrl = `${window.location.origin.replace("http", "ws")}/ws/`;
 
       console.log("🌐 WS CONNECT:", wsUrl);
 
+      // ✅ WebSocket生成
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

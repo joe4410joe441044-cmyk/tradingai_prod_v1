@@ -31,7 +31,7 @@ export default function useEventWS(onMessage) {
 
       console.log("🔌 WS CONNECT TRY:", WS_URL);
 
-      const ws = new WebSocket(WS_URL);
+      const WS_URL = `${window.location.origin.replace("http", "ws")}/ws/`;
       wsRef.current = ws;
 
       ws.onopen = () => {
