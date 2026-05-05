@@ -1,120 +1,74 @@
-import { useEffect, useState, useRef } from "react";
-
-const WS_URL = "ws://127.0.0.1:8001/ws";
+import { useEffect, useState } from "react";
 
 export default function useBotData() {
-  const wsRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
-  const isConnectingRef = useRef(false);
 
   const [data, setData] = useState({
-    status: "STOPPED",
-    price: 0,
     balance: 0,
     equity: 0,
     pnl: 0,
-    positions: [],
-    logs: [],
-    connection: "OFFLINE",
-    risk: null,
+    price: 0,
+    status: "STOPPED",
     symbol: null
   });
 
-  // =========================
-  // WebSocket接続
-  // =========================
-  const connect = () => {
-    if (wsRef.current || isConnectingRef.current) return;
+  useEffect(() => {
 
-    isConnectingRef.current = true;
+    let ws;
+    let reconnectTimer;
 
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
+    const connect = () => {
 
-    ws.onopen = () => {
-      console.log("🟢 WS CONNECTED");
-      isConnectingRef.current = false;
+      // ✅ 本番対応（超重要）
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${protocol}://${window.location.host}/ws`;
 
-      setData(prev => ({
-        ...prev,
-        connection: "ONLINE"
-      }));
-    };
+      console.log("🌐 WS CONNECT:", wsUrl);
 
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
+      ws = new WebSocket(wsUrl);
 
-        console.log("📡 WS DATA:", payload);
+      ws.onopen = () => {
+        console.log("🟢 WS CONNECTED");
+      };
 
-        // 🔥 完全上書き（←これ重要）
-        setData({
-          status: payload.status ?? "STOPPED",
-          price: payload.price ?? 0,
-          balance: payload.balance ?? 0,
-          equity: payload.equity ?? 0,
-          pnl: payload.pnl ?? 0,
-          positions: payload.positions ?? [],
-          logs: payload.logs ?? [],
-          connection: "ONLINE",
-          risk: payload.risk ?? null,
-          symbol: payload.symbol ?? null
-        });
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
 
-      } catch (e) {
-        console.error("❌ WS PARSE ERROR", event.data);
-      }
-    };
+          console.log("📡 WS DATA:", msg);
 
-    ws.onerror = (e) => {
-      console.error("🔴 WS ERROR", e);
-    };
+          setData(prev => ({
+            ...prev,
+            ...msg
+          }));
 
-    ws.onclose = (event) => {
-      console.log("🔴 WS CLOSED", event.code);
+        } catch (err) {
+          console.error("❌ WS PARSE ERROR:", err);
+        }
+      };
 
-      setData(prev => ({
-        ...prev,
-        connection: "OFFLINE"
-      }));
+      ws.onerror = (err) => {
+        console.error("🔴 WS ERROR", err);
+      };
 
-      wsRef.current = null;
-      isConnectingRef.current = false;
+      ws.onclose = (e) => {
+        console.warn("🔴 WS CLOSED", e.code);
 
-      // 正常終了なら再接続しない
-      if (event.code === 1000) return;
-
-      if (!reconnectTimerRef.current) {
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectTimerRef.current = null;
+        // 🔥 自動再接続
+        reconnectTimer = setTimeout(() => {
+          console.log("♻️ WS RECONNECT...");
           connect();
         }, 2000);
-      }
+      };
     };
-  };
 
-  // =========================
-  // 初期化
-  // =========================
-  useEffect(() => {
     connect();
 
     return () => {
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-      }
-
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-
-      isConnectingRef.current = false;
+      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
     };
+
   }, []);
 
-  // =========================
-  // UIに渡す
-  // =========================
   return data;
 }

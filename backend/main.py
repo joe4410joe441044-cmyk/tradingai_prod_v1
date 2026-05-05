@@ -9,11 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 
 # =========================
-# CORS
+# CORS（修正版）
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",   # Vite
+        "http://127.0.0.1:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,7 +40,7 @@ from backend.routers.mode import router as mode_router
 from backend.routers.portfolio import router as portfolio_router
 
 # =========================
-# ROUTER登録（完全統一）
+# ROUTER登録
 # =========================
 
 # 🔥 BOT系
@@ -48,7 +51,7 @@ app.include_router(symbol_api.router, prefix="/api/bot")
 app.include_router(mode_router, prefix="/api/bot")
 app.include_router(portfolio_router, prefix="/api/bot")
 
-# 🔥 trade（内部で /trade/preview にする）
+# 🔥 trade
 app.include_router(preview_router, prefix="/api/bot")
 
 # 🔥 risk
