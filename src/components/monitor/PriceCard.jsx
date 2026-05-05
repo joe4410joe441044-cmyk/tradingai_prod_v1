@@ -1,37 +1,59 @@
-import { useState, useEffect } from "react";
-import { API } from "../../api/index"; // ← 修正
+// src/components/monitor/PriceCard.jsx
 
-export default function PriceCard() {
-  const [price, setPrice] = useState(0);
+import { useEffect, useRef } from "react";
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API.price());
+export default function PriceCard({ price = 0 }) {
+  const prev = useRef(price);
 
-      if (!res.ok) {
-        console.error(await res.text());
-        return;
-      }
-
-      const data = await res.json();
-
-      setPrice(data?.price ?? 0);
-    } catch (err) {
-      console.error("PriceCard error:", err);
-      setPrice(0);
-    }
-  };
+  const isUp = price > prev.current;
+  const isDown = price < prev.current;
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    prev.current = price;
+  }, [price]);
+
+  const color = isUp ? "#4ade80" : isDown ? "#f87171" : "#fff";
 
   return (
-    <div>
-      <h3>Price</h3>
-      <p>{price}</p>
+    <div
+      style={{
+        background: "#111",
+        borderRadius: "16px",
+        padding: "16px",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        textAlign: "center",
+        transition: "0.2s",
+      }}
+    >
+      {/* TITLE */}
+      <div
+        style={{
+          fontSize: "12px",
+          opacity: 0.6,
+          marginBottom: "8px",
+        }}
+      >
+        Price
+      </div>
+
+      {/* VALUE */}
+      <div
+        style={{
+          fontSize: "32px",
+          fontWeight: "bold",
+          color,
+          transition: "0.2s",
+        }}
+      >
+        {Number(price).toLocaleString()}
+      </div>
+
+      {/* DIRECTION */}
+      <div style={{ fontSize: "12px", marginTop: "4px", opacity: 0.7 }}>
+        {isUp && "▲ UP"}
+        {isDown && "▼ DOWN"}
+        {!isUp && !isDown && "-"}
+      </div>
     </div>
   );
 }

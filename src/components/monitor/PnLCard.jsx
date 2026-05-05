@@ -1,60 +1,68 @@
-﻿import { useState, useEffect } from "react";
-import { API } from "../../api/index";
+﻿// src/components/monitor/PnLCard.jsx
 
-export default function PnLCard() {
-  const [pnl, setPnl] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+export default function PnLCard({
+  pnl = 0,
+  loading = false,
+  error = false,
+}) {
+  const isPositive = pnl >= 0;
 
-  const fetchPnL = async () => {
-    try {
-      setLoading(true);
-      setError(false);
+  const value = loading ? "Loading..." : Number(pnl).toFixed(2);
 
-      const res = await fetch(API.positions());
-
-      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
-
-      const data = await res.json();
-
-      const safeData = Array.isArray(data) ? data : [];
-
-      const totalPnL = safeData.reduce((sum, p) => {
-        return sum + (Number(p.pnl) || 0);
-      }, 0);
-
-      setPnl(totalPnL);
-
-    } catch (err) {
-      console.error("PnL fetch error:", err);
-      setError(true);
-      setPnl(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPnL();
-
-    const interval = setInterval(fetchPnL, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const safePnL =
-    typeof pnl === "number" && !isNaN(pnl) ? pnl : 0;
-
-  const isPositive = safePnL >= 0;
+  const color = isPositive ? "#4ade80" : "#f87171";
 
   return (
-    <div className="card">
-      <h3>PnL</h3>
+    <div
+      style={{
+        background: "#111",
+        borderRadius: "16px",
+        padding: "16px",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        textAlign: "center",
+        transition: "0.2s",
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.transform = "translateY(-4px)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.transform = "translateY(0)")
+      }
+    >
+      {/* TITLE */}
+      <div
+        style={{
+          fontSize: "12px",
+          opacity: 0.6,
+          marginBottom: "8px",
+        }}
+      >
+        PnL
+      </div>
 
-      <h2 style={{ color: isPositive ? "lime" : "red" }}>
-        {loading ? "Loading..." : error ? "ERROR" : safePnL}
-      </h2>
+      {/* VALUE */}
+      <div
+        style={{
+          fontSize: "28px",
+          fontWeight: "bold",
+          color,
+        }}
+      >
+        {value}
+      </div>
 
-      {error && <p style={{ color: "red" }}>Fetch error</p>}
+      {/* ERROR */}
+      {error && (
+        <div
+          style={{
+            marginTop: "6px",
+            fontSize: "12px",
+            color: "#f87171",
+          }}
+        >
+          Fetch error
+        </div>
+      )}
     </div>
   );
 }

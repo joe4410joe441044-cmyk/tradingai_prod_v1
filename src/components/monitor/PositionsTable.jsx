@@ -1,50 +1,65 @@
-import { useState, useEffect } from "react";
-import { API } from "../../api/index";
+// src/components/monitor/PositionsTable.jsx
 
-export default function PositionsTable() {
-  const [positions, setPositions] = useState([]);
-
-  const fetchData = async () => {
-    try {
-      const res = await fetch(API.positions());
-
-      if (!res.ok) {
-        console.error(await res.text());
-        return;
-      }
-
-      const data = await res.json();
-
-      // 安全化
-      setPositions(data?.positions ?? data ?? []);
-    } catch (err) {
-      console.error(err);
-      setPositions([]);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
+export default function PositionsTable({
+  positions = [],
+  loading = false,
+  error = false,
+}) {
   return (
-    <div>
-      <h3>Positions</h3>
+    <div
+      style={{
+        background: "#0b0b0b",
+        borderRadius: "10px",
+        padding: "10px",
+        maxHeight: "300px",
+        overflowY: "auto",
+        fontSize: "12px",
+        fontFamily: "monospace",
+      }}
+    >
+      {/* LOADING */}
+      {loading && <div style={{ opacity: 0.6 }}>Loading...</div>}
 
-      {positions.length === 0 ? (
-        <p>No positions</p>
-      ) : (
-        <ul>
-          {positions.map((p, i) => (
-            <li key={i}>
-              {p.symbol} | {p.side} | {p.pnl}
-            </li>
-          ))}
-        </ul>
+      {/* ERROR */}
+      {error && (
+        <div style={{ color: "#f87171" }}>
+          Fetch error
+        </div>
       )}
+
+      {/* EMPTY */}
+      {!loading && positions.length === 0 && (
+        <div style={{ opacity: 0.5 }}>
+          No positions
+        </div>
+      )}
+
+      {/* LIST */}
+      {!loading &&
+        positions.map((p, i) => {
+          const pnl = Number(p.pnl ?? 0);
+          const color = pnl >= 0 ? "#4ade80" : "#f87171";
+
+          return (
+            <div
+              key={`${p.symbol}-${p.side}-${i}`}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "4px 0",
+                borderBottom: "1px solid rgba(255,255,255,0.05)",
+              }}
+            >
+              <span>
+                {p.symbol ?? "?"} | {p.side ?? "?"}
+              </span>
+
+              <span style={{ color }}>
+                {pnl.toFixed(2)}
+              </span>
+            </div>
+          );
+        })}
     </div>
   );
 }

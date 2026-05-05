@@ -1,0 +1,96 @@
+============================== 
+DEPLOY START 2026/04/23  4:15:13.82 
+============================== 
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-UtZ5cd7R.js   200.37 kB │ gzip: 62.51 kB
+
+[32m✓ built in 587ms[39m
+============================== 
+DEPLOY START 2026/04/23  4:16:25.84 
+============================== 
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-UtZ5cd7R.js   200.37 kB │ gzip: 62.51 kB
+
+[32m✓ built in 650ms[39m
+============================== 
+DEPLOY START 2026/04/23  4:20:21.18 
+============================== 
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-UtZ5cd7R.js   200.37 kB │ gzip: 62.51 kB
+
+[32m✓ built in 328ms[39m
+============================== 
+DEPLOY START 2026/04/23  4:20:47.77 
+============================== 
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-UtZ5cd7R.js   200.37 kB │ gzip: 62.51 kB
+
+[32m✓ built in 671ms[39m
+============================== 
+DEPLOY START 2026/04/23  4:23:24.99 
+============================== 
+[1/4] BUILD START 
+CURRENT DIR: 
+C:\trading\tradingai_prod_v1\react_dashboard
+
+> react_dashboard@0.0.0 build
+> vite build
+
+[36mvite v8.0.3 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 26 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C-FsNcTt.css    0.10 kB │ gzip:  0.10 kB
+dist/assets/index-UtZ5cd7R.js   200.37 kB │ gzip: 62.51 kB
+
+[32m✓ built in 396ms[39m
+[2/4] BACKUP DIST 
+C:\trading\tradingai_prod_v1\react_dashboard\dist\favicon.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\icons.svg
+C:\trading\tradingai_prod_v1\react_dashboard\dist\index.html
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-C-FsNcTt.css
+C:\trading\tradingai_prod_v1\react_dashboard\dist\assets\index-UtZ5cd7R.js
+5 File(s) copied
+[3/4] VPS DEPLOY 
+/home/joe4410joe/TradingAI_Bot_Prod_v1/react_dashboard_dist/index.html
+[4/4] RESTART SERVICE 
+============================== 
+DEPLOY SUCCESS 2026/04/23  4:23:31.00 
+============================== 
