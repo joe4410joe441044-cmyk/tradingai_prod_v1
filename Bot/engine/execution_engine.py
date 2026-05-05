@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from backend.utils.order import place_order_safe
+from backend.log_store import add_log  # ← 🔥 追加
 import math
 import time
 
@@ -46,6 +47,8 @@ class ExecutionEngine:
 
     def start(self):
 
+        add_log("🚀 ENGINE START CALLED")  # ← 🔥 追加
+
         if self.mode == "live" and self.exchange:
             try:
                 balance = self.exchange.get_balance()
@@ -76,6 +79,7 @@ class ExecutionEngine:
 
     def stop(self):
         self.status = "STOPPED"
+        add_log("🛑 ENGINE STOPPED")  # ← 🔥 追加
         print("🛑 ENGINE STOPPED")
         return {"status": "stopped"}
 
@@ -95,7 +99,7 @@ class ExecutionEngine:
             self.config["leverage"] = float(safe_config.get("leverage", self.config["leverage"]))
             self.config["sl_percent"] = float(safe_config.get("sl_percent", self.config["sl_percent"]))
             self.config["tp_percent"] = float(safe_config.get("tp_percent", self.config["tp_percent"]))
-            self.config["dry_run"] = False  # 🔥 強制OFF
+            self.config["dry_run"] = False
 
             print("🔥 ENGINE CONFIG APPLIED")
 
@@ -103,6 +107,8 @@ class ExecutionEngine:
             print("[CONFIG ERROR]", e)
 
     def on_price(self, symbol, price):
+
+        add_log("🔥 ENGINE TICK")  # ← 🔥 核心
 
         if self.status != "RUNNING":
             return
@@ -112,17 +118,20 @@ class ExecutionEngine:
 
         if not self.price_ready and price > 0:
             print("✅ FIRST PRICE RECEIVED")
+            add_log("✅ FIRST PRICE RECEIVED")
             self.price_ready = True
 
         # ポジション管理
         if self.position:
             if price <= self.position.get("sl", 0):
                 print("🔴 SL HIT")
+                add_log("🔴 SL HIT")
                 self.close_position(price, "SL")
                 return
 
             if price >= self.position.get("tp", 0):
                 print("🟢 TP HIT")
+                add_log("🟢 TP HIT")
                 self.close_position(price, "TP")
                 return
 
@@ -140,6 +149,8 @@ class ExecutionEngine:
         return self.price_manager.get_price(self.symbol)
 
     def try_entry(self, signal):
+
+        add_log("🔥 TRY ENTRY")  # ← 🔥 追加
 
         print("🔥 TRY ENTRY CALLED:", self.symbol)
 
@@ -191,6 +202,7 @@ class ExecutionEngine:
         }
 
         print("🟡 ORDER:", order)
+        add_log(f"🟡 ORDER: {order}")
 
         try:
 
@@ -210,14 +222,15 @@ class ExecutionEngine:
                 )
 
             print("🟢 RESULT:", res)
+            add_log(f"🟢 RESULT: {res}")
 
             if "-" in str(res):
                 print("❌ invalid result")
                 return
 
             print("✅ ORDER SUCCESS")
+            add_log("✅ ORDER SUCCESS")
 
-            # 🔥 ここが今回の核心（追加）
             if self.mode == "paper":
                 self.position = {
                     "entry_price": price,
@@ -226,6 +239,7 @@ class ExecutionEngine:
                     "tp": price * (1 + self.config["tp_percent"] / 100)
                 }
                 print("📦 PAPER POSITION CREATED:", self.position)
+                add_log("📦 PAPER POSITION CREATED")
 
             else:
                 try:
@@ -239,10 +253,12 @@ class ExecutionEngine:
 
         except Exception as e:
             print("❌ Order Error:", e)
+            add_log(f"❌ Order Error: {e}")
 
     def close_position(self, price, reason):
 
         print(f"🚪 CLOSE ({reason})")
+        add_log(f"🚪 CLOSE ({reason})")
 
         if not self.position:
             return
@@ -259,6 +275,7 @@ class ExecutionEngine:
             self.portfolio.balance = self.balance
 
         print(f"💰 PnL: {pnl:.4f}")
+        add_log(f"💰 PnL: {pnl:.4f}")
 
         self.position = None
 
