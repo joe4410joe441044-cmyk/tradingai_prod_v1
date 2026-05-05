@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from fastapi import APIRouter
-from backend.utils.log_buffer import get_logs
+from backend.log_store import get_logs  # ← ここを統一
 
 router = APIRouter()
 
