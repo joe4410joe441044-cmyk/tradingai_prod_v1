@@ -3,10 +3,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.logs import router as logs_router
-
-app.include_router(logs_router)
-
 # =========================
 # FastAPI本体
 # =========================
@@ -37,6 +33,9 @@ from backend.api import websocket as websocket_api
 from backend.api import result as result_api
 from backend.api import symbol as symbol_api
 
+# 🔥 logs追加（ここはimportだけ）
+from backend.api.logs import router as logs_router
+
 # =========================
 # MODE / PORTFOLIO
 # =========================
@@ -66,6 +65,9 @@ except Exception:
 
 # 🔥 WebSocket
 app.include_router(websocket_api.router)
+
+# 🔥 Logs（ここが正しい位置）
+app.include_router(logs_router)
 
 # =========================
 # root
