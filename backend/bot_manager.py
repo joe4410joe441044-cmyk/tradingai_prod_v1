@@ -82,7 +82,7 @@ class BotManager:
             return self.engine
 
     # =========================
-    # START（完全版：symbol完全支配）
+    # START
     # =========================
     def start(self, config: dict = None):
 
@@ -94,58 +94,38 @@ class BotManager:
 
             print("🚀 START REQUEST")
 
-            # =========================
-            # 完全停止
-            # =========================
             if self.ws:
-                print("🛑 STOP OLD WS")
                 try:
                     self.ws.stop()
-                except Exception as e:
-                    print("WS STOP ERROR:", e)
+                except Exception:
+                    pass
                 self.ws = None
 
             if self.engine:
-                print("🛑 STOP OLD ENGINE")
                 try:
                     self.engine.stop()
-                except Exception as e:
-                    print("ENGINE STOP ERROR:", e)
+                except Exception:
+                    pass
                 self.engine = None
 
             self._running = True
 
-        # =========================
-        # 🔥 symbol確定（唯一・fallback禁止）
-        # =========================
-        if not config or "symbol" not in config or not config["symbol"]:
+        if not config or "symbol" not in config:
             raise ValueError("symbol is required")
 
         symbol = config["symbol"].upper()
-
         print(f"🎯 SYMBOL LOCKED: {symbol}")
 
-        # =========================
-        # Engine生成
-        # =========================
         engine = self.get_engine()
 
-        # =========================
-        # 🔥 configからsymbol削除
-        # =========================
         safe_config = dict(config)
         safe_config.pop("symbol", None)
 
         if safe_config:
-            print("🔥 APPLY CONFIG:", safe_config)
             engine.set_config(safe_config)
 
-        # 🔥 最後に強制注入（最重要）
         engine.symbol = symbol
 
-        # =========================
-        # WS生成（symbol完全一致）
-        # =========================
         from backend.binance_ws_client import BinanceWSClient
 
         self.ws = BinanceWSClient(
@@ -155,12 +135,8 @@ class BotManager:
         )
 
         self.ws.start()
-
         engine.ws_client = self.ws
 
-        # =========================
-        # Engine起動
-        # =========================
         result = engine.start()
 
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
@@ -179,20 +155,18 @@ class BotManager:
 
             self._running = False
 
-        print("🛑 STOP ALL")
-
         if self.ws:
             try:
                 self.ws.stop()
-            except Exception as e:
-                print("WS STOP ERROR:", e)
+            except Exception:
+                pass
             self.ws = None
 
         if self.engine:
             try:
                 self.engine.stop()
-            except Exception as e:
-                print("ENGINE STOP ERROR:", e)
+            except Exception:
+                pass
             self.engine = None
 
         return {"status": "stopped"}
@@ -203,6 +177,8 @@ class BotManager:
             time.sleep(0.5)
 
     # =========================
+    # 🔥 修正ポイント（ここが本命）
+    # =========================
     def get_status(self):
 
         if self.engine is None:
@@ -210,8 +186,19 @@ class BotManager:
 
         result = self.engine.get_result() or {}
 
+        # 🔥 リアルタイム価格を直接取得
+        symbol = getattr(self.engine, "symbol", None)
+        price = 0
+
+        if symbol:
+            try:
+                price = self.price_manager.prices.get(symbol, 0)
+            except Exception:
+                price = 0
+
         return {
             **result,
+            "price": price,   # ← 強制上書き（最重要）
             "status": result.get("status") or ("RUNNING" if self._running else "STOPPED"),
         }
 
