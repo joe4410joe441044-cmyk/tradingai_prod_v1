@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+from backend.utils.log_buffer import add_log  # ← 追加
+
 class OrderFlowDepthStrategy:
 
     def __init__(self, orderbook_manager):
@@ -25,12 +27,12 @@ class OrderFlowDepthStrategy:
         # =========================
         imbalance = (bid_vol - ask_vol) / total
 
-        print(f"📊 OB: bid={bid_vol:.2f} ask={ask_vol:.2f} imbalance={imbalance:.2f}")
+        # 🔥 ここ変更
+        add_log(f"📊 OB: bid={bid_vol:.2f} ask={ask_vol:.2f} imbalance={imbalance:.2f}")
 
         # =========================
-        # 🔥 シグナル条件（現実調整）
+        # 🔥 シグナル条件
         # =========================
-        # ※元の0.6は強すぎるので緩和
         if imbalance > 0.2:
             signal = "BUY"
         elif imbalance < -0.2:
@@ -47,19 +49,23 @@ class OrderFlowDepthStrategy:
             self.history.pop(0)
 
         # =========================
-        # 🔥 連続一致フィルタ（最重要）
+        # 🔥 連続一致フィルタ
         # =========================
         if len(self.history) < self.max_history:
             return None
 
         if all(h == "BUY" for h in self.history):
-            print("✅ BUY 3連続")
+            add_log("✅ BUY 3連続")
+            signal_data = {"side": "BUY"}
+            add_log(f"🟡 SIGNAL: {signal_data}")
             self.history.clear()
-            return {"side": "BUY"}
+            return signal_data
 
         if all(h == "SELL" for h in self.history):
-            print("✅ SELL 3連続")
+            add_log("✅ SELL 3連続")
+            signal_data = {"side": "SELL"}
+            add_log(f"🟡 SIGNAL: {signal_data}")
             self.history.clear()
-            return {"side": "SELL"}
+            return signal_data
 
         return None
