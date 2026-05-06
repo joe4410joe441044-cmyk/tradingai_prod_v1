@@ -1,84 +1,181 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter
+from fastapi import WebSocket
+from fastapi import WebSocketDisconnect
+
 from typing import List
+
 import asyncio
 import logging
 
 from backend.bot_manager import get_bot_manager
 
+# =========================
+# ROUTER
+# =========================
+
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+# =========================
+# CONNECTIONS
+# =========================
+
 connections: List[WebSocket] = []
 
-# 🔥 デバッグ制御
+# =========================
+# DEBUG
+# =========================
+
 DEBUG_WS = False
 
+# =========================
+# JSON SAFE
+# =========================
 
-# =========================
-# JSON安全化
-# =========================
 def safe_json(obj):
+
     try:
-        if isinstance(obj, (int, float, str, bool)) or obj is None:
+
+        if isinstance(
+            obj,
+            (int, float, str, bool)
+        ) or obj is None:
+
             return obj
+
         if isinstance(obj, list):
-            return [safe_json(x) for x in obj]
+
+            return [
+                safe_json(x)
+                for x in obj
+            ]
+
         if isinstance(obj, dict):
-            return {k: safe_json(v) for k, v in obj.items()}
+
+            return {
+                k: safe_json(v)
+                for k, v in obj.items()
+            }
+
         return str(obj)
+
     except Exception:
+
         return str(obj)
 
+# =========================
+# CONNECT
+# =========================
 
-# =========================
-# 接続管理
-# =========================
 async def connect(ws: WebSocket):
-    await ws.accept()
-    connections.append(ws)
-    logger.info(f"[WS CONNECT] total={len(connections)}")
 
+    await ws.accept()
+
+    connections.append(ws)
+
+    logger.info(
+        f"[WS CONNECT] total={len(connections)}"
+    )
+
+# =========================
+# DISCONNECT
+# =========================
 
 def disconnect(ws: WebSocket):
+
     if ws in connections:
+
         connections.remove(ws)
-        logger.info(f"[WS DISCONNECT] total={len(connections)}")
 
+        logger.info(
+            f"[WS DISCONNECT] total={len(connections)}"
+        )
 
 # =========================
-# WebSocket
+# WEBSOCKET
 # =========================
-@router.websocket("/ws/")
-async def websocket_endpoint(ws: WebSocket):
+
+@router.websocket("/ws")
+async def websocket_endpoint(
+    ws: WebSocket
+):
+
+    # =========================
+    # CONNECT
+    # =========================
 
     await connect(ws)
 
     bot = get_bot_manager()
-    print("WS BOT ID:", id(bot))
+
+    print(
+        "WS BOT ID:",
+        id(bot)
+    )
 
     try:
+
         while True:
 
+            # =========================
+            # BOT STATUS
+            # =========================
+
             data = bot.get_status()
+
             data = safe_json(data)
 
-            # 🔥 ログ制御
-            if DEBUG_WS:
-                print("WS SEND:", data)
+            # =========================
+            # DEBUG
+            # =========================
 
-            # 🔥 STOPでも切断しない
+            if DEBUG_WS:
+
+                print(
+                    "WS SEND:",
+                    data
+                )
+
+            # =========================
+            # SEND
+            # =========================
+
             await ws.send_json(data)
+
+            # =========================
+            # LOOP WAIT
+            # =========================
 
             await asyncio.sleep(1)
 
+    # =========================
+    # DISCONNECT
+    # =========================
+
     except WebSocketDisconnect:
-        logger.warning("[WS DISCONNECTED]")
+
+        logger.warning(
+            "[WS DISCONNECTED]"
+        )
+
+    # =========================
+    # ERROR
+    # =========================
 
     except Exception as e:
-        logger.error(f"[WS LOOP ERROR] {type(e).__name__}: {e}")
+
+        logger.error(
+            f"[WS LOOP ERROR] "
+            f"{type(e).__name__}: {e}"
+        )
+
+    # =========================
+    # FINALLY
+    # =========================
 
     finally:
+
         disconnect(ws)

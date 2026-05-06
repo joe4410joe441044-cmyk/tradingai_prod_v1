@@ -1,22 +1,34 @@
 export default function RiskSettings() {
   return (
-    <div className="panel-section">
-      <h3>🛡 Risk Settings</h3>
+    <>
 
       <div className="form-group">
         <label>Max DD %</label>
-        <input type="number" defaultValue="10" />
+
+        <input
+          type="number"
+          defaultValue="10"
+        />
       </div>
 
       <div className="form-group">
         <label>Max Loss Streak</label>
-        <input type="number" defaultValue="3" />
+
+        <input
+          type="number"
+          defaultValue="3"
+        />
       </div>
 
       <div className="form-group">
         <label>Max Position</label>
-        <input type="number" defaultValue="100" />
+
+        <input
+          type="number"
+          defaultValue="100"
+        />
       </div>
-    </div>
+
+    </>
   );
 }

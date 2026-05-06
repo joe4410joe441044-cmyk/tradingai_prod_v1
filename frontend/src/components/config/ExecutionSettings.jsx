@@ -1,21 +1,29 @@
 export default function ExecutionSettings() {
   return (
-    <div className="panel-section">
-      <h3>⚙️ Execution Settings</h3>
+    <>
 
       <div className="form-group">
         <label>Cooldown</label>
-        <input type="number" defaultValue="2" />
+
+        <input
+          type="number"
+          defaultValue="2"
+        />
       </div>
 
       <div className="form-group">
         <label>Max Entries/min</label>
-        <input type="number" defaultValue="5" />
+
+        <input
+          type="number"
+          defaultValue="5"
+        />
       </div>
 
       <div className="form-group">
         <label>One Signal Only</label>
-        <select>
+
+        <select defaultValue="ON">
           <option>ON</option>
           <option>OFF</option>
         </select>
@@ -23,16 +31,22 @@ export default function ExecutionSettings() {
 
       <div className="form-group">
         <label>Re-entry Delay</label>
-        <input type="number" defaultValue="3" />
+
+        <input
+          type="number"
+          defaultValue="3"
+        />
       </div>
 
       <div className="form-group">
         <label>Signal Lock</label>
-        <select>
+
+        <select defaultValue="ON">
           <option>ON</option>
           <option>OFF</option>
         </select>
       </div>
-    </div>
+
+    </>
   );
 }

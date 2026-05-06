@@ -7,64 +7,110 @@ export default function StrategyMonitor({
   cooldown = "1.2s",
   signal = "BUY",
 }) {
+
   const buyColor = "#00ff88";
   const sellColor = "#ff4d4f";
 
   const getColor = (val) => {
     if (!val) return "#aaa";
-    return val.includes("BUY") ? buyColor : sellColor;
+
+    return val.includes("BUY")
+      ? buyColor
+      : sellColor;
   };
 
   return (
-    <div className="bg-gray-900 p-4 rounded-2xl">
-      <h2 className="text-lg mb-3">📊 Strategy Monitor</h2>
+    <div className="execution-status-card">
 
-      <div className="text-sm space-y-1">
+      <div className="status-row">
+        <span className="label">
+          OB Imbalance
+        </span>
 
-        <div>
-          OB Imbalance: {imbalance}
-        </div>
-
-        <div>
-          OB Direction:{" "}
-          <span style={{ color: getColor(direction) }}>
-            {direction}
-          </span>
-        </div>
-
-        <div>
-          Streak:{" "}
-          <span style={{ color: getColor(streak) }}>
-            {streak}
-          </span>
-        </div>
-
-        <div>
-          Momentum:{" "}
-          <span style={{ color: getColor(momentum) }}>
-            {momentum}
-          </span>
-        </div>
-
-        <div>
-          Fake Wall:{" "}
-          <span style={{ color: fakeWall ? sellColor : buyColor }}>
-            {fakeWall ? "YES" : "NO"}
-          </span>
-        </div>
-
-        <div>
-          Cooldown: {cooldown}
-        </div>
-
-        <div className="mt-2 font-bold">
-          Signal:{" "}
-          <span style={{ color: getColor(signal) }}>
-            {signal}
-          </span>
-        </div>
-
+        <span className="value">
+          {imbalance}
+        </span>
       </div>
+
+      <div className="status-row">
+        <span className="label">
+          OB Direction
+        </span>
+
+        <span
+          className="value"
+          style={{ color: getColor(direction) }}
+        >
+          {direction}
+        </span>
+      </div>
+
+      <div className="status-row">
+        <span className="label">
+          Streak
+        </span>
+
+        <span
+          className="value"
+          style={{ color: getColor(streak) }}
+        >
+          {streak}
+        </span>
+      </div>
+
+      <div className="status-row">
+        <span className="label">
+          Momentum
+        </span>
+
+        <span
+          className="value"
+          style={{ color: getColor(momentum) }}
+        >
+          {momentum}
+        </span>
+      </div>
+
+      <div className="status-row">
+        <span className="label">
+          Fake Wall
+        </span>
+
+        <span
+          className="value"
+          style={{
+            color: fakeWall
+              ? sellColor
+              : buyColor,
+          }}
+        >
+          {fakeWall ? "YES" : "NO"}
+        </span>
+      </div>
+
+      <div className="status-row">
+        <span className="label">
+          Cooldown
+        </span>
+
+        <span className="value">
+          {cooldown}
+        </span>
+      </div>
+
+      <div className="status-row">
+        <span className="label">
+          Signal
+        </span>
+
+        <span
+          className="value"
+          style={{ color: getColor(signal) }}
+        >
+          {signal}
+        </span>
+      </div>
+
     </div>
   );
 }

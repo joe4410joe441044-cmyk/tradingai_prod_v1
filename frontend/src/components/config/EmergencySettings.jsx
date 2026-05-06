@@ -1,7 +1,6 @@
 export default function EmergencySettings() {
   return (
-    <div className="panel-section">
-      <h3>🚨 Emergency Settings</h3>
+    <>
 
       <div className="form-group">
         <label>Kill Switch</label>
@@ -14,12 +13,20 @@ export default function EmergencySettings() {
 
       <div className="form-group">
         <label>Max Daily Loss</label>
-        <input type="number" defaultValue="50" />
+
+        <input
+          type="number"
+          defaultValue="50"
+        />
       </div>
 
       <div className="form-group">
         <label>Max Trades</label>
-        <input type="number" defaultValue="20" />
+
+        <input
+          type="number"
+          defaultValue="20"
+        />
       </div>
 
       <div className="form-group">
@@ -30,6 +37,7 @@ export default function EmergencySettings() {
           <option>OFF</option>
         </select>
       </div>
-    </div>
+
+    </>
   );
 }

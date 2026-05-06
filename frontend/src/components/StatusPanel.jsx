@@ -9,7 +9,6 @@ export default function StatusPanel({
   killSwitch = false,
   botStatus = "STOPPED",
 
-  // 🔥 追加項目
   position = "NONE",
   entryPrice = null,
   lastSignal = "-",
@@ -18,77 +17,225 @@ export default function StatusPanel({
   connection = "OFFLINE",
 }) {
 
+  // =========================
+  // FORMAT
+  // =========================
+
   const format = (num) => {
-    if (num === null || num === undefined) return "-";
+    if (num === null || num === undefined) {
+      return "-";
+    }
+
     return Number(num).toLocaleString(undefined, {
       maximumFractionDigits: 4,
     });
   };
 
+  // =========================
+  // COLORS
+  // =========================
+
   const statusColor =
-    botStatus === "RUNNING" ? "#00ff88" : "#ff4d4f";
+    botStatus === "RUNNING"
+      ? "#00ff88"
+      : "#ff4d4f";
 
   const connectionColor =
-    connection === "ONLINE" ? "#00ff88" : "#ff4d4f";
+    connection === "ONLINE"
+      ? "#00ff88"
+      : "#ff4d4f";
 
   const engineColor =
-    engineState === "READY" ? "#00ff88" : "#ffaa00";
+    engineState === "READY"
+      ? "#00ff88"
+      : "#ffaa00";
+
+  const killSwitchColor =
+    killSwitch
+      ? "#ff4d4f"
+      : "#00ff88";
+
+  // =========================
+  // UI
+  // =========================
 
   return (
-    <div className="card">
-      <h2>🔵 Status</h2>
+    <div className="execution-status-card">
 
-      {/* 基本情報 */}
-      <div>Balance: {format(balance)}</div>
-      <div>Equity: {format(equity)}</div>
-      <div>PnL: {format(pnl)}</div>
-      <div>Price: {format(price)}</div>
+      {/* BALANCE */}
+      <div className="status-row">
+        <span className="label">
+          Balance
+        </span>
 
-      <hr />
+        <span className="value">
+          {format(balance)}
+        </span>
+      </div>
 
-      {/* ポジション情報 */}
-      <div>Position: {position}</div>
-      <div>Entry Price: {format(entryPrice)}</div>
+      {/* EQUITY */}
+      <div className="status-row">
+        <span className="label">
+          Equity
+        </span>
 
-      <hr />
+        <span className="value">
+          {format(equity)}
+        </span>
+      </div>
 
-      {/* リスク情報 */}
-      <div>Current DD: {format(currentDD)}%</div>
-      <div>Loss Streak: {lossStreak ?? "-"}</div>
+      {/* PNL */}
+      <div className="status-row">
+        <span className="label">
+          PnL
+        </span>
 
-      <hr />
+        <span className="value">
+          {format(pnl)}
+        </span>
+      </div>
 
-      {/* 状態系 */}
-      <div>Last Signal: {lastSignal}</div>
-      <div>Last Block: {lastBlock}</div>
+      {/* PRICE */}
+      <div className="status-row">
+        <span className="label">
+          Price
+        </span>
 
-      <div>
-        Engine State:{" "}
-        <span style={{ color: engineColor }}>
+        <span className="value">
+          {format(price)}
+        </span>
+      </div>
+
+      {/* POSITION */}
+      <div className="status-row">
+        <span className="label">
+          Position
+        </span>
+
+        <span className="value">
+          {position}
+        </span>
+      </div>
+
+      {/* ENTRY PRICE */}
+      <div className="status-row">
+        <span className="label">
+          Entry Price
+        </span>
+
+        <span className="value">
+          {entryPrice ? format(entryPrice) : "-"}
+        </span>
+      </div>
+
+      {/* CURRENT DD */}
+      <div className="status-row">
+        <span className="label">
+          Current DD
+        </span>
+
+        <span className="value">
+          {format(currentDD)}%
+        </span>
+      </div>
+
+      {/* LOSS STREAK */}
+      <div className="status-row">
+        <span className="label">
+          Loss Streak
+        </span>
+
+        <span className="value">
+          {lossStreak ?? "-"}
+        </span>
+      </div>
+
+      {/* LAST SIGNAL */}
+      <div className="status-row">
+        <span className="label">
+          Last Signal
+        </span>
+
+        <span className="value">
+          {lastSignal}
+        </span>
+      </div>
+
+      {/* LAST BLOCK */}
+      <div className="status-row">
+        <span className="label">
+          Last Block
+        </span>
+
+        <span className="value">
+          {lastBlock}
+        </span>
+      </div>
+
+      {/* ENGINE STATE */}
+      <div className="status-row">
+        <span className="label">
+          Engine State
+        </span>
+
+        <span
+          className="value"
+          style={{
+            color: engineColor,
+          }}
+        >
           {engineState}
         </span>
       </div>
 
-      <div>
-        Kill Switch:{" "}
-        <span style={{ color: killSwitch ? "#ff4d4f" : "#00ff88" }}>
+      {/* KILL SWITCH */}
+      <div className="status-row">
+        <span className="label">
+          Kill Switch
+        </span>
+
+        <span
+          className="value"
+          style={{
+            color: killSwitchColor,
+          }}
+        >
           {killSwitch ? "ON" : "OFF"}
         </span>
       </div>
 
-      <div>
-        Bot Status:{" "}
-        <span style={{ color: statusColor }}>
+      {/* BOT STATUS */}
+      <div className="status-row">
+        <span className="label">
+          Bot Status
+        </span>
+
+        <span
+          className="value"
+          style={{
+            color: statusColor,
+          }}
+        >
           {botStatus}
         </span>
       </div>
 
-      <div>
-        Connection:{" "}
-        <span style={{ color: connectionColor }}>
+      {/* CONNECTION */}
+      <div className="status-row">
+        <span className="label">
+          Connection
+        </span>
+
+        <span
+          className="value"
+          style={{
+            color: connectionColor,
+          }}
+        >
           {connection}
         </span>
       </div>
+
     </div>
   );
 }

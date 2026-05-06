@@ -1,11 +1,6 @@
 export default function ExecutionPanel() {
   return (
-    <div className="panel-card execution-panel">
-
-      {/* HEADER */}
-      <div className="panel-header">
-        <h3>⚡ EXECUTION</h3>
-      </div>
+    <div className="execution-panel">
 
       {/* STATUS CARD */}
       <div className="execution-status-card">
