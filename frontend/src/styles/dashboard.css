@@ -1,11 +1,15 @@
 .dashboard {
     padding: 24px;
+
     background: #0b0b0b;
+
     color: white;
+
     min-height: 100vh;
 
     display: flex;
     flex-direction: column;
+
     gap: 24px;
 
     box-sizing: border-box;
@@ -17,7 +21,9 @@
 
 .header {
     display: flex;
+
     justify-content: space-between;
+
     align-items: center;
 
     gap: 20px;
@@ -25,6 +31,7 @@
     margin-bottom: 10px;
 
     font-weight: bold;
+
     font-size: 18px;
 
     flex-wrap: wrap;
@@ -65,6 +72,7 @@
 .config-column,
 .monitor-column {
     display: flex;
+
     flex-direction: column;
 
     gap: 20px;
@@ -88,6 +96,8 @@
     box-sizing: border-box;
 
     overflow: hidden;
+
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 
 /* ========================= */
@@ -107,11 +117,36 @@
 }
 
 /* ========================= */
+/* PANEL HEADER */
+/* ========================= */
+
+.panel-header {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    margin-bottom: 4px;
+}
+
+.panel-header h3 {
+    margin: 0;
+
+    font-size: 24px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.5px;
+}
+
+/* ========================= */
 /* FORM */
 /* ========================= */
 
 .form-group {
     display: flex;
+
     flex-direction: column;
 
     gap: 8px;
@@ -151,12 +186,16 @@
 
     box-sizing: border-box;
 
-    transition: border-color 0.2s;
+    transition:
+        border-color 0.2s,
+        background 0.2s;
 }
 
 .form-group input:focus,
 .form-group select:focus {
     border-color: #666;
+
+    background: #202020;
 }
 
 /* ========================= */
@@ -165,26 +204,161 @@
 
 .execution-panel {
     display: flex;
+
     flex-direction: column;
 
-    gap: 20px;
+    gap: 24px;
+
+    min-height: 320px;
+
+    justify-content: space-between;
 }
+
+/* ========================= */
+/* STATUS CARD */
+/* ========================= */
+
+.execution-status-card {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 16px;
+
+    background: #161616;
+
+    border: 1px solid #2a2a2a;
+
+    border-radius: 14px;
+
+    padding: 18px;
+
+    box-sizing: border-box;
+}
+
+.status-row {
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    gap: 12px;
+
+    padding-bottom: 10px;
+
+    border-bottom: 1px solid #242424;
+
+    font-size: 15px;
+}
+
+.status-row:last-child {
+    border-bottom: none;
+
+    padding-bottom: 0;
+}
+
+.label {
+    color: #888;
+
+    font-weight: 500;
+
+    letter-spacing: 0.3px;
+}
+
+.value {
+    font-weight: bold;
+
+    text-align: right;
+}
+
+/* ========================= */
+/* STATUS COLORS */
+/* ========================= */
+
+.running {
+    color: #4ade80;
+}
+
+.stopped {
+    color: #f87171;
+}
+
+.warning {
+    color: #facc15;
+}
+
+.danger {
+    color: #f87171;
+}
+
+/* ========================= */
+/* EXECUTION BUTTONS */
+/* ========================= */
 
 .execution-buttons {
     display: flex;
 
-    gap: 12px;
+    gap: 16px;
 
     flex-wrap: wrap;
 }
 
-.execution-status {
-    display: flex;
-    flex-direction: column;
+.execution-buttons button {
+    flex: 1;
 
-    gap: 12px;
+    min-width: 140px;
+
+    padding: 14px 18px;
+
+    border: none;
+
+    border-radius: 12px;
+
+    font-weight: bold;
 
     font-size: 15px;
+
+    color: white;
+
+    cursor: pointer;
+
+    margin-right: 0;
+
+    transition:
+        transform 0.15s,
+        opacity 0.2s,
+        background 0.2s;
+}
+
+.execution-buttons button:hover {
+    transform: translateY(-2px);
+
+    opacity: 0.95;
+}
+
+/* ========================= */
+/* START BUTTON */
+/* ========================= */
+
+.start-btn {
+    background: #166534;
+}
+
+.start-btn:hover {
+    background: #15803d;
+}
+
+/* ========================= */
+/* STOP BUTTON */
+/* ========================= */
+
+.stop-btn {
+    background: #991b1b;
+}
+
+.stop-btn:hover {
+    background: #b91c1c;
 }
 
 /* ========================= */
@@ -216,7 +390,7 @@
 }
 
 /* ========================= */
-/* BUTTON */
+/* GLOBAL BUTTON */
 /* ========================= */
 
 button {
@@ -231,8 +405,6 @@ button {
     color: white;
 
     cursor: pointer;
-
-    margin-right: 10px;
 
     font-size: 15px;
 
@@ -261,6 +433,7 @@ h1 {
 
 h2 {
     margin-top: 0;
+
     margin-bottom: 18px;
 
     font-size: 30px;
@@ -270,6 +443,7 @@ h2 {
 
 h3 {
     margin-top: 0;
+
     margin-bottom: 16px;
 
     font-size: 22px;
@@ -310,5 +484,25 @@ p {
 
     h3 {
         font-size: 20px;
+    }
+
+    .execution-buttons {
+        flex-direction: column;
+    }
+
+    .execution-buttons button {
+        width: 100%;
+    }
+
+    .status-row {
+        flex-direction: column;
+
+        align-items: flex-start;
+
+        gap: 6px;
+    }
+
+    .value {
+        text-align: left;
     }
 }
