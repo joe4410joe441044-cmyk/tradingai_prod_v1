@@ -1,28 +1,122 @@
 import Header from "../components/Header";
-import TradeSettings from "../components/TradeSettings";
-import StrategyMonitor from "../components/StrategyMonitor";
-import StrategyControl from "../components/StrategyControl";
-import StatusPanel from "../components/StatusPanel";
-import ExecutionPanel from "../components/ExecutionPanel";
-import LogPanel from "../components/LogPanel";
 
+// =========================
+// CONFIG
+// =========================
+import TradeSettings from "../components/config/TradeSettings";
+import ExecutionSettings from "../components/config/ExecutionSettings";
+import RiskSettings from "../components/config/RiskSettings";
+import EmergencySettings from "../components/config/EmergencySettings";
+import PositionSettings from "../components/config/PositionSettings";
+
+// =========================
+// MONITOR
+// =========================
+import StrategyMonitor from "../components/StrategyMonitor";
+import StatusPanel from "../components/StatusPanel";
+import ResultPanel from "../components/ResultPanel";
+
+// =========================
+// EXECUTION
+// =========================
+import ExecutionPanel from "../components/ExecutionPanel";
+
+// =========================
+// LOGS
+// =========================
+import SignalLog from "../components/SignalLog";
+import TradeLog from "../components/TradeLog";
+
+// =========================
+// CSS
+// =========================
 import "../styles/dashboard.css";
 
 export default function Dashboard() {
   return (
-    <div className="container">
+    <div className="dashboard">
+
+      {/* ========================= */}
+      {/* HEADER */}
+      {/* ========================= */}
       <Header />
 
-      <div className="grid">
-        <TradeSettings />
-        <StrategyMonitor />
+      {/* ========================= */}
+      {/* TOP GRID */}
+      {/* ========================= */}
+      <div className="top-grid">
 
-        <StrategyControl />
-        <StatusPanel />
+        {/* ========================= */}
+        {/* CONFIG */}
+        {/* ========================= */}
+        <div className="config-column panel-card">
+
+          <h2>🟢 CONFIG</h2>
+
+          <TradeSettings />
+
+          <ExecutionSettings />
+
+          <RiskSettings />
+
+          <EmergencySettings />
+
+          <PositionSettings />
+
+        </div>
+
+        {/* ========================= */}
+        {/* MONITOR */}
+        {/* ========================= */}
+        <div className="monitor-column panel-card">
+
+          <h2>🔵 MONITOR</h2>
+
+          <StrategyMonitor />
+
+          <StatusPanel />
+
+          <ResultPanel />
+
+        </div>
+
       </div>
 
-      <ExecutionPanel />
-      <LogPanel />
+      {/* ========================= */}
+      {/* BOTTOM GRID */}
+      {/* ========================= */}
+      <div className="bottom-grid">
+
+        {/* ========================= */}
+        {/* EXECUTION */}
+        {/* ========================= */}
+        <div className="panel-card">
+
+          <h2>🔘 EXECUTION</h2>
+
+          <ExecutionPanel />
+
+        </div>
+
+        {/* ========================= */}
+        {/* LOGS */}
+        {/* ========================= */}
+        <div className="panel-card">
+
+          <h2>📊 LOGS</h2>
+
+          <div className="logs-grid">
+
+            <SignalLog />
+
+            <TradeLog />
+
+          </div>
+
+        </div>
+
+      </div>
+
     </div>
   );
 }
