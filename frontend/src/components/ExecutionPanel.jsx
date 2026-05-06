@@ -1,20 +1,42 @@
 export default function ExecutionPanel() {
   return (
-    <div className="execution-panel">
+    <div className="panel-card execution-panel">
 
-      <div className="execution-buttons">
-        <button>▶ START</button>
-
-        <button>■ STOP</button>
+      {/* HEADER */}
+      <div className="panel-header">
+        <h3>⚡ EXECUTION</h3>
       </div>
 
-      <div className="execution-status">
+      {/* STATUS CARD */}
+      <div className="execution-status-card">
 
-        <div>MODE: SAFE / NORMAL / AGG</div>
+        <div className="status-row">
+          <span className="label">MODE</span>
+          <span className="value">🟢 SAFE</span>
+        </div>
 
-        <div>DRY RUN: OFF (REAL)</div>
+        <div className="status-row">
+          <span className="label">DRY RUN</span>
+          <span className="value danger">🔴 OFF (REAL)</span>
+        </div>
 
-        <div>STATUS: 🟢 RUNNING</div>
+        <div className="status-row">
+          <span className="label">STATUS</span>
+          <span className="value stopped">🔴 STOPPED</span>
+        </div>
+
+      </div>
+
+      {/* BUTTONS */}
+      <div className="execution-buttons">
+
+        <button className="start-btn">
+          ▶ START
+        </button>
+
+        <button className="stop-btn">
+          ■ STOP
+        </button>
 
       </div>
 
