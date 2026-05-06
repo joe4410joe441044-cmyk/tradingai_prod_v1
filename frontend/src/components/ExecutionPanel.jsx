@@ -1,18 +1,23 @@
 export default function ExecutionPanel() {
   return (
-    <div className="card">
-      <h2>Execution</h2>
+    <div className="execution-panel">
 
-      <button>START</button>
-      <button>STOP</button>
+      <div className="execution-buttons">
+        <button>▶ START</button>
 
-      <div>Mode: PAPER</div>
+        <button>■ STOP</button>
+      </div>
 
-      <hr />
+      <div className="execution-status">
 
-      <div>DRY RUN: ON (PAPER)</div>
+        <div>MODE: SAFE / NORMAL / AGG</div>
 
-      <button>Toggle Dry Run</button>
+        <div>DRY RUN: OFF (REAL)</div>
+
+        <div>STATUS: 🟢 RUNNING</div>
+
+      </div>
+
     </div>
   );
 }
