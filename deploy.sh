@@ -44,11 +44,26 @@ git fetch origin
 git reset --hard "origin/$BRANCH"
 
 # =========================
-# STEP 5: Frontend Build
+# STEP 5: Verify Frontend
 # =========================
-echo "📦 Build frontend"
+echo "🧪 Verify frontend directory"
+
+if [ ! -d frontend ]; then
+    echo "❌ frontend directory not found"
+    exit 1
+fi
 
 cd frontend
+
+if [ ! -f package.json ]; then
+    echo "❌ package.json not found"
+    exit 1
+fi
+
+# =========================
+# STEP 6: Frontend Build
+# =========================
+echo "📦 Build frontend"
 
 if [ -f package-lock.json ]; then
     npm ci
@@ -61,7 +76,7 @@ npm run build
 cd ..
 
 # =========================
-# STEP 6: Restart Backend
+# STEP 7: Restart Backend
 # =========================
 echo "🚀 Restart backend"
 
@@ -70,7 +85,7 @@ sudo systemctl restart "$SERVICE_NAME"
 sleep 3
 
 # =========================
-# STEP 7: Health Check
+# STEP 8: Health Check
 # =========================
 echo "🩺 Health check"
 
@@ -91,14 +106,14 @@ else
 fi
 
 # =========================
-# STEP 8: Reload Nginx
+# STEP 9: Reload Nginx
 # =========================
 echo "🔁 Reload nginx"
 
 sudo systemctl reload nginx
 
 # =========================
-# STEP 9: Show Service Status
+# STEP 10: Show Service Status
 # =========================
 echo "📊 Service status"
 
