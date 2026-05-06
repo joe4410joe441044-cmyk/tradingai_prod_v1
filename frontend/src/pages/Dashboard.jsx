@@ -47,11 +47,13 @@ export default function Dashboard() {
       <div className="top-grid">
 
         {/* ========================= */}
-        {/* CONFIG */}
+        {/* CONFIG COLUMN */}
         {/* ========================= */}
-        <div className="config-column panel-card">
+        <div className="config-column">
 
-          <h2>🟢 CONFIG</h2>
+          <div className="panel-card">
+            <h2>🟢 CONFIG</h2>
+          </div>
 
           <TradeSettings />
 
@@ -66,11 +68,13 @@ export default function Dashboard() {
         </div>
 
         {/* ========================= */}
-        {/* MONITOR */}
+        {/* MONITOR COLUMN */}
         {/* ========================= */}
-        <div className="monitor-column panel-card">
+        <div className="monitor-column">
 
-          <h2>🔵 MONITOR</h2>
+          <div className="panel-card">
+            <h2>🔵 MONITOR</h2>
+          </div>
 
           <StrategyMonitor />
 
@@ -90,7 +94,7 @@ export default function Dashboard() {
         {/* ========================= */}
         {/* EXECUTION */}
         {/* ========================= */}
-        <div className="panel-card">
+        <div className="panel-card execution-wrapper">
 
           <h2>🔘 EXECUTION</h2>
 
@@ -101,7 +105,7 @@ export default function Dashboard() {
         {/* ========================= */}
         {/* LOGS */}
         {/* ========================= */}
-        <div className="panel-card">
+        <div className="panel-card logs-wrapper">
 
           <h2>📊 LOGS</h2>
 
