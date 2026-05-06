@@ -62,8 +62,17 @@ export default function Dashboard() {
 
   useEffect(() => {
 
+    // =========================
+    // AUTO WS / WSS
+    // =========================
+
+    const protocol =
+      window.location.protocol === "https:"
+        ? "wss"
+        : "ws";
+
     const ws = new WebSocket(
-      "ws://localhost:8001/ws"
+      `${protocol}://${window.location.host}/ws`
     );
 
     // =========================
