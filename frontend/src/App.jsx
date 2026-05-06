@@ -1,52 +1,54 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import useBotData from "./hooks/useBotData";
+
 import TradeConfigPanel from "./components/control/TradeConfigPanel";
 import StatusPanel from "./components/StatusPanel";
 import TradeControl from "./components/TradeControl";
+import StrategyMonitor from "./components/monitor/StrategyMonitor";
 
-// 🔥 ファイル実行確認
-console.log("🔥🔥🔥 APP ROOT FILE LOADED 🔥🔥🔥");
-document.body.style.background = "#200";
+// 🔥 追加
+import ResultPanel from "./components/ResultPanel";
+import SignalLog from "./components/SignalLog";
+import TradeLog from "./components/TradeLog";
 
-function Card({ title, children }) {
-  return (
-    <div style={{
-      background: "#111",
-      borderRadius: "16px",
-      padding: "16px",
-      boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
-      marginBottom: 16
-    }}>
-      <div style={{ fontSize: "12px", opacity: 0.6, marginBottom: "8px" }}>
-        {title}
-      </div>
-      <div style={{ fontSize: "16px", fontWeight: "bold" }}>
-        {children}
-      </div>
+console.log("🔥 APP DASHBOARD LOADED");
+
+// =========================
+// UIパーツ
+// =========================
+const Box = ({ title, children }) => (
+  <div style={{
+    border: "1px solid #333",
+    borderRadius: 10,
+    padding: 16,
+    background: "#111",
+    marginBottom: 16
+  }}>
+    <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 10 }}>
+      {title}
     </div>
-  );
-}
+    {children}
+  </div>
+);
 
-function StatusBar({ status }) {
-  return (
-    <div style={{
-      position: "fixed",
-      bottom: 0,
-      left: 0,
-      width: "100%",
-      background: "#111",
-      color: "#0f0",
-      padding: "8px",
-      fontSize: "12px",
-      borderTop: "1px solid #333"
-    }}>
-      <div>
-        STATUS: {status === "RUNNING" ? "🟢 RUNNING" : "🔴 STOPPED"}
-      </div>
-    </div>
-  );
-}
+const StatusBar = ({ status }) => (
+  <div style={{
+    position: "fixed",
+    bottom: 0,
+    left: 0,
+    width: "100%",
+    background: "#111",
+    padding: 8,
+    fontSize: 12,
+    borderTop: "1px solid #333"
+  }}>
+    STATUS: {status === "RUNNING" ? "🟢 RUNNING" : "🔴 STOPPED"}
+  </div>
+);
 
+// =========================
+// APP
+// =========================
 export default function App() {
 
   const bot = useBotData();
@@ -60,52 +62,27 @@ export default function App() {
     dry_run: false
   });
 
-  const [mode, setMode] = useState("paper");
-
-  useEffect(() => {
-    console.log("📊 CONFIG STATE UPDATED:", config);
-  }, [config]);
+  const [mode, setMode] = useState("safe");
 
   // =========================
   // START
   // =========================
   const handleStart = async () => {
-
-    console.log("🔥 CURRENT CONFIG:", config);
-
     const finalConfig = {
-      symbol: config.symbol,
+      ...config,
+      mode,
       risk_percent: Number(config.risk_percent),
       sl_percent: Number(config.sl_percent),
       leverage: Number(config.leverage),
-      tp_percent: Number(config.tp_percent),
-      mode: mode,
-      dry_run: false
+      tp_percent: Number(config.tp_percent)
     };
 
-    console.log("🚀 FINAL CONFIG:", finalConfig);
-
-    if (!finalConfig.symbol) {
-      alert("❌ SYMBOLなし");
-      return;
-    }
-
-    if (bot.status === "RUNNING") {
-      alert("すでに稼働中");
-      return;
-    }
-
     try {
-      const res = await fetch("/api/bot/start", {
+      await fetch("/api/bot/start", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(finalConfig)
       });
-
-      console.log("📡 FETCH RESPONSE:", res);
-
     } catch (err) {
       console.error("❌ START ERROR:", err);
     }
@@ -115,92 +92,185 @@ export default function App() {
   // STOP
   // =========================
   const handleStop = async () => {
-    console.log("🛑 STOP CLICKED");
-
     try {
-      await fetch("/api/bot/stop", {
-        method: "POST"
-      });
+      await fetch("/api/bot/stop", { method: "POST" });
     } catch (err) {
       console.error("❌ STOP ERROR:", err);
     }
   };
 
+  // =========================
+  // UI
+  // =========================
   return (
-    <div style={{ padding: 20, color: "#fff", background: "#0b0b0b" }}>
+    <div style={{ padding: 20, background: "#000", color: "#fff" }}>
 
-      {/* 設定入力 */}
-      <TradeConfigPanel
-        onChange={(cfg) => {
-          console.log("📥 CONFIG UPDATE FROM PANEL:", cfg);
-          setConfig((prev) => ({
-            ...prev,
-            ...cfg
-          }));
-        }}
-      />
+      {/* HEADER */}
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        marginBottom: 20,
+        fontWeight: "bold"
+      }}>
+        <div>CONFIG SYMBOL: {config.symbol}</div>
+        <div>BOT SYMBOL: {bot.symbol ?? "-"}</div>
+        <div>
+          STATUS: {bot.status === "RUNNING" ? "🟢 RUNNING" : "🔴 STOPPED"}
+        </div>
+      </div>
 
-      <Card title="Control">
+      <h1 style={{ marginBottom: 20 }}>🧠 TradingAI Dashboard</h1>
 
-        <button
-          onClick={handleStart}
-          disabled={bot.status === "RUNNING"}
-        >
-          ▶ START
-        </button>
+      {/* MAIN */}
+      <div style={{ display: "flex", gap: 20 }}>
 
-        <button onClick={handleStop}>
-          ■ STOP
-        </button>
+        {/* LEFT */}
+        <div style={{ flex: 1 }}>
 
-        <div style={{ marginTop: 10 }}>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
+          <Box title="🟢 CONFIG">
+            <TradeConfigPanel
+              onChange={(cfg) => {
+                setConfig((prev) => ({ ...prev, ...cfg }));
+              }}
+            />
+          </Box>
+
+          <Box title="🧠 Strategy">
+            <TradeControl
+              config={{ ...config, mode }}
+              onChange={(newConfig) => {
+                setConfig((prev) => ({ ...prev, ...newConfig }));
+              }}
+            />
+          </Box>
+
+        </div>
+
+        {/* RIGHT */}
+        <div style={{ flex: 1 }}>
+
+          <Box title="🔵 Strategy Monitor">
+            <StrategyMonitor />
+          </Box>
+
+          <Box title="Status">
+            <StatusPanel
+              balance={bot.balance}
+              equity={bot.equity}
+              pnl={bot.pnl}
+              price={bot.price}
+
+              currentDD={bot.drawdown}
+              lossStreak={bot.loss_streak}
+              killSwitch={bot.kill_switch}
+              botStatus={bot.status}
+
+              position={bot.position}
+              entryPrice={bot.entry_price}
+              lastSignal={bot.last_signal}
+              lastBlock={bot.last_block}
+              engineState={bot.engine_state}
+              connection={bot.connection}
+            />
+          </Box>
+
+          {/* 🔥 Result追加 */}
+          <Box title="📊 Result">
+            <ResultPanel
+              price={bot.price}
+              balance={bot.balance}
+              risk_percent={config.risk_percent}
+              sl_percent={config.sl_percent}
+              tp_percent={config.tp_percent}
+            />
+          </Box>
+
+        </div>
+
+      </div>
+
+      {/* EXECUTION */}
+      <div style={{ marginTop: 20 }}>
+
+        <Box title="🔘 Execution">
+
+          <button
+            onClick={handleStart}
             disabled={bot.status === "RUNNING"}
           >
-            <option value="paper">🟡 PAPER</option>
-            <option value="live">🔴 LIVE</option>
-          </select>
-        </div>
+            ▶ START
+          </button>
 
-        <div style={{ marginTop: 10 }}>
-          MODE: {mode === "paper" ? "🟡 PAPER" : "🔴 LIVE"}
-        </div>
+          <button
+            onClick={handleStop}
+            style={{ marginLeft: 10 }}
+          >
+            ■ STOP
+          </button>
 
-        <TradeControl
-          config={{ ...config, mode }}
-          onChange={(newConfig) => {
-            setConfig((prev) => ({
-              ...prev,
-              ...newConfig
-            }));
-          }}
-        />
+          <div style={{ marginTop: 12 }}>
+            <div>MODE:</div>
 
-        <div style={{ marginTop: 10 }}>
-          CONFIG SYMBOL: {config.symbol}
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          BOT SYMBOL: {bot.symbol ?? "-"}
-        </div>
-
-        {bot.symbol && config.symbol !== bot.symbol && (
-          <div style={{ color: "red", fontWeight: "bold", marginTop: 10 }}>
-            ⚠️ SYMBOL MISMATCH
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              disabled={bot.status === "RUNNING"}
+            >
+              <option value="safe">🟢 SAFE</option>
+              <option value="normal">🟡 NORMAL</option>
+              <option value="aggressive">🔴 AGGRESSIVE</option>
+            </select>
           </div>
-        )}
 
-      </Card>
+          <div style={{ marginTop: 8 }}>
+            CURRENT MODE: {
+              mode === "safe" ? "🟢 SAFE" :
+              mode === "normal" ? "🟡 NORMAL" :
+              "🔴 AGGRESSIVE"
+            }
+          </div>
 
-      <StatusPanel
-        balance={bot.balance}
-        equity={bot.equity}
-        pnl={bot.pnl}
-        price={bot.price}
-        botStatus={bot.status}
-      />
+          <div style={{ marginTop: 12 }}>
+            <button
+              onClick={() =>
+                setConfig((prev) => ({
+                  ...prev,
+                  dry_run: !prev.dry_run
+                }))
+              }
+            >
+              TOGGLE DRY RUN
+            </button>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            DRY RUN: {config.dry_run ? "🟡 ON (PAPER)" : "🔴 OFF (REAL)"}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            STATUS: {
+              bot.status === "RUNNING"
+                ? "🟢 RUNNING"
+                : "🔴 STOPPED"
+            }
+          </div>
+
+        </Box>
+
+      </div>
+
+      {/* 🔥 Logs追加 */}
+      <div style={{ display: "flex", gap: 20, marginTop: 20 }}>
+
+        <div style={{ flex: 1 }}>
+          <SignalLog logs={bot.signal_logs || []} />
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <TradeLog logs={bot.trade_logs || []} />
+        </div>
+
+      </div>
 
       <StatusBar status={bot.status} />
 

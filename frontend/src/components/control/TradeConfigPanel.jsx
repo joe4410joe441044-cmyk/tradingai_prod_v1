@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import StrategyControl from "./StrategyControl";
 
 // =========================
 // 行コンポーネント
@@ -20,15 +21,23 @@ function Row({ label, children }) {
 }
 
 // =========================
-// Trade Settings（完全同期版）
+// Trade Settings + Strategy統合版
 // =========================
 export default function TradeConfigPanel({ onChange }) {
 
   const [config, setConfig] = useState({
+    // ===== trade =====
     risk_percent: "1",
     sl_percent: "1",
     leverage: "10",
-    symbol: "BTCUSDT"
+    symbol: "BTCUSDT",
+
+    // ===== strategy =====
+    mode: 0.62,
+    gamma: 0.0025,
+    delta_buy: 0.56,
+    sigma: 0.02,
+    edge: 0.00025
   });
 
   const symbols = [
@@ -49,42 +58,93 @@ export default function TradeConfigPanel({ onChange }) {
   };
 
   // =========================
-  // 🔥 親へ通知（唯一のデータルート）
+  // 🔥 Backend送信（改善版）
   // =========================
-  const emitChange = (cfg) => {
-    if (onChange) {
-      onChange({
-        symbol: cfg.symbol,
-        risk_percent: Number(cfg.risk_percent || 0),
-        sl_percent: Number(cfg.sl_percent || 0),
-        leverage: Number(cfg.leverage || 0)
-      });
-    }
+  const timerRef = useRef(null);
+  const lastSentRef = useRef(null); // ← 重複送信防止
+
+  const sendConfig = (cfg) => {
+    clearTimeout(timerRef.current);
+
+    timerRef.current = setTimeout(async () => {
+      try {
+        const json = JSON.stringify(cfg);
+
+        // 🔥 同一内容なら送らない
+        if (lastSentRef.current === json) return;
+        lastSentRef.current = json;
+
+        console.log("📤 SEND CONFIG:", cfg);
+
+        const res = await fetch("http://localhost:8001/config", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: json
+        });
+
+        if (!res.ok) {
+          console.error("❌ APIエラー", res.status);
+        }
+
+      } catch (e) {
+        console.error("❌ Config送信失敗", e);
+      }
+    }, 250); // 少し余裕持たせる
   };
 
   // =========================
-  // 🔥 初回同期
+  // 親へ通知 + Backend送信（統一）
+  // =========================
+  const emitChange = (cfg) => {
+
+    const payload = {
+      symbol: cfg.symbol,
+      risk_percent: Number(cfg.risk_percent || 0),
+      sl_percent: Number(cfg.sl_percent || 0),
+      leverage: Number(cfg.leverage || 0),
+
+      // strategy
+      mode: cfg.mode,
+      gamma: cfg.gamma,
+      delta_buy: cfg.delta_buy,
+      sigma: cfg.sigma,
+      edge: cfg.edge
+    };
+
+    // 親へ
+    if (onChange) onChange(payload);
+
+    // Backendへ
+    sendConfig(payload);
+  };
+
+  // =========================
+  // 初回同期
   // =========================
   useEffect(() => {
     emitChange(config);
   }, []);
 
   // =========================
-  // 🔥 更新処理（常に親へ通知）
+  // クリーンアップ（重要）
+  // =========================
+  useEffect(() => {
+    return () => {
+      clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  // =========================
+  // 更新処理
   // =========================
   const updateConfig = (key, value) => {
-    const newConfig = {
-      ...config,
-      [key]: value
-    };
-
+    const newConfig = { ...config, [key]: value };
     setConfig(newConfig);
     emitChange(newConfig);
   };
 
-  // =========================
-  // 数字入力制御
-  // =========================
   const handleNumberInput = (key, value) => {
     if (/^\d*\.?\d*$/.test(value)) {
       updateConfig(key, value);
@@ -112,21 +172,17 @@ export default function TradeConfigPanel({ onChange }) {
           onChange={e => updateConfig("symbol", e.target.value)}
         >
           {symbols.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
+            <option key={s} value={s}>{s}</option>
           ))}
         </select>
       </Row>
 
-      {/* 🔥 追加：現在選択中 */}
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 12 }}>
         選択中: {config.symbol}
       </div>
 
       <Row label="Risk %">
         <input
-          type="text"
           value={config.risk_percent}
           style={inputStyle}
           onChange={e => handleNumberInput("risk_percent", e.target.value)}
@@ -135,7 +191,6 @@ export default function TradeConfigPanel({ onChange }) {
 
       <Row label="SL %">
         <input
-          type="text"
           value={config.sl_percent}
           style={inputStyle}
           onChange={e => handleNumberInput("sl_percent", e.target.value)}
@@ -144,12 +199,25 @@ export default function TradeConfigPanel({ onChange }) {
 
       <Row label="Leverage">
         <input
-          type="text"
           value={config.leverage}
           style={inputStyle}
           onChange={e => handleNumberInput("leverage", e.target.value)}
         />
       </Row>
+
+      {/* =========================
+          🧠 Strategy Control
+      ========================= */}
+      <div style={{ marginTop: 30 }}>
+        <StrategyControl
+          values={config}
+          onChange={(updates) => {
+            const newConfig = { ...config, ...updates };
+            setConfig(newConfig);
+            emitChange(newConfig);
+          }}
+        />
+      </div>
     </div>
   );
 }
