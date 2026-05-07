@@ -91,50 +91,77 @@ class BotManager:
 
             def on_update(bids, asks):
 
-                # =========================
-                # ORDERBOOK UPDATE
-                # =========================
-
-                self.ob_manager.update(
-                    bids,
-                    asks
-                )
-
-                # =========================
-                # BEST PRICE
-                # =========================
+                print("📥 on_update CALLED")
 
                 try:
 
-                    if bids:
+                    # =========================
+                    # ORDERBOOK UPDATE
+                    # =========================
 
-                        self.last_price = float(
-                            bids[0][0]
+                    self.ob_manager.update(
+                        bids,
+                        asks
+                    )
+
+                    print(
+                        "✅ MANAGER UPDATED"
+                    )
+
+                    # =========================
+                    # BEST PRICE
+                    # =========================
+
+                    try:
+
+                        if bids:
+
+                            self.last_price = float(
+                                bids[0][0]
+                            )
+
+                    except Exception as e:
+
+                        print(
+                            f"❌ PRICE ERROR: {e}"
                         )
 
-                except Exception:
+                    # =========================
+                    # STRATEGY
+                    # =========================
 
-                    pass
+                    print(
+                        "🚀 CALL STRATEGY"
+                    )
 
-                # =========================
-                # STRATEGY
-                # =========================
+                    signal = (
+                        self.strategy
+                        .on_orderbook()
+                    )
 
-                signal = (
-                    self.strategy
-                    .on_orderbook()
-                )
+                    print(
+                        f"🧠 STRATEGY RESULT: "
+                        f"{signal}"
+                    )
 
-                # =========================
-                # SIGNAL
-                # =========================
+                    # =========================
+                    # SIGNAL
+                    # =========================
 
-                if signal:
+                    if signal:
 
-                    self.last_signal = signal
+                        self.last_signal = signal
 
-                    add_log(
-                        f"🟡 SIGNAL: {signal}"
+                        add_log(
+                            f"🟡 SIGNAL: "
+                            f"{signal}"
+                        )
+
+                except Exception as e:
+
+                    print(
+                        f"❌ on_update ERROR: "
+                        f"{e}"
                     )
 
             # =========================
