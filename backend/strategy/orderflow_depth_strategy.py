@@ -9,10 +9,14 @@ class OrderFlowDepthStrategy:
 
         self.ob = orderbook_manager
 
-        # シグナル履歴
+        # =========================
+        # SIGNAL HISTORY
+        # =========================
+
         self.history = []
 
-        self.max_history = 3
+        # 3 → 2 に変更
+        self.max_history = 2
 
     # =========================
     # ORDERBOOK EVENT
@@ -20,7 +24,9 @@ class OrderFlowDepthStrategy:
 
     def on_orderbook(self):
 
-        print("📊 STRATEGY on_orderbook CALLED")
+        print(
+            "📊 STRATEGY on_orderbook CALLED"
+        )
 
         bid_vol, ask_vol = (
             self.ob.get_top_n_volume(5)
@@ -49,7 +55,7 @@ class OrderFlowDepthStrategy:
             return None
 
         # =========================
-        # 🔥 imbalance計算
+        # IMBALANCE
         # =========================
 
         imbalance = (
@@ -70,14 +76,16 @@ class OrderFlowDepthStrategy:
         )
 
         # =========================
-        # 🔥 シグナル条件
+        # SIGNAL CONDITIONS
         # =========================
 
-        if imbalance > 0.2:
+        # 0.2 → 0.05 に緩和
+
+        if imbalance > 0.05:
 
             signal = "BUY"
 
-        elif imbalance < -0.2:
+        elif imbalance < -0.05:
 
             signal = "SELL"
 
@@ -91,22 +99,22 @@ class OrderFlowDepthStrategy:
         )
 
         # =========================
-        # 履歴保存
+        # HISTORY
         # =========================
 
         self.history.append(signal)
+
+        if len(self.history) > self.max_history:
+
+            self.history.pop(0)
 
         print(
             f"📚 HISTORY: "
             f"{self.history}"
         )
 
-        if len(self.history) > self.max_history:
-
-            self.history.pop(0)
-
         # =========================
-        # 🔥 連続一致フィルタ
+        # WAIT HISTORY
         # =========================
 
         if len(self.history) < self.max_history:
@@ -114,7 +122,7 @@ class OrderFlowDepthStrategy:
             return None
 
         # =========================
-        # BUY
+        # BUY SIGNAL
         # =========================
 
         if all(
@@ -123,7 +131,7 @@ class OrderFlowDepthStrategy:
         ):
 
             add_log(
-                "✅ BUY 3連続"
+                "✅ BUY CONFIRMED"
             )
 
             signal_data = {
@@ -145,7 +153,7 @@ class OrderFlowDepthStrategy:
             return signal_data
 
         # =========================
-        # SELL
+        # SELL SIGNAL
         # =========================
 
         if all(
@@ -154,7 +162,7 @@ class OrderFlowDepthStrategy:
         ):
 
             add_log(
-                "✅ SELL 3連続"
+                "✅ SELL CONFIRMED"
             )
 
             signal_data = {

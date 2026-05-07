@@ -47,6 +47,22 @@ class BotManager:
 
         self.last_price = 0
 
+        # =========================
+        # POSITION
+        # =========================
+
+        self.position = "NONE"
+
+        self.entry_price = None
+
+        # =========================
+        # RISK
+        # =========================
+
+        self.tp_percent = 2.0
+
+        self.sl_percent = 1.0
+
     # =========================
     # START
     # =========================
@@ -56,15 +72,38 @@ class BotManager:
         try:
 
             # =========================
-            # 既存停止
+            # RESET
             # =========================
 
             self.stop()
 
+            self.position = "NONE"
+
+            self.entry_price = None
+
+            self.last_signal = None
+
+            self.last_price = 0
+
             self.symbol = config["symbol"].upper()
 
+            # =========================
+            # CONFIG
+            # =========================
+
+            self.tp_percent = config.get(
+                "tp_percent",
+                2.0
+            )
+
+            self.sl_percent = config.get(
+                "sl_percent",
+                1.0
+            )
+
             add_log(
-                f"🚀 START BOT: {self.symbol}"
+                f"🚀 START BOT: "
+                f"{self.symbol}"
             )
 
             # =========================
@@ -91,7 +130,9 @@ class BotManager:
 
             def on_update(bids, asks):
 
-                print("📥 on_update CALLED")
+                print(
+                    "📥 on_update CALLED"
+                )
 
                 try:
 
@@ -123,7 +164,8 @@ class BotManager:
                     except Exception as e:
 
                         print(
-                            f"❌ PRICE ERROR: {e}"
+                            f"❌ PRICE ERROR: "
+                            f"{e}"
                         )
 
                     # =========================
@@ -156,6 +198,189 @@ class BotManager:
                             f"🟡 SIGNAL: "
                             f"{signal}"
                         )
+
+                        # =========================
+                        # POSITION OPEN
+                        # =========================
+
+                        self.position = (
+                            signal["side"]
+                        )
+
+                        self.entry_price = (
+                            self.last_price
+                        )
+
+                        print(
+                            f"💥 POSITION OPENED "
+                            f"{self.position} "
+                            f"@ "
+                            f"{self.entry_price}"
+                        )
+
+                        add_log(
+                            f"💥 POSITION OPENED "
+                            f"{self.position} "
+                            f"@ "
+                            f"{self.entry_price}"
+                        )
+
+                    # =========================
+                    # POSITION MANAGEMENT
+                    # =========================
+
+                    if (
+                        self.position != "NONE"
+                        and self.entry_price
+                    ):
+
+                        # =========================
+                        # BUY POSITION
+                        # =========================
+
+                        if self.position == "BUY":
+
+                            tp_price = (
+                                self.entry_price
+                                * (
+                                    1
+                                    + (
+                                        self.tp_percent
+                                        / 100
+                                    )
+                                )
+                            )
+
+                            sl_price = (
+                                self.entry_price
+                                * (
+                                    1
+                                    - (
+                                        self.sl_percent
+                                        / 100
+                                    )
+                                )
+                            )
+
+                            # TAKE PROFIT
+
+                            if (
+                                self.last_price
+                                >= tp_price
+                            ):
+
+                                print(
+                                    "🎯 TAKE PROFIT HIT"
+                                )
+
+                                add_log(
+                                    "🎯 TAKE PROFIT HIT"
+                                )
+
+                                self.position = (
+                                    "NONE"
+                                )
+
+                                self.entry_price = (
+                                    None
+                                )
+
+                            # STOP LOSS
+
+                            elif (
+                                self.last_price
+                                <= sl_price
+                            ):
+
+                                print(
+                                    "🛑 STOP LOSS HIT"
+                                )
+
+                                add_log(
+                                    "🛑 STOP LOSS HIT"
+                                )
+
+                                self.position = (
+                                    "NONE"
+                                )
+
+                                self.entry_price = (
+                                    None
+                                )
+
+                        # =========================
+                        # SELL POSITION
+                        # =========================
+
+                        elif self.position == "SELL":
+
+                            tp_price = (
+                                self.entry_price
+                                * (
+                                    1
+                                    - (
+                                        self.tp_percent
+                                        / 100
+                                    )
+                                )
+                            )
+
+                            sl_price = (
+                                self.entry_price
+                                * (
+                                    1
+                                    + (
+                                        self.sl_percent
+                                        / 100
+                                    )
+                                )
+                            )
+
+                            # TAKE PROFIT
+
+                            if (
+                                self.last_price
+                                <= tp_price
+                            ):
+
+                                print(
+                                    "🎯 TAKE PROFIT HIT"
+                                )
+
+                                add_log(
+                                    "🎯 TAKE PROFIT HIT"
+                                )
+
+                                self.position = (
+                                    "NONE"
+                                )
+
+                                self.entry_price = (
+                                    None
+                                )
+
+                            # STOP LOSS
+
+                            elif (
+                                self.last_price
+                                >= sl_price
+                            ):
+
+                                print(
+                                    "🛑 STOP LOSS HIT"
+                                )
+
+                                add_log(
+                                    "🛑 STOP LOSS HIT"
+                                )
+
+                                self.position = (
+                                    "NONE"
+                                )
+
+                                self.entry_price = (
+                                    None
+                                )
 
                 except Exception as e:
 
@@ -199,7 +424,8 @@ class BotManager:
         except Exception as e:
 
             add_log(
-                f"❌ BOT START ERROR: {e}"
+                f"❌ BOT START ERROR: "
+                f"{e}"
             )
 
             return {
@@ -229,6 +455,10 @@ class BotManager:
 
             self._running = False
 
+            self.position = "NONE"
+
+            self.entry_price = None
+
             add_log(
                 "🛑 BOT STOPPED"
             )
@@ -240,7 +470,8 @@ class BotManager:
         except Exception as e:
 
             add_log(
-                f"❌ STOP ERROR: {e}"
+                f"❌ STOP ERROR: "
+                f"{e}"
             )
 
             return {
@@ -264,9 +495,9 @@ class BotManager:
 
             "equity": 1000,
 
-            "position": "NONE",
+            "position": self.position,
 
-            "entryPrice": None,
+            "entryPrice": self.entry_price,
 
             "signal": self.last_signal,
 
