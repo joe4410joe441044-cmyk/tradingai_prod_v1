@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from backend.utils.log_buffer import add_log
-
+from backend.core.logger import logger
 
 class OrderFlowDepthStrategy:
 
@@ -24,7 +24,7 @@ class OrderFlowDepthStrategy:
 
     def on_orderbook(self):
 
-        print(
+        logger.debug(
             "📊 STRATEGY on_orderbook CALLED"
         )
 
@@ -38,7 +38,7 @@ class OrderFlowDepthStrategy:
         # DEBUG
         # =========================
 
-        print(
+        logger.debug(
             f"📊 STRATEGY DATA "
             f"bid={bid_vol:.2f} "
             f"ask={ask_vol:.2f}"
@@ -50,7 +50,7 @@ class OrderFlowDepthStrategy:
 
         if total == 0:
 
-            print("⚠️ TOTAL = 0")
+            logger.debug("⚠️ TOTAL = 0")
 
             return None
 
@@ -63,7 +63,7 @@ class OrderFlowDepthStrategy:
             / total
         )
 
-        print(
+        logger.debug(
             f"📊 IMBALANCE="
             f"{imbalance:.4f}"
         )
@@ -93,7 +93,7 @@ class OrderFlowDepthStrategy:
 
             signal = "NONE"
 
-        print(
+        logger.debug(
             f"🧠 SIGNAL CANDIDATE: "
             f"{signal}"
         )
@@ -108,7 +108,7 @@ class OrderFlowDepthStrategy:
 
             self.history.pop(0)
 
-        print(
+        logger.debug(
             f"📚 HISTORY: "
             f"{self.history}"
         )
@@ -143,7 +143,7 @@ class OrderFlowDepthStrategy:
                 f"{signal_data}"
             )
 
-            print(
+            logger.debug(
                 f"🚀 FINAL SIGNAL: "
                 f"{signal_data}"
             )
@@ -174,7 +174,7 @@ class OrderFlowDepthStrategy:
                 f"{signal_data}"
             )
 
-            print(
+            logger.debug(
                 f"🚀 FINAL SIGNAL: "
                 f"{signal_data}"
             )

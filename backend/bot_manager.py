@@ -4,13 +4,27 @@
 # IMPORTS
 # =========================
 
+import time
+from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.core.orderbook_manager import OrderBookManager
+
 from backend.strategy.orderflow_depth_strategy import (
     OrderFlowDepthStrategy,
 )
+
 from backend.ws.orderbook_ws import OrderBookWS
 
 from backend.utils.log_buffer import add_log
+
+from backend.core.logger import logger
+
+
+from Bot.engine.execution_engine import (
+    ExecutionEngine
+)
+
+
+
 
 
 # =========================
@@ -46,6 +60,10 @@ class BotManager:
         self.last_signal = None
 
         self.last_price = 0
+
+        self.market_ready = False
+
+        self.last_update_time = 0
 
         # =========================
         # POSITION
@@ -85,6 +103,10 @@ class BotManager:
 
             self.last_price = 0
 
+            self.market_ready = False
+
+            self.last_update_time = 0
+
             self.symbol = config["symbol"].upper()
 
             # =========================
@@ -115,6 +137,32 @@ class BotManager:
             )
 
             # =========================
+            # EXECUTION ENGINE
+            # =========================
+
+            portfolio = PortfolioManager(
+                initial_balance=1000
+            )
+
+            self.engine = ExecutionEngine(
+                exchange=None,
+                logger=logger,
+                portfolio=portfolio,
+                notifier=None,
+                price_manager=self.ob_manager
+            )
+
+            self.engine.symbol = self.symbol
+            
+            
+            # =========================
+            # ENGINE START
+            # =========================
+
+            self.engine.start()
+            
+            
+            # =========================
             # STRATEGY
             # =========================
 
@@ -130,7 +178,7 @@ class BotManager:
 
             def on_update(bids, asks):
 
-                print(
+                logger.debug(
                     "📥 on_update CALLED"
                 )
 
@@ -145,7 +193,7 @@ class BotManager:
                         asks
                     )
 
-                    print(
+                    logger.debug(
                         "✅ MANAGER UPDATED"
                     )
 
@@ -161,18 +209,44 @@ class BotManager:
                                 bids[0][0]
                             )
 
+                            self.market_ready = True
+
+                            self.last_update_time = (
+                                time.time()
+                            )
+
                     except Exception as e:
 
-                        print(
+                        logger.debug(
                             f"❌ PRICE ERROR: "
                             f"{e}"
                         )
 
                     # =========================
+                    # ENGINE PRICE EVENT
+                    # =========================
+
+                    if self.engine:
+
+                        try:
+
+                            self.engine.on_price(
+                                self.symbol,
+                                self.last_price
+                            )
+
+                        except Exception as e:
+
+                            logger.debug(
+                                f"❌ ENGINE PRICE ERROR: "
+                                f"{e}"
+                            )
+
+                    # =========================
                     # STRATEGY
                     # =========================
 
-                    print(
+                    logger.debug(
                         "🚀 CALL STRATEGY"
                     )
 
@@ -181,7 +255,7 @@ class BotManager:
                         .on_orderbook()
                     )
 
-                    print(
+                    logger.debug(
                         f"🧠 STRATEGY RESULT: "
                         f"{signal}"
                     )
@@ -200,191 +274,27 @@ class BotManager:
                         )
 
                         # =========================
-                        # POSITION OPEN
+                        # EXECUTION ENGINE
                         # =========================
 
-                        self.position = (
-                            signal["side"]
-                        )
+                        if self.engine:
 
-                        self.entry_price = (
-                            self.last_price
-                        )
+                            try:
 
-                        print(
-                            f"💥 POSITION OPENED "
-                            f"{self.position} "
-                            f"@ "
-                            f"{self.entry_price}"
-                        )
-
-                        add_log(
-                            f"💥 POSITION OPENED "
-                            f"{self.position} "
-                            f"@ "
-                            f"{self.entry_price}"
-                        )
-
-                    # =========================
-                    # POSITION MANAGEMENT
-                    # =========================
-
-                    if (
-                        self.position != "NONE"
-                        and self.entry_price
-                    ):
-
-                        # =========================
-                        # BUY POSITION
-                        # =========================
-
-                        if self.position == "BUY":
-
-                            tp_price = (
-                                self.entry_price
-                                * (
-                                    1
-                                    + (
-                                        self.tp_percent
-                                        / 100
-                                    )
-                                )
-                            )
-
-                            sl_price = (
-                                self.entry_price
-                                * (
-                                    1
-                                    - (
-                                        self.sl_percent
-                                        / 100
-                                    )
-                                )
-                            )
-
-                            # TAKE PROFIT
-
-                            if (
-                                self.last_price
-                                >= tp_price
-                            ):
-
-                                print(
-                                    "🎯 TAKE PROFIT HIT"
+                                self.engine.submit_signal(
+                                    signal
                                 )
 
-                                add_log(
-                                    "🎯 TAKE PROFIT HIT"
-                                )
+                            except Exception as e:
 
-                                self.position = (
-                                    "NONE"
-                                )
-
-                                self.entry_price = (
-                                    None
-                                )
-
-                            # STOP LOSS
-
-                            elif (
-                                self.last_price
-                                <= sl_price
-                            ):
-
-                                print(
-                                    "🛑 STOP LOSS HIT"
-                                )
-
-                                add_log(
-                                    "🛑 STOP LOSS HIT"
-                                )
-
-                                self.position = (
-                                    "NONE"
-                                )
-
-                                self.entry_price = (
-                                    None
-                                )
-
-                        # =========================
-                        # SELL POSITION
-                        # =========================
-
-                        elif self.position == "SELL":
-
-                            tp_price = (
-                                self.entry_price
-                                * (
-                                    1
-                                    - (
-                                        self.tp_percent
-                                        / 100
-                                    )
-                                )
-                            )
-
-                            sl_price = (
-                                self.entry_price
-                                * (
-                                    1
-                                    + (
-                                        self.sl_percent
-                                        / 100
-                                    )
-                                )
-                            )
-
-                            # TAKE PROFIT
-
-                            if (
-                                self.last_price
-                                <= tp_price
-                            ):
-
-                                print(
-                                    "🎯 TAKE PROFIT HIT"
-                                )
-
-                                add_log(
-                                    "🎯 TAKE PROFIT HIT"
-                                )
-
-                                self.position = (
-                                    "NONE"
-                                )
-
-                                self.entry_price = (
-                                    None
-                                )
-
-                            # STOP LOSS
-
-                            elif (
-                                self.last_price
-                                >= sl_price
-                            ):
-
-                                print(
-                                    "🛑 STOP LOSS HIT"
-                                )
-
-                                add_log(
-                                    "🛑 STOP LOSS HIT"
-                                )
-
-                                self.position = (
-                                    "NONE"
-                                )
-
-                                self.entry_price = (
-                                    None
+                                logger.debug(
+                                    f"❌ ENGINE ERROR: "
+                                    f"{e}"
                                 )
 
                 except Exception as e:
 
-                    print(
+                    logger.debug(
                         f"❌ on_update ERROR: "
                         f"{e}"
                     )
@@ -400,17 +310,11 @@ class BotManager:
 
             self.ws.start()
 
-            print(
+            logger.debug(
                 "🔥 WS START CALLED"
             )
 
             self._running = True
-
-            # =========================
-            # ENGINE DUMMY
-            # =========================
-
-            self.engine = self
 
             add_log(
                 "🟢 ORDERBOOK WS STARTED"
@@ -459,6 +363,14 @@ class BotManager:
 
             self.entry_price = None
 
+            self.last_signal = None
+
+            self.last_price = 0
+
+            self.market_ready = False
+
+            self.last_update_time = 0
+
             add_log(
                 "🛑 BOT STOPPED"
             )
@@ -485,9 +397,57 @@ class BotManager:
 
     def get_result(self):
 
+        stale_seconds = 0
+
+        if self.last_update_time > 0:
+
+            stale_seconds = (
+                time.time()
+                - self.last_update_time
+            )
+
+        market_stale = (
+            stale_seconds > 5
+        )
+
+        safe_price = (
+            self.last_price
+            if self.market_ready
+            else None
+        )
+
+        actual_position = None
+
+        pending_order = False
+
+        if self.engine:
+
+            actual_position = getattr(
+                self.engine,
+                "actual_position",
+                None
+            )
+
+            pending_order = getattr(
+                self.engine,
+                "pending_order",
+                False
+            )
+
         return {
 
-            "price": self.last_price,
+            "timestamp": time.time(),
+
+            "price": safe_price,
+
+            "marketReady":
+                self.market_ready,
+
+            "marketStale":
+                market_stale,
+
+            "lastUpdateAge":
+                stale_seconds,
 
             "pnl": 0,
 
@@ -495,11 +455,15 @@ class BotManager:
 
             "equity": 1000,
 
-            "position": self.position,
+            "position": actual_position,
 
-            "entryPrice": self.entry_price,
+            "pendingOrder": pending_order,
 
-            "signal": self.last_signal,
+            "signal":
+                self.last_signal,
+
+            "symbol":
+                self.symbol,
 
             "status": (
                 "RUNNING"
@@ -518,7 +482,17 @@ class BotManager:
 
             return {
 
-                "price": 0,
+                "status": "STOPPED",
+
+                "symbol": None,
+
+                "price": None,
+
+                "marketReady": False,
+
+                "marketStale": False,
+
+                "lastUpdateAge": 0,
 
                 "pnl": 0,
 
@@ -526,9 +500,11 @@ class BotManager:
 
                 "equity": 1000,
 
-                "position": "NONE",
+                "position": None,
 
-                "entryPrice": None,
+                "pendingOrder": False,
+
+                "signal": None,
 
                 "botStatus": "STOPPED",
             }
@@ -539,8 +515,33 @@ class BotManager:
 
             **result,
 
+            "status": result.get(
+                "status",
+                "STOPPED"
+            ),
+
+            "symbol": result.get(
+                "symbol",
+                None
+            ),
+
             "price": result.get(
                 "price",
+                None
+            ),
+
+            "marketReady": result.get(
+                "marketReady",
+                False
+            ),
+
+            "marketStale": result.get(
+                "marketStale",
+                False
+            ),
+
+            "lastUpdateAge": result.get(
+                "lastUpdateAge",
                 0
             ),
 
@@ -561,12 +562,12 @@ class BotManager:
 
             "position": result.get(
                 "position",
-                "NONE"
+                None
             ),
 
-            "entryPrice": result.get(
-                "entryPrice",
-                None
+            "pendingOrder": result.get(
+                "pendingOrder",
+                False
             ),
 
             "signal": result.get(

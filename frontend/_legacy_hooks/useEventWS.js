@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-const WS_URL = "ws://127.0.0.1:8001/ws/events";
+const WS_URL = "ws://35.194.104.74:8001/ws/events";
 
 export default function useEventWS(onMessage) {
   const wsRef = useRef(null);
@@ -31,8 +31,10 @@ export default function useEventWS(onMessage) {
 
       console.log("🔌 WS CONNECT TRY:", WS_URL);
 
-      const WS_URL = `${window.location.origin.replace("http", "ws")}/ws/`;
+      const ws = new WebSocket(WS_URL);
+
       wsRef.current = ws;
+
 
       ws.onopen = () => {
         console.log("✅ WS CONNECTED");

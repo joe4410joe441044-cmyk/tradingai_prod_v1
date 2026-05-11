@@ -1,0 +1,15 @@
+[0;1;32m●[0m tradingai.service - TradingAI Bot
+     Loaded: loaded (]8;;file://tradingai-prod-v1/etc/systemd/system/tradingai.service/etc/systemd/system/tradingai.service]8;;; [0;1;38;5;185mdisabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Sun 2026-05-10 10:31:01 UTC; 9s ago
+   Main PID: 228594 (uvicorn)
+      Tasks: 1[0;38;5;245m (limit: 2278)[0m
+     Memory: 31.9M
+        CPU: 659ms
+     CGroup: /system.slice/tradingai.service
+             └─[0;38;5;245m228594 /home/joe4410joe/tradingai_prod_v1/venv/bin/python3 /home/joe4410joe/tradingai_prod_v1/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8001[0m
+
+May 10 10:31:01 tradingai-prod-v1 systemd[1]: Started tradingai.service - TradingAI Bot.
+May 10 10:31:02 tradingai-prod-v1 uvicorn[228594]: INFO:     Started server process [228594]
+May 10 10:31:02 tradingai-prod-v1 uvicorn[228594]: INFO:     Waiting for application startup.
+May 10 10:31:02 tradingai-prod-v1 uvicorn[228594]: INFO:     Application startup complete.
+May 10 10:31:02 tradingai-prod-v1 uvicorn[228594]: INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)

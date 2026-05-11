@@ -76,7 +76,7 @@ export default function TradeConfigPanel({ onChange }) {
 
         console.log("📤 SEND CONFIG:", cfg);
 
-        const res = await fetch("http://localhost:8001/config", {
+        const res = await fetch("http://35.194.104.74:8001/config", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"

@@ -8,6 +8,7 @@ from typing import List
 
 import asyncio
 import logging
+import math
 
 from backend.bot_manager import get_bot_manager
 
@@ -29,7 +30,7 @@ connections: List[WebSocket] = []
 # DEBUG
 # =========================
 
-DEBUG_WS = False
+DEBUG_WS = True
 
 # =========================
 # JSON SAFE
@@ -39,12 +40,36 @@ def safe_json(obj):
 
     try:
 
+        # =========================
+        # FLOAT SAFE
+        # =========================
+
+        if isinstance(obj, float):
+
+            if math.isnan(obj):
+
+                return 0
+
+            if math.isinf(obj):
+
+                return 0
+
+            return obj
+
+        # =========================
+        # PRIMITIVE SAFE
+        # =========================
+
         if isinstance(
             obj,
-            (int, float, str, bool)
+            (int, str, bool)
         ) or obj is None:
 
             return obj
+
+        # =========================
+        # LIST SAFE
+        # =========================
 
         if isinstance(obj, list):
 
@@ -53,12 +78,20 @@ def safe_json(obj):
                 for x in obj
             ]
 
+        # =========================
+        # DICT SAFE
+        # =========================
+
         if isinstance(obj, dict):
 
             return {
                 k: safe_json(v)
                 for k, v in obj.items()
             }
+
+        # =========================
+        # FALLBACK
+        # =========================
 
         return str(obj)
 
@@ -72,7 +105,11 @@ def safe_json(obj):
 
 async def connect(ws: WebSocket):
 
+    print("🔥 BEFORE ACCEPT")
+
     await ws.accept()
+
+    print("🟢 WS ACCEPTED")
 
     connections.append(ws)
 
@@ -103,6 +140,8 @@ async def websocket_endpoint(
     ws: WebSocket
 ):
 
+    print("🔥 WS ROUTE HIT")
+
     # =========================
     # CONNECT
     # =========================
@@ -120,13 +159,25 @@ async def websocket_endpoint(
 
         while True:
 
+            print(
+                "🔥 BEFORE GET RESULT"
+            )
+
             # =========================
             # BOT STATUS
             # =========================
 
-            data = bot.get_status()
+            data = bot.get_result()
+
+            print(
+                "🔥 AFTER GET RESULT"
+            )
 
             data = safe_json(data)
+
+            print(
+                "🔥 AFTER SAFE JSON"
+            )
 
             # =========================
             # DEBUG
@@ -144,6 +195,10 @@ async def websocket_endpoint(
             # =========================
 
             await ws.send_json(data)
+
+            print(
+                "🔥 AFTER SEND JSON"
+            )
 
             # =========================
             # LOOP WAIT

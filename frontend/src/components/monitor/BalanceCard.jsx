@@ -1,30 +1,60 @@
 ﻿// src/components/monitor/BalanceCard.jsx
 
 export default function BalanceCard({
-  balance = 0,
+  balance = null,
   loading = false,
   error = false,
 }) {
-  const value = loading ? "Loading..." : Number(balance).toFixed(2);
+
+  const hasValue =
+
+    balance !== null &&
+    balance !== undefined &&
+    Number.isFinite(
+      Number(balance)
+    );
+
+  const value =
+
+    loading
+
+      ? "Loading..."
+
+      : hasValue
+
+        ? Number(balance).toFixed(2)
+
+        : "-";
 
   return (
+
     <div
       style={{
         background: "#111",
         borderRadius: "16px",
         padding: "16px",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        boxShadow:
+          "0 6px 20px rgba(0,0,0,0.3)",
         transition: "0.2s",
         cursor: "pointer",
         textAlign: "center",
       }}
+
       onMouseEnter={(e) =>
-        (e.currentTarget.style.transform = "translateY(-4px)")
+        (
+          e.currentTarget.style.transform =
+            "translateY(-4px)"
+        )
       }
+
       onMouseLeave={(e) =>
-        (e.currentTarget.style.transform = "translateY(0)")
+        (
+          e.currentTarget.style.transform =
+            "translateY(0)"
+        )
       }
     >
+
       {/* TITLE */}
       <div
         style={{
@@ -41,7 +71,7 @@ export default function BalanceCard({
         style={{
           fontSize: "28px",
           fontWeight: "bold",
-          color: "#4ade80", // 緑（資産）
+          color: "#4ade80",
         }}
       >
         {value}
@@ -49,6 +79,7 @@ export default function BalanceCard({
 
       {/* ERROR */}
       {error && (
+
         <div
           style={{
             marginTop: "6px",
@@ -58,7 +89,11 @@ export default function BalanceCard({
         >
           Fetch error
         </div>
+
       )}
+
     </div>
+
   );
+
 }

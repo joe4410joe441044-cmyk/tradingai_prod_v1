@@ -22,6 +22,20 @@ export default function App() {
   });
 
   // =========================
+  // BOT DATA
+  // =========================
+
+  const [botData, setBotData] = useState({
+    price: 0,
+    pnl: 0,
+    balance: 1000,
+    equity: 1000,
+    position: "NONE",
+    entryPrice: null,
+    botStatus: "STOPPED",
+  });
+
+  // =========================
   // START
   // =========================
 
@@ -132,6 +146,8 @@ export default function App() {
     <Dashboard
       config={config}
       setConfig={setConfig}
+
+      botData={botData}
 
       handleStart={handleStart}
       handleStop={handleStop}

@@ -1,34 +1,78 @@
 ﻿// src/components/monitor/PnLCard.jsx
 
 export default function PnLCard({
-  pnl = 0,
+  pnl = null,
   loading = false,
   error = false,
 }) {
-  const isPositive = pnl >= 0;
 
-  const value = loading ? "Loading..." : Number(pnl).toFixed(2);
+  const hasValue =
 
-  const color = isPositive ? "#4ade80" : "#f87171";
+    pnl !== null &&
+    pnl !== undefined &&
+    Number.isFinite(
+      Number(pnl)
+    );
+
+  const isPositive =
+
+    hasValue
+      ? Number(pnl) >= 0
+      : false;
+
+  const value =
+
+    loading
+
+      ? "Loading..."
+
+      : hasValue
+
+        ? Number(pnl).toFixed(2)
+
+        : "-";
+
+  const color =
+
+    hasValue
+
+      ? (
+          isPositive
+            ? "#4ade80"
+            : "#f87171"
+        )
+
+      : "#999";
 
   return (
+
     <div
       style={{
         background: "#111",
         borderRadius: "16px",
         padding: "16px",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+        boxShadow:
+          "0 6px 20px rgba(0,0,0,0.3)",
         textAlign: "center",
         transition: "0.2s",
         cursor: "pointer",
       }}
+
       onMouseEnter={(e) =>
-        (e.currentTarget.style.transform = "translateY(-4px)")
+        (
+          e.currentTarget.style.transform =
+            "translateY(-4px)"
+        )
       }
+
       onMouseLeave={(e) =>
-        (e.currentTarget.style.transform = "translateY(0)")
+        (
+          e.currentTarget.style.transform =
+            "translateY(0)"
+        )
       }
     >
+
       {/* TITLE */}
       <div
         style={{
@@ -53,6 +97,7 @@ export default function PnLCard({
 
       {/* ERROR */}
       {error && (
+
         <div
           style={{
             marginTop: "6px",
@@ -62,7 +107,11 @@ export default function PnLCard({
         >
           Fetch error
         </div>
+
       )}
+
     </div>
+
   );
+
 }

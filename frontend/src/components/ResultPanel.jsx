@@ -1,54 +1,140 @@
 export default function ResultPanel({
-  price = 0,
-  balance = 1000,
 
-  risk_percent = 1,
-  sl_percent = 1,
-  tp_percent = 1,
-  timeExit = 3,
+  price = null,
+
+  balance = null,
+
+  risk_percent = null,
+
+  sl_percent = null,
+
+  tp_percent = null,
+
+  timeExit = null,
+
 }) {
 
   // =========================
   // SAFE NUMBER
   // =========================
 
-  const safeNum = (v) => {
-    if (isNaN(v) || v === null || v === undefined) {
-      return 0;
+  const safeNum = (
+    v
+  ) => {
+
+    if (
+      v === null ||
+      v === undefined
+    ) {
+
+      return null;
+
     }
 
-    return Number(v);
+    const n = Number(v);
+
+    return Number.isFinite(n)
+      ? n
+      : null;
+
   };
 
   // =========================
   // BASE VALUES
   // =========================
 
-  const p = safeNum(price);
+  const p =
+    safeNum(price);
 
-  const bal = safeNum(balance);
+  const bal =
+    safeNum(balance);
+
+  const riskPercent =
+    safeNum(risk_percent);
+
+  const slPercent =
+    safeNum(sl_percent);
+
+  const tpPercent =
+    safeNum(tp_percent);
 
   // =========================
   // CALCULATIONS
   // =========================
 
   const risk =
-    bal * (risk_percent / 100);
+
+    (
+      bal !== null &&
+      riskPercent !== null
+    )
+
+      ? (
+          bal *
+          (
+            riskPercent / 100
+          )
+        )
+
+      : null;
 
   const qty =
-    p > 0
-      ? risk / p
-      : 0;
+
+    (
+      p !== null &&
+      p > 0 &&
+      risk !== null
+    )
+
+      ? (
+          risk / p
+        )
+
+      : null;
 
   const tp =
-    p > 0
-      ? p * (1 + tp_percent / 100)
-      : 0;
+
+    (
+      p !== null &&
+      p > 0 &&
+      tpPercent !== null
+    )
+
+      ? (
+          p * (
+            1 +
+            (
+              tpPercent / 100
+            )
+          )
+        )
+
+      : null;
 
   const sl =
-    p > 0
-      ? p * (1 - sl_percent / 100)
-      : 0;
+
+    (
+      p !== null &&
+      p > 0 &&
+      slPercent !== null
+    )
+
+      ? (
+          p * (
+            1 -
+            (
+              slPercent / 100
+            )
+          )
+        )
+
+      : null;
+
+  const ddAfter =
+    slPercent;
+
+  const positionSize =
+    risk;
 
   // =========================
   // FORMAT
@@ -62,19 +148,25 @@ export default function ResultPanel({
     if (
       num === null ||
       num === undefined ||
-      isNaN(num) ||
-      num === Infinity
+      !Number.isFinite(
+        Number(num)
+      )
     ) {
+
       return "-";
+
     }
 
-    return Number(num).toLocaleString(
-      undefined,
-      {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: digits,
-      }
-    );
+    return Number(num)
+      .toLocaleString(
+        undefined,
+        {
+          minimumFractionDigits: 0,
+          maximumFractionDigits:
+            digits,
+        }
+      );
+
   };
 
   // =========================
@@ -82,105 +174,231 @@ export default function ResultPanel({
   // =========================
 
   const isValid =
-    p > 0 &&
-    bal > 0 &&
-    risk > 0;
+
+    (
+      p !== null &&
+      p > 0 &&
+      bal !== null &&
+      bal > 0 &&
+      risk !== null &&
+      risk > 0
+    );
 
   // =========================
   // UI
   // =========================
 
   return (
-    <div className="execution-status-card">
 
-      {/* POSITION SIZE */}
-      <div className="status-row">
-        <span className="label">
-          Position Size
-        </span>
+    <div className="result-panel">
 
-        <span className="value">
-          {format(risk)} USDT
-        </span>
-      </div>
+      {/* HEADER */}
 
-      {/* QTY */}
-      <div className="status-row">
-        <span className="label">
-          Qty
-        </span>
+      <div className="panel-header">
 
-        <span className="value">
-          {format(qty, 6)}
-        </span>
-      </div>
-
-      {/* RISK AMOUNT */}
-      <div className="status-row">
-        <span className="label">
-          Risk Amount
-        </span>
-
-        <span className="value">
-          {format(risk)} USDT
-        </span>
-      </div>
-
-      {/* TP PRICE */}
-      <div className="status-row">
-        <span className="label">
-          TP Price
-        </span>
-
-        <span className="value">
-          {format(tp, 4)}
-        </span>
-      </div>
-
-      {/* SL PRICE */}
-      <div className="status-row">
-        <span className="label">
-          SL Price
-        </span>
-
-        <span className="value">
-          {format(sl, 4)}
-        </span>
-      </div>
-
-      {/* TIME EXIT */}
-      <div className="status-row">
-        <span className="label">
-          Time Exit
-        </span>
-
-        <span className="value">
-          {timeExit} sec
-        </span>
-      </div>
-
-      {/* STATUS */}
-      <div className="status-row">
-        <span className="label">
-          Status
-        </span>
+        <h3>
+          🟡 Result Monitor
+        </h3>
 
         <span
-          className="value"
-          style={{
-            color: isValid
-              ? "#00ff88"
-              : "#ff4d4f",
+          className={
+            isValid
+              ? "running"
+              : "stopped"
+          }
 
+          style={{
             fontWeight: "bold",
+            fontSize: "12px",
           }}
         >
-          {isValid
-            ? "✅ VALID"
-            : "❌ INVALID"}
+
+          {
+            isValid
+              ? "VALID"
+              : "INVALID"
+          }
+
         </span>
+
+      </div>
+
+      {/* RESULT GRID */}
+
+      <div className="monitor-grid">
+
+        {/* POSITION SIZE */}
+
+        <div className="monitor-item">
+
+          <span>
+            Position Size
+          </span>
+
+          <strong>
+
+            {
+              format(
+                positionSize
+              )
+            } USDT
+
+          </strong>
+
+        </div>
+
+        {/* QTY */}
+
+        <div className="monitor-item">
+
+          <span>
+            Qty
+          </span>
+
+          <strong>
+
+            {
+              format(
+                qty,
+                6
+              )
+            }
+
+          </strong>
+
+        </div>
+
+        {/* RISK */}
+
+        <div className="monitor-item">
+
+          <span>
+            Risk Amount
+          </span>
+
+          <strong>
+
+            {
+              format(
+                risk
+              )
+            } USDT
+
+          </strong>
+
+        </div>
+
+        {/* DD */}
+
+        <div className="monitor-item">
+
+          <span>
+            DD After Trade
+          </span>
+
+          <strong className="warning">
+
+            {
+              format(
+                ddAfter
+              )
+            } %
+
+          </strong>
+
+        </div>
+
+        {/* TP */}
+
+        <div className="monitor-item">
+
+          <span>
+            TP Price
+          </span>
+
+          <strong className="running">
+
+            {
+              format(
+                tp,
+                4
+              )
+            }
+
+          </strong>
+
+        </div>
+
+        {/* SL */}
+
+        <div className="monitor-item">
+
+          <span>
+            SL Price
+          </span>
+
+          <strong className="stopped">
+
+            {
+              format(
+                sl,
+                4
+              )
+            }
+
+          </strong>
+
+        </div>
+
+        {/* TIME EXIT */}
+
+        <div className="monitor-item">
+
+          <span>
+            Time Exit
+          </span>
+
+          <strong>
+
+            {
+              timeExit ??
+              "-"
+            } sec
+
+          </strong>
+
+        </div>
+
+        {/* STATUS */}
+
+        <div className="monitor-item">
+
+          <span>
+            Status
+          </span>
+
+          <strong
+            className={
+              isValid
+                ? "running"
+                : "stopped"
+            }
+          >
+
+            {
+              isValid
+                ? "READY"
+                : "INVALID"
+            }
+
+          </strong>
+
+        </div>
+
       </div>
 
     </div>
+
   );
+
 }

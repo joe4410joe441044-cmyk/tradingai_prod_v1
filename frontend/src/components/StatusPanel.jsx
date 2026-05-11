@@ -1,4 +1,5 @@
 export default function StatusPanel({
+
   balance = 0,
   equity = 0,
   pnl = 0,
@@ -6,15 +7,21 @@ export default function StatusPanel({
 
   currentDD = 0,
   lossStreak = 0,
+
+  riskLevel = "LOW",
+
   killSwitch = false,
   botStatus = "STOPPED",
 
   position = "NONE",
   entryPrice = null,
+
   lastSignal = "-",
   lastBlock = "-",
+
   engineState = "READY",
   connection = "OFFLINE",
+
 }) {
 
   // =========================
@@ -22,13 +29,20 @@ export default function StatusPanel({
   // =========================
 
   const format = (num) => {
-    if (num === null || num === undefined) {
+
+    if (
+      num === null ||
+      num === undefined
+    ) {
       return "-";
     }
 
-    return Number(num).toLocaleString(undefined, {
-      maximumFractionDigits: 4,
-    });
+    return Number(num).toLocaleString(
+      undefined,
+      {
+        maximumFractionDigits: 4,
+      }
+    );
   };
 
   // =========================
@@ -41,7 +55,7 @@ export default function StatusPanel({
       : "#ff4d4f";
 
   const connectionColor =
-    connection === "ONLINE"
+    connection === "CONNECTED"
       ? "#00ff88"
       : "#ff4d4f";
 
@@ -53,6 +67,35 @@ export default function StatusPanel({
   const killSwitchColor =
     killSwitch
       ? "#ff4d4f"
+      : "#facc15";
+
+  const pnlColor =
+    Number(pnl) >= 0
+      ? "#00ff88"
+      : "#ff4d4f";
+
+  const positionColor =
+    position === "BUY"
+      ? "#00ff88"
+      : position === "SELL"
+      ? "#ff4d4f"
+      : "#ccc";
+
+  // =========================
+  // RISK COLOR
+  // =========================
+
+  const riskColor =
+
+    riskLevel === "CRITICAL"
+      ? "#ff0000"
+
+      : riskLevel === "HIGH"
+      ? "#ff4d4f"
+
+      : riskLevel === "MEDIUM"
+      ? "#ffaa00"
+
       : "#00ff88";
 
   // =========================
@@ -60,180 +103,300 @@ export default function StatusPanel({
   // =========================
 
   return (
-    <div className="execution-status-card">
 
-      {/* BALANCE */}
-      <div className="status-row">
-        <span className="label">
-          Balance
-        </span>
+    <div className="panel-section">
 
-        <span className="value">
-          {format(balance)}
-        </span>
+      {/* ========================= */}
+      {/* TITLE */}
+      {/* ========================= */}
+
+      <div className="panel-header">
+
+        <h3>
+          🔵 STATUS
+        </h3>
+
       </div>
 
-      {/* EQUITY */}
-      <div className="status-row">
-        <span className="label">
-          Equity
-        </span>
+      {/* ========================= */}
+      {/* STATUS CARD */}
+      {/* ========================= */}
 
-        <span className="value">
-          {format(equity)}
-        </span>
-      </div>
+      <div className="execution-status-card">
 
-      {/* PNL */}
-      <div className="status-row">
-        <span className="label">
-          PnL
-        </span>
+        {/* BALANCE */}
 
-        <span className="value">
-          {format(pnl)}
-        </span>
-      </div>
+        <div className="status-row">
 
-      {/* PRICE */}
-      <div className="status-row">
-        <span className="label">
-          Price
-        </span>
+          <span className="label">
+            Balance
+          </span>
 
-        <span className="value">
-          {format(price)}
-        </span>
-      </div>
+          <span className="value">
+            {format(balance)}
+          </span>
 
-      {/* POSITION */}
-      <div className="status-row">
-        <span className="label">
-          Position
-        </span>
+        </div>
 
-        <span className="value">
-          {position}
-        </span>
-      </div>
+        {/* EQUITY */}
 
-      {/* ENTRY PRICE */}
-      <div className="status-row">
-        <span className="label">
-          Entry Price
-        </span>
+        <div className="status-row">
 
-        <span className="value">
-          {entryPrice ? format(entryPrice) : "-"}
-        </span>
-      </div>
+          <span className="label">
+            Equity
+          </span>
 
-      {/* CURRENT DD */}
-      <div className="status-row">
-        <span className="label">
-          Current DD
-        </span>
+          <span className="value">
+            {format(equity)}
+          </span>
 
-        <span className="value">
-          {format(currentDD)}%
-        </span>
-      </div>
+        </div>
 
-      {/* LOSS STREAK */}
-      <div className="status-row">
-        <span className="label">
-          Loss Streak
-        </span>
+        {/* PNL */}
 
-        <span className="value">
-          {lossStreak ?? "-"}
-        </span>
-      </div>
+        <div className="status-row">
 
-      {/* LAST SIGNAL */}
-      <div className="status-row">
-        <span className="label">
-          Last Signal
-        </span>
+          <span className="label">
+            PnL
+          </span>
 
-        <span className="value">
-          {lastSignal}
-        </span>
-      </div>
+          <span
+            className="value"
+            style={{
+              color: pnlColor,
+            }}
+          >
+            {format(pnl)}
+          </span>
 
-      {/* LAST BLOCK */}
-      <div className="status-row">
-        <span className="label">
-          Last Block
-        </span>
+        </div>
 
-        <span className="value">
-          {lastBlock}
-        </span>
-      </div>
+        {/* PRICE */}
 
-      {/* ENGINE STATE */}
-      <div className="status-row">
-        <span className="label">
-          Engine State
-        </span>
+        <div className="status-row">
 
-        <span
-          className="value"
-          style={{
-            color: engineColor,
-          }}
-        >
-          {engineState}
-        </span>
-      </div>
+          <span className="label">
+            Price
+          </span>
 
-      {/* KILL SWITCH */}
-      <div className="status-row">
-        <span className="label">
-          Kill Switch
-        </span>
+          <span className="value">
+            {format(price)}
+          </span>
 
-        <span
-          className="value"
-          style={{
-            color: killSwitchColor,
-          }}
-        >
-          {killSwitch ? "ON" : "OFF"}
-        </span>
-      </div>
+        </div>
 
-      {/* BOT STATUS */}
-      <div className="status-row">
-        <span className="label">
-          Bot Status
-        </span>
+        {/* POSITION */}
 
-        <span
-          className="value"
-          style={{
-            color: statusColor,
-          }}
-        >
-          {botStatus}
-        </span>
-      </div>
+        <div className="status-row">
 
-      {/* CONNECTION */}
-      <div className="status-row">
-        <span className="label">
-          Connection
-        </span>
+          <span className="label">
+            Position
+          </span>
 
-        <span
-          className="value"
-          style={{
-            color: connectionColor,
-          }}
-        >
-          {connection}
-        </span>
+          <span
+            className="value"
+            style={{
+              color: positionColor,
+            }}
+          >
+            {position?.side || "NONE"}
+          </span>
+
+        </div>
+
+        {/* ENTRY PRICE */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Entry Price
+          </span>
+
+          <span className="value">
+
+            {
+              entryPrice
+                ? format(entryPrice)
+                : "-"
+            }
+
+          </span>
+
+        </div>
+
+        {/* CURRENT DD */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Current DD
+          </span>
+
+          <span className="value">
+
+            {format(currentDD)}%
+
+          </span>
+
+        </div>
+
+        {/* LOSS STREAK */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Loss Streak
+          </span>
+
+          <span className="value">
+
+            {lossStreak ?? 0}
+
+          </span>
+
+        </div>
+
+        {/* RISK LEVEL */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Risk Level
+          </span>
+
+          <span
+            className="value"
+            style={{
+              color: riskColor,
+            }}
+          >
+
+            {riskLevel}
+
+          </span>
+
+        </div>
+
+        {/* LAST SIGNAL */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Last Signal
+          </span>
+
+          <span className="value">
+
+            {lastSignal || "-"}
+
+          </span>
+
+        </div>
+
+        {/* LAST BLOCK */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Last Block
+          </span>
+
+          <span className="value">
+
+            {lastBlock || "-"}
+
+          </span>
+
+        </div>
+
+        {/* ENGINE STATE */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Engine State
+          </span>
+
+          <span
+            className="value"
+            style={{
+              color: engineColor,
+            }}
+          >
+
+            {engineState || "READY"}
+
+          </span>
+
+        </div>
+
+        {/* KILL SWITCH */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Kill Switch
+          </span>
+
+          <span
+            className="value"
+            style={{
+              color: killSwitchColor,
+            }}
+          >
+
+            {
+              killSwitch
+                ? "ACTIVE"
+                : "SAFE"
+            }
+
+          </span>
+
+        </div>
+
+        {/* BOT STATUS */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Bot Status
+          </span>
+
+          <span
+            className="value"
+            style={{
+              color: statusColor,
+            }}
+          >
+
+            {botStatus}
+
+          </span>
+
+        </div>
+
+        {/* CONNECTION */}
+
+        <div className="status-row">
+
+          <span className="label">
+            Connection
+          </span>
+
+          <span
+            className="value"
+            style={{
+              color: connectionColor,
+            }}
+          >
+
+            {connection}
+
+          </span>
+
+        </div>
+
       </div>
 
     </div>

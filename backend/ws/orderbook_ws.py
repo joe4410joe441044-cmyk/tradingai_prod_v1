@@ -3,6 +3,7 @@
 import websocket
 import json
 import threading
+import time
 
 
 class OrderBookWS:
@@ -19,6 +20,18 @@ class OrderBookWS:
         self.on_update = on_update
 
         self.ws = None
+
+        self.last_price = 0.0
+
+        self.best_bid = 0.0
+
+        self.best_ask = 0.0
+
+        self.spread = 0.0
+
+        self.connected = False
+
+        self.running = False
 
     # =========================
     # MESSAGE
@@ -43,6 +56,46 @@ class OrderBookWS:
                 f"ASKS={len(asks)}"
             )
 
+            if bids and asks:
+
+                self.best_bid = float(
+                    bids[0][0]
+                )
+
+                self.best_ask = float(
+                    asks[0][0]
+                )
+
+                self.spread = (
+                    self.best_ask
+                    - self.best_bid
+                )
+
+                self.last_price = (
+                    self.best_bid
+                    + self.best_ask
+                ) / 2
+
+                print(
+                    f"💰 BEST BID: "
+                    f"{self.best_bid}"
+                )
+
+                print(
+                    f"💰 BEST ASK: "
+                    f"{self.best_ask}"
+                )
+
+                print(
+                    f"💰 SPREAD: "
+                    f"{self.spread}"
+                )
+
+                print(
+                    f"💰 MID PRICE: "
+                    f"{self.last_price}"
+                )
+
             # BOTへ渡す
             self.on_update(
                 bids,
@@ -61,6 +114,8 @@ class OrderBookWS:
 
     def on_open(self, ws):
 
+        self.connected = True
+
         print(
             f"🟢 ORDERBOOK WS CONNECTED: "
             f"{self.symbol}"
@@ -77,8 +132,20 @@ class OrderBookWS:
         close_msg,
     ):
 
+        self.connected = False
+
         print(
             "🔴 ORDERBOOK WS CLOSED"
+        )
+
+        print(
+            f"🔴 CLOSE STATUS: "
+            f"{close_status_code}"
+        )
+
+        print(
+            f"🔴 CLOSE MESSAGE: "
+            f"{close_msg}"
         )
 
     # =========================
@@ -86,6 +153,8 @@ class OrderBookWS:
     # =========================
 
     def on_error(self, ws, error):
+
+        self.connected = False
 
         print(
             f"❌ ORDERBOOK WS ERROR: "
@@ -98,51 +167,65 @@ class OrderBookWS:
 
     def start(self):
 
+        self.running = True
+
         def run():
 
-            try:
+            while self.running:
 
-                print(
-                    f"🚀 CONNECT URL: "
-                    f"{self.url}"
-                )
+                try:
 
-                print(
-                    "🚀 RUN_FOREVER START"
-                )
-
-                self.ws = (
-                    websocket.WebSocketApp(
-                        self.url,
-
-                        on_message=(
-                            self.on_message
-                        ),
-
-                        on_open=(
-                            self.on_open
-                        ),
-
-                        on_close=(
-                            self.on_close
-                        ),
-
-                        on_error=(
-                            self.on_error
-                        ),
+                    print(
+                        f"🚀 CONNECT URL: "
+                        f"{self.url}"
                     )
-                )
 
-                self.ws.run_forever()
+                    print(
+                        "🚀 RUN_FOREVER START"
+                    )
 
-            except Exception as e:
+                    self.ws = (
+                        websocket.WebSocketApp(
+                            self.url,
+
+                            on_message=(
+                                self.on_message
+                            ),
+
+                            on_open=(
+                                self.on_open
+                            ),
+
+                            on_close=(
+                                self.on_close
+                            ),
+
+                            on_error=(
+                                self.on_error
+                            ),
+                        )
+                    )
+
+                    self.ws.run_forever(
+                        ping_interval=20,
+                        ping_timeout=10,
+                    )
+
+                except Exception as e:
+
+                    print(
+                        f"❌ WS THREAD ERROR: {e}"
+                    )
 
                 print(
-                    f"❌ WS THREAD ERROR: {e}"
+                    "♻️ RECONNECT IN 5 SEC"
                 )
+
+                time.sleep(5)
 
         threading.Thread(
-            target=run
+            target=run,
+            daemon=True
         ).start()
 
     # =========================
@@ -150,6 +233,8 @@ class OrderBookWS:
     # =========================
 
     def stop(self):
+
+        self.running = False
 
         if self.ws:
 

@@ -7,7 +7,7 @@ export default function useWebSocket() {
   useEffect(() => {
 
     // ✅ URLを先に定義
-    const wsUrl = `${window.location.origin.replace("http", "ws")}/ws/`;
+    const wsUrl = "ws://35.194.104.74:8001/ws";
 
     console.log("🌐 WS CONNECT:", wsUrl);
 

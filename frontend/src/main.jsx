@@ -14,8 +14,6 @@ if (!rootElement) {
   console.error("Root element (#root) not found in index.html");
 } else {
   ReactDOM.createRoot(rootElement).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
+    <App />
   );
 }
