@@ -3,7 +3,7 @@
 import os
 from dotenv import load_dotenv
 from backend.bot_manager import get_bot_manager
-from backend.binance_client import BinanceClient
+from backend.binance_rest_client import BinanceClient
 
 # =========================
 # 🔧 .env 読み込み
