@@ -10,6 +10,14 @@ export default function StatusStrip({
     latency = "--",
 
     executionState = "DISABLED",
+
+    pipelineStatus = "WAIT",
+
+    loopCount = 0,
+
+    session = "LOCAL",
+
+    version = "V2",
 }) {
 
 
@@ -155,6 +163,70 @@ export default function StatusStrip({
                             : "無効"
                     }
 
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* PIPELINE */}
+            {/* ============================================= */}
+
+            <div className="status-item">
+
+                <span className="status-label">
+                    PIPELINE
+                </span>
+
+                <span className="status-value warning">
+                    {pipelineStatus}
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* LOOPS */}
+            {/* ============================================= */}
+
+            <div className="status-item">
+
+                <span className="status-label">
+                    LOOPS
+                </span>
+
+                <span className="status-value">
+                    {loopCount}
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* SESSION */}
+            {/* ============================================= */}
+
+            <div className="status-item">
+
+                <span className="status-label">
+                    SESSION
+                </span>
+
+                <span className="status-value online">
+                    {session}
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* VERSION */}
+            {/* ============================================= */}
+
+            <div className="status-item">
+
+                <span className="status-label">
+                    VERSION
+                </span>
+
+                <span className="status-value">
+                    {version}
                 </span>
 
             </div>
