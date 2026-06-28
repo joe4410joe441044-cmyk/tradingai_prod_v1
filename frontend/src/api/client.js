@@ -56,7 +56,7 @@ export const getStatus = () => {
 
 // --------------------------
 // Bot Control（注意付き）
-– -------------------------
+// --------------------------
 
 export const startBot = () => {
   console.warn("[DEPRECATED] startBot - consider using fetch(API.botStart())");
@@ -70,7 +70,7 @@ export const stopBot = () => {
 
 // --------------------------
 // default export（非推奨）
-– -------------------------
+// ------------------------
 
 export default {
   getPrice,

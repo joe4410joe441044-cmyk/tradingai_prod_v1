@@ -1,404 +1,363 @@
+import React from "react";
+
+/* =========================================================
+   CENTER TERMINAL PNL MONITOR
+========================================================= */
+
 export default function ResultPanel({
 
-  price = null,
+    balance = 0,
 
-  balance = null,
+    equity = 0,
 
-  risk_percent = null,
+    pnl = 0,
 
-  sl_percent = null,
+    dayPnl = null,
 
-  tp_percent = null,
+    drawdown = null,
 
-  timeExit = null,
+    slippage = null,
+
+    margin = null,
+
+    position = "NONE",
+
+    marketRegime = "NEUTRAL",
+
+    routingQuality = "UNKNOWN",
+
+    marketHostility = 0,
 
 }) {
 
-  // =========================
-  // SAFE NUMBER
-  // =========================
+    const roi =
+        equity > 0
+            ? (
+                (
+                    pnl /
+                    equity
+                ) * 100
+            ).toFixed(2)
+            : "0.00";
 
-  const safeNum = (
-    v
-  ) => {
+    return (
 
-    if (
-      v === null ||
-      v === undefined
-    ) {
+        <div className="terminal-monitor-section">
 
-      return null;
+            {/* =============================================
+               SECTION HEADER
+            ============================================= */}
 
-    }
+            <div className="terminal-section-header">
+                1 | PNL
+            </div>
 
-    const n = Number(v);
+            {/* =============================================
+               TELEMETRY GRID
+            ============================================= */}
 
-    return Number.isFinite(n)
-      ? n
-      : null;
+            <div className="result-telemetry-grid">
 
-  };
+                {/* =============================================
+                   BALANCE
+                ============================================= */}
 
-  // =========================
-  // BASE VALUES
-  // =========================
+                <div className="telemetry-cell">
 
-  const p =
-    safeNum(price);
+                    <div className="telemetry-label">
+                        BAL / 残高
+                    </div>
 
-  const bal =
-    safeNum(balance);
+                    <div className="telemetry-value terminal-green">
 
-  const riskPercent =
-    safeNum(risk_percent);
+                        {
+                            Number(
+                                balance || 0
+                            ).toLocaleString(
+                                undefined,
+                                {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                }
+                            )
+                        }
 
-  const slPercent =
-    safeNum(sl_percent);
+                    </div>
 
-  const tpPercent =
-    safeNum(tp_percent);
+                </div>
 
-  // =========================
-  // CALCULATIONS
-  // =========================
+                {/* =============================================
+                   EQUITY
+                ============================================= */}
 
-  const risk =
+                <div className="telemetry-cell">
 
-    (
-      bal !== null &&
-      riskPercent !== null
-    )
+                    <div className="telemetry-label">
+                        EQ / 有効資産
+                    </div>
 
-      ? (
-          bal *
-          (
-            riskPercent / 100
-          )
-        )
+                    <div className="telemetry-value terminal-green">
 
-      : null;
+                        {
+                            Number(
+                                equity || 0
+                            ).toLocaleString(
+                                undefined,
+                                {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                }
+                            )
+                        }
 
-  const qty =
+                    </div>
 
-    (
-      p !== null &&
-      p > 0 &&
-      risk !== null
-    )
+                </div>
 
-      ? (
-          risk / p
-        )
+                {/* =============================================
+                   PNL
+                ============================================= */}
 
-      : null;
+                <div className="telemetry-cell">
 
-  const tp =
+                    <div className="telemetry-label">
+                        PNL / 損益
+                    </div>
 
-    (
-      p !== null &&
-      p > 0 &&
-      tpPercent !== null
-    )
+                    <div
+                        className={
+                            pnl >= 0
+                                ? "telemetry-value terminal-green"
+                                : "telemetry-value terminal-red"
+                        }
+                    >
 
-      ? (
-          p * (
-            1 +
-            (
-              tpPercent / 100
-            )
-          )
-        )
+                        {
+                            pnl >= 0
+                                ? "+"
+                                : ""
+                        }
 
-      : null;
+                        {
+                            Number(
+                                pnl || 0
+                            ).toFixed(2)
+                        }
 
-  const sl =
+                    </div>
 
-    (
-      p !== null &&
-      p > 0 &&
-      slPercent !== null
-    )
+                </div>
 
-      ? (
-          p * (
-            1 -
-            (
-              slPercent / 100
-            )
-          )
-        )
+                {/* =============================================
+                   DAY
+                ============================================= */}
 
-      : null;
+                <div className="telemetry-cell">
 
-  const ddAfter =
-    slPercent;
+                    <div className="telemetry-label">
+                        DAY / 日次
+                    </div>
 
-  const positionSize =
-    risk;
+                    <div className="telemetry-value">
 
-  // =========================
-  // FORMAT
-  // =========================
+                        {
+                            dayPnl !== null &&
+                            dayPnl !== undefined
+                                ? Number(dayPnl).toFixed(2)
+                                : "NO DATA"
+                        }
 
-  const format = (
-    num,
-    digits = 2
-  ) => {
+                    </div>
 
-    if (
-      num === null ||
-      num === undefined ||
-      !Number.isFinite(
-        Number(num)
-      )
-    ) {
+                </div>
 
-      return "-";
+                {/* =============================================
+                   ROI
+                ============================================= */}
 
-    }
+                <div className="telemetry-cell">
 
-    return Number(num)
-      .toLocaleString(
-        undefined,
-        {
-          minimumFractionDigits: 0,
-          maximumFractionDigits:
-            digits,
-        }
-      );
+                    <div className="telemetry-label">
+                        ROI / 利益率
+                    </div>
 
-  };
+                    <div
+                        className={
+                            Number(roi) >= 0
+                                ? "telemetry-value terminal-green"
+                                : "telemetry-value terminal-red"
+                        }
+                    >
 
-  // =========================
-  // VALIDATION
-  // =========================
+                        {
+                            Number(roi) >= 0
+                                ? "+"
+                                : ""
+                        }
 
-  const isValid =
+                        {roi}%
 
-    (
-      p !== null &&
-      p > 0 &&
-      bal !== null &&
-      bal > 0 &&
-      risk !== null &&
-      risk > 0
+                    </div>
+
+                </div>
+
+                {/* =============================================
+                   DRAWDOWN
+                ============================================= */}
+
+                <div className="telemetry-cell">
+
+                    <div className="telemetry-label">
+                        DD / 最大損失
+                    </div>
+
+                    <div className="telemetry-value">
+
+                        {
+                            drawdown !== null &&
+                            drawdown !== undefined
+                                ? `${Number(drawdown).toFixed(2)}%`
+                                : "NO DATA"
+                        }
+
+                    </div>
+
+                </div>
+
+                {/* =============================================
+                   POSITION
+                ============================================= */}
+
+                <div className="telemetry-cell">
+
+                    <div className="telemetry-label">
+                        POS
+                    </div>
+
+                    <div className="telemetry-value">
+
+                        {position}
+
+                    </div>
+
+                </div>
+
+                {/* =============================================
+                   MARGIN
+                ============================================= */}
+
+                <div className="telemetry-cell">
+
+                    <div className="telemetry-label">
+                        MGN / 使用証拠金
+                    </div>
+
+                    <div className="telemetry-value">
+
+                        {
+                            margin !== null &&
+                            margin !== undefined
+                                ? Number(margin).toFixed(2)
+                                : "NO DATA"
+                        }
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            {/* =============================================
+               ROUTING / QUALITY
+            ============================================= */}
+
+            <div className="terminal-monitor-section">
+
+                <div className="terminal-section-header">
+                    3 | ROUTING
+                </div>
+
+                <div className="result-telemetry-grid">
+
+                    <div className="telemetry-cell">
+
+                        <div className="telemetry-label">
+                            ROUTE / 経路品質
+                        </div>
+
+                        <div className="telemetry-value terminal-yellow">
+
+                            {routingQuality}
+
+                        </div>
+
+                    </div>
+
+                    <div className="telemetry-cell">
+
+                        <div className="telemetry-label">
+                            LAT / 遅延
+                        </div>
+
+                        <div className="telemetry-value terminal-yellow">
+                            UNK
+                        </div>
+
+                    </div>
+
+                    <div className="telemetry-cell">
+
+                        <div className="telemetry-label">
+                            SLIP / 滑り
+                        </div>
+
+                        <div className="telemetry-value">
+
+                            {
+                                slippage !== null &&
+                                slippage !== undefined
+                                    ? `${Number(slippage).toFixed(2)}%`
+                                    : "NO DATA"
+                            }
+
+                        </div>
+
+                    </div>
+
+                    <div className="telemetry-cell">
+
+                        <div className="telemetry-label">
+                            MICRO / 微細構造
+                        </div>
+
+                        <div className="telemetry-value">
+
+                            {marketRegime}
+
+                        </div>
+
+                    </div>
+
+                    <div className="telemetry-cell">
+
+                        <div className="telemetry-label">
+                            HOSTILE / 市場敵対度
+                        </div>
+
+                        <div className="telemetry-value terminal-green">
+
+                            {marketHostility}
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
     );
-
-  // =========================
-  // UI
-  // =========================
-
-  return (
-
-    <div className="result-panel">
-
-      {/* HEADER */}
-
-      <div className="panel-header">
-
-        <h3>
-          🟡 Result Monitor
-        </h3>
-
-        <span
-          className={
-            isValid
-              ? "running"
-              : "stopped"
-          }
-
-          style={{
-            fontWeight: "bold",
-            fontSize: "12px",
-          }}
-        >
-
-          {
-            isValid
-              ? "VALID"
-              : "INVALID"
-          }
-
-        </span>
-
-      </div>
-
-      {/* RESULT GRID */}
-
-      <div className="monitor-grid">
-
-        {/* POSITION SIZE */}
-
-        <div className="monitor-item">
-
-          <span>
-            Position Size
-          </span>
-
-          <strong>
-
-            {
-              format(
-                positionSize
-              )
-            } USDT
-
-          </strong>
-
-        </div>
-
-        {/* QTY */}
-
-        <div className="monitor-item">
-
-          <span>
-            Qty
-          </span>
-
-          <strong>
-
-            {
-              format(
-                qty,
-                6
-              )
-            }
-
-          </strong>
-
-        </div>
-
-        {/* RISK */}
-
-        <div className="monitor-item">
-
-          <span>
-            Risk Amount
-          </span>
-
-          <strong>
-
-            {
-              format(
-                risk
-              )
-            } USDT
-
-          </strong>
-
-        </div>
-
-        {/* DD */}
-
-        <div className="monitor-item">
-
-          <span>
-            DD After Trade
-          </span>
-
-          <strong className="warning">
-
-            {
-              format(
-                ddAfter
-              )
-            } %
-
-          </strong>
-
-        </div>
-
-        {/* TP */}
-
-        <div className="monitor-item">
-
-          <span>
-            TP Price
-          </span>
-
-          <strong className="running">
-
-            {
-              format(
-                tp,
-                4
-              )
-            }
-
-          </strong>
-
-        </div>
-
-        {/* SL */}
-
-        <div className="monitor-item">
-
-          <span>
-            SL Price
-          </span>
-
-          <strong className="stopped">
-
-            {
-              format(
-                sl,
-                4
-              )
-            }
-
-          </strong>
-
-        </div>
-
-        {/* TIME EXIT */}
-
-        <div className="monitor-item">
-
-          <span>
-            Time Exit
-          </span>
-
-          <strong>
-
-            {
-              timeExit ??
-              "-"
-            } sec
-
-          </strong>
-
-        </div>
-
-        {/* STATUS */}
-
-        <div className="monitor-item">
-
-          <span>
-            Status
-          </span>
-
-          <strong
-            className={
-              isValid
-                ? "running"
-                : "stopped"
-            }
-          >
-
-            {
-              isValid
-                ? "READY"
-                : "INVALID"
-            }
-
-          </strong>
-
-        </div>
-
-      </div>
-
-    </div>
-
-  );
 
 }

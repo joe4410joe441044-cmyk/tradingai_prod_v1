@@ -1,404 +1,505 @@
-export default function StatusPanel({
+import {
+    telemetryState,
+} from "../store/telemetryStore";
 
-  balance = 0,
-  equity = 0,
-  pnl = 0,
-  price = 0,
+/* =================================================
+   STATUS PANEL
+================================================= */
 
-  currentDD = 0,
-  lossStreak = 0,
+const StatusPanel = () => {
 
-  riskLevel = "LOW",
+    /* =================================================
+       TELEMETRY STORE
+    ================================================= */
 
-  killSwitch = false,
-  botStatus = "STOPPED",
+    const governance =
+        telemetryState.governance || {};
 
-  position = "NONE",
-  entryPrice = null,
+    const runtime =
+        telemetryState.runtime || {};
 
-  lastSignal = "-",
-  lastBlock = "-",
+    const router =
+        telemetryState.router || {};
 
-  engineState = "READY",
-  connection = "OFFLINE",
+    const cognition =
+        telemetryState.cognition || {};
 
-}) {
+    const market =
+        telemetryState.market || {};
 
-  // =========================
-  // FORMAT
-  // =========================
+    const microstructure =
+        telemetryState.microstructure || {};
 
-  const format = (num) => {
+    const risk =
+        telemetryState.risk || {};
 
-    if (
-      num === null ||
-      num === undefined
-    ) {
-      return "-";
-    }
+    /* =================================================
+       RUNTIME SNAPSHOT
+    ================================================= */
 
-    return Number(num).toLocaleString(
-      undefined,
-      {
-        maximumFractionDigits: 4,
-      }
+    const mode =
+        governance.mode || "PAPER";
+
+    const runtimePhase =
+        runtime.runtimePhase
+        || "UNKNOWN";
+
+    const wsConnected =
+        runtime.websocketConnected === true;
+
+    const apiConnected =
+        runtime.apiConnected === true;
+
+    const websocketHealth =
+        runtime.websocketHealth ?? "--";
+
+    const latency =
+        runtime.latency ?? "-";
+
+    const uptime =
+        runtime.uptime ?? "-";
+
+    const routerStatus =
+        router.status || "UNKNOWN";
+
+    const routerRoute =
+        router.route || "UNKNOWN";
+
+    const routerBelief =
+        cognition.routerBelief
+        || "NO DATA";
+
+    const marketBelief =
+        cognition.marketBelief
+        || "NO DATA";
+
+    const cognitionStability =
+        cognition.cognitionStability
+        ?? "--";
+
+    const marketRegime =
+        market.marketRegime
+        || "NO DATA";
+
+    const marketHostility =
+        market.marketHostility
+        ?? "--";
+
+    const survivability =
+        risk.survivability
+        ?? "--";
+
+    const restrictionReason =
+        risk.restrictionReason
+        || "NO DATA";
+
+    const tickMomentum =
+        microstructure.tickMomentum
+        || "NO DATA";
+
+    const orderFlowBias =
+        microstructure.orderFlowBias
+        || "NO DATA";
+
+    /* =================================================
+       PANEL
+    ================================================= */
+
+    return (
+    <>
+
+            <div className="compact-row">
+
+                <span>
+                    MODE
+                </span>
+
+                <span
+                    className={
+                        mode === "LIVE"
+                            ? "danger"
+                            : "neutral"
+                    }
+                >
+
+                    {mode}
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    RUNTIME
+                </span>
+
+                <span
+                className="neutral"
+                >
+
+                    {
+                        runtimePhase
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    ROUTER
+                </span>
+
+                <span
+                className="neutral"
+                >
+
+                    {
+                        routerStatus
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    ROUTE
+                </span>
+
+                <span className="warning">
+
+                    {
+                        routerRoute
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    ROUTER BELIEF
+                </span>
+
+                <span>
+
+                    {
+                        routerBelief
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    MARKET BELIEF
+                </span>
+
+                <span>
+
+                    {
+                        marketBelief
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    MARKET REGIME
+                </span>
+
+                <span>
+
+                    {
+                        marketRegime
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    HOSTILITY
+                </span>
+
+                <span className={
+                    typeof marketHostility === "number"
+                    && marketHostility > 0.7
+                        ? "danger"
+                        : typeof marketHostility === "number"
+                        && marketHostility > 0.4
+                            ? "warning"
+                            : "neutral"
+                }>
+
+                    {
+                        marketHostility
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    SURVIVABILITY
+                </span>
+
+                <span className={
+                    typeof survivability === "number"
+                    && survivability < 0.4
+                        ? "danger"
+                        : typeof survivability === "number"
+                        && survivability < 0.7
+                            ? "warning"
+                            : "neutral"
+                }>
+
+                    {
+                        survivability
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    STABILITY
+                </span>
+
+                <span className={
+                    typeof cognitionStability === "number"
+                    && cognitionStability < 0.4
+                        ? "danger"
+                        : typeof cognitionStability === "number"
+                        && cognitionStability < 0.7
+                            ? "warning"
+                            : "neutral"
+                }>
+
+                    {
+                        cognitionStability
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    MOMENTUM
+                </span>
+
+                <span>
+
+                    {
+                        tickMomentum
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    ORDER FLOW
+                </span>
+
+                <span>
+
+                    {
+                        orderFlowBias
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    WS
+                </span>
+
+            <span
+                className={
+
+                    typeof wsConnected === "boolean"
+                        ? wsConnected
+                            ? "online"
+                            : "warning"
+                        : "neutral"
+
+                }
+            >
+
+                {
+
+                    typeof wsConnected === "boolean"
+                        ? wsConnected
+                            ? "CONNECTED"
+                            : "DISCONNECTED"
+                        : "--"
+
+                }
+
+            </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    API
+                </span>
+
+                <span
+                    className={
+
+                        typeof apiConnected === "boolean"
+                            ? apiConnected
+                                ? "online"
+                                : "warning"
+                            : "neutral"
+
+                    }
+                >
+
+                    {
+
+                        typeof apiConnected === "boolean"
+                            ? apiConnected
+                                ? "CONNECTED"
+                                : "DISCONNECTED"
+                            : "--"
+
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    WS HEALTH
+                </span>
+
+                <span className={
+
+                    typeof websocketHealth === "number"
+                        ? websocketHealth < 40
+                            ? "danger"
+                            : websocketHealth < 70
+                                ? "warning"
+                                : "neutral"
+                        : "neutral"
+
+                }>
+
+                    {
+
+                        typeof websocketHealth === "number"
+                            ? websocketHealth
+                            : "--"
+
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    LATENCY
+                </span>
+
+                <span className={
+
+                    typeof latency === "number"
+                        ? latency > 120
+                            ? "danger"
+                            : latency > 50
+                                ? "warning"
+                                : "neutral"
+                        : "neutral"
+
+                }>
+
+                    {
+
+                        typeof latency === "number"
+                            ? latency
+                            : "--"
+
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    UPTIME
+                </span>
+
+                <span>
+
+                    {
+                        uptime
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    RESTRICTION
+                </span>
+
+                <span
+                    className={
+                        typeof restrictionReason === "string"
+                            ? restrictionReason !== "NO DATA"
+                                ? "danger"
+                                : "neutral"
+                            : "neutral"
+                    }
+                >
+                    {
+                        typeof restrictionReason === "string"
+                            ? restrictionReason
+                            : "--"
+                    }
+                </span>
+
+            </div>
+
+        </>
+
     );
-  };
 
-  // =========================
-  // COLORS
-  // =========================
+};
 
-  const statusColor =
-    botStatus === "RUNNING"
-      ? "#00ff88"
-      : "#ff4d4f";
-
-  const connectionColor =
-    connection === "CONNECTED"
-      ? "#00ff88"
-      : "#ff4d4f";
-
-  const engineColor =
-    engineState === "READY"
-      ? "#00ff88"
-      : "#ffaa00";
-
-  const killSwitchColor =
-    killSwitch
-      ? "#ff4d4f"
-      : "#facc15";
-
-  const pnlColor =
-    Number(pnl) >= 0
-      ? "#00ff88"
-      : "#ff4d4f";
-
-  const positionColor =
-    position === "BUY"
-      ? "#00ff88"
-      : position === "SELL"
-      ? "#ff4d4f"
-      : "#ccc";
-
-  // =========================
-  // RISK COLOR
-  // =========================
-
-  const riskColor =
-
-    riskLevel === "CRITICAL"
-      ? "#ff0000"
-
-      : riskLevel === "HIGH"
-      ? "#ff4d4f"
-
-      : riskLevel === "MEDIUM"
-      ? "#ffaa00"
-
-      : "#00ff88";
-
-  // =========================
-  // UI
-  // =========================
-
-  return (
-
-    <div className="panel-section">
-
-      {/* ========================= */}
-      {/* TITLE */}
-      {/* ========================= */}
-
-      <div className="panel-header">
-
-        <h3>
-          🔵 STATUS
-        </h3>
-
-      </div>
-
-      {/* ========================= */}
-      {/* STATUS CARD */}
-      {/* ========================= */}
-
-      <div className="execution-status-card">
-
-        {/* BALANCE */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Balance
-          </span>
-
-          <span className="value">
-            {format(balance)}
-          </span>
-
-        </div>
-
-        {/* EQUITY */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Equity
-          </span>
-
-          <span className="value">
-            {format(equity)}
-          </span>
-
-        </div>
-
-        {/* PNL */}
-
-        <div className="status-row">
-
-          <span className="label">
-            PnL
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: pnlColor,
-            }}
-          >
-            {format(pnl)}
-          </span>
-
-        </div>
-
-        {/* PRICE */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Price
-          </span>
-
-          <span className="value">
-            {format(price)}
-          </span>
-
-        </div>
-
-        {/* POSITION */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Position
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: positionColor,
-            }}
-          >
-            {position?.side || "NONE"}
-          </span>
-
-        </div>
-
-        {/* ENTRY PRICE */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Entry Price
-          </span>
-
-          <span className="value">
-
-            {
-              entryPrice
-                ? format(entryPrice)
-                : "-"
-            }
-
-          </span>
-
-        </div>
-
-        {/* CURRENT DD */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Current DD
-          </span>
-
-          <span className="value">
-
-            {format(currentDD)}%
-
-          </span>
-
-        </div>
-
-        {/* LOSS STREAK */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Loss Streak
-          </span>
-
-          <span className="value">
-
-            {lossStreak ?? 0}
-
-          </span>
-
-        </div>
-
-        {/* RISK LEVEL */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Risk Level
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: riskColor,
-            }}
-          >
-
-            {riskLevel}
-
-          </span>
-
-        </div>
-
-        {/* LAST SIGNAL */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Last Signal
-          </span>
-
-          <span className="value">
-
-            {lastSignal || "-"}
-
-          </span>
-
-        </div>
-
-        {/* LAST BLOCK */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Last Block
-          </span>
-
-          <span className="value">
-
-            {lastBlock || "-"}
-
-          </span>
-
-        </div>
-
-        {/* ENGINE STATE */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Engine State
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: engineColor,
-            }}
-          >
-
-            {engineState || "READY"}
-
-          </span>
-
-        </div>
-
-        {/* KILL SWITCH */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Kill Switch
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: killSwitchColor,
-            }}
-          >
-
-            {
-              killSwitch
-                ? "ACTIVE"
-                : "SAFE"
-            }
-
-          </span>
-
-        </div>
-
-        {/* BOT STATUS */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Bot Status
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: statusColor,
-            }}
-          >
-
-            {botStatus}
-
-          </span>
-
-        </div>
-
-        {/* CONNECTION */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Connection
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: connectionColor,
-            }}
-          >
-
-            {connection}
-
-          </span>
-
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
+export default StatusPanel;

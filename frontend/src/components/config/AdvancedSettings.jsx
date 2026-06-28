@@ -1,142 +1,280 @@
 export default function AdvancedSettings({
 
-  config = {},
-  setConfig = () => {},
+    config = {},
+    setConfig = () => {},
 
 }) {
 
-  return (
+    /* =====================================================
+       UPDATE
+    ===================================================== */
 
-    <div className="panel-section">
+    const update = (
+        key,
+        value
+    ) => {
 
-      <h3>📦 Advanced</h3>
+        setConfig({
 
-      {/* DRY RUN */}
+            ...config,
 
-      <div className="form-group">
+            [key]: value,
 
-        <label>Dry Run</label>
+        });
 
-        <select
-          value={
-            config.dry_run || "ON"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              dry_run:
-                e.target.value,
-            })
-          }
-        >
+    };
 
-          <option>ON</option>
-          <option>OFF</option>
+    /* =====================================================
+       STATUS
+    ===================================================== */
 
-        </select>
+    const dryRun =
+        config.dry_run || "ON";
 
-      </div>
+    const partialTP =
+        config.partial_tp || "OFF";
 
-      {/* PARTIAL TP */}
+    const breakEven =
+        config.break_even || "OFF";
 
-      <div className="form-group">
+    const trailingStop =
+        config.trailing_stop || "OFF";
 
-        <label>Partial TP</label>
+    const timeLock =
+        config.time_lock || 3;
 
-        <select
-          value={
-            config.partial_tp || "OFF"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              partial_tp:
-                e.target.value,
-            })
-          }
-        >
+    /* =====================================================
+       UI
+    ===================================================== */
 
-          <option>OFF</option>
-          <option>ON</option>
+    return (
 
-        </select>
+        <>
 
-      </div>
+            {/* ============================================= */}
+            {/* ADVANCED MODE */}
+            {/* ============================================= */}
 
-      {/* BREAK EVEN */}
+            <div className="compact-row">
 
-      <div className="form-group">
+                <span>
+                    ADVANCED
+                </span>
 
-        <label>Break Even</label>
+                <span className="warning">
+                    ENABLED
+                </span>
 
-        <select
-          value={
-            config.break_even || "OFF"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              break_even:
-                e.target.value,
-            })
-          }
-        >
+            </div>
 
-          <option>OFF</option>
-          <option>ON</option>
+            {/* ============================================= */}
+            {/* DRY RUN */}
+            {/* ============================================= */}
 
-        </select>
+            <div className="compact-row">
 
-      </div>
+                <span>
+                    DRY RUN
+                </span>
 
-      {/* TRAILING STOP */}
+                <span
+                    className={
+                        dryRun === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
 
-      <div className="form-group">
+                    {dryRun}
 
-        <label>Trailing Stop</label>
+                </span>
 
-        <select
-          value={
-            config.trailing_stop || "OFF"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              trailing_stop:
-                e.target.value,
-            })
-          }
-        >
+            </div>
 
-          <option>OFF</option>
-          <option>ON</option>
+            {/* ============================================= */}
+            {/* PARTIAL TP */}
+            {/* ============================================= */}
 
-        </select>
+            <div className="compact-row">
 
-      </div>
+                <span>
+                    PARTIAL TP
+                </span>
 
-      {/* TIME LOCK */}
+                <span
+                    className={
+                        partialTP === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
 
-      <div className="form-group">
+                    {partialTP}
 
-        <label>Time Lock</label>
+                </span>
 
-        <input
-          type="number"
-          value={
-            config.time_lock || 3
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              time_lock:
-                e.target.value,
-            })
-          }
-        />
+            </div>
 
-      </div>
+            {/* ============================================= */}
+            {/* BREAK EVEN */}
+            {/* ============================================= */}
 
-    </div>
-  );
+            <div className="compact-row">
+
+                <span>
+                    BREAK EVEN
+                </span>
+
+                <span
+                    className={
+                        breakEven === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
+
+                    {breakEven}
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* TRAILING STOP */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    TRAILING STOP
+                </span>
+
+                <span
+                    className={
+                        trailingStop === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
+
+                    {trailingStop}
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* TIME LOCK */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    TIME LOCK
+                </span>
+
+                <span>
+
+                    {timeLock}s
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* AUTO MANAGEMENT */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    AUTO MGMT
+                </span>
+
+                <span className="online">
+                    ACTIVE
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* SURVIVABILITY */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    SURVIVABILITY
+                </span>
+
+                <span className="warning">
+                    HIGH
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* QUICK PROFILE */}
+            {/* ============================================= */}
+
+            <div className="control-buttons">
+
+                <button
+                    className="start-button"
+                    onClick={() => {
+
+                        update(
+                            "partial_tp",
+                            "ON"
+                        );
+
+                        update(
+                            "break_even",
+                            "ON"
+                        );
+
+                        update(
+                            "trailing_stop",
+                            "ON"
+                        );
+
+                    }}
+                >
+
+                    SAFE
+
+                </button>
+
+                <button
+                    className="stop-button"
+                    onClick={() => {
+
+                        update(
+                            "partial_tp",
+                            "OFF"
+                        );
+
+                        update(
+                            "break_even",
+                            "OFF"
+                        );
+
+                        update(
+                            "trailing_stop",
+                            "OFF"
+                        );
+
+                    }}
+                >
+
+                    RAW
+
+                </button>
+
+            </div>
+
+        </>
+
+    );
+
 }

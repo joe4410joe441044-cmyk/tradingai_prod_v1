@@ -1,9 +1,23 @@
-export default function Header() {
-  return (
-    <div className="header">
-      <div>CONFIG SYMBOL: BTCUSDT</div>
-      <div>BOT SYMBOL: BTCUSDT</div>
-      <div>STATUS: 🔴 STOPPED</div>
-    </div>
-  );
+import React from "react";
+
+import StatusStrip from "./StatusStrip";
+
+export default function Header({
+    executionEnabled
+}) {
+
+    return (
+
+        <header className="app-header">
+
+            <StatusStrip
+                botRunning={
+                    executionEnabled
+                }
+            />
+
+        </header>
+
+    );
+
 }

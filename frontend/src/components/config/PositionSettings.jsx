@@ -1,90 +1,225 @@
 export default function PositionSettings({
 
-  config = {},
-  setConfig = () => {},
+    config = {},
+    setConfig = () => {},
 
 }) {
 
-  return (
+    /* =====================================================
+       UPDATE
+    ===================================================== */
 
-    <div className="panel-section">
+    const update = (
+        key,
+        value
+    ) => {
 
-      <h3>📦 Position Settings</h3>
+        setConfig({
 
-      {/* MAX POSITIONS */}
+            ...config,
 
-      <div className="form-group">
+            [key]: value,
 
-        <label>Max Positions</label>
+        });
 
-        <input
-          type="number"
-          value={
-            config.max_positions || 1
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              max_positions:
-                e.target.value,
-            })
-          }
-        />
+    };
 
-      </div>
+    /* =====================================================
+       UI
+    ===================================================== */
 
-      {/* ALLOW HEDGING */}
+    return (
 
-      <div className="form-group">
+        <>
 
-        <label>Allow Hedging</label>
+            {/* ============================================= */}
+            {/* POSITION MODE */}
+            {/* ============================================= */}
 
-        <select
-          value={
-            config.allow_hedging || "OFF"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              allow_hedging:
-                e.target.value,
-            })
-          }
-        >
+            <div className="compact-row">
 
-          <option>OFF</option>
-          <option>ON</option>
+                <span>
+                    POSITION MODE
+                </span>
 
-        </select>
+                <span className="online">
+                    SINGLE
+                </span>
 
-      </div>
+            </div>
 
-      {/* SCALE IN */}
+            {/* ============================================= */}
+            {/* MAX POSITIONS */}
+            {/* ============================================= */}
 
-      <div className="form-group">
+            <div className="compact-row">
 
-        <label>Scale In</label>
+                <span>
+                    MAX POSITIONS
+                </span>
 
-        <select
-          value={
-            config.scale_in || "OFF"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              scale_in:
-                e.target.value,
-            })
-          }
-        >
+                <span>
+                    {
+                        config.max_positions || 1
+                    }
+                </span>
 
-          <option>OFF</option>
-          <option>ON</option>
+            </div>
 
-        </select>
+            {/* ============================================= */}
+            {/* POSITION LIMIT */}
+            {/* ============================================= */}
 
-      </div>
+            <div className="compact-row">
 
-    </div>
-  );
+                <span>
+                    POSITION LIMIT
+                </span>
+
+                <span className="warning">
+                    HARD LIMIT
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* HEDGING */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    HEDGING
+                </span>
+
+                <span
+                    className={
+                        config.allow_hedging === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
+
+                    {
+                        config.allow_hedging || "OFF"
+                    }
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* SCALE IN */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    SCALE IN
+                </span>
+
+                <span
+                    className={
+                        config.scale_in === "ON"
+                            ? "online"
+                            : "danger"
+                    }
+                >
+
+                    {
+                        config.scale_in || "OFF"
+                    }
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* SCALE OUT */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    SCALE OUT
+                </span>
+
+                <span className="online">
+                    ON
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* AUTO CLOSE */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    AUTO CLOSE
+                </span>
+
+                <span className="online">
+                    ENABLED
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* POSITION ROUTER */}
+            {/* ============================================= */}
+
+            <div className="compact-row">
+
+                <span>
+                    POSITION ROUTER
+                </span>
+
+                <span className="online">
+                    ACTIVE
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* POSITION PROFILE */}
+            {/* ============================================= */}
+
+            <div className="control-buttons">
+
+                <button
+                    className="start-button"
+                    onClick={() =>
+                        update(
+                            "position_profile",
+                            "safe"
+                        )
+                    }
+                >
+
+                    SAFE
+
+                </button>
+
+                <button
+                    className="stop-button"
+                    onClick={() =>
+                        update(
+                            "position_profile",
+                            "aggressive"
+                        )
+                    }
+                >
+
+                    AGGR
+
+                </button>
+
+            </div>
+
+        </>
+
+    );
+
 }

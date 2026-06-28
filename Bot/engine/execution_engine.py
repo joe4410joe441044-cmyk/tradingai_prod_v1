@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from backend.utils.order import place_order_safe
-from backend.log_store import add_log
+from backend.utils.log_buffer import add_log
 
 import math
 import time
@@ -58,6 +58,12 @@ class ExecutionEngine:
 
         # actual execution state
         self.actual_position = None
+
+        # realtime price state
+        self.latest_price = 0
+
+        # realtime pnl state
+        self.unrealized_pnl = 0
 
         # duplicate prevention
         self.pending_order = False
@@ -129,15 +135,73 @@ class ExecutionEngine:
 
                 print("❌ POSITION SYNC ERROR:", e)
 
+        # =====================================
+        # RUNNING
+        # =====================================
+
         self.status = "RUNNING"
 
-        self.price_ready = False
+        print(
+            "🔥 ENGINE STARTED | MODE:",
+            self.mode
+        )
 
-        print("🔥 ENGINE STARTED | MODE:", self.mode)
+        add_log(
+            f"🔥 ENGINE STARTED: "
+            f"{self.mode}"
+        )
 
         return {
             "status": "started"
         }
+
+    # =====================================
+    # REFRESH BALANCE
+    # =====================================
+
+    def refresh_balance(self):
+
+        if not self.exchange:
+
+            return
+
+        try:
+
+            balance = (
+                self.exchange.get_balance()
+            )
+
+            print(
+                "💰 REFRESH BALANCE:",
+                balance
+            )
+
+            add_log(
+                f"💰 REFRESH BALANCE: "
+                f"{balance}"
+            )
+
+            if balance > 0:
+
+                self.balance = balance
+
+                if self.portfolio:
+
+                    self.portfolio.balance = (
+                        balance
+                    )
+
+        except Exception as e:
+
+            print(
+                "❌ REFRESH BALANCE ERROR:",
+                e
+            )
+
+            add_log(
+                f"❌ REFRESH BALANCE ERROR: "
+                f"{e}"
+            )
 
     # =====================================
     # STOP
@@ -166,12 +230,6 @@ class ExecutionEngine:
             if not config:
                 return
 
-            if "mode" in config:
-
-                self.mode = config["mode"]
-
-                print("🔥 MODE SET:", self.mode)
-
             safe_config = dict(config)
 
             safe_config.pop("symbol", None)
@@ -183,11 +241,19 @@ class ExecutionEngine:
                 )
             )
 
-            self.config["leverage"] = float(
-                safe_config.get(
-                    "leverage",
-                    self.config["leverage"]
+            self.config["leverage"] = int(
+                float(
+                    safe_config.get(
+                        "leverage",
+                        self.config["leverage"]
+                    )
                 )
+            )
+
+            print(
+                f"🟣 NORMALIZED LEVERAGE: "
+                f"{self.config['leverage']} "
+                f"type={type(self.config['leverage'])}"
             )
 
             self.config["sl_percent"] = float(
@@ -204,7 +270,42 @@ class ExecutionEngine:
                 )
             )
 
-            self.config["dry_run"] = False
+            self.config["dry_run"] = bool(
+                safe_config.get(
+                    "dry_run",
+                    self.config["dry_run"]
+                )
+            )
+
+            # =====================================
+            # MODE NORMALIZATION
+            # =====================================
+
+            if self.config["dry_run"]:
+
+                self.mode = "paper"
+
+            else:
+
+                self.mode = "live"
+
+            print(
+                f"🔥 FINAL MODE => {self.mode}"
+            )
+
+            add_log(
+                f"🔥 FINAL MODE => {self.mode}"
+            )
+
+            print(
+                f"🟡 DRY RUN => "
+                f"{self.config['dry_run']}"
+            )
+
+            add_log(
+                f"🟡 DRY RUN => "
+                f"{self.config['dry_run']}"
+            )
 
             print("🔥 ENGINE CONFIG APPLIED")
 
@@ -229,35 +330,10 @@ class ExecutionEngine:
 
             import inspect
 
-            print("ENGINE FILE:", inspect.getfile(self.__class__))
-
-            print("PRICE_READY VALUE:", self.price_ready)
-            print("PRICE_READY VALUE:", self.price_ready)
-            print("PRICE_READY TYPE:", type(self.price_ready))
-            print("ENGINE ID:", self.engine_id)
-            print("ON_PRICE VALUE:", price)
-            print("ON_PRICE TYPE:", type(price))
-            print("ON_PRICE SYMBOL:", symbol)
-            print("ENGINE SYMBOL:", self.symbol)
-            print("BEFORE MARKET UPDATE")
-
-            # self.last_market_update = time.time()
-            
-            print("AFTER MARKET UPDATE")
             self.last_market_update = time.time()
-            
-            
-            # add_log("🔥 ENGINE TICK")
-            
-            print("ENGINE STATUS:", self.status)
-            print("STATUS EQ:", self.status == "RUNNING")
 
             if self.status != "RUNNING":
                 return
-
-            print("SYMBOL EQ:", symbol == self.symbol)
-            print("SYMBOL REPR:", repr(symbol))
-            print("ENGINE SYMBOL REPR:", repr(self.symbol))
 
             if symbol != self.symbol:
 
@@ -265,14 +341,7 @@ class ExecutionEngine:
 
                 return
 
-            print("PASSED SYMBOL CHECK")
-
-            print("PRICE > 0:", price > 0)
-            print("NOT PRICE_READY:", not self.price_ready)
-            print(
-                "FINAL CONDITION:",
-                (not self.price_ready and price > 0)
-            )
+            self.latest_price = price
 
             if not self.price_ready and price > 0:
 
@@ -282,13 +351,42 @@ class ExecutionEngine:
 
                 self.price_ready = True
 
-                print("PRICE_READY UPDATED:", self.price_ready)
-
             # =====================================
             # POSITION MANAGEMENT
             # =====================================
 
             if self.actual_position:
+
+                entry = self.actual_position.get(
+                    "entry_price",
+                    0
+                )
+
+                contracts = self.actual_position.get(
+                    "qty",
+                    0
+                )
+
+                multiplier = self.actual_position.get(
+                    "multiplier",
+                    0.001
+                )
+
+                coin_qty = (
+                    contracts * multiplier
+                )
+
+                self.unrealized_pnl = (
+                    (price - entry)
+                    * coin_qty
+                )
+
+                print(
+                    f"PRICE={price} "
+                    f"ENTRY={entry} "
+                    f"QTY={contracts} "
+                    f"UPNL={self.unrealized_pnl}"
+                )
 
                 if price <= self.actual_position.get("sl", 0):
 
@@ -358,6 +456,28 @@ class ExecutionEngine:
 
             self.last_signal_id = signal_id
 
+        # =====================================
+        # EARLY COOLDOWN BLOCK
+        # =====================================
+
+        if (
+            self.last_execution_time
+            and
+            time.time()
+            - self.last_execution_time
+            < 3
+        ):
+
+            print(
+                "[EARLY_COOLDOWN_BLOCK]"
+            )
+
+            add_log(
+                "[EARLY_COOLDOWN_BLOCK]"
+            )
+
+            return
+
         self.last_signal_time = time.time()
 
         self.try_entry(signal)
@@ -391,6 +511,56 @@ class ExecutionEngine:
 
             return 0.0
 
+
+    # =====================================
+    # POSITION STATE
+    # =====================================
+
+    def set_position_state(
+        self,
+        state
+    ):
+
+        if not self.actual_position:
+
+            return
+
+        old_state = self.actual_position.get(
+            "state"
+        )
+
+        # =====================================
+        # SKIP DUPLICATE
+        # =====================================
+
+        if old_state == state:
+
+            return
+
+        self.actual_position["state"] = state
+
+        print(
+            f"🟢 POSITION STATE: "
+            f"{old_state} -> {state}"
+        )
+
+        add_log(
+            f"🟢 POSITION STATE: "
+            f"{old_state} -> {state}"
+        )
+
+
+    # =====================================
+    # POSITION CHECK
+    # =====================================
+
+    def has_open_position(self):
+
+        return bool(
+            self.actual_position
+        )
+
+
     # =====================================
     # ENTRY
     # =====================================
@@ -419,17 +589,45 @@ class ExecutionEngine:
         # =====================================
         # EXECUTION COOLDOWN
         # =====================================
+
         print(
             "④ CHECK cooldown:",
             self.last_execution_time,
             type(self.last_execution_time)
         )
 
-        if time.time() - self.last_execution_time < 1:
+        cooldown_seconds = 3
 
-            print("⑤ BLOCK cooldown")
+        if (
+            self.last_execution_time
+            and
+            time.time() - self.last_execution_time
+            < cooldown_seconds
+        ):
 
-            add_log("BLOCK: cooldown")
+            print("[COOLDOWN_BLOCK] signal ignored")
+
+            add_log(
+                "[COOLDOWN_BLOCK] signal ignored"
+            )
+
+            return
+
+        # =====================================
+        # MARKET STALE CHECK
+        # =====================================
+
+        if time.time() - self.last_market_update > 5:
+
+            self.price_ready = False
+
+            print("BLOCK: stale")
+
+            add_log("BLOCK: stale")
+
+            print("⚠️ PRICE_READY RESET")
+
+            add_log("⚠️ PRICE_READY RESET")
 
             return
 
@@ -467,13 +665,44 @@ class ExecutionEngine:
         # POSITION EXISTS
         # =====================================
 
-        if self.actual_position is not None:
+        if self.actual_position:
 
-            print("BLOCK: actual_position")
+            state = self.actual_position.get(
+                "state",
+                "OPEN"
+            )
 
-            add_log("BLOCK: actual_position")
+            qty = self.actual_position.get(
+                "qty",
+                0
+            )
 
-            return
+            print(
+                "POSITION CHECK:",
+                state,
+                qty
+            )
+
+            add_log(
+                f"POSITION CHECK: "
+                f"{state} {qty}"
+            )
+
+            # =================================
+            # AUTHORITATIVE OPEN CHECK
+            # =================================
+
+            if state == "OPEN":
+
+                print(
+                    "BLOCK: open position exists"
+                )
+
+                add_log(
+                    "BLOCK: open position exists"
+                )
+
+                return
 
         print("PASS: actual_position_check")
 
@@ -521,6 +750,12 @@ class ExecutionEngine:
 
         if not valid:
 
+            # =====================================
+            # INVALID PREVIEW COOLDOWN
+            # =====================================
+
+            self.last_execution_time = time.time()
+
             print(
                 "❌ preview invalid:",
                 preview.get("reason")
@@ -553,7 +788,7 @@ class ExecutionEngine:
             "price": price
         }
 
-        print("STEP-7 BEFORE ORDER BUILD")
+        print("PASS: order_created")
 
         print("🟡 ORDER:", order)
 
@@ -573,14 +808,22 @@ class ExecutionEngine:
 
             if self.mode == "paper":
 
+                print("ENTER place_order_safe")
+
                 raw_res = place_order_safe(
                     self.exchange,
                     self.portfolio,
                     order
                 )
 
+                print("EXIT place_order_safe")
+                print(raw_res)
+
                 res = {
-                    "success": bool(raw_res),
+                    "success": raw_res.get(
+                        "success",
+                        False
+                    ),
                     "raw": raw_res
                 }
 
@@ -590,15 +833,23 @@ class ExecutionEngine:
 
             else:
 
-                self.exchange.set_leverage(
-                    symbol=order["symbol"],
-                    leverage=int(
-                        self.config.get(
-                            "leverage",
-                            10
-                        )
+                # =====================================
+                # DRY RUN GUARD
+                # =====================================
+
+                if self.config["dry_run"]:
+
+                    add_log(
+                        "🟡 DRY RUN ACTIVE"
                     )
-                )
+
+                    print(
+                        "🟡 DRY RUN ACTIVE"
+                    )
+
+                    return
+
+                print("ENTER exchange.place_order")
 
                 raw_res = self.exchange.place_order(
                     symbol=order["symbol"],
@@ -607,20 +858,26 @@ class ExecutionEngine:
                     price=order["price"]
                 )
 
+                print("EXIT exchange.place_order")
+                print(raw_res)
+
                 res = {
-                    "success": bool(raw_res),
+                    "success": raw_res.get(
+                        "success",
+                        False
+                    ),
                     "raw": raw_res
                 }
 
-            print("🟢 RESULT:", res)
+            print("🟢 EXECUTION RESULT:", res)
 
-            add_log(f"🟢 RESULT: {res}")
+            add_log(f"🟢 EXECUTION RESULT: {res}")
 
             # =====================================
             # RESULT VALIDATION
             # =====================================
 
-            if not res.get("success"):
+            if not res:
 
                 print("❌ invalid result")
 
@@ -628,9 +885,52 @@ class ExecutionEngine:
 
                 return
 
-            print("✅ ORDER SUCCESS")
 
-            add_log("✅ ORDER SUCCESS")
+            if not res.get("success"):
+
+                print("❌ execution failed")
+
+                add_log("❌ execution failed")
+
+                return
+
+
+            if self.actual_position:
+
+                print(
+                    "⚠️ POSITION ALREADY EXISTS"
+                )
+
+                add_log(
+                    "⚠️ POSITION ALREADY EXISTS"
+                )
+
+                return
+
+
+            print("✅ execution success")
+
+            add_log("✅ execution success")
+
+            # =====================================
+            # AUTHORITATIVE BALANCE REFRESH
+            # =====================================
+
+            try:
+
+                self.refresh_balance()
+
+            except Exception as e:
+
+                print(
+                    "❌ BALANCE REFRESH ERROR:",
+                    e
+                )
+
+                add_log(
+                    f"❌ BALANCE REFRESH ERROR: "
+                    f"{e}"
+                )
 
             # =====================================
             # PAPER POSITION
@@ -638,15 +938,47 @@ class ExecutionEngine:
 
             if self.mode == "paper":
 
+                rules = (
+                    self.exchange.get_symbol_rules(
+                        self.symbol
+                    )
+                    if self.exchange
+                    else {
+                        "multiplier": 0.001
+                    }
+                )
+
+                multiplier = rules.get(
+                    "multiplier",
+                    0.001
+                )
+
+                contracts = qty / multiplier
+
                 self.actual_position = {
+                    "state": "OPEN",
+
                     "side": signal.get("side"),
+
                     "entry_price": price,
-                    "qty": qty,
+
+                    # authoritative contract qty
+                    "qty": contracts,
+
+                    # normalized coin qty
+                    "coin_qty": qty,
+
+                    # contract spec
+                    "multiplier": multiplier,
+
                     "entry_time": time.time(),
+
                     "signal_id": signal.get("id"),
+
                     "sl": price * (
                         1 - self.config["sl_percent"] / 100
                     ),
+
                     "tp": price * (
                         1 + self.config["tp_percent"] / 100
                     )
@@ -705,6 +1037,10 @@ class ExecutionEngine:
 
             self.pending_order = False
 
+            print("🔓 pending_order reset")
+
+            add_log("🔓 pending_order reset")
+
     # =====================================
     # CLOSE
     # =====================================
@@ -723,16 +1059,36 @@ class ExecutionEngine:
             price
         )
 
-        qty = self.actual_position.get(
+        contracts = self.actual_position.get(
             "qty",
             0
         )
 
-        pnl = (price - entry) * qty
+        multiplier = self.actual_position.get(
+            "multiplier",
+            0.001
+        )
+
+        coin_qty = (
+            contracts * multiplier
+        )
+
+        pnl = (
+            (price - entry)
+            * coin_qty
+        )
 
         self.pnl += pnl
 
         self.balance += pnl
+
+        self.unrealized_pnl = 0
+
+        print(
+            f"📊 ACCOUNTING | "
+            f"BAL={self.balance:.4f} "
+            f"PNL={self.pnl:.4f}"
+        )
 
         if self.portfolio:
             self.portfolio.balance = self.balance
@@ -788,18 +1144,105 @@ class ExecutionEngine:
                 risk * self.config["leverage"]
             )
 
-            qty = pos_size / price
+            # =====================================
+            # CONTRACT-AWARE MIN SIZE
+            # =====================================
+
+            if self.exchange:
+
+                rules = self.exchange.get_symbol_rules(
+                    self.symbol
+                )
+
+            else:
+
+                rules = {
+                    "multiplier": 0.001,
+                    "min_size": 1
+                }
+
+            multiplier = rules.get(
+                "multiplier",
+                0.001
+            )
+
+            min_contracts = rules.get(
+                "min_size",
+                1
+            )
+
+            coin_qty = (
+                min_contracts * multiplier
+            )
+
+            min_position_value = (
+                coin_qty * price
+            )
+
+            print("MULTIPLIER:", multiplier)
+            print("MIN_CONTRACTS:", min_contracts)
+            print("COIN_QTY:", coin_qty)
+            print("MIN_POSITION_VALUE:", min_position_value)
+
+            pos_size = max(
+                pos_size,
+                min_position_value
+            )
+
+            # =====================================
+            # MINIMUM BALANCE SAFETY
+            # =====================================
+
+            required_margin = (
+                min_position_value
+                / self.config["leverage"]
+            )
+
+            safety_ratio = 0.8
+
+            safe_limit = (
+                balance * safety_ratio
+            )
+
+            print("REQUIRED_MARGIN:", required_margin)
+            print("SAFE_LIMIT:", safe_limit)
+
+            if required_margin > safe_limit:
+
+                print(
+                    "🚫 INSUFFICIENT BALANCE "
+                    "FOR MIN CONTRACT"
+                )
+
+                preview = {
+                    "valid": False,
+                    "reason": (
+                        "insufficient_balance_for_min_contract"
+                    )
+                }
+
+            else:
+
+                qty = pos_size / price
+
+                preview = {
+                    "qty": round(qty, 6),
+                    "valid": True
+                }
+
+
+
             print("BALANCE:", balance)
             print("RISK_PERCENT:", self.config["risk_percent"])
             print("LEVERAGE:", self.config["leverage"])
             print("RISK:", risk)
             print("POS_SIZE:", pos_size)
-            print("RAW QTY:", qty)
 
-            preview = {
-                "qty": round(qty, 6),
-                "valid": True
-            }
+            if "qty" in locals():
+
+                print("RAW QTY:", qty)
+
+
 
         return {
             "status": self.status,

@@ -1,528 +1,785 @@
-import SignalLog from "../SignalLog";
-import TradeLog from "../TradeLog";
+import {
+    useEffect,
+    useMemo,
+    useRef,
+} from "react";
+
+import "../../styles/dashboard.css";
+
+/* =========================================================
+   SAFE ARRAY
+========================================================= */
+
+const safeArray = (value) => {
+
+    return Array.isArray(value)
+        ? value
+        : [];
+
+};
+
+/* =========================================================
+   FORMAT TIME
+========================================================= */
+
+const formatTime = (value) => {
+
+    if (!value) {
+
+        return "--:--:--";
+
+    }
+
+    try {
+
+        return new Date(value)
+            .toLocaleTimeString();
+
+    } catch {
+
+        return "--:--:--";
+
+    }
+
+};
+
+/* =========================================================
+   SOURCE ENUM
+========================================================= */
+
+const normalizeSource = (
+    type = ""
+) => {
+
+    const t =
+        String(type)
+            .toLowerCase();
+
+    if (
+        t.includes("router")
+    ) {
+
+        return "ROUTER";
+
+    }
+
+    if (
+        t.includes("market")
+    ) {
+
+        return "MARKET";
+
+    }
+
+    if (
+        t.includes("micro")
+    ) {
+
+        return "MICRO";
+
+    }
+
+    if (
+        t.includes("runtime")
+    ) {
+
+        return "SYSTEM";
+
+    }
+
+    if (
+        t.includes("risk")
+    ) {
+
+        return "ENGINE";
+
+    }
+
+    if (
+        t.includes("execution")
+    ) {
+
+        return "EXEC";
+
+    }
+
+    if (
+        t.includes("restriction")
+    ) {
+
+        return "ENGINE";
+
+    }
+
+    return "SYSTEM";
+
+};
+
+/* =========================================================
+   LEVEL ENUM
+========================================================= */
+
+const normalizeLevel = (
+    type = ""
+) => {
+
+    const t =
+        String(type)
+            .toLowerCase();
+
+    if (
+        t.includes("risk")
+    ) {
+
+        return "WARN";
+
+    }
+
+    if (
+        t.includes("restriction")
+    ) {
+
+        return "WARN";
+
+    }
+
+    if (
+        t.includes("error")
+    ) {
+
+        return "ERROR";
+
+    }
+
+    if (
+        t.includes("failure")
+    ) {
+
+        return "ERROR";
+
+    }
+
+    return "INFO";
+
+};
+
+/* =========================================================
+   STATE ENUM
+========================================================= */
+
+const normalizeState = (
+    message = ""
+) => {
+
+    const m =
+        String(message)
+            .toLowerCase();
+
+    if (
+        m.includes("reconnect")
+    ) {
+
+        return "RECONNECT";
+
+    }
+
+    if (
+        m.includes("stale")
+    ) {
+
+        return "STALE";
+
+    }
+
+    if (
+        m.includes("blocked")
+    ) {
+
+        return "BLOCKED";
+
+    }
+
+    if (
+        m.includes("degraded")
+    ) {
+
+        return "DEGRADED";
+
+    }
+
+    if (
+        m.includes("failure")
+    ) {
+
+        return "FAILURE";
+
+    }
+
+    if (
+        m.includes("disconnect")
+    ) {
+
+        return "DISCONNECTED";
+
+    }
+
+    return "UNKNOWN";
+
+};
+
+/* =========================================================
+   CATEGORY CLASS
+========================================================= */
+
+const categoryClass = (
+    level = ""
+) => {
+
+    const t =
+        String(level)
+            .toLowerCase();
+
+    if (
+        t.includes("error")
+    ) {
+
+        return "error";
+
+    }
+
+    if (
+        t.includes("warn")
+    ) {
+
+        return "warning";
+
+    }
+
+    return "system";
+
+};
+
+/* =========================================================
+   BUILD RUNTIME EVENTS
+========================================================= */
+
+const buildRuntimeEvents = ({
+
+    signalLogs = [],
+    tradeLogs = [],
+
+    unifiedTelemetry = {},
+
+    journalTelemetry = {},
+
+}) => {
+
+    const events = [];
+
+
+    /* =====================================================
+       MARKET
+    ===================================================== */
+
+    if (
+        unifiedTelemetry?.market
+            ?.marketHostility >
+        0.7
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "MARKET",
+
+            level:
+                "WARN",
+
+            state:
+                "HOSTILE",
+
+        });
+
+    }
+
+    /* =====================================================
+       RUNTIME
+    ===================================================== */
+
+    if (
+        unifiedTelemetry?.runtime
+            ?.streamStale
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "SYSTEM",
+
+            level:
+                "WARN",
+
+            state:
+                "STALE",
+
+        });
+
+    }
+
+    if (
+        unifiedTelemetry?.runtime
+            ?.reconnectInProgress
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "SYSTEM",
+
+            level:
+                "WARN",
+
+            state:
+                "RECONNECT",
+
+        });
+
+    }
+
+    if (
+        unifiedTelemetry?.runtime
+            ?.websocketHealth < 50
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "SYSTEM",
+
+            level:
+                "WARN",
+
+            state:
+                "DEGRADED",
+
+        });
+
+    }
+
+    /* =====================================================
+       RISK
+    ===================================================== */
+
+    if (
+        unifiedTelemetry?.risk
+            ?.restrictionReason &&
+        unifiedTelemetry?.risk
+            ?.restrictionReason !==
+        "NONE"
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "ENGINE",
+
+            level:
+                "WARN",
+
+            state:
+                "BLOCKED",
+
+        });
+
+    }
+
+    /* =====================================================
+       JOURNAL
+    ===================================================== */
+
+    if (
+        journalTelemetry
+            ?.crashRecoveryDetected
+    ) {
+
+        events.push({
+
+            timestamp:
+                Date.now(),
+
+            source:
+                "SYSTEM",
+
+            level:
+                "INFO",
+
+            state:
+                "RECOVERY",
+
+        });
+
+    }
+
+    /* =====================================================
+       SIGNAL LOGS
+    ===================================================== */
+
+    safeArray(signalLogs)
+        .slice(-30)
+        .forEach((entry) => {
+
+            events.push({
+
+                timestamp:
+                    entry?.timestamp ??
+                    Date.now(),
+
+                source:
+                    normalizeSource(
+                        entry?.type
+                    ),
+
+                level:
+                    normalizeLevel(
+                        entry?.type
+                    ),
+
+                state:
+                    normalizeState(
+                        entry?.type,
+                        entry?.message
+                    ),
+
+            });
+
+        });
+            /* =====================================================
+       TRADE LOGS
+    ===================================================== */
+
+    safeArray(tradeLogs)
+        .slice(-30)
+        .forEach((entry) => {
+
+            events.push({
+
+                timestamp:
+                    entry?.timestamp ??
+                    Date.now(),
+
+                source:
+                    normalizeSource(
+                        entry?.type
+                    ),
+
+                level:
+                    normalizeLevel(
+                        entry?.type
+                    ),
+
+                state:
+                    normalizeState(
+                        entry?.type,
+                        entry?.message
+                    ),
+
+            });
+
+        });
+
+    return events
+        .sort((a, b) => {
+
+            return (
+                Number(a.timestamp) -
+                Number(b.timestamp)
+            );
+
+        })
+        .slice(-120);
+
+};
+
+/* =========================================================
+   LOGS PANEL
+========================================================= */
 
 export default function LogsPanel({
 
-  signalLogs = [],
-  tradeLogs = [],
+    signalLogs = [],
+    tradeLogs = [],
 
-  routerTelemetry = {},
-  executionRoute = "NONE",
-  routerReason = "NONE",
+    routerTelemetry = {},
 
-  loading,
-  error,
+    unifiedTelemetry = {},
+
+    journalTelemetry = {},
+
+    loading = false,
+
+    error = false,
 
 }) {
 
-  const telemetry = {
+    const streamRef =
+        useRef(null);
 
-    route:
-      routerTelemetry?.route ||
-      executionRoute ||
-      "NONE",
+    const runtimeEvents =
+        useMemo(() => {
 
-    reason:
-      routerTelemetry?.reason ||
-      routerReason ||
-      "NONE",
+            return buildRuntimeEvents({
 
-    mode:
-      routerTelemetry?.mode ||
-      "SAFE",
+                signalLogs,
+                tradeLogs,
 
-    priority:
-      routerTelemetry?.priority ||
-      "NORMAL",
+                routerTelemetry,
 
-    allowed:
-      routerTelemetry?.allowed ||
-      false,
+                unifiedTelemetry,
 
-    survivability:
-      routerTelemetry?.survivability ||
-      0,
+                journalTelemetry,
 
-  };
+            });
 
-  return (
+        }, [
 
-    <div
-      style={{
-        background: "#111",
-        borderRadius: "16px",
-        padding: "12px",
-        boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+            signalLogs,
+            tradeLogs,
 
-        display: "flex",
-        flexDirection: "column",
-        gap: "12px",
+            routerTelemetry,
 
-        height: "100%",
-      }}
-    >
+            unifiedTelemetry,
 
-      {/* LOADING */}
+            journalTelemetry,
 
-      {loading && (
+        ]);
 
-        <div
-          style={{
-            opacity: 0.6,
-            fontSize: "11px",
-          }}
-        >
-          Loading...
-        </div>
+    /* =====================================================
+       AUTO SCROLL
+    ===================================================== */
 
-      )}
+    useEffect(() => {
 
-      {/* ERROR */}
+        if (!streamRef.current) {
 
-      {error && (
+            return;
 
-        <div
-          style={{
-            color: "#f87171",
-            fontSize: "11px",
-          }}
-        >
-          Fetch error
-        </div>
+        }
 
-      )}
+        streamRef.current.scrollTop =
+            streamRef.current.scrollHeight;
 
-      {/* LOG CONTENT */}
+    }, [runtimeEvents]);
 
-      {!loading && !error && (
+    /* =====================================================
+       UI
+    ===================================================== */
 
-        <>
+    return (
 
-          {/* EXECUTION TELEMETRY */}
+        <div className="panel-card logs-panel">
 
-          <div
-            style={{
-              background: "#0b0b0b",
-              borderRadius: "10px",
+            {/* =============================================
+               HEADER
+            ============================================= */}
 
-              padding: "8px",
+            <div className="panel-title">
 
-              border: "1px solid #1a1a1a",
-
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "600",
-                color: "#888",
-                letterSpacing: "0.5px",
-              }}
-            >
-              EXECUTION TELEMETRY
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "6px",
-                fontSize: "11px",
-                fontFamily: "monospace",
-              }}
-            >
-
-              <div
-                style={{
-                  color: "#00ff88",
-                }}
-              >
-                ROUTE: {telemetry.route}
-              </div>
-
-              <div
-                style={{
-                  color: telemetry.allowed
-                    ? "#00ff88"
-                    : "#ff4d4f",
-                }}
-              >
-                {
-                  telemetry.allowed
-                    ? "GATE: PASS"
-                    : "GATE: BLOCK"
-                }
-              </div>
-
-              <div
-                style={{
-                  color: "#ffaa00",
-                }}
-              >
-                MODE: {telemetry.mode}
-              </div>
-
-              <div
-                style={{
-                  color: "#00d4ff",
-                }}
-              >
-                PRIORITY: {telemetry.priority}
-              </div>
-
-              <div
-                style={{
-                  color: "#ff8800",
-                }}
-              >
-                SURV: {
-                  Math.round(
-                    telemetry.survivability || 0
-                  )
-                }
-              </div>
-
-              <div
-                style={{
-                  color: "#cccccc",
-                }}
-              >
-                REASON: {telemetry.reason}
-              </div>
+                CENTER | EVENT STREAM
 
             </div>
 
-          </div>
-
-          {/* SIGNAL LOG */}
-
-          <div
-            style={{
-              flex: 1,
-              background: "#0b0b0b",
-              borderRadius: "10px",
-
-              padding: "6px",
-
-              overflowY: "auto",
-              overflowX: "hidden",
-
-              maxHeight: "300px",
-
-              border: "1px solid #1a1a1a",
-
-              display: "flex",
-              flexDirection: "column",
-              gap: "4px",
-            }}
-          >
+            {/* =============================================
+               STREAM
+            ============================================= */}
 
             <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "600",
-                color: "#888",
-                marginBottom: "4px",
-                letterSpacing: "0.5px",
-              }}
-            >
-              SIGNAL LOG
-            </div>
-
-            {/* =========================
-                INTELLIGENCE LOGS
-            ========================= */}
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-              }}
+                ref={streamRef}
+                className="log-stream"
             >
 
-              {signalLogs.map((log, index) => (
+                <div className="log-stream-line">
 
-                <div
-                  key={index}
+                    <div>
+                        TIME
+                    </div>
 
-                  className="log-row"
+                    <div>
+                        SOURCE
+                    </div>
 
-                  style={{
+                    <div>
+                        LEVEL
+                    </div>
 
-                    borderColor:
-
-                      log.type === "NO TRADE" ||
-                      log.type === "SPOOF"
-
-                        ? "#ff4d4f"
-
-                        : log.type === "BURST"
-
-                        ? "#ffaa00"
-
-                        : log.type === "EXECUTION"
-
-                        ? "#ff8800"
-
-                        : "#242424",
-
-                    background:
-
-                      log.type === "NO TRADE" ||
-                      log.type === "SPOOF"
-
-                        ? "rgba(255,77,79,0.08)"
-
-                        : log.type === "BURST"
-
-                        ? "rgba(255,170,0,0.08)"
-
-                        : log.type === "EXECUTION"
-
-                        ? "rgba(255,136,0,0.08)"
-
-                        : "#181818",
-
-                    border: "1px solid",
-
-                    borderRadius: "8px",
-
-                    padding: "8px",
-
-                    fontSize: "11px",
-
-                    fontFamily: "monospace",
-
-                  }}
-                >
-
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: "3px",
-                    }}
-                  >
-
-                    <span
-                      style={{
-                        color: "#888",
-                      }}
-                    >
-                      {log.time}
-                    </span>
-
-                    <span
-                      style={{
-                        fontWeight: "700",
-                        color:
-
-                          log.type === "NO TRADE" ||
-                          log.type === "SPOOF"
-
-                            ? "#ff4d4f"
-
-                            : log.type === "BURST"
-
-                            ? "#ffaa00"
-
-                            : log.type === "EXECUTION"
-
-                            ? "#ff8800"
-
-                            : "#00ff88",
-                      }}
-                    >
-                      {log.type}
-                    </span>
-
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#ddd",
-                    }}
-                  >
-                    {log.value}
-                  </div>
+                    <div>
+                        STATE
+                    </div>
 
                 </div>
+                                {/* =============================================
+                   LOADING
+                ============================================= */}
 
-              ))}
+                {loading && (
+
+                    <div className="log-stream-line">
+
+                        <div>
+                            WAIT
+                        </div>
+
+                        <div>
+                            SYSTEM
+                        </div>
+
+                        <div>
+                            INFO
+                        </div>
+
+                    <div>
+                        CONNECTING
+                    </div>
+
+                    </div>
+
+                )}
+
+                {/* =============================================
+                   ERROR
+                ============================================= */}
+
+                {error && (
+
+                    <div className="log-stream-line">
+
+                        <div>
+                            ERROR
+                        </div>
+
+                        <div>
+                            SYSTEM
+                        </div>
+
+                        <div
+                            className="terminal-red"
+                        >
+                            ERROR
+                        </div>
+
+                        <div>
+                            FAILURE
+                        </div>
+
+                    </div>
+
+                )}
+
+                {/* =============================================
+                   EVENTS
+                ============================================= */}
+
+                {runtimeEvents.map(
+
+                    (event, index) => {
+
+                        return (
+
+                            <div
+                                key={`${event.timestamp}-${index}`}
+                                className="log-stream-line"
+                            >
+
+                                <div>
+
+                                    {
+                                        formatTime(
+                                            event.timestamp
+                                        )
+                                    }
+
+                                </div>
+
+                                <div>
+
+                                    {
+                                        event.source
+                                    }
+
+                                </div>
+
+                                <div
+                                    className={
+                                        categoryClass(
+                                            event.level
+                                        )
+                                    }
+                                >
+
+                                    {
+                                        event.level
+                                    }
+
+                                </div>
+
+                                <div>
+
+                                    {
+                                        event.state
+                                    }
+
+                                </div>
+
+                            </div>
+
+                        );
+
+                    }
+
+                )}
+
+                {runtimeEvents.length === 0 && !loading && (
+
+                    <div className="log-stream-line">
+
+                        <div>
+                            --
+                        </div>
+
+                        <div>
+                            SYSTEM
+                        </div>
+
+                        <div>
+                            INFO
+                        </div>
+
+                        <div>
+                            DISCONNECTED
+                        </div>
+
+                    </div>
+
+                )}
 
             </div>
 
-          </div>
+        </div>
 
-          {/* TRADE LOG */}
+    );
 
-          <div
-            style={{
-              flex: 1,
-              background: "#0b0b0b",
-              borderRadius: "10px",
-
-              padding: "6px",
-
-              overflowY: "auto",
-              overflowX: "hidden",
-
-              maxHeight: "300px",
-
-              border: "1px solid #1a1a1a",
-
-              display: "flex",
-              flexDirection: "column",
-              gap: "4px",
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "600",
-                color: "#888",
-                marginBottom: "4px",
-                letterSpacing: "0.5px",
-              }}
-            >
-              TRADE LOG
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-              }}
-            >
-
-              {tradeLogs.map((log, index) => (
-
-                <div
-                  key={index}
-                  style={{
-                    background: "#181818",
-                    border: "1px solid #242424",
-                    borderRadius: "8px",
-                    padding: "8px",
-                    fontSize: "11px",
-                    fontFamily: "monospace",
-
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "4px",
-                  }}
-                >
-
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                    }}
-                  >
-
-                    <span
-                      style={{
-                        color: "#888",
-                      }}
-                    >
-                      {log.timestamp}
-                    </span>
-
-                    <span
-                      style={{
-                        color: "#00ff88",
-                        fontWeight: "700",
-                      }}
-                    >
-                      {log.action}
-                    </span>
-
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#ddd",
-                    }}
-                  >
-                    SYMBOL: {log.symbol}
-                  </div>
-
-                  <div
-                    style={{
-                      color:
-                        Number(log.pnl) >= 0
-                          ? "#00ff88"
-                          : "#ff4d4f",
-                    }}
-                  >
-                    PNL: {log.pnl}
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#00d4ff",
-                    }}
-                  >
-                    [ROUTER] {
-                      log.executionRoute ||
-                      "NONE"
-                    }
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#ffaa00",
-                    }}
-                  >
-                    [GATE] {
-                      log.routerReason ||
-                      "NONE"
-                    }
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#00ff88",
-                    }}
-                  >
-                    [MODE] {
-                      log.executionMode ||
-                      "SAFE"
-                    }
-                  </div>
-
-                  <div
-                    style={{
-                      color: "#ff8800",
-                    }}
-                  >
-                    [SURV] {
-                      Math.round(
-                        log.survivabilityScore || 0
-                      )
-                    }
-                  </div>
-
-                </div>
-
-              ))}
-
-            </div>
-
-          </div>
-
-        </>
-
-      )}
-
-    </div>
-
-  );
 }

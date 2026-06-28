@@ -2,53 +2,128 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from backend.bot_manager import get_bot_manager
+
+from backend.bot_manager import (
+    get_bot_manager
+)
 
 router = APIRouter()
-
-bot_manager = get_bot_manager()
 
 
 # =========================
 # CONFIG MODEL
 # =========================
+
 class StartConfig(BaseModel):
+
     symbol: str
+
     risk_percent: float
+
     sl_percent: float
+
     leverage: float
+
     mode: str
 
 
 # =========================
 # START
 # =========================
+
 @router.post("/start")
 def start_bot(config: StartConfig):
 
+    # =========================
+    # GET BOT MANAGER
+    # =========================
+
+    bot_manager = get_bot_manager()
+
     config_dict = config.dict()
 
-    # 🔥 symbol正規化（ここで固定）
-    config_dict["symbol"] = config_dict["symbol"].upper()
+    # ===================================
+    # FORCE STRING MODE
+    # ===================================
 
-    # 🔥 modeチェック（事故防止）
-    if config_dict["mode"] not in ["paper", "live"]:
-        raise HTTPException(status_code=400, detail="invalid mode")
+    config_dict["mode"] = str(
+        config_dict["mode"]
+    ).split(".")[-1]
+
+    config_dict["mode"] = (
+        config_dict["mode"]
+        .replace("'>", "")
+        .replace("'", "")
+        .strip()
+        .lower()
+    )
+
+    print(
+        "🔥 NORMALIZED API MODE:",
+        config_dict["mode"]
+    )
+
+    # =========================
+    # SYMBOL NORMALIZE
+    # =========================
+
+    config_dict["symbol"] = (
+        config_dict["symbol"]
+        .upper()
+    )
+
+    # =========================
+    # MODE VALIDATION
+    # =========================
+
+    if config_dict["mode"] not in [
+        "paper",
+        "live"
+    ]:
+
+        raise HTTPException(
+            status_code=400,
+            detail="invalid mode"
+        )
 
     print("===================================")
-    print("🔥 START CONFIG RECEIVED:", config_dict)
+    print(
+        "🔥 START CONFIG RECEIVED:",
+        config_dict
+    )
     print("===================================")
 
-    return bot_manager.start(config_dict)
+    print(
+        "🚀 BOT MANAGER ID:",
+        id(bot_manager)
+    )
+
+    return bot_manager.start(
+        config_dict
+    )
 
 
 # =========================
 # STOP
 # =========================
+
 @router.post("/stop")
 def stop_bot():
 
-    print("🛑 STOP REQUEST")
+    # =========================
+    # GET BOT MANAGER
+    # =========================
+
+    bot_manager = get_bot_manager()
+
+    print(
+        "🛑 STOP REQUEST"
+    )
+
+    print(
+        "🛑 BOT MANAGER ID:",
+        id(bot_manager)
+    )
 
     return bot_manager.stop()
 
@@ -56,12 +131,18 @@ def stop_bot():
 # =========================
 # SYMBOL（完全無効）
 # =========================
+
 @router.post("/symbol")
 def set_symbol(data: dict):
 
-    print("⚠️ SYMBOL API DISABLED")
+    print(
+        "⚠️ SYMBOL API DISABLED"
+    )
 
     return {
         "status": "error",
-        "reason": "symbol must be set via /start only"
+        "reason": (
+            "symbol must be set "
+            "via /start only"
+        )
     }

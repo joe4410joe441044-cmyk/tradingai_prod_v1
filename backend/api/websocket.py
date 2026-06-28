@@ -159,46 +159,26 @@ async def websocket_endpoint(
 
         while True:
 
-            print(
-                "🔥 BEFORE GET RESULT"
-            )
-
             # =========================
             # BOT STATUS
             # =========================
 
             data = bot.get_result()
 
-            print(
-                "🔥 AFTER GET RESULT"
-            )
-
             data = safe_json(data)
 
-            print(
-                "🔥 AFTER SAFE JSON"
-            )
 
             # =========================
             # DEBUG
             # =========================
 
-            if DEBUG_WS:
 
-                print(
-                    "WS SEND:",
-                    data
-                )
 
             # =========================
             # SEND
             # =========================
 
             await ws.send_json(data)
-
-            print(
-                "🔥 AFTER SEND JSON"
-            )
 
             # =========================
             # LOOP WAIT

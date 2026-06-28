@@ -3,6 +3,7 @@
 from backend.utils.log_buffer import add_log
 from backend.core.logger import logger
 
+
 class OrderFlowDepthStrategy:
 
     def __init__(self, orderbook_manager):
@@ -23,6 +24,15 @@ class OrderFlowDepthStrategy:
     # =========================
 
     def on_orderbook(self):
+
+        # =========================
+        # STRATEGY UPDATE
+        # =========================
+
+        add_log(
+            "🧠 STRATEGY UPDATE",
+            "warning"
+        )
 
         logger.debug(
             "📊 STRATEGY on_orderbook CALLED"
@@ -72,7 +82,16 @@ class OrderFlowDepthStrategy:
             f"📊 OB: "
             f"bid={bid_vol:.2f} "
             f"ask={ask_vol:.2f} "
-            f"imbalance={imbalance:.2f}"
+            f"imbalance={imbalance:.2f}",
+            "info"
+        )
+
+        add_log(
+            f"📊 IMBALANCE "
+            f"BID_VOL={bid_vol:.2f} "
+            f"ASK_VOL={ask_vol:.2f} "
+            f"RATIO={imbalance:.4f}",
+            "info"
         )
 
         # =========================
@@ -98,6 +117,12 @@ class OrderFlowDepthStrategy:
             f"{signal}"
         )
 
+        add_log(
+            f"🧠 SIGNAL CANDIDATE: "
+            f"{signal}",
+            "warning"
+        )
+
         # =========================
         # HISTORY
         # =========================
@@ -111,6 +136,12 @@ class OrderFlowDepthStrategy:
         logger.debug(
             f"📚 HISTORY: "
             f"{self.history}"
+        )
+
+        add_log(
+            f"📚 HISTORY: "
+            f"{self.history}",
+            "info"
         )
 
         # =========================
@@ -131,7 +162,8 @@ class OrderFlowDepthStrategy:
         ):
 
             add_log(
-                "✅ BUY CONFIRMED"
+                "✅ BUY CONFIRMED",
+                "success"
             )
 
             signal_data = {
@@ -140,12 +172,19 @@ class OrderFlowDepthStrategy:
 
             add_log(
                 f"🟡 SIGNAL: "
-                f"{signal_data}"
+                f"{signal_data}",
+                "success"
             )
 
             logger.debug(
                 f"🚀 FINAL SIGNAL: "
                 f"{signal_data}"
+            )
+
+            add_log(
+                f"🚀 FINAL SIGNAL: "
+                f"{signal_data}",
+                "success"
             )
 
             self.history.clear()
@@ -162,7 +201,8 @@ class OrderFlowDepthStrategy:
         ):
 
             add_log(
-                "✅ SELL CONFIRMED"
+                "✅ SELL CONFIRMED",
+                "success"
             )
 
             signal_data = {
@@ -171,12 +211,19 @@ class OrderFlowDepthStrategy:
 
             add_log(
                 f"🟡 SIGNAL: "
-                f"{signal_data}"
+                f"{signal_data}",
+                "success"
             )
 
             logger.debug(
                 f"🚀 FINAL SIGNAL: "
                 f"{signal_data}"
+            )
+
+            add_log(
+                f"🚀 FINAL SIGNAL: "
+                f"{signal_data}",
+                "success"
             )
 
             self.history.clear()

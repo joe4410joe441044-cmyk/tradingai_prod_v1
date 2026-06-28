@@ -21,23 +21,46 @@ class TradeBrain:
     # =====================================================
     def decide(self, market_data: dict):
 
+        print(
+            "[AI DEBUG] ENTER TradeBrain.decide"
+        )
+
         features = market_data.get("features", [])
 
         if not features:
+
+            print(
+                "[AI DEBUG] NO_FEATURES"
+            )
+
             return None
 
         lstm_signal = self.lstm.predict(features)
+
+        print(
+            f"[AI DEBUG] LSTM={lstm_signal}"
+        )
+
         llm_signal = self.llm.analyze(market_data)
 
-        # =========================
-        # CONSENSUS
-        # =========================
+        print(
+            f"[AI DEBUG] LLM={llm_signal}"
+        )
+
+        print(
+            f"[AI DEBUG] MATCH={lstm_signal == llm_signal}"
+        )
+
         if lstm_signal == llm_signal:
             decision = lstm_signal
             confidence = 1.0
         else:
             decision = "HOLD"
             confidence = 0.5
+
+        print(
+            f"[AI DEBUG] DECISION={decision}"
+        )
 
         # =========================
         # ★ 強化イベント（UI完全対応）

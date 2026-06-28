@@ -3,7 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# CORS（React接続用）
+# =========================
+# CORS
+# =========================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,62 +16,309 @@ app.add_middleware(
 )
 
 # =========================
-# TradeCoreインスタンス（後で注入）
+# TRADE CORE
 # =========================
+
 trade_core = None
 
 
 def set_trade_core(core):
+
     global trade_core
+
     trade_core = core
 
 
 # =========================
-# AIステータス
+# AI STATUS
 # =========================
+
 @app.get("/api/ai/status")
 def ai_status():
 
+    global trade_core
+
     if not trade_core:
-        return {"error": "no_trade_core"}
+
+        return {
+            "error": "no_trade_core"
+        }
 
     return {
-        "ai_score": trade_core.ai_last_score,
-        "ai_decision": trade_core.ai_last_decision,
-        "open_positions": len(trade_core.positions)
+
+        "ai_score": getattr(
+            trade_core,
+            "ai_last_score",
+            None
+        ),
+
+        "ai_decision": getattr(
+            trade_core,
+            "ai_last_decision",
+            None
+        ),
+
+        "open_positions": len(
+            getattr(
+                trade_core,
+                "positions",
+                {}
+            )
+        ),
     }
 
 
 # =========================
-# AIログ（最新100件）
+# AI LOGS
 # =========================
+
 @app.get("/api/ai/logs")
 def ai_logs():
 
+    global trade_core
+
     if not trade_core:
+
         return []
 
-    return trade_core.ai_logger.logs[-100:]
+    ai_logger = getattr(
+        trade_core,
+        "ai_logger",
+        None
+    )
+
+    if not ai_logger:
+
+        return []
+
+    return getattr(
+        ai_logger,
+        "logs",
+        []
+    )[-100:]
 
 
 # =========================
-# ポジション一覧
+# POSITIONS + EXECUTION
 # =========================
+
 @app.get("/api/positions")
 def positions():
 
-    if not trade_core:
-        return []
+    global trade_core
 
-    return [
-        {
-            "id": p.id,
-            "symbol": p.symbol,
-            "type": p.trade_type,
-            "entry": p.entry_price,
-            "sl": p.sl,
-            "tp": p.tp,
-            "status": p.status
+    # =========================
+    # NO TRADE CORE
+    # =========================
+
+    if not trade_core:
+
+        return {
+
+            "execution": {
+
+                "bot_running": False,
+
+                "ws_connected": False,
+
+                "real_order_allowed": False,
+
+                "position_active": False,
+
+                "position_side": None,
+
+                "cooldown_active": False,
+
+                "execution_mode": "SIMULATION",
+
+                "market_ready": False,
+            },
+
+            "positions": [],
         }
-        for p in trade_core.positions.values()
-    ]
+
+    # =========================
+    # SAFE ACCESS
+    # =========================
+
+    positions_dict = getattr(
+        trade_core,
+        "positions",
+        {}
+    )
+
+    config = getattr(
+        trade_core,
+        "config",
+        {}
+    )
+
+    ws = getattr(
+        trade_core,
+        "ws",
+        None
+    )
+
+    # =========================
+    # POSITION SIDE
+    # =========================
+
+    position_side = None
+
+    try:
+
+        if positions_dict:
+
+            first_position = next(
+                iter(
+                    positions_dict.values()
+                )
+            )
+
+            position_side = getattr(
+                first_position,
+                "trade_type",
+                None
+            )
+
+    except Exception:
+
+        position_side = None
+
+    # =========================
+    # EXECUTION SNAPSHOT
+    # =========================
+
+    execution = {
+
+        "bot_running": getattr(
+            trade_core,
+            "_running",
+            False
+        ),
+
+        "ws_connected": (
+
+            ws is not None
+
+            and
+
+            getattr(
+                ws,
+                "connected",
+                False
+            )
+
+        ),
+
+        "real_order_allowed": (
+
+            not config.get(
+                "dry_run",
+                True
+            )
+
+        ),
+
+        "position_active": (
+            len(positions_dict) > 0
+        ),
+
+        "position_side": (
+            position_side
+        ),
+
+        "cooldown_active": False,
+
+        "execution_mode": (
+
+            "SIMULATION"
+
+            if config.get(
+                "dry_run",
+                True
+            )
+
+            else "LIVE"
+
+        ),
+
+        "market_ready": getattr(
+            trade_core,
+            "market_ready",
+            False
+        ),
+    }
+
+    # =========================
+    # POSITION LIST
+    # =========================
+
+    positions_data = []
+
+    try:
+
+        for p in positions_dict.values():
+
+            positions_data.append({
+
+                "id": getattr(
+                    p,
+                    "id",
+                    None
+                ),
+
+                "symbol": getattr(
+                    p,
+                    "symbol",
+                    None
+                ),
+
+                "type": getattr(
+                    p,
+                    "trade_type",
+                    None
+                ),
+
+                "entry": getattr(
+                    p,
+                    "entry_price",
+                    None
+                ),
+
+                "sl": getattr(
+                    p,
+                    "sl",
+                    None
+                ),
+
+                "tp": getattr(
+                    p,
+                    "tp",
+                    None
+                ),
+
+                "status": getattr(
+                    p,
+                    "status",
+                    None
+                ),
+            })
+
+    except Exception as err:
+
+        print(
+            "❌ POSITION BUILD ERROR:",
+            err
+        )
+
+    # =========================
+    # RESPONSE
+    # =========================
+
+    return {
+
+        "execution": execution,
+
+        "positions": positions_data,
+    }

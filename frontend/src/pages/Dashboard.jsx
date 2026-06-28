@@ -1,938 +1,979 @@
-import { useEffect, useState } from "react";
-import "../styles/dashboard.css";
+import {
+    useEffect,
+    useState,
+} from "react";
 
-import StatusPanel from "../components/StatusPanel";
-import StrategyMonitor from "../components/StrategyMonitor";
-import SignalIntelligencePanel from "../components/SignalIntelligencePanel";
-import DerivedIntelligencePanel from "../components/DerivedIntelligencePanel";
-
-import ExecutionPanel from "../components/ExecutionPanel";
+import {
+    startWebSocketRuntime,
+} from "../runtime/websocketRuntime";
 import LogsPanel from "../components/monitor/LogsPanel";
 
-import TradeSettings from "../components/TradeSettings";
-import StrategyControl from "../components/StrategyControl";
+import FilterSettings from "../components/FilterSettings";
+import SafetySettings from "../components/SafetySettings";
+import QuickActions from "../components/QuickActions";
+
+import {
+    mapLatencyQuality,
+    mapExecutionHealth,
+    mapSpreadSafety,
+} from "../utils/telemetryUtils";
+
+import {
+    telemetryState,
+} from "../store/telemetryStore";
+
+import BotControl from "../components/BotControl";
+
 import RiskPanel from "../components/RiskPanel";
 
-import ExecutionSettings from "../components/config/ExecutionSettings";
-import PositionSettings from "../components/config/PositionSettings";
-import EmergencySettings from "../components/config/EmergencySettings";
-import AdvancedSettings from "../components/config/AdvancedSettings";
+import TradeSettings from "../components/TradeSettings";
+
+import ExecutionPanel from "../components/ExecutionPanel";
 
 import ResultPanel from "../components/ResultPanel";
 
-import {
-  createRealtimeWebSocketLifecycle,
-} from "../core/realtime/websocketLifecycle";
+/* =================================================
+   TELEMETRY STATE
+================================================= */
 
-import realtimePipeline from "../core/realtime/realtimePipeline";
+const signalLogs = [];
 
-import {
-  createTelemetryPipeline,
-  updateTelemetryPipeline,
-  createUnifiedTelemetryPacket,
-} from "../core/telemetry/telemetryPipeline";
+const tradeLogs = [];
 
-// =========================
-// SAFE NUMBER
-// =========================
+const unifiedTelemetry = {};
 
-const safeNumber = (
-  value,
-  fallback = null
-) => {
+const journalTelemetry = {};
 
-  if (
-    value === null ||
-    value === undefined
-  ) {
+/* =================================================
+   TELEMETRY STORE
+================================================= */
 
-    return fallback;
+const governance =
+    telemetryState.governance;
 
-  }
+const runtime =
+    telemetryState.runtime;
 
-  const n = Number(value);
+const routerTelemetry =
+    telemetryState.router;
 
-  return Number.isFinite(n)
-    ? n
-    : fallback;
+const marketData =
+    telemetryState.market;
 
-};
+const executionData =
+    telemetryState.execution;
 
-// =========================
-// SAFE DATE
-// =========================
+const riskData =
+    telemetryState.risk;
 
-const safeDate = (
-  value
-) => {
+/* =================================================
+   DASHBOARD
+================================================= */
 
-  if (!value) {
-    return null;
-  }
 
-  const d = new Date(value);
+const Dashboard = ({
+    executionEnabled,
+    setExecutionEnabled
+}) => {
 
-  return Number.isNaN(d.getTime())
-    ? null
-    : d.getTime();
+const [tradeSettings, setTradeSettings] = useState({
 
-};
+    mode: "PAPER",
 
-const telemetryPipeline =
-  createTelemetryPipeline();
+    exchange: "BINANCE",
 
-createUnifiedTelemetryPacket();
+    symbol: "XRPUSDT",
 
-// =========================
-// DASHBOARD
-// =========================
+    leverage: 5,
 
-export default function Dashboard({
+    timeframe: "1m",
 
-  config = {},
-  setConfig = () => { },
+    positionSize: 100,
 
-  botData = {},
+    tp: 1.0,
 
-  handleStart = () => { },
-  handleStop = () => { },
+    sl: 1.0,
 
-}) {
+    maxDd: 5,
 
-  // =========================
-  // MARKET DATA
-  // =========================
+    trailing: false,
 
-  const [marketData, setMarketData] = useState({
+    spreadFilter: true,
 
-    timestamp: null,
+    volatilityFilter: true,
 
-    price: null,
+    liquidityFilter: true,
 
-    pnl: null,
+    spoofFilter: true,
 
-    balance: null,
-
-    equity: null,
-
-    position: null,
-
-    entryPrice: null,
-
-    botStatus: null,
-
-  });
-
-  // =========================
-  // STRATEGY DATA
-  // =========================
-
-  const [strategyData, setStrategyData] = useState({
-
-    timestamp: null,
-
-    imbalance: null,
-
-    momentum: null,
-
-    spread: null,
-
-    edge: null,
-
-    delta: null,
-
-    cooldown: false,
-
-    entryReady: false,
-
-  });
-
-  // =========================
-  // EXECUTION DATA
-  // =========================
-
-  const [executionData, setExecutionData] = useState({
-
-    timestamp: null,
-
-    latency: null,
-
-    orderStatus: null,
-
-    wsStatus: null,
-
-    engineStatus: null,
-
-    executionMode: null,
-
-  });
-
-  // =========================
-  // RISK DATA
-  // =========================
-
-  const [riskData, setRiskData] = useState({
-
-    timestamp: null,
-
-    currentDD: null,
-
-    dailyLoss: null,
-
-    lossStreak: null,
-
-    riskLevel: null,
+    momentumFilter: true,
 
     killSwitch: false,
 
-  });
+    autoFlatten: false,
 
-  // =========================
-  // SIGNAL INTELLIGENCE
-  // =========================
+});
+const [, forceUpdate] = useState(0);
 
-  const [signalIntel, setSignalIntel] = useState({
+useEffect(() => {
+    const id = setInterval(() => {
+        forceUpdate(v => v + 1);
+    }, 250);
 
-    fakeWall: false,
+    return () => clearInterval(id);
+}, []);
+    
+    useEffect(() => {
 
-    liquidityGrab: false,
+        startWebSocketRuntime();
 
-    spoofProbability: null,
+    }, []);
 
-    absorption: false,
+    return (
 
-    spreadExplosion: false,
+        <div className="dashboard">
 
-    confidenceScore: null,
+            <div className="dashboard-layout">
 
-  });
+            {/* =================================================
+            LEFT COLUMN
+            ================================================= */}
 
-  // =========================
-  // DERIVED INTELLIGENCE
-  // =========================
+            <div className="left-column">
 
-  const [derivedIntel, setDerivedIntel] = useState({
+                <div className="panel-card">
 
-    marketDanger: null,
+                    <BotControl
 
-    entryQuality: null,
+                        config={tradeSettings}
 
-    executionQuality: null,
+                        executionEnabled={
+                            executionEnabled
+                        }
 
-    marketStability: null,
+                        setExecutionEnabledState={
+                            setExecutionEnabled
+                        }
 
-    trendAggression: null,
+                    />
 
-    noTradeZone: false,
+                </div>
 
-    momentumBurst: false,
+                <div className="panel-card">
 
-    executionAnomaly: false,
+                <TradeSettings
+                    values={tradeSettings}
+                    onChange={(update) =>
+                        setTradeSettings(prev => ({
 
-    unstableMarket: false,
+                            ...prev,
 
-    spoofDanger: false,
+                            ...update,
 
-    confidenceScore: null,
+                        }))
+                    }
+                />
 
-    marketPhase: null,
+                </div>
 
-    signalRank: null,
+                <div className="panel-card">
 
-  });
+                    <RiskPanel
+                        values={tradeSettings}
+                        onChange={(update) =>
+                            setTradeSettings(prev => ({
 
-  const [signalLogs, setSignalLogs] =
-    useState([]);
+                                ...prev,
 
-  const [tradeLogs, setTradeLogs] =
-    useState([]);
+                                ...update,
 
-  const [frontendMetrics, setFrontendMetrics] = useState({
+                            }))
+                        }
+                    />
 
-    wsReconnects: 0,
+                </div>
 
-    staleEvents: 0,
+                <div className="panel-card">
 
-    parseErrors: 0,
+                    <FilterSettings
+                        values={tradeSettings}
+                        onChange={(update) =>
+                            setTradeSettings(prev => ({
 
-    packetsProcessed: 0,
+                                ...prev,
 
-    droppedPackets: 0,
+                                ...update,
 
-  });
+                            }))
+                        }
+                    />
 
-  const [momentumHistory, setMomentumHistory] =
-    useState([]);
+                </div>
 
-  const [spreadHistory, setSpreadHistory] =
-    useState([]);
+                <div className="panel-card">
 
-  const [latencyHistory, setLatencyHistory] =
-    useState([]);
+                    <SafetySettings
+                        values={tradeSettings}
+                        onChange={(update) =>
+                            setTradeSettings(prev => ({
 
-  const [executionRoute, setExecutionRoute] =
-    useState(null);
+                                ...prev,
 
-  const [executionAllowed, setExecutionAllowed] =
-    useState(false);
+                                ...update,
 
-  const [routerReason, setRouterReason] =
-    useState(null);
+                            }))
+                        }
+                    />
 
-  const [executionPriority, setExecutionPriority] =
-    useState(null);
+                </div>
 
-  const [executionMode, setExecutionMode] =
-    useState(null);
+                <div className="panel-card">
 
-  const [survivabilityScore, setSurvivabilityScore] =
-    useState(null);
+                    <QuickActions />
 
-  const [routerTelemetry, setRouterTelemetry] =
-    useState({});
+                </div>
 
-  const [unifiedTelemetry, setUnifiedTelemetry] =
-    useState({});
+            </div>
 
-  const [journalTelemetry, setJournalTelemetry] =
-    useState({
+            {/* =================================================
+            CENTER COLUMN
+            ================================================= */}
 
-      executionJournalSize: 0,
+            <div className="center-column">
 
-      lastJournalEntry: null,
+                <div className="panel-card center-terminal-panel">
 
-      journalPersistenceStatus:
-        null,
+                    {/* =============================================
+                       CENTER TERMINAL TITLE
+                    ============================================= */}
 
-      journalRestoreStatus:
-        null,
+                    <div className="center-terminal-title">
+                        CENTER | MONITOR
+                    </div>
 
-      crashRecoveryDetected:
-        false,
+                    {/* =============================================
+                       RESULT PANEL
+                    ============================================= */}
 
-    });
+                    <ResultPanel
 
-  useEffect(() => {
+                        price={
+                            marketData?.price
+                        }
 
-    const wsLifecycle =
-      createRealtimeWebSocketLifecycle({
+                        balance={
+                            marketData?.balance
+                        }
 
-        url:
-          `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`,
+                        equity={
+                            marketData?.equity
+                        }
 
-        debug: true,
+                        pnl={
+                            marketData?.pnl
+                        }
 
-        onOpen: () => {
+                        position={
+                            marketData?.position
+                            || "NONE"
+                        }
 
-          console.log(
-            "WS LIFECYCLE READY"
-          );
+                        marketRegime={
+                            marketData?.marketRegime
+                            || "UNDEFINED"
+                        }
 
-        },
+                        routingQuality={
+                            routerTelemetry?.routingQuality
+                            || "UNKNOWN"
+                        }
 
-        onReconnect: (attempts) => {
+                        marketHostility={
+                            marketData?.marketHostility
+                            ?? "--"
+                        }
 
-          console.log(
-            "WS RECONNECT",
-            attempts
-          );
-                setFrontendMetrics((prev) => ({
+                    />
 
-                  ...prev,
+                    {/* =============================================
+                       EXECUTION PANEL
+                    ============================================= */}
 
-                  wsReconnects:
-                    prev.wsReconnects + 1,
+                    <ExecutionPanel
 
-                }));
+                        executionAllowed={
+                            governance?.executionEnabled
+                        }
 
-              },
+                        governanceMode={
+                            governance?.mode
+                            || "PAPER"
+                        }
 
-                onStale: () => {
+                        runtimePhase={
+                            executionData?.runtimePhase
+                            || "--"
+                        }
 
-                  console.warn(
-                    "WS STALE DETECTED"
-                  );
+                        routerRoute={
+                            routerTelemetry?.route
+                            || "UNKNOWN"
+                        }
 
-                  setFrontendMetrics((prev) => ({
+                        marketRegime={
+                            marketData?.marketRegime
+                            || "UNDEFINED"
+                        }
 
-                    ...prev,
+                        websocketHealth={
+                            runtime?.websocketHealth
+                            ?? "--"
+                        }
 
-                    staleEvents:
-                      prev.staleEvents + 1,
+                        latency={
+                            runtime?.latency
+                            || "--"
+                        }
 
-                  }));
+                        spreadCondition={
+                            riskData?.spreadSafety
+                            || "UNKNOWN"
+                        }
 
-                },
+                        volatility={
+                            marketData?.volatility
+                            || "--"
+                        }
 
-                  onError: (err) => {
+                        liquidity={
+                            marketData?.liquidity
+                            || "--"
+                        }
 
-                    console.error(
-                      "WS ERROR:",
-                      err
-                    );
+                        microstructureBias={
+                            marketData?.microstructureBias
+                            || "--"
+                        }
 
-                  },
+                        routingQuality={
+                            routerTelemetry?.routingQuality
+                            || "UNKNOWN"
+                        }
 
-                    onMessage: (event) => {
+                    />
 
-                      realtimePipeline({
+                    {/* =============================================
+                       LOGS PANEL
+                    ============================================= */}
 
-                        event,
+                    <LogsPanel
 
-                        setMarketData,
-                        setStrategyData,
-                        setExecutionData,
-                        setRiskData,
+                        signalLogs={
+                            signalLogs
+                        }
 
-                        setSignalIntel,
-                        setDerivedIntel,
+                        tradeLogs={
+                            tradeLogs
+                        }
 
-                        setMomentumHistory,
-                        setSpreadHistory,
-                        setLatencyHistory,
+                        routerTelemetry={
+                            routerTelemetry
+                        }
 
-                        setFrontendMetrics,
+                        unifiedTelemetry={
+                            unifiedTelemetry
+                        }
 
-                      });
+                        journalTelemetry={
+                            journalTelemetry
+                        }
 
-                      try {
+                        loading={false}
 
-                        const parsed =
-                          JSON.parse(event.data);
+                        error={false}
 
-                        const now = safeDate(
-                          parsed.timestamp
-                        );
+                    />
 
-                        setExecutionRoute(
-                          parsed.executionRoute ??
-                          null
-                        );
+                </div>
 
-                        setExecutionAllowed(
-                          parsed.executionAllowed ??
-                          false
-                        );
+            </div>
 
-                        setRouterReason(
-                          parsed.routerReason ??
-                          null
-                        );
+            {/* =================================================
+            RIGHT GOVERNANCE COLUMN
+            ================================================= */}
 
-                        setExecutionPriority(
-                          parsed.executionPriority ??
-                          null
-                        );
+            <div className="right-governance-column">
 
-                        setExecutionMode(
-                          parsed.executionMode ??
-                          null
-                        );
+                {/* =============================================
+                   EXECUTION MONITORING
+                ============================================= */}
 
-                        setSurvivabilityScore(
-                          safeNumber(
-                            parsed.survivabilityScore,
-                            null
-                          )
-                        );
+                <div className="execution-monitoring-card">
 
-                        setRouterTelemetry(
-                          parsed.routerTelemetry ??
-                          {}
-                        );
+                    <div className="governance-card-title">
+                        EXECUTION MONITORING（実行監視）
+                    </div>
 
-                        const telemetryPacket =
-                          updateTelemetryPipeline({
+                    {/* =============================================
+                       EXECUTION
+                    ============================================= */}
 
-                            executionTelemetry: {
+                    <div className="monitoring-section">
 
-                              executionRoute:
-                                parsed.executionRoute,
+                        <div className="monitoring-label">
+                            EXECUTION
+                        </div>
 
-                              executionAllowed:
-                                parsed.executionAllowed,
+                        <div className="monitoring-grid">
 
-                              routerReason:
-                                parsed.routerReason,
+                            <div className="monitoring-row">
 
-                              executionPriority:
-                                parsed.executionPriority,
+                                <span>STATUS</span>
 
-                              executionMode:
-                                parsed.executionMode,
+                                <span className={
+                                    governance?.executionEnabled
+                                        ? "status-safe"
+                                        : "status-danger"
+                                }>
 
-                              survivabilityScore:
-                                parsed.survivabilityScore,
+                                    {
+                                        governance?.executionEnabled
+                                            ? "ENABLED（有効）"
+                                            : "BLOCKED（停止）"
+                                    }
 
-                            },
+                                </span>
 
-                            runtimeTelemetry: {
+                            </div>
 
-                              websocketConnected:
-                                executionData?.wsStatus === "CONNECTED",
+                            <div className="monitoring-row">
 
-                              lastUpdate:
-                                now,
+                                <span>POSITION</span>
 
-                            },
+                                <span>
 
-                            survivabilityTelemetry: {
+                                    {
+                                        marketData?.position
+                                        ?? "NONE"
+                                    }
 
-                              survivabilityScore:
-                                parsed.survivabilityScore,
+                                </span>
 
-                            },
+                            </div>
 
-                          });
+                            <div className="monitoring-row">
 
-                        setUnifiedTelemetry(
-                          telemetryPacket
-                        );
+                                <span>WS</span>
 
-                        setJournalTelemetry({
+                                <span className={
+                                    runtime?.wsStatus
+                                    === "CONNECTED"
+                                        ? "status-safe"
+                                        : "status-danger"
+                                }>
 
-                          executionJournalSize:
-                            telemetryPacket
-                              ?.executionJournalSize ?? 0,
+                                    {
+                                        runtime?.wsStatus
+                                        ?? "-"
+                                    }
 
-                          lastJournalEntry:
-                            telemetryPacket
-                              ?.lastJournalEntry ?? null,
+                                </span>
 
-                          journalPersistenceStatus:
-                            telemetryPacket
-                              ?.journalPersistenceStatus ??
-                            null,
+                            </div>
 
-                          journalRestoreStatus:
-                            telemetryPacket
-                              ?.journalRestoreStatus ??
-                            null,
+                            <div className="monitoring-row">
 
-                          crashRecoveryDetected:
-                            telemetryPacket
-                              ?.crashRecoveryDetected ??
-                            false,
+                                <span>HEALTH</span>
 
-                        });
+                                <span className={
+                                    mapExecutionHealth(
+                                        runtime?.latency
+                                    ) === "STABLE（安定）"
+                                        ? "status-safe"
+                                        : mapExecutionHealth(
+                                            runtime?.latency
+                                        ) === "NORMAL（正常）"
+                                            ? "status-warning"
+                                            : "status-danger"
+                                }>
 
-                        setSignalLogs((prev) => ([
+                                    {
+                                        mapExecutionHealth(
+                                            runtime?.latency
+                                        )
+                                    }
 
-                          {
+                                </span>
 
-                            timestamp: now,
+                            </div>
 
-                            signal:
-                              parsed.signal ??
-                              null,
+                            <div className="monitoring-row">
 
-                            confidence:
-                              safeNumber(
-                                parsed.confidenceScore,
-                                null
-                              ),
+                                <span>LATENCY</span>
 
-                            momentum:
-                              safeNumber(
-                                parsed.momentum,
-                                null
-                              ),
+                                <span>
 
-                          },
+                                    {
+                                        runtime?.latency
+                                        ?? "-"
+                                    }
 
-                          ...prev,
+                                </span>
 
-                        ].slice(0, 50)));
+                            </div>
 
-                        setTradeLogs((prev) => ([
+                            <div className="monitoring-row">
 
-                          {
+                                <span>SPREAD</span>
 
-                            timestamp: now,
+                                <span className={
+                                    mapSpreadSafety(
+                                        riskData?.spreadSafety
+                                    ) === "SAFE"
+                                        ? "status-safe"
+                                        : "status-warning"
+                                }>
 
-                            action:
-                              parsed.orderStatus ??
-                              null,
+                                    {
+                                        mapSpreadSafety(
+                                            riskData?.spreadSafety
+                                        )
+                                    }
 
-                            symbol:
-                              parsed.symbol ??
-                              config.symbol ??
-                              null,
+                                </span>
 
-                            pnl:
-                              safeNumber(
-                                parsed.pnl,
-                                null
-                              ),
+                            </div>
 
-                            executionRoute:
-                              parsed.executionRoute ??
-                              null,
+                        </div>
 
-                            routerReason:
-                              parsed.routerReason ??
-                              null,
+                    </div>
 
-                            executionMode:
-                              parsed.executionMode ??
-                              null,
+                    {/* =============================================
+                       MARKET
+                    ============================================= */}
 
-                            survivabilityScore:
-                              safeNumber(
-                                parsed.survivabilityScore,
-                                null
-                              ),
+                    <div className="monitoring-section">
 
-                          },
+                        <div className="monitoring-label">
+                            MARKET
+                        </div>
 
-                          ...prev,
+                        <div className="monitoring-grid">
 
-                        ].slice(0, 50)));
+                            <div className="monitoring-row">
 
-                      } catch (err) {
+                                <span>LIQUIDITY</span>
 
-                        console.error(
-                          "LOG PIPELINE ERROR:",
-                          err
-                        );
+                                <span>
 
-                      }
+                                    {
+                                        marketData?.liquidity
+                                        ?? "-"
+                                    }
 
-                    },
+                                </span>
 
-      });
+                            </div>
 
-    return () => {
+                            <div className="monitoring-row">
 
-      if (
-        wsLifecycle &&
-        wsLifecycle.destroy
-      ) {
+                                <span>VOLATILITY</span>
 
-        wsLifecycle.destroy();
+                                <span>
 
-      }
+                                    {
+                                        marketData?.volatility
+                                        ?? "-"
+                                    }
 
-    };
+                                </span>
 
-  }, []);
+                            </div>
 
-  const resultData = {
+                            <div className="monitoring-row">
 
-    positionSize:
-      marketData?.balance !== null &&
-        config.risk_percent !== null
-        ? (
-          safeNumber(
-            marketData.balance,
-            null
-          ) *
-          (
-            safeNumber(
-              config.risk_percent ?? null,
-              null
-            ) / 100
-          )
-        ).toFixed(2)
-        : "-",
+                                <span>SPOOF</span>
 
-    qty:
-      marketData?.price !== null &&
-        marketData?.balance !== null &&
-        config.risk_percent !== null
-        ? (
-          (
-            safeNumber(
-              marketData.balance,
-              null
-            ) *
-            (
-              safeNumber(
-                config.risk_percent ?? null,
-                null
-              ) / 100
-            )
-          ) /
-          safeNumber(
-            marketData.price,
-            null
-          )
-        ).toFixed(6)
-        : "-",
+                                <span>
 
-    riskAmount:
-      marketData?.balance !== null &&
-        config.risk_percent !== null
-        ? (
-          safeNumber(
-            marketData.balance,
-            null
-          ) *
-          (
-            safeNumber(
-              config.risk_percent ?? null,
-              null
-            ) / 100
-          )
-        ).toFixed(2)
-        : "-",
+                                    {
+                                        marketData?.spoofRisk
+                                        ?? "-"
+                                    }
 
-    ddAfter:
-      config.sl_percent ?? null,
+                                </span>
 
-    symbol:
-      config.symbol ?? null,
+                            </div>
 
-  };
+                            <div className="monitoring-row">
 
-  return (
+                                <span>MARKET QUALITY</span>
 
-    <div className="dashboard">
+                                <span>
 
-      <div className="header">
+                                    {
+                                        marketData?.marketQuality
+                                        ?? "NORMAL"
+                                    }
 
-        <h1>
-          TradingAI Dashboard
-        </h1>
+                                </span>
 
-      </div>
+                            </div>
 
-      <div className="dashboard-content">
+                            <div className="monitoring-row">
 
-        <div className="panel-card full-dashboard-card">
+                                <span>NO TRADE</span>
 
-          <div className="left-column">
+                                <span className={
+                                    riskData?.noTrade
+                                        ? "status-danger"
+                                        : "status-safe"
+                                }>
 
-            <StatusPanel
+                                    {
+                                        riskData?.noTrade
+                                            ? "ON（有効）"
+                                            : "OFF（無効）"
+                                    }
 
-              balance={marketData?.balance}
-              equity={marketData?.equity}
-              pnl={marketData?.pnl}
-              price={marketData?.price}
+                                </span>
 
-              position={marketData?.position}
-              entryPrice={marketData?.entryPrice}
+                            </div>
 
-              botStatus={marketData?.botStatus}
+                        </div>
 
-              connection={
-                executionData?.wsStatus
-              }
+                    </div>
 
-              currentDD={
-                riskData?.currentDD
-              }
+                    {/* =============================================
+                       RESTRICTIONS
+                    ============================================= */}
 
-              lossStreak={
-                riskData?.lossStreak
-              }
+                    <div className="monitoring-section">
 
-              lastSignal={
-                strategyData?.entryReady
-                  ? "BUY"
-                  : null
-              }
+                        <div className="monitoring-label">
+                            RESTRICTIONS
+                        </div>
 
-              lastBlock={
-                derivedIntel?.marketPhase ??
-                null
-              }
+                        <div className="monitoring-grid">
 
-              engineState={
-                executionData?.engineStatus
-              }
+                            <div className="monitoring-row">
 
-              killSwitch={
-                riskData?.killSwitch
-                  ? "ACTIVE"
-                  : "SAFE"
-              }
+                                <span>COOLDOWN</span>
 
-              riskLevel={
-                riskData?.riskLevel
-              }
+                                <span className={
+                                    riskData?.cooldown
+                                        ? "status-warning"
+                                        : "status-safe"
+                                }>
 
-            />
+                                    {
+                                        riskData?.cooldown
+                                            ? "ACTIVE（稼働）"
+                                            : "OFF（無効）"
+                                    }
 
-            <StrategyMonitor
-              strategyData={strategyData}
-            />
+                                </span>
 
-            <SignalIntelligencePanel
-              signalIntel={signalIntel}
-            />
+                            </div>
 
-            <DerivedIntelligencePanel
-              derivedIntel={derivedIntel}
-            />
+                            <div className="monitoring-row">
 
-            <StrategyControl />
+                                <span>ROUTER</span>
 
-            <ResultPanel
+                                <span className={
+                                    routerTelemetry?.status
+                                    === "ACTIVE"
+                                        ? "status-safe"
+                                        : "status-danger"
+                                }>
 
-              price={marketData?.price}
-              balance={marketData?.balance}
+                                    {
+                                        routerTelemetry?.status
+                                        ?? "ACTIVE"
+                                    }
 
-              risk_percent={
-                config.risk_percent
-              }
+                                </span>
 
-              sl_percent={
-                config.sl_percent
-              }
+                            </div>
 
-              tp_percent={
-                config.tp_percent
-              }
+                            <div className="monitoring-row">
 
-              timeExit={
-                config.time_exit ?? 3
-              }
+                                <span>EXECUTION</span>
 
-            />
+                                <span className={
+                                    governance?.executionEnabled
+                                        ? "status-safe"
+                                        : "status-danger"
+                                }>
 
-          </div>
+                                    {
+                                        governance?.executionEnabled
+                                            ? "ALLOWED"
+                                            : "BLOCKED"
+                                    }
 
-          <div className="center-column">
+                                </span>
 
-            <ExecutionPanel
+                            </div>
 
-              handleStart={handleStart}
-              handleStop={handleStop}
+                            <div className="monitoring-row">
 
-              botData={{
-                ...botData,
-                ...marketData,
-              }}
+                                <span>REASON</span>
 
-              executionData={{
-                ...executionData,
+                                <span>
 
-                executionRoute,
+                                    {
+                                        executionData?.restrictionReason
+                                        ?? "-"
+                                    }
 
-                executionAllowed,
+                                </span>
 
-                routerReason,
+                            </div>
 
-                executionPriority,
+                        </div>
 
-                executionMode,
+                    </div>
 
-                survivabilityScore,
+                    {/* =============================================
+                       QUALITY
+                    ============================================= */}
 
-                routerTelemetry,
+                    <div className="monitoring-section">
 
-                unifiedTelemetry,
+                        <div className="monitoring-label">
+                            QUALITY
+                        </div>
 
-                journalTelemetry,
+                        <div className="monitoring-grid">
 
-              }}
+                            <div className="monitoring-row">
 
-              aiData={{
+                                <span>EXECUTION</span>
 
-                aiDecision:
-                  derivedIntel?.signal,
+                                <span className={
+                                    runtime?.executionQuality
+                                    === "GOOD（良好）"
+                                        ? "status-safe"
+                                        : runtime?.executionQuality
+                                            === "WEAK（弱い）"
+                                            ? "status-warning"
+                                            : "status-danger"
+                                }>
 
-                finalAction:
-                  derivedIntel?.direction,
+                                    {
+                                        runtime?.executionQuality
+                                        ?? "NORMAL（正常）"
+                                    }
 
-                executionProfile:
-                  derivedIntel?.strategyState,
+                                </span>
 
-                aiConviction:
-                  derivedIntel?.signalRank,
+                            </div>
 
-                survivalMode:
-                  derivedIntel?.marketPhase,
+                            <div className="monitoring-row">
 
-                executionConfidence:
-                  derivedIntel?.confidenceScore,
+                                <span>LATENCY</span>
 
-              }}
+                                <span className={
+                                    mapLatencyQuality(
+                                        runtime?.latency
+                                    ) === "GOOD"
+                                        ? "status-safe"
+                                        : mapLatencyQuality(
+                                            runtime?.latency
+                                        ) === "WEAK"
+                                            ? "status-warning"
+                                            : "status-danger"
+                                }>
 
-            />
+                                    {
+                                        mapLatencyQuality(
+                                            runtime?.latency
+                                        )
+                                    }
 
-            <LogsPanel
+                                </span>
 
-              signalLogs={signalLogs}
-              tradeLogs={tradeLogs}
+                            </div>
 
-              routerTelemetry={
-                routerTelemetry
-              }
+                            <div className="monitoring-row">
 
-              executionRoute={
-                executionRoute
-              }
+                                <span>ROUTING</span>
 
-              routerReason={
-                routerReason
-              }
+                                <span>
 
-              unifiedTelemetry={
-                unifiedTelemetry
-              }
+                                    {
+                                        routerTelemetry?.routingQuality
+                                        ?? "NORMAL"
+                                    }
 
-              journalTelemetry={
-                journalTelemetry
-              }
+                                </span>
 
-              loading={false}
-              error={false}
+                            </div>
 
-            />
+                        </div>
 
-          </div>
+                    </div>
 
-          <div className="right-column">
+                </div>
 
-            <TradeSettings
+                {/* =============================================
+                   HUMAN GOVERNANCE
+                ============================================= */}
 
-              config={config}
-              setConfig={setConfig}
+                <div className="human-governance-card">
 
-            />
+                    <div className="governance-card-title">
+                        HUMAN GOVERNANCE
+                    </div>
 
-            <ExecutionSettings
+                    <div className="governance-control-grid">
 
-              config={config}
-              setConfig={setConfig}
+                        <div className="governance-control-row">
 
-            />
+                            <span>EXECUTION</span>
 
-            <PositionSettings
+                            <button
+                                className={
+                                    governance?.executionEnabled
+                                        ? "governance-button active"
+                                        : "governance-button danger"
+                                }
+                            >
 
-              config={config}
-              setConfig={setConfig}
+                                {
+                                    governance?.executionEnabled
+                                        ? "ENABLED（有効）"
+                                        : "DISABLED（無効）"
+                                }
 
-            />
+                            </button>
 
-            <RiskPanel
-              result={resultData}
-            />
+                        </div>
 
-            <EmergencySettings
+                        <div className="governance-control-row">
 
-              config={config}
-              setConfig={setConfig}
+                            <span>MODE</span>
 
-            />
+                            <button className="governance-button">
 
-            <AdvancedSettings
+                                {
+                                    governance?.mode
+                                    ?? "PAPER"
+                                }
 
-              config={config}
-              setConfig={setConfig}
+                            </button>
 
-            />
+                        </div>
 
-          </div>
+                        <div className="governance-control-row">
+
+                            <span>RISK PROFILE</span>
+
+                            <button className="governance-button">
+
+                                {
+                                    riskData?.riskProfile
+                                    ?? "SAFE"
+                                }
+
+                            </button>
+
+                        </div>
+
+                        <div className="governance-control-row">
+
+                            <span>AUTHORITY</span>
+
+                            <button className="governance-button active">
+
+                                {
+                                    governance?.authority
+                                    ?? "BACKEND"
+                                }
+
+                            </button>
+
+                        </div>
+
+                        <div className="governance-control-row">
+
+                            <span>ROUTER</span>
+
+                            <button
+                                className={
+                                    routerTelemetry?.status
+                                    === "ACTIVE"
+                                        ? "governance-button active"
+                                        : "governance-button danger"
+                                }
+                            >
+
+                                {
+                                    routerTelemetry?.status
+                                    ?? "ACTIVE"
+                                }
+
+                            </button>
+
+                        </div>
+
+                        <div className="governance-control-row">
+
+                            <span>SESSION</span>
+
+                            <button className="governance-button active">
+                                ACTIVE
+                            </button>
+
+                        </div>
+
+                        <div className="governance-control-row">
+
+                            <span>NO TRADE</span>
+
+                            <button
+                                className={
+                                    riskData?.noTrade
+                                        ? "governance-button danger"
+                                        : "governance-button"
+                                }
+                            >
+
+                                {
+                                    riskData?.noTrade
+                                        ? "RESTRICTED（制限）"
+                                        : "NORMAL（正常）"
+                                }
+
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                    {/* =============================================
+                       EMERGENCY CONTROL
+                    ============================================= */}
+
+                    <div className="emergency-control-section">
+
+                        <button className="emergency-stop-button">
+                            EMERGENCY STOP（緊急停止）
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
 
         </div>
 
-      </div>
-
     </div>
 
-  );
+    );
 
-}
+};
+
+export default Dashboard;

@@ -3,14 +3,6 @@
 // =========================
 
 import {
-  aiCompositeDecisionEngine
-} from "../../engines/aiCompositeDecisionEngine";
-
-import {
-  marketIntelligenceEngine
-} from "../../engines/marketIntelligenceEngine";
-
-import {
   adaptiveEngine
 } from "../../engines/adaptiveEngine";
 
@@ -19,8 +11,8 @@ import {
 } from "../../engines/scoringEngine";
 
 import {
-  permissionEngine
-} from "../../engines/permissionEngine";
+  governanceEngine
+} from "../../engines/governanceEngine";
 
 import {
   positionSizingEngine
@@ -31,12 +23,8 @@ import {
 } from "../../engines/lifecycleEngine";
 
 import {
-  interpretationEngine
-} from "../../engines/interpretationEngine";
-
-import {
-  executionSurvivabilityEngine
-} from "../../engines/executionSurvivabilityEngine";
+  survivabilityEngine
+} from "../../engines/survivabilityEngine";
 
 // =========================
 // AGGREGATION PIPELINE
@@ -48,13 +36,9 @@ export const aggregationPipeline = ({
 
   strategyPacket,
 
-  executionPacket,
+  runtimePacket,
 
   riskPacket,
-
-  intelligencePacket,
-
-  momentumHistory,
 
   spreadHistory,
 
@@ -68,74 +52,41 @@ export const aggregationPipeline = ({
 
   const baseDerivedPacket = {
 
-    marketDanger:
-      intelligencePacket.spoofProbability >= 80 ||
-      intelligencePacket.spreadExplosion
+    restrictionActive:
+      runtimePacket.latency > 150,
+
+    marketHostility:
+      strategyPacket.spread > 0.05
         ? "HIGH"
-        : intelligencePacket.spoofProbability >= 50
-        ? "MEDIUM"
-        : "LOW",
+        : strategyPacket.spread > 0.02
+          ? "MEDIUM"
+          : "LOW",
 
-    entryQuality:
+    routingQuality:
       Math.max(
         0,
-        100 -
-        intelligencePacket.spoofProbability +
-        strategyPacket.edge * 10
-      ),
-
-    executionQuality:
-      Math.max(
-        0,
-        100 - executionPacket.latency
+        100 - runtimePacket.latency
       ),
 
     marketStability:
-      intelligencePacket.spreadExplosion
+      strategyPacket.spread > 0.05
         ? 20
-        : 90,
+        : strategyPacket.spread > 0.02
+          ? 60
+          : 90,
 
-    trendAggression:
-      Math.abs(strategyPacket.delta) * 10,
+    hostileMarketCondition:
+      strategyPacket.spread > 0.05 ||
+      runtimePacket.latency > 120 ||
+      riskPacket.restrictionActive,
 
-    noTradeZone:
-      intelligencePacket.spreadExplosion ||
-      executionPacket.latency > 80 ||
-      riskPacket.killSwitch,
+    runtimeInstability:
+      runtimePacket.latency > 120,
 
-    momentumBurst:
-      Math.abs(strategyPacket.delta) > 5 &&
-      strategyPacket.momentum > 3,
-
-    executionAnomaly:
-      executionPacket.latency > 120,
-
-    unstableMarket:
-      intelligencePacket.spreadExplosion ||
-      intelligencePacket.spoofProbability > 70,
-
-    spoofDanger:
-      intelligencePacket.spoofProbability > 80,
+    spreadInstability:
+      strategyPacket.spread > 0.05,
 
   };
-
-  // =========================
-  // MARKET INTELLIGENCE
-  // =========================
-
-  const marketIntelSync =
-    marketIntelligenceEngine({
-
-      momentumHistory,
-
-      spreadHistory,
-
-      latencyHistory,
-
-      strategyData:
-        strategyPacket,
-
-    });
 
   // =========================
   // ADAPTIVE ENGINE
@@ -146,21 +97,20 @@ export const aggregationPipeline = ({
 
       riskPacket,
 
-      executionPacket,
+      runtimePacket,
 
-      intelligencePacket,
-
-      volatilityRegime:
-        marketIntelSync.volatilityRegime,
-
-      liquidityStability:
-        marketIntelSync.liquidityStability,
-
-      momentumRegime:
-        marketIntelSync.momentumRegime,
+      spread:
+        strategyPacket.spread,
 
       avgSpread:
-        marketIntelSync.avgSpread,
+        spreadHistory?.length
+          ? (
+              spreadHistory.reduce(
+                (a, b) => a + b,
+                0
+              ) / spreadHistory.length
+            )
+          : 0,
 
     });
 
@@ -171,55 +121,30 @@ export const aggregationPipeline = ({
   const scoringSyncPacket =
     scoringEngine({
 
-      executionPacket,
-
-      intelligencePacket,
+      runtimePacket,
 
       riskPacket,
 
       strategyPacket,
 
-      momentumAcceleration:
-        marketIntelSync.momentumAcceleration,
-
-      liquidityStability:
-        marketIntelSync.liquidityStability,
-
-      avgSpread:
-        marketIntelSync.avgSpread,
-
     });
 
   // =========================
-  // PERMISSION ENGINE
+  // GOVERNANCE ENGINE
   // =========================
 
-  const permissionSyncPacket =
-    permissionEngine({
+  const governanceSyncPacket =
+    governanceEngine({
 
       riskPacket,
 
-      executionPacket,
+      runtimePacket,
 
-      intelligencePacket,
+      routingScore:
+        scoringSyncPacket.routingScore,
 
-      liquidityStability:
-        marketIntelSync.liquidityStability,
-
-      aiCompositeScore:
-        scoringSyncPacket.aiCompositeScore,
-
-      executionScore:
-        scoringSyncPacket.executionScore,
-
-      marketSurvivabilityScore:
-        scoringSyncPacket.marketSurvivabilityScore,
-
-      liquidityScore:
-        scoringSyncPacket.liquidityScore,
-
-      trendQualityScore:
-        scoringSyncPacket.trendQualityScore,
+      marketScore:
+        scoringSyncPacket.marketScore,
 
     });
 
@@ -230,23 +155,12 @@ export const aggregationPipeline = ({
   const positionSizingSyncPacket =
     positionSizingEngine({
 
-      aiCompositeScore:
-        scoringSyncPacket.aiCompositeScore,
-
-      volatilityRegime:
-        marketIntelSync.volatilityRegime,
-
-      liquidityStability:
-        marketIntelSync.liquidityStability,
-
-      momentumRegime:
-        marketIntelSync.momentumRegime,
-
-      executionPacket,
-
-      intelligencePacket,
+      runtimePacket,
 
       riskPacket,
+
+      spread:
+        strategyPacket.spread,
 
     });
 
@@ -260,100 +174,34 @@ export const aggregationPipeline = ({
       marketData:
         marketPacket,
 
-      aiCompositeScore:
-        scoringSyncPacket.aiCompositeScore,
-
-      aiTradeRejection:
-        permissionSyncPacket.aiTradeRejection,
-
-      executionPacket,
-
-      intelligencePacket,
+      runtimePacket,
 
       riskPacket,
 
-      volatilityRegime:
-        marketIntelSync.volatilityRegime,
-
-      momentumRegime:
-        marketIntelSync.momentumRegime,
-
-      liquidityStability:
-        marketIntelSync.liquidityStability,
+      spread:
+        strategyPacket.spread,
 
     });
 
   // =========================
-  // INTERPRETATION ENGINE
+  // SURVIVABILITY ENGINE
   // =========================
 
-  const interpretationSyncPacket =
-    interpretationEngine({
+  const survivabilityState =
 
-      volatilityRegime:
-        marketIntelSync.volatilityRegime,
+    survivabilityEngine({
 
-      momentumRegime:
-        marketIntelSync.momentumRegime,
+      runtimeData:
+        runtimePacket,
 
-      liquidityStability:
-        marketIntelSync.liquidityStability,
+      spread:
+        strategyPacket.spread,
 
-      executionPacket,
+      latency:
+        runtimePacket.latency,
 
-      intelligencePacket,
-
-      momentumAcceleration:
-        marketIntelSync.momentumAcceleration,
-
-      avgSpread:
-        marketIntelSync.avgSpread,
-
-    });
-
-  // =========================
-  // EXECUTION SURVIVABILITY
-  // =========================
-
-  const executionSurvival =
-
-    executionSurvivabilityEngine({
-
-      marketIntel:
-        marketIntelSync,
-
-      strategyIntel:
-        strategyPacket,
-
-      executionData:
-        executionPacket,
-
-      signalIntel:
-        interpretationSyncPacket,
-
-    });
-
-  // =========================
-  // AI COMPOSITE DECISION
-  // =========================
-
-  const aiCompositeDecision =
-
-    aiCompositeDecisionEngine({
-
-      marketIntel:
-        marketIntelSync,
-
-      scoringPacket:
-        scoringSyncPacket,
-
-      permissionPacket:
-        permissionSyncPacket,
-
-      interpretationPacket:
-        interpretationSyncPacket,
-
-      executionSurvival,
+      riskData:
+        riskPacket,
 
     });
 
@@ -365,60 +213,65 @@ export const aggregationPipeline = ({
 
     ...baseDerivedPacket,
 
-    volatilityRegime:
-      marketIntelSync.volatilityRegime,
+    avgSpread:
+      spreadHistory?.length
+        ? (
+            spreadHistory.reduce(
+              (a, b) => a + b,
+              0
+            ) / spreadHistory.length
+          )
+        : 0,
 
-    momentumRegime:
-      marketIntelSync.momentumRegime,
+    avgLatency:
+      latencyHistory?.length
+        ? (
+            latencyHistory.reduce(
+              (a, b) => a + b,
+              0
+            ) / latencyHistory.length
+          )
+        : 0,
 
-    liquidityStability:
-      marketIntelSync.liquidityStability,
+    runtimeEnvironment:
+      runtimePacket.latency > 120
+        ? "DEGRADED"
+        : runtimePacket.latency > 60
+          ? "NORMAL"
+          : "OPTIMAL",
 
-    marketPhase:
-      marketIntelSync.marketPhase,
+    marketCondition:
+      strategyPacket.spread > 0.05
+        ? "UNSTABLE"
+        : strategyPacket.spread > 0.02
+          ? "VOLATILE"
+          : "STABLE",
 
-    spreadShock:
-      marketIntelSync.spreadShock,
+    runtimePressure:
+      runtimePacket.latency > 120
+        ? "HIGH"
+        : runtimePacket.latency > 60
+          ? "MEDIUM"
+          : "LOW",
 
-    liquidityCollapse:
-      marketIntelSync.liquidityCollapse,
-
-    executionSurvivability:
-      marketIntelSync.executionSurvivability,
-
-    adaptiveConfidence:
-      marketIntelSync.adaptiveConfidence,
-
-    executionPressure:
-      marketIntelSync.executionPressure,
-
-    marketRisk:
-      marketIntelSync.marketRisk,
-
-    executionEnvironment:
-      marketIntelSync.executionEnvironment,
-
-    marketTemperature:
-      marketIntelSync.marketTemperature,
-
-    trendStrength:
-      marketIntelSync.trendStrength,
-
-    ...interpretationSyncPacket,
+    cognitionStability:
+      runtimePacket.latency > 150
+        ? "CRITICAL"
+        : runtimePacket.latency > 100
+          ? "DEGRADED"
+          : "STABLE",
 
     ...adaptiveSyncPacket,
 
     ...scoringSyncPacket,
 
-    ...permissionSyncPacket,
+    ...governanceSyncPacket,
 
     ...positionSizingSyncPacket,
 
     ...lifecycleSyncPacket,
 
-    ...executionSurvival,
-
-    ...aiCompositeDecision,
+    ...survivabilityState,
 
   };
 
@@ -448,23 +301,35 @@ export function buildRealtimeLogPacket(
       parsed.timestamp
     );
 
-  const signalLog = {
+  const runtimeLog = {
 
     timestamp,
 
-    signal:
-      parsed.signal ||
-      "NEUTRAL",
+    runtimeState:
+      parsed.runtimeState ||
+      "IDLE",
 
-    confidence:
+    routerState:
+      parsed.routerState ||
+      "STANDBY",
+
+    restrictionReason:
+      parsed.restrictionReason ||
+      "NONE",
+
+    latency:
       safeNumber(
-        parsed.confidenceScore
+        parsed.latency
       ),
 
-    momentum:
+    spread:
       safeNumber(
-        parsed.momentum
+        parsed.spread
       ),
+
+    cognitionStability:
+      parsed.cognitionStability ||
+      "NORMAL",
 
   };
 
@@ -490,7 +355,7 @@ export function buildRealtimeLogPacket(
 
   return {
 
-    signalLog,
+    runtimeLog,
     tradeLog,
 
   };

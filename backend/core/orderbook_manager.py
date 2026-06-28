@@ -1,12 +1,32 @@
 # -*- coding: utf-8 -*-
+from backend.utils.log_buffer import add_log
+from backend.core.logger import logger
+
 
 class OrderBookManager:
 
-    def __init__(self):
+    def __init__(
+        self,
+        callback=None
+    ):
 
-        self.bids = []
+        # =========================
+        # CALLBACK
+        # =========================
 
-        self.asks = []
+        self.callback = callback
+
+        # =========================
+        # LOCAL ORDERBOOK
+        # =========================
+
+        self.bids = {}
+
+        self.asks = {}
+
+        # =========================
+        # PRICE
+        # =========================
 
         self.current_price = 0.0
 
@@ -16,16 +36,26 @@ class OrderBookManager:
 
         self.spread = 0.0
 
+        # =========================
+        # VOLUME
+        # =========================
+
         self.bid_volume = 0.0
 
         self.ask_volume = 0.0
 
         self.imbalance = 0.0
 
+    # =========================
+    # UPDATE
+    # =========================
+
     def update(self, bids, asks):
         """
-        WebSocketから受け取った板データを更新
+        reconstructed local orderbook 更新
         """
+
+        print("🔥 UPDATE ENTER")
 
         print(
             f"📥 MANAGER UPDATE "
@@ -34,139 +64,331 @@ class OrderBookManager:
         )
 
         # =========================
-        # 🔥 フィルタ①：0数量除外（最重要）
+        # EMPTY CHECK
         # =========================
 
-        self.bids = [
-            b for b in bids
-            if float(b[1]) > 0
-        ]
+        print(
+            f"TRACE INPUT "
+            f"bids={len(bids)} "
+            f"asks={len(asks)}"
+        )
 
-        self.asks = [
-            a for a in asks
-            if float(a[1]) > 0
-        ]
+        if not bids or not asks:
+
+            print(
+                "⚠️ EMPTY ORDERBOOK"
+            )
+
+            print(
+                "❌ RETURN EMPTY INPUT "
+                f"bids={len(bids)} "
+                f"asks={len(asks)}"
+            )
+
+            return
+
+        # =========================
+        # LOCAL BOOK SNAPSHOT
+        # =========================
+
+        self.bids = dict(bids)
+
+        self.asks = dict(asks)
+
+        add_log(
+            f"🔥 WS OB INSTANCE={id(self)}",
+            "warning"
+        )
+
+        add_log(
+            f"🔥 WS BOOK UPDATE "
+            f"bids={len(self.bids)} "
+            f"asks={len(self.asks)}",
+            "warning"
+        )
 
         print(
-            f"✅ FILTERED "
+            f"🔥 WS OB INSTANCE={id(self)}"
+        )
+
+        print(
+            f"🔥 WS BOOK UPDATE "
             f"bids={len(self.bids)} "
             f"asks={len(self.asks)}"
         )
 
         # =========================
-        # 🔥 フィルタ②：価格順ソート（安全対策）
+        # EMPTY CHECK
         # =========================
 
-        # bids: 高い順
-        self.bids.sort(
-            key=lambda x: float(x[0]),
-            reverse=True
+        print(
+            f"TRACE LOCAL "
+            f"bids={len(self.bids)} "
+            f"asks={len(self.asks)}"
         )
 
-        # asks: 安い順
-        self.asks.sort(
-            key=lambda x: float(x[0])
+        if (
+            not self.bids
+            or
+            not self.asks
+        ):
+
+            print(
+                "⚠️ EMPTY LOCAL BOOK"
+            )
+
+            print(
+                "❌ RETURN EMPTY LOCAL BOOK "
+                f"bids={len(self.bids)} "
+                f"asks={len(self.asks)}"
+            )
+
+            return
+
+        # =========================
+        # BEST PRICE
+        # =========================
+
+        self.best_bid = max(
+            self.bids.keys()
         )
+
+        print(
+            f"TRACE BEST BID="
+            f"{self.best_bid}"
+        )
+
+        self.best_ask = min(
+            self.asks.keys()
+        )
+
+        print(
+            f"TRACE BEST ASK="
+            f"{self.best_ask}"
+        )
+
+        # =========================
+        # CROSSED BOOK PROTECTION
+        # =========================
+
+        print(
+            f"TRACE CROSS CHECK "
+            f"bid={self.best_bid} "
+            f"ask={self.best_ask}"
+        )
+
+        if (
+            self.best_bid
+            >=
+            self.best_ask
+        ):
+
+            print(
+                f"❌ CROSSED BOOK "
+                f"BID={self.best_bid} "
+                f"ASK={self.best_ask}"
+            )
+
+            print(
+                "❌ RETURN CROSSED BOOK "
+                f"bid={self.best_bid} "
+                f"ask={self.best_ask}"
+            )
+
+            return
+
+        # =========================
+        # PRICE / SPREAD
+        # =========================
+
+        self.current_price = (
+            self.best_bid
+            + self.best_ask
+        ) / 2
+
+        print(
+            f"TRACE CURRENT PRICE="
+            f"{self.current_price}"
+        )
+
+        self.spread = (
+            self.best_ask
+            - self.best_bid
+        )
+
+        print("✅ UPDATE SUCCESS")
+
+        # =========================
+        # TOP LEVELS
+        # =========================
+
+        top_bid_prices = sorted(
+            self.bids.keys(),
+            reverse=True
+        )[:5]
+
+        top_ask_prices = sorted(
+            self.asks.keys()
+        )[:5]
+
+        # =========================
+        # VOLUME
+        # =========================
+
+        self.bid_volume = sum(
+            self.bids[p]
+            for p in top_bid_prices
+        )
+
+        self.ask_volume = sum(
+            self.asks[p]
+            for p in top_ask_prices
+        )
+
+        total_volume = (
+            self.bid_volume
+            + self.ask_volume
+        )
+
+        # =========================
+        # IMBALANCE
+        # =========================
+
+        if total_volume > 0:
+
+            self.imbalance = (
+                self.bid_volume
+                - self.ask_volume
+            ) / total_volume
+
+        else:
+
+            self.imbalance = 0.0
 
         # =========================
         # DEBUG
         # =========================
 
-        if self.bids and self.asks:
+        print(
+            f"📊 TOP BID="
+            f"{self.best_bid} "
+            f"ASK={self.best_ask}"
+        )
 
-            self.best_bid = float(
-                self.bids[0][0]
-            )
+        print(
+            f"💰 CURRENT PRICE="
+            f"{self.current_price}"
+        )
 
-            self.best_ask = float(
-                self.asks[0][0]
-            )
+        print(
+            f"💰 SPREAD="
+            f"{self.spread}"
+        )
 
-            self.current_price = (
-                self.best_bid
-                + self.best_ask
-            ) / 2
+        print(
+            f"📊 BID VOLUME="
+            f"{self.bid_volume}"
+        )
 
-            self.spread = (
-                self.best_ask
-                - self.best_bid
-            )
+        print(
+            f"📊 ASK VOLUME="
+            f"{self.ask_volume}"
+        )
 
-            self.bid_volume = sum(
-                float(b[1])
-                for b in self.bids[:5]
-            )
+        print(
+            f"📊 IMBALANCE="
+            f"{self.imbalance}"
+        )
 
-            self.ask_volume = sum(
-                float(a[1])
-                for a in self.asks[:5]
-            )
+        # =========================
+        # CALLBACK
+        # =========================
 
-            total_volume = (
-                self.bid_volume
-                + self.ask_volume
-            )
-
-            if total_volume > 0:
-
-                self.imbalance = (
-                    self.bid_volume
-                    - self.ask_volume
-                ) / total_volume
-
-            else:
-
-                self.imbalance = 0.0
+        if self.callback:
 
             print(
-                f"📊 TOP BID="
-                f"{self.best_bid} "
-                f"ASK={self.best_ask}"
+                "🔥 CALLBACK EXECUTE"
             )
 
-            print(
-                f"💰 CURRENT PRICE="
-                f"{self.current_price}"
+            self.callback(
+                self.current_price,
+                self.best_bid,
+                self.best_ask,
+                self.bid_volume,
+                self.ask_volume,
             )
 
-            print(
-                f"💰 SPREAD="
-                f"{self.spread}"
-            )
-
-            print(
-                f"📊 BID VOLUME="
-                f"{self.bid_volume}"
-            )
-
-            print(
-                f"📊 ASK VOLUME="
-                f"{self.ask_volume}"
-            )
-
-            print(
-                f"📊 IMBALANCE="
-                f"{self.imbalance}"
-            )
+    # =========================
+    # GET TOP N VOLUME
+    # =========================
 
     def get_top_n_volume(self, n=5):
-        """
-        上位n件の合計ボリュームを取得
-        """
 
-        if not self.bids or not self.asks:
+        add_log(
+            f"📚 OB INSTANCE={id(self)}",
+            "warning"
+        )
+
+        add_log(
+            f"📚 BOOK SIZES "
+            f"bids={len(self.bids)} "
+            f"asks={len(self.asks)}",
+            "warning"
+        )
+
+        print(
+            f"📚 OB INSTANCE={id(self)}"
+        )
+
+        print(
+            f"📚 BOOK SIZES "
+            f"bids={len(self.bids)} "
+            f"asks={len(self.asks)}"
+        )
+
+        if (
+            not self.bids
+            or
+            not self.asks
+        ):
+
+            print(
+                "⚠️ EMPTY BOOK IN get_top_n_volume"
+            )
+
             return 0.0, 0.0
 
         try:
 
+            top_bid_prices = sorted(
+                self.bids.keys(),
+                reverse=True
+            )[:n]
+
+            top_ask_prices = sorted(
+                self.asks.keys()
+            )[:n]
+
+            print(
+                f"📚 TOPN INPUT "
+                f"bids={top_bid_prices[:3]} "
+                f"asks={top_ask_prices[:3]}"
+            )
+
             bid_vol = sum(
-                float(b[1])
-                for b in self.bids[:n]
+                self.bids[p]
+                for p in top_bid_prices
             )
 
             ask_vol = sum(
-                float(a[1])
-                for a in self.asks[:n]
+                self.asks[p]
+                for p in top_ask_prices
+            )
+
+            print(
+                f"📚 TOPN RESULT "
+                f"bid_vol={bid_vol} "
+                f"ask_vol={ask_vol}"
             )
 
             return bid_vol, ask_vol
@@ -180,31 +402,62 @@ class OrderBookManager:
 
             return 0.0, 0.0
 
-    def get_best_bid_ask(self):
-        """
-        最良価格（デバッグ・スプレッド確認用）
-        """
+    # =========================
+    # GET BEST BID ASK
+    # =========================
 
-        if not self.bids or not self.asks:
+    def get_best_bid_ask(self):
+
+        if (
+            not self.bids
+            or
+            not self.asks
+        ):
+
             return None, None
 
-        best_bid = float(self.bids[0][0])
+        best_bid = max(
+            self.bids.keys()
+        )
 
-        best_ask = float(self.asks[0][0])
+        best_ask = min(
+            self.asks.keys()
+        )
 
         return best_bid, best_ask
 
+    # =========================
+    # GET CURRENT PRICE
+    # =========================
+
     def get_current_price(self):
 
+        logger.error(
+            f"🟢 GET_CURRENT_PRICE="
+            f"{self.current_price}"
+        )
+
         return self.current_price
+
+    # =========================
+    # GET SPREAD
+    # =========================
 
     def get_spread(self):
 
         return self.spread
 
+    # =========================
+    # GET IMBALANCE
+    # =========================
+
     def get_imbalance(self):
 
         return self.imbalance
+
+    # =========================
+    # MARKET SNAPSHOT
+    # =========================
 
     def get_market_snapshot(self):
 

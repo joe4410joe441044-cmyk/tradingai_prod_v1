@@ -1,50 +1,207 @@
 import React from "react";
 
-export default function TradeControl({ config, onChange }) {
+import {
+  telemetryStore,
+} from "../store/telemetryStore";
 
-  const toggleDryRun = () => {
+import {
+  setExecutionEnabled,
+} from "../runtime/governanceRuntime";
 
-    // 🚨 liveでOFFにする時だけ確認
-    if (config.mode === "live" && config.dry_run === true) {
+export default function TradeControl() {
+
+  // =====================================
+  // GOVERNANCE RUNTIME
+  // =====================================
+
+  const governance =
+    telemetryStore.governance || {};
+
+  const execution =
+    telemetryStore.execution || {};
+
+  // =====================================
+  // BACKEND AUTHORITATIVE STATE
+  // =====================================
+
+  const mode =
+    governance.mode || "PAPER";
+
+  const executionEnabled =
+    governance.execution_enabled === true;
+
+  const connected =
+    execution.connected === true;
+
+  // =====================================
+  // GOVERNANCE ACTION
+  // =====================================
+
+  const toggleExecution =
+    async () => {
+
+    // 🚨 REAL execution confirmation
+    if (
+      mode === "LIVE" &&
+      executionEnabled === false
+    ) {
+
       const ok = window.confirm(
-        "⚠️ REAL TRADINGになります。\n本当にdry_runをOFFにしますか？"
+        "⚠️ REAL TRADING を有効化します。\n本当に EXECUTION を ENABLE にしますか？"
       );
-      if (!ok) return;
+
+      if (!ok) {
+
+        return;
+
+      }
+
     }
 
-    const newConfig = {
-      ...config,
-      dry_run: !config.dry_run
-    };
+    try {
 
-    onChange(newConfig);
+      await setExecutionEnabled(
+        !executionEnabled
+      );
+
+      console.log(
+        "EXECUTION TOGGLE:",
+        !executionEnabled
+      );
+
+    } catch (err) {
+
+      console.error(
+        "EXECUTION TOGGLE ERROR:",
+        err
+      );
+
+    }
+
   };
 
   return (
-    <div style={{ border: "1px solid #ccc", padding: "10px", marginTop: "10px" }}>
+
+    <div
+      style={{
+        border: "1px solid #ccc",
+        padding: "10px",
+        marginTop: "10px"
+      }}
+    >
 
       <h4>Control</h4>
 
-      {/* DRY RUN表示 */}
+      {/* =====================================
+          GOVERNANCE STATUS
+      ===================================== */}
+
       <p>
-        DRY RUN:{" "}
-        <b style={{ color: config.dry_run ? "green" : "red" }}>
-          {config.dry_run ? "ON (SAFE)" : "OFF (REAL)"}
+
+        BOT:{" "}
+
+        <b
+          style={{
+            color:
+              connected
+                ? "green"
+                : "red"
+          }}
+        >
+
+          {
+            connected
+              ? "CONNECTED"
+              : "DISCONNECTED"
+          }
+
         </b>
+
       </p>
 
-      {/* トグルボタン */}
-      <button onClick={toggleDryRun}>
-        Toggle Dry Run
+      <p>
+
+        MODE:{" "}
+
+        <b
+          style={{
+            color:
+              mode === "LIVE"
+                ? "red"
+                : "green"
+          }}
+        >
+
+          {mode}
+
+        </b>
+
+      </p>
+
+      <p>
+
+        EXECUTION:{" "}
+
+        <b
+          style={{
+            color:
+              executionEnabled
+                ? "red"
+                : "green"
+          }}
+        >
+
+          {
+            executionEnabled
+              ? "LIVE ENABLED"
+              : "BLOCKED"
+          }
+
+        </b>
+
+      </p>
+
+      {/* =====================================
+          GOVERNANCE ACTION
+      ===================================== */}
+
+      <button
+        onClick={toggleExecution}
+      >
+
+        {
+          executionEnabled
+            ? "Disable Execution"
+            : "Enable Execution"
+        }
+
       </button>
 
-      {/* 🚨 本番警告 */}
-      {config.mode === "live" && !config.dry_run && (
-        <div style={{ color: "red", fontWeight: "bold" }}>
-          ⚠️ REAL TRADING ACTIVE
-        </div>
-      )}
+      {/* =====================================
+          LIVE WARNING
+      ===================================== */}
+
+      {
+
+        executionEnabled && (
+
+          <div
+            style={{
+              color: "red",
+              fontWeight: "bold"
+            }}
+          >
+
+            ⚠️ REAL TRADING ACTIVE
+
+          </div>
+
+        )
+
+      }
 
     </div>
+
   );
+
 }

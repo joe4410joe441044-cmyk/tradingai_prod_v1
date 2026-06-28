@@ -9,3 +9,61 @@ body {
     color: white;
     font-family: Arial, sans-serif;
 }
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    background: #0b1220;
+    border-bottom: 1px solid #1f2937;
+}
+
+.status-strip {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.status-item {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+
+    width: auto !important;
+    min-width: auto !important;
+    max-width: none !important;
+
+    gap: 6px;
+
+    white-space: nowrap !important;
+
+    font-size: 12px;
+}
+
+.status-label {
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-value {
+    font-weight: 700;
+    color: #e2e8f0;
+}
+
+.status-value.online {
+    color: #22c55e;
+}
+
+.status-value.warning {
+    color: #facc15;
+}
+
+.status-value.danger {
+    color: #ef4444;
+}

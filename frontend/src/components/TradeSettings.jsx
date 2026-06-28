@@ -1,177 +1,289 @@
+// frontend/src/components/TradeSettings.jsx
+
+import React from "react";
+
 export default function TradeSettings({
 
-  config,
-  setConfig,
+    values = {},
+
+    onChange = () => {},
 
 }) {
 
-  return (
+    const handle = (
+        key,
+        value
+    ) => {
 
-    <div>
+        onChange({
+            [key]: value,
+        });
 
-      {/* ========================= */}
-      {/* TITLE */}
-      {/* ========================= */}
+    };
 
-      <div className="panel-header">
+    return (
 
-        <h3>
-          🟢 Trade Settings
-        </h3>
+        <div className="terminal-panel">
 
-      </div>
+            {/* =============================================
+               HEADER
+            ============================================= */}
 
-      {/* ========================= */}
-      {/* SYMBOL */}
-      {/* ========================= */}
+            <div className="panel-header">
 
-      <div className="form-group">
+                <div className="panel-title">
 
-        <label>
-          Symbol
-        </label>
+                    TRADE SETTINGS（取引設定）
 
-        <select
-          value={config.symbol}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              symbol: e.target.value,
-            })
-          }
-        >
+                </div>
 
-          <option value="BTCUSDT">
-            BTCUSDT
-          </option>
+            </div>
 
-          <option value="ETHUSDT">
-            ETHUSDT
-          </option>
+            {/* =============================================
+               MODE
+            ============================================= */}
 
-          <option value="XRPUSDT">
-            XRPUSDT
-          </option>
+            <div className="config-row">
 
-        </select>
+                <div className="config-label">
 
-      </div>
+                    MODE（モード）
 
-      {/* ========================= */}
-      {/* RISK */}
-      {/* ========================= */}
+                </div>
 
-      <div className="form-group">
+                <div className="config-control">
 
-        <label>
-          Risk %
-        </label>
+                    <select
+                        className="config-select"
+                        value={
+                            values.mode
+                            || "PAPER"
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "mode",
+                                e.target.value
+                            )
+                        }
+                    >
 
-        <input
-          type="number"
-          value={config.risk_percent}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              risk_percent: e.target.value,
-            })
-          }
-        />
+                        <option value="PAPER">
+                            PAPER（模擬）
+                        </option>
 
-      </div>
+                        <option value="SAFE">
+                            SAFE（安全）
+                        </option>
 
-      {/* ========================= */}
-      {/* SL */}
-      {/* ========================= */}
+                        <option value="LIVE">
+                            LIVE（本番）
+                        </option>
 
-      <div className="form-group">
+                    </select>
 
-        <label>
-          SL %
-        </label>
+                </div>
 
-        <input
-          type="number"
-          value={config.sl_percent}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              sl_percent: e.target.value,
-            })
-          }
-        />
+            </div>
 
-      </div>
+            {/* =============================================
+               EXCHANGE
+            ============================================= */}
 
-      {/* ========================= */}
-      {/* TP */}
-      {/* ========================= */}
+            <div className="config-row">
 
-      <div className="form-group">
+                <div className="config-label">
 
-        <label>
-          TP %
-        </label>
+                    EXCHANGE（取引所）
 
-        <input
-          type="number"
-          value={config.tp_percent}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              tp_percent: e.target.value,
-            })
-          }
-        />
+                </div>
 
-      </div>
+                <div className="config-control">
 
-      {/* ========================= */}
-      {/* TIME EXIT */}
-      {/* ========================= */}
+                    <select
+                        className="config-select"
+                        value={
+                            values.exchange
+                            || "BINANCE"
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "exchange",
+                                e.target.value
+                            )
+                        }
+                    >
 
-      <div className="form-group">
+                        <option value="BINANCE">
+                            BINANCE
+                        </option>
 
-        <label>
-          Time Exit
-        </label>
+                        <option value="BYBIT">
+                            BYBIT
+                        </option>
 
-        <input
-          type="number"
-          value={config.time_exit || 3}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              time_exit: e.target.value,
-            })
-          }
-        />
+                        <option value="KUCOIN">
+                            KUCOIN
+                        </option>
 
-      </div>
+                    </select>
 
-      {/* ========================= */}
-      {/* LEVERAGE */}
-      {/* ========================= */}
+                </div>
 
-      <div className="form-group">
+            </div>
 
-        <label>
-          Leverage
-        </label>
+            {/* =============================================
+               SYMBOL
+            ============================================= */}
 
-        <input
-          type="number"
-          value={config.leverage}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              leverage: e.target.value,
-            })
-          }
-        />
+            <div className="config-row">
 
-      </div>
+                <div className="config-label">
 
-    </div>
-  );
+                    SYMBOL（銘柄）
+
+                </div>
+
+                <div className="config-control">
+
+                    <select
+                        className="config-select"
+                        value={
+                            values.symbol
+                            || "XRPUSDT"
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "symbol",
+                                e.target.value
+                            )
+                        }
+                    >
+
+                        <option value="XRPUSDT">
+                            XRPUSDT
+                        </option>
+
+                        <option value="BTCUSDT">
+                            BTCUSDT
+                        </option>
+
+                        <option value="ETHUSDT">
+                            ETHUSDT
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+            {/* =============================================
+               LEVERAGE
+            ============================================= */}
+
+            <div className="config-row">
+
+                <div className="config-label">
+
+                    LEVERAGE（レバレッジ）
+
+                </div>
+
+                <div className="config-control">
+
+                    <select
+                        className="config-select"
+                        value={
+                            values.leverage || 5
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "leverage",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    >
+
+                        <option value={1}>
+                            1x
+                        </option>
+
+                        <option value={2}>
+                            2x
+                        </option>
+
+                        <option value={3}>
+                            3x
+                        </option>
+
+                        <option value={5}>
+                            5x
+                        </option>
+
+                        <option value={10}>
+                            10x
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+            {/* =============================================
+               TIMEFRAME
+            ============================================= */}
+
+            <div className="config-row">
+
+                <div className="config-label">
+
+                    TIMEFRAME（時間軸）
+
+                </div>
+
+                <div className="config-control">
+
+                    <select
+                        className="config-select"
+                        value={
+                            values.timeframe
+                            || "1m"
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "timeframe",
+                                e.target.value
+                            )
+                        }
+                    >
+
+                        <option value="1m">
+                            1m
+                        </option>
+
+                        <option value="5m">
+                            5m
+                        </option>
+
+                        <option value="15m">
+                            15m
+                        </option>
+
+                        <option value="1h">
+                            1h
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    );
+
 }

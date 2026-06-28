@@ -1,9 +1,10 @@
 export function executionSurvivabilityEngine({
 
-  marketIntel = {},
-  strategyIntel = {},
   executionData = {},
-  signalIntel = {},
+  riskData = {},
+
+  spread = 0,
+  latency = 0,
 
 }) {
 
@@ -11,156 +12,141 @@ export function executionSurvivabilityEngine({
   // SAFE VALUES
   // =========================
 
-  const latency =
+  const safeLatency =
 
     Number(
+      latency ??
       executionData.latency
     ) || 0;
 
-  const spread =
+  const safeSpread =
 
     Number(
-      strategyIntel.spread
+      spread
     ) || 0;
 
-  const spoofProbability =
+  const killSwitch =
 
-    Number(
-      signalIntel.spoofProbability
-    ) || 0;
-
-  const confidenceScore =
-
-    Number(
-      signalIntel.confidenceScore
-    ) || 0;
-
-  const adaptiveConfidence =
-
-    Number(
-      marketIntel.adaptiveConfidence
-    ) || 0;
+    Boolean(
+      riskData.killSwitch
+    );
 
   // =========================
-  // LATENCY DANGER
+  // LATENCY STATE
   // =========================
 
   const latencyDanger =
 
-    latency > 150;
+    safeLatency > 150;
 
   const latencyWarning =
 
-    latency > 80;
+    safeLatency > 80;
+
+  const latencyCritical =
+
+    safeLatency > 220;
 
   // =========================
-  // LIQUIDITY DANGER
+  // SPREAD STATE
   // =========================
 
-  const liquidityDanger =
+  const spreadDanger =
 
-    marketIntel.liquidityCollapse ||
+    safeSpread > 0.05;
 
-    spread > 1.5;
+  const spreadWarning =
 
-  // =========================
-  // SPOOF DANGER
-  // =========================
+    safeSpread > 0.02;
 
-  const spoofDanger =
+  const spreadCritical =
 
-    spoofProbability > 70 ||
-
-    signalIntel.fakeWall;
+    safeSpread > 0.1;
 
   // =========================
-  // MARKET DANGER
+  // MARKET HEALTH
   // =========================
 
-  const marketDanger =
+  const marketHealthy =
 
-    marketIntel.marketPhase ===
-      "CHAOTIC" ||
+    !spreadDanger &&
+    !spreadCritical;
 
-    marketIntel.marketRisk ===
+  const executionHealthy =
+
+    !latencyDanger &&
+    !latencyCritical;
+
+  // =========================
+  // EXECUTION PRESSURE
+  // =========================
+
+  let executionPressure =
+    "LOW";
+
+  if (
+    safeLatency > 40
+  ) {
+
+    executionPressure =
+      "NORMAL";
+
+  }
+
+  if (
+    safeLatency > 80
+  ) {
+
+    executionPressure =
       "HIGH";
 
-  // =========================
-  // SPREAD SHOCK
-  // =========================
-
-  const spreadShock =
-
-    marketIntel.spreadShock ||
-
-    spread > (
-      (
-        Number(
-          marketIntel.avgSpread
-        ) || 0
-      ) * 2
-    );
-
-  // =========================
-  // EXECUTION CONFIDENCE
-  // =========================
-
-  let executionConfidence =
-
-    (
-      confidenceScore * 0.5
-    ) +
-
-    (
-      adaptiveConfidence * 0.5
-    );
-
-  if (latencyDanger) {
-    executionConfidence -= 40;
   }
 
-  if (liquidityDanger) {
-    executionConfidence -= 30;
+  if (
+    safeLatency > 150
+  ) {
+
+    executionPressure =
+      "EXTREME";
+
   }
-
-  if (spoofDanger) {
-    executionConfidence -= 25;
-  }
-
-  if (spreadShock) {
-    executionConfidence -= 20;
-  }
-
-  executionConfidence =
-
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          executionConfidence
-        )
-      )
-    );
 
   // =========================
-  // SURVIVAL MODE
+  // EXECUTION SAFETY
   // =========================
 
-  const survivalMode =
+  let executionSafety =
+    "NORMAL";
 
+  if (
+    latencyWarning ||
+    spreadWarning
+  ) {
+
+    executionSafety =
+      "LIMITED";
+
+  }
+
+  if (
     latencyDanger ||
-    liquidityDanger ||
-    spoofDanger ||
-    marketDanger
+    spreadDanger
+  ) {
 
-      ? "DEFENSIVE"
+    executionSafety =
+      "BLOCKED";
 
-      : executionConfidence > 80
+  }
 
-      ? "OFFENSIVE"
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
 
-      : "NORMAL";
+    executionSafety =
+      "CRITICAL";
+
+  }
 
   // =========================
   // ENTRY BLOCK
@@ -170,15 +156,9 @@ export function executionSurvivabilityEngine({
 
     latencyDanger ||
 
-    liquidityDanger ||
+    spreadDanger ||
 
-    spoofDanger ||
-
-    marketDanger ||
-
-    spreadShock ||
-
-    executionConfidence < 35;
+    killSwitch;
 
   // =========================
   // EXECUTION ALLOWED
@@ -189,51 +169,77 @@ export function executionSurvivabilityEngine({
     !entryBlocked;
 
   // =========================
-  // EMERGENCY EXIT
+  // FAILSAFE
   // =========================
 
   const emergencyExit =
 
-    (
-      latencyDanger &&
-      spoofDanger
-    ) ||
+    latencyCritical ||
 
-    (
-      liquidityDanger &&
-      spreadShock
-    ) ||
+    spreadCritical ||
 
-    (
-      marketDanger &&
-      executionConfidence < 20
-    );
+    killSwitch;
 
   // =========================
-  // EXECUTION PRESSURE
+  // SURVIVAL MODE
   // =========================
 
-  const executionPressure =
+  let survivalMode =
+    "NORMAL";
 
-    latency > 150
+  if (
+    executionSafety ===
+    "LIMITED"
+  ) {
 
-      ? "EXTREME"
+    survivalMode =
+      "DEFENSIVE";
 
-      : latency > 80
+  }
 
-      ? "HIGH"
+  if (
+    executionSafety ===
+    "BLOCKED"
+  ) {
 
-      : latency > 40
+    survivalMode =
+      "SURVIVAL";
 
-      ? "NORMAL"
+  }
 
-      : "LOW";
+  if (
+    executionSafety ===
+    "CRITICAL"
+  ) {
+
+    survivalMode =
+      "EMERGENCY";
+
+  }
 
   // =========================
-  // SURVIVABILITY SCORE
+  // EXECUTION SCORE
   // =========================
 
-  const survivabilityScore =
+  let survivabilityScore =
+    100;
+
+  survivabilityScore -=
+    safeLatency * 0.25;
+
+  survivabilityScore -=
+    safeSpread * 1200;
+
+  if (
+    killSwitch
+  ) {
+
+    survivabilityScore -=
+      50;
+
+  }
+
+  survivabilityScore =
 
     Math.max(
 
@@ -244,21 +250,7 @@ export function executionSurvivabilityEngine({
         100,
 
         Math.round(
-
-          100 -
-
-          (
-            latency * 0.25
-          ) -
-
-          (
-            spread * 15
-          ) -
-
-          (
-            spoofProbability * 0.4
-          )
-
+          survivabilityScore
         )
 
       )
@@ -266,24 +258,69 @@ export function executionSurvivabilityEngine({
     );
 
   // =========================
-  // AI EXECUTION STATE
+  // EXECUTION STATE
   // =========================
 
-  const executionState =
+  let executionState =
+    "WAIT";
 
+  if (
+    executionAllowed
+  ) {
+
+    executionState =
+      "ACTIVE";
+
+  }
+
+  if (
+    entryBlocked
+  ) {
+
+    executionState =
+      "BLOCKED";
+
+  }
+
+  if (
     emergencyExit
+  ) {
 
-      ? "EMERGENCY_EXIT"
+    executionState =
+      "EMERGENCY_EXIT";
 
-      : entryBlocked
+  }
 
-      ? "BLOCKED"
+  // =========================
+  // GOVERNANCE HEALTH
+  // =========================
 
-      : executionAllowed
+  let governanceHealth =
+    "STABLE";
 
-      ? "ACTIVE"
+  if (
+    executionSafety ===
+    "LIMITED"
+  ) {
 
-      : "WAIT";
+    governanceHealth =
+      "DEGRADED";
+
+  }
+
+  if (
+    executionSafety ===
+    "BLOCKED"
+  ) {
+
+    governanceHealth =
+      "CRITICAL";
+
+  }
+
+  // =========================
+  // RETURN
+  // =========================
 
   return {
 
@@ -291,17 +328,21 @@ export function executionSurvivabilityEngine({
 
     latencyWarning,
 
-    liquidityDanger,
+    latencyCritical,
 
-    spoofDanger,
+    spreadDanger,
 
-    marketDanger,
+    spreadWarning,
 
-    spreadShock,
+    spreadCritical,
 
-    executionConfidence,
+    marketHealthy,
 
-    survivalMode,
+    executionHealthy,
+
+    executionPressure,
+
+    executionSafety,
 
     entryBlocked,
 
@@ -309,11 +350,13 @@ export function executionSurvivabilityEngine({
 
     emergencyExit,
 
-    executionPressure,
+    survivalMode,
 
     survivabilityScore,
 
     executionState,
+
+    governanceHealth,
 
   };
 

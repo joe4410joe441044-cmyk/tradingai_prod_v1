@@ -19,73 +19,78 @@ const MAX_STATE_AGE_MS =
 function safeSerialize(data) {
   try {
     return JSON.stringify(data);
-  } catch (error) {
-    return null;
+    } catch{
+      return null;
   }
 }
 
 function safeDeserialize(serialized) {
   try {
     return JSON.parse(serialized);
-  } catch (error) {
-    return null;
+   } catch{
+      return null;
   }
 }
 
 function saveToStorage({
-  key,
-  payload,
+key,
+payload,
 }) {
-  if (
-    typeof window === "undefined" ||
-    !window.localStorage
-  ) {
-    return {
-      success: false,
-      reason: "LOCAL_STORAGE_UNAVAILABLE",
-    };
-  }
+if (
+typeof window === "undefined" ||
+!window.localStorage
+) {
+return {
+success: false,
+reason: "LOCAL_STORAGE_UNAVAILABLE",
+};
+}
 
-  const serializedPayload =
-    safeSerialize(payload);
+const serializedPayload =
+safeSerialize(payload);
 
-  if (!serializedPayload) {
-    return {
-      success: false,
-      reason: "SERIALIZATION_FAILED",
-    };
-  }
+if (!serializedPayload) {
+return {
+success: false,
+reason: "SERIALIZATION_FAILED",
+};
+}
 
-  try {
-    window.localStorage.setItem(
-      key,
-      serializedPayload
-    );
+try {
+window.localStorage.setItem(
+key,
+serializedPayload
+);
 
-    return {
-      success: true,
-      key,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      reason: "LOCAL_STORAGE_WRITE_FAILED",
-      error,
-    };
-  }
+
+return {
+  success: true,
+  key,
+};
+
+
+} catch (error) {
+return {
+success: false,
+reason:
+"LOCAL_STORAGE_WRITE_FAILED",
+error,
+};
+}
 }
 
 function loadFromStorage(key) {
-  if (
-    typeof window === "undefined" ||
-    !window.localStorage
-  ) {
-    return {
-      success: false,
-      reason: "LOCAL_STORAGE_UNAVAILABLE",
-      payload: null,
-    };
-  }
+if (
+typeof window === "undefined" ||
+!window.localStorage
+) {
+return {
+success: false,
+reason: "LOCAL_STORAGE_UNAVAILABLE",
+payload: null,
+};
+}
+
 
   try {
     const serializedPayload =

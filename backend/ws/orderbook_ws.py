@@ -5,6 +5,8 @@ import json
 import threading
 import time
 
+from backend.utils.log_buffer import add_log
+
 
 class OrderBookWS:
 
@@ -29,9 +31,39 @@ class OrderBookWS:
 
         self.spread = 0.0
 
+        # =========================
+        # LAST VALID BOOK
+        # =========================
+
+        self.last_valid_bid = 0.0
+
+        self.last_valid_ask = 0.0
+
         self.connected = False
 
         self.running = False
+
+        # =========================
+        # LOCAL ORDERBOOK
+        # =========================
+
+        self.bids = {}
+
+        self.asks = {}
+
+        # =========================
+        # SEQUENCE
+        # =========================
+
+        self.snapshot_loaded = False
+
+        self.orderbook_initialized = False
+
+        self.snapshot_sequence = 0
+
+        self.last_sequence_end = None
+
+        self.resnapshot_required = False
 
     # =========================
     # MESSAGE
@@ -39,11 +71,7 @@ class OrderBookWS:
 
     def on_message(self, ws, message):
 
-        print("🔥 MESSAGE RECEIVED")
-
         try:
-
-            print(message[:300])
 
             data = json.loads(message)
 
@@ -51,61 +79,255 @@ class OrderBookWS:
 
             asks = data.get("a", [])
 
-            print(
-                f"📊 BIDS={len(bids)} "
-                f"ASKS={len(asks)}"
+            # =========================
+            # SEQUENCE
+            # =========================
+
+            new_U = data.get("U")
+
+            new_u = data.get("u")
+
+            if (
+                new_U is not None
+                and
+                new_u is not None
+            ):
+
+                # =========================
+                # INITIALIZE
+                # =========================
+
+                if self.last_sequence_end is None:
+
+                    self.last_sequence_end = (
+                        new_u
+                    )
+
+                else:
+
+                    expected = (
+                        self.last_sequence_end + 1
+                    )
+
+                    if new_U != expected:
+
+                        add_log(
+                            f"⚠️ SEQUENCE GAP "
+                            f"EXPECTED={expected} "
+                            f"ACTUAL={new_U}",
+                            "warning"
+                        )
+
+                        self.resnapshot_required = True
+
+                    # =========================
+                    # UPDATE AFTER VALIDATION
+                    # =========================
+
+                    self.last_sequence_end = (
+                        new_u
+                    )
+
+            # =========================
+            # EMPTY CHECK
+            # =========================
+
+            if not bids or not asks:
+
+                add_log(
+                    "⚠️ EMPTY WS BOOK",
+                    "warning"
+                )
+
+                return
+
+            # =========================
+            # APPLY BID DELTAS
+            # =========================
+
+            for bid in bids:
+
+                price = float(
+                    bid[0]
+                )
+
+                size = float(
+                    bid[1]
+                )
+
+                if size <= 0:
+
+                    self.bids.pop(
+                        price,
+                        None
+                    )
+
+                else:
+
+                    self.bids[price] = size
+
+            # =========================
+            # APPLY ASK DELTAS
+            # =========================
+
+            for ask in asks:
+
+                price = float(
+                    ask[0]
+                )
+
+                size = float(
+                    ask[1]
+                )
+
+                if size <= 0:
+
+                    self.asks.pop(
+                        price,
+                        None
+                    )
+
+                else:
+
+                    self.asks[price] = size
+
+            # =========================
+            # EMPTY LOCAL BOOK
+            # =========================
+
+            if (
+                not self.bids
+                or
+                not self.asks
+            ):
+
+                add_log(
+                    "⚠️ EMPTY LOCAL BOOK",
+                    "warning"
+                )
+
+                return
+
+            # =========================
+            # RECONSTRUCT BEST PRICE
+            # =========================
+
+            self.best_bid = max(
+                self.bids.keys()
             )
 
-            if bids and asks:
+            self.best_ask = min(
+                self.asks.keys()
+            )
 
-                self.best_bid = float(
-                    bids[0][0]
+            self.spread = (
+                self.best_ask
+                - self.best_bid
+            )
+
+            self.last_price = (
+                self.best_bid
+                + self.best_ask
+            ) / 2
+
+            # =========================
+            # INVALID BOOK PROTECTION
+            # =========================
+
+            if (
+                self.best_bid <= 0
+                or
+                self.best_ask <= 0
+            ):
+
+                add_log(
+                    "❌ INVALID BOOK",
+                    "error"
                 )
 
-                self.best_ask = float(
-                    asks[0][0]
+                return
+
+            # =========================
+            # CROSSED BOOK PROTECTION
+            # =========================
+
+            if (
+                self.best_bid
+                >=
+                self.best_ask
+            ):
+
+                add_log(
+                    f"❌ CROSSED BOOK "
+                    f"BID={self.best_bid} "
+                    f"ASK={self.best_ask}",
+                    "error"
                 )
 
-                self.spread = (
-                    self.best_ask
-                    - self.best_bid
-                )
+                # =========================
+                # ROLLBACK
+                # =========================
 
-                self.last_price = (
-                    self.best_bid
-                    + self.best_ask
-                ) / 2
+                if (
+                    self.last_valid_bid > 0
+                    and
+                    self.last_valid_ask > 0
+                ):
 
-                print(
-                    f"💰 BEST BID: "
-                    f"{self.best_bid}"
-                )
+                    self.best_bid = (
+                        self.last_valid_bid
+                    )
 
-                print(
-                    f"💰 BEST ASK: "
-                    f"{self.best_ask}"
-                )
+                    self.best_ask = (
+                        self.last_valid_ask
+                    )
 
-                print(
-                    f"💰 SPREAD: "
-                    f"{self.spread}"
-                )
+                    self.spread = (
+                        self.best_ask
+                        - self.best_bid
+                    )
 
-                print(
-                    f"💰 MID PRICE: "
-                    f"{self.last_price}"
-                )
+                    self.last_price = (
+                        self.best_bid
+                        + self.best_ask
+                    ) / 2
 
-            # BOTへ渡す
+                    add_log(
+                        f"♻️ ROLLBACK "
+                        f"BID={self.best_bid} "
+                        f"ASK={self.best_ask}",
+                        "warning"
+                    )
+
+                return
+
+            # =========================
+            # SAVE VALID BOOK
+            # =========================
+
+            self.last_valid_bid = (
+                self.best_bid
+            )
+
+            self.last_valid_ask = (
+                self.best_ask
+            )
+
+            # =========================
+            # CALLBACK
+            # =========================
+
             self.on_update(
-                bids,
-                asks
+                dict(self.bids),
+                dict(self.asks)
             )
 
         except Exception as e:
 
-            print(
-                f"❌ ORDERBOOK MESSAGE ERROR: {e}"
+            add_log(
+                f"❌ ORDERBOOK MESSAGE ERROR: "
+                f"{e}",
+                "error"
             )
 
     # =========================
@@ -116,9 +338,10 @@ class OrderBookWS:
 
         self.connected = True
 
-        print(
+        add_log(
             f"🟢 ORDERBOOK WS CONNECTED: "
-            f"{self.symbol}"
+            f"{self.symbol}",
+            "info"
         )
 
     # =========================
@@ -134,18 +357,21 @@ class OrderBookWS:
 
         self.connected = False
 
-        print(
-            "🔴 ORDERBOOK WS CLOSED"
+        add_log(
+            "🔴 ORDERBOOK WS CLOSED",
+            "warning"
         )
 
-        print(
+        add_log(
             f"🔴 CLOSE STATUS: "
-            f"{close_status_code}"
+            f"{close_status_code}",
+            "warning"
         )
 
-        print(
+        add_log(
             f"🔴 CLOSE MESSAGE: "
-            f"{close_msg}"
+            f"{close_msg}",
+            "warning"
         )
 
     # =========================
@@ -156,9 +382,10 @@ class OrderBookWS:
 
         self.connected = False
 
-        print(
+        add_log(
             f"❌ ORDERBOOK WS ERROR: "
-            f"{error}"
+            f"{error}",
+            "error"
         )
 
     # =========================
@@ -175,13 +402,10 @@ class OrderBookWS:
 
                 try:
 
-                    print(
+                    add_log(
                         f"🚀 CONNECT URL: "
-                        f"{self.url}"
-                    )
-
-                    print(
-                        "🚀 RUN_FOREVER START"
+                        f"{self.url}",
+                        "warning"
                     )
 
                     self.ws = (
@@ -213,12 +437,15 @@ class OrderBookWS:
 
                 except Exception as e:
 
-                    print(
-                        f"❌ WS THREAD ERROR: {e}"
+                    add_log(
+                        f"❌ WS THREAD ERROR: "
+                        f"{e}",
+                        "error"
                     )
 
-                print(
-                    "♻️ RECONNECT IN 5 SEC"
+                add_log(
+                    "♻️ RECONNECT IN 5 SEC",
+                    "warning"
                 )
 
                 time.sleep(5)

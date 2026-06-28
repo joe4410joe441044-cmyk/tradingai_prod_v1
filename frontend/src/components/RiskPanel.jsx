@@ -1,403 +1,225 @@
-import { useState, useEffect } from "react";
+// frontend/src/components/RiskPanel.jsx
 
-// =========================
-// RISK PANEL
-// =========================
+/* =========================================================
+   POSITION / RISK TERMINAL PANEL
+========================================================= */
 
 export default function RiskPanel({
 
-  onChange,
-  result = {},
-  risk = {},
-  refresh,
+    values = {},
+
+    onChange = () => {},
 
 }) {
 
-  // =========================
-  // LOCAL STATE
-  // =========================
+    const handle = (
+        key,
+        value
+    ) => {
 
-  const [maxDD, setMaxDD] = useState(
-    risk?.dd_limit || 10
-  );
+        onChange({
+            [key]: value,
+        });
 
-  const [maxLossStreak, setMaxLossStreak] = useState(
-    risk?.loss_limit || 3
-  );
+    };
 
-  const [maxPosition, setMaxPosition] = useState(
-    100
-  );
+    return (
 
-  // =========================
-  // EFFECT
-  // =========================
+        <div className="terminal-panel">
 
-  useEffect(() => {
+            {/* ============================================= */}
+            {/* TITLE */}
+            {/* ============================================= */}
 
-    if (!onChange) return;
+            <div className="panel-title">
 
-    onChange({
-      maxDD: Number(maxDD),
-      maxLossStreak: Number(maxLossStreak),
-      maxPosition: Number(maxPosition),
-    });
+                POSITION / RISK（ポジション・リスク設定）
 
-  }, [
-    maxDD,
-    maxLossStreak,
-    maxPosition,
-    onChange,
-  ]);
+            </div>
 
-  // =========================
-  // API
-  // =========================
+            {/* ============================================= */}
+            {/* MAX DD */}
+            {/* ============================================= */}
 
-  const updateRisk = async () => {
+            <div className="config-row">
 
-    try {
+                <div className="config-label">
 
-      await fetch(
-        "/api/risk/update",
-        {
-          method: "POST",
+                    MAX DD
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+                </div>
 
-          body: JSON.stringify({
-            max_drawdown_pct:
-              Number(maxDD),
+                <div className="config-control">
 
-            max_loss_streak:
-              Number(maxLossStreak),
-          }),
-        }
-      );
+                    <input
+                        className="config-select"
+                        type="number"
+                        value={
+                            values.maxDd ?? 5
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "maxDd",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    />
 
-      refresh && refresh();
+                </div>
 
-    } catch (err) {
+            </div>
 
-      console.error(
-        "❌ RISK UPDATE ERROR:",
-        err
-      );
-    }
-  };
+            {/* ============================================= */}
+            {/* POSITION SIZE */}
+            {/* ============================================= */}
 
-  const resetRisk = async () => {
+            <div className="config-row">
 
-    try {
+                <div className="config-label">
 
-      await fetch(
-        "/api/risk/reset",
-        {
-          method: "POST",
-        }
-      );
+                    POSITION SIZE
 
-      refresh && refresh();
+                </div>
 
-    } catch (err) {
+                <div className="config-control">
 
-      console.error(
-        "❌ RISK RESET ERROR:",
-        err
-      );
-    }
-  };
+                    <input
+                        className="config-select"
+                        type="number"
+                        value={
+                            values.positionSize ?? 100
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "positionSize",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    />
 
-  // =========================
-  // RESULT
-  // =========================
+                </div>
 
-  const rawQty =
-    Number(result?.qty) || 0;
+            </div>
 
-  const rawSymbol =
-    result?.symbol || "";
+            {/* ============================================= */}
+            {/* TAKE PROFIT */}
+            {/* ============================================= */}
 
-  const symbol =
-    rawSymbol
-      .trim()
-      .toUpperCase();
+            <div className="config-row">
 
-  const symbolUnit =
-    symbol.replace(
-      "USDT",
-      ""
+                <div className="config-label">
+
+                    TP
+
+                </div>
+
+                <div className="config-control">
+
+                    <input
+                        className="config-select"
+                        type="number"
+                        step="0.1"
+                        value={
+                            values.tp ?? 1.0
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "tp",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    />
+
+                </div>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* STOP LOSS */}
+            {/* ============================================= */}
+
+            <div className="config-row">
+
+                <div className="config-label">
+
+                    SL
+
+                </div>
+
+                <div className="config-control">
+
+                    <input
+                        className="config-select"
+                        type="number"
+                        step="0.1"
+                        value={
+                            values.sl ?? 1.0
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "sl",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    />
+
+                </div>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* TRAILING */}
+            {/* ============================================= */}
+
+            <div className="config-row">
+
+                <div className="config-label">
+
+                    TRAILING
+
+                </div>
+
+                <div className="config-control">
+
+                    <select
+                        className="config-select"
+                        value={
+                            values.trailing
+                                ? "ON"
+                                : "OFF"
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "trailing",
+                                e.target.value === "ON"
+                            )
+                        }
+                    >
+
+                        <option value="OFF">
+                            OFF
+                        </option>
+
+                        <option value="ON">
+                            ON
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+        </div>
+
     );
 
-  const finalQty = (() => {
-
-    const q =
-      Number(result?.qty) || 0;
-
-    const s =
-      (result?.symbol || "")
-        .toUpperCase();
-
-    if (!q) return "-";
-
-    if (s.includes("XRP")) {
-      return Math.floor(q);
-    }
-
-    if (
-      s.includes("BTC") ||
-      s.includes("ETH")
-    ) {
-      return (
-        Math.round(q * 1000) /
-        1000
-      );
-    }
-
-    if (
-      s.includes("SOL") ||
-      s.includes("BNB")
-    ) {
-      return (
-        Math.round(q * 100) /
-        100
-      );
-    }
-
-    return q;
-
-  })();
-
-  // =========================
-  // KILL SWITCH
-  // =========================
-
-  const isKill =
-    risk?.kill_switch || false;
-
-  // =========================
-  // UI
-  // =========================
-
-  return (
-
-    <div>
-
-      {/* ========================= */}
-      {/* TITLE */}
-      {/* ========================= */}
-
-      <div className="panel-header">
-
-        <h3>
-          🔴 Risk Settings
-        </h3>
-
-      </div>
-
-      {/* ========================= */}
-      {/* INPUTS */}
-      {/* ========================= */}
-
-      <div className="execution-status-card">
-
-        <div className="status-row">
-
-          <span className="label">
-            Max DD %
-          </span>
-
-          <input
-            value={maxDD}
-            onChange={(e) =>
-              setMaxDD(
-                e.target.value
-              )
-            }
-            style={{
-              width: 120,
-            }}
-          />
-
-        </div>
-
-        <div className="status-row">
-
-          <span className="label">
-            Max Loss Streak
-          </span>
-
-          <input
-            value={maxLossStreak}
-            onChange={(e) =>
-              setMaxLossStreak(
-                e.target.value
-              )
-            }
-            style={{
-              width: 120,
-            }}
-          />
-
-        </div>
-
-        <div className="status-row">
-
-          <span className="label">
-            Max Position
-          </span>
-
-          <input
-            value={maxPosition}
-            onChange={(e) =>
-              setMaxPosition(
-                e.target.value
-              )
-            }
-            style={{
-              width: 120,
-            }}
-          />
-
-        </div>
-
-        {/* ========================= */}
-        {/* BUTTONS */}
-        {/* ========================= */}
-
-        <div className="execution-buttons">
-
-          <button
-            className="start-btn"
-            onClick={updateRisk}
-          >
-            UPDATE
-          </button>
-
-          <button
-            className="stop-btn"
-            onClick={resetRisk}
-          >
-            RESET
-          </button>
-
-        </div>
-
-        {/* ========================= */}
-        {/* KILL SWITCH */}
-        {/* ========================= */}
-
-        <div className="status-row">
-
-          <span className="label">
-            Kill Switch
-          </span>
-
-          <span
-            className="value"
-            style={{
-              color: isKill
-                ? "#ff4d4f"
-                : "#00ff88",
-            }}
-          >
-            {
-              isKill
-                ? "ACTIVE 🔴"
-                : "SAFE 🟢"
-            }
-          </span>
-
-        </div>
-
-      </div>
-
-      {/* ========================= */}
-      {/* RESULT */}
-      {/* ========================= */}
-
-      <div
-        style={{
-          marginTop: 20,
-        }}
-      >
-
-        <div className="panel-header">
-
-          <h3>
-            🟡 Result
-          </h3>
-
-        </div>
-
-        <div className="execution-status-card">
-
-          <div className="status-row">
-
-            <span className="label">
-              Position Size
-            </span>
-
-            <span className="value">
-              {
-                result?.positionSize
-                  ?? "-"
-              } USDT
-            </span>
-
-          </div>
-
-          <div className="status-row">
-
-            <span className="label">
-              Qty
-            </span>
-
-            <span className="value">
-              {finalQty}
-              {" "}
-              {symbolUnit}
-            </span>
-
-          </div>
-
-          <div className="status-row">
-
-            <span className="label">
-              Risk Amount
-            </span>
-
-            <span className="value">
-              {
-                result?.riskAmount
-                  ?? "-"
-              } USDT
-            </span>
-
-          </div>
-
-          <div className="status-row">
-
-            <span className="label">
-              DD After Trade
-            </span>
-
-            <span className="value">
-              {
-                result?.ddAfter
-                  ?? "-"
-              } %
-            </span>
-
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-  );
 }

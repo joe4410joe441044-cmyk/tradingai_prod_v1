@@ -1,236 +1,79 @@
-/* ========================= */
-/* DASHBOARD */
-/* ========================= */
+/* =========================================================
+ROOT
+========================================================= */
 
 .dashboard {
 
-    padding: 14px;
-
-    background: #0b0b0b;
-
-    color: white;
+    width: 100%;
 
     min-height: 100vh;
 
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 14px;
-
-    box-sizing: border-box;
-
-    overflow-x: hidden;
-}
-
-/* ========================= */
-/* HEADER */
-/* ========================= */
-
-.header {
-
-    display: flex;
-
-    justify-content: space-between;
-
-    align-items: center;
-
-    gap: 20px;
-
-    margin-bottom: 2px;
-
-    flex-wrap: wrap;
-}
-
-.header h1 {
-
-    margin: 0;
-
-    font-size: 30px;
-
-    font-weight: 700;
-
-    line-height: 1.1;
-
-    letter-spacing: 0.5px;
-}
-
-/* ========================= */
-/* MAIN GRID */
-/* ========================= */
-
-.dashboard-content {
-
-    width: 100%;
-}
-
-.full-dashboard-card {
-
-    display: grid !important;
-
-    grid-template-columns:
-        minmax(320px, 1fr)
-        minmax(340px, 1fr)
-        minmax(320px, 1fr);
-
-    gap: 14px;
-
-    align-items: stretch;
-
-    width: 100%;
-}
-
-/* ========================= */
-/* ULTRA WIDE */
-/* ========================= */
-
-@media (min-width: 1800px) {
-
-    .full-dashboard-card {
-
-        grid-template-columns:
-            420px
-            1fr
-            420px;
-
-        max-width: 1800px;
-
-        margin: 0 auto;
-    }
-}
-
-/* ========================= */
-/* COLUMNS */
-/* ========================= */
-
-.left-column,
-.center-column,
-.right-column {
-
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 14px;
-
-    min-width: 0;
-
-    align-self: stretch;
-}
-
-/* ========================= */
-/* RIGHT COLUMN */
-/* ========================= */
-
-.right-column {
-
-    overflow: visible;
-
-    max-height: none;
-
-    padding-right: 0;
-}
-
-/* ========================= */
-/* CUSTOM SCROLLBAR */
-/* ========================= */
-
-.right-column::-webkit-scrollbar,
-.log-container::-webkit-scrollbar {
-
-    width: 6px;
-}
-
-.right-column::-webkit-scrollbar-thumb,
-.log-container::-webkit-scrollbar-thumb {
-
-    background: #2a2a2a;
-
-    border-radius: 10px;
-}
-
-/* ========================= */
-/* PANEL CARD */
-/* ========================= */
-
-.panel-card {
-
-    background: #111;
-
-    border: 1px solid #222;
-
-    border-radius: 14px;
-
     padding: 12px;
 
-    box-sizing: border-box;
+    background: #0f1115;
 
-    overflow: visible;
+    color: #d4d7dd;
+
+    font-family:
+        "Inter",
+        "Segoe UI",
+        sans-serif;
+
+    overflow-x: hidden;
+
+}
+
+/* =========================================================
+LAYOUT
+========================================================= */
+
+.dashboard-layout {
+
+    display: flex !important;
+
+    flex-direction: row !important;
+
+    flex-wrap: nowrap !important;
+
+    gap: 16px;
+
+    align-items: flex-start;
 
     width: 100%;
 
-    box-shadow:
-        0 4px 18px rgba(0, 0, 0, 0.35);
-
-    transition:
-        border-color 0.2s,
-        transform 0.2s,
-        background 0.2s;
 }
 
-.panel-card:hover {
+/* =========================================================
+LEFT COLUMN
+========================================================= */
 
-    border-color: #333;
+.left-column {
 
-    background: #151515;
+    width: 22%;
 
-    transform: translateY(-1px);
-}
-
-/* ========================= */
-/* PANEL SECTION */
-/* ========================= */
-
-.panel-section {
+    min-width: 420px;
 
     display: flex;
 
     flex-direction: column;
 
-    gap: 10px;
+    gap: 18px;
+
+    transform: scale(0.93);
+
+    transform-origin: top left;
+
+    margin-right: -32px;
+
 }
 
-/* ========================= */
-/* PANEL HEADER */
-/* ========================= */
+/* =========================================================
+CENTER COLUMN
+========================================================= */
 
-.panel-header {
+.center-column {
 
-    display: flex;
-
-    align-items: center;
-
-    justify-content: space-between;
-
-    margin-bottom: 8px;
-}
-
-.panel-header h3 {
-
-    margin: 0;
-
-    font-size: 15px;
-
-    font-weight: 700;
-
-    letter-spacing: 0.3px;
-}
-
-/* ========================= */
-/* EXECUTION PANEL */
-/* ========================= */
-
-.execution-panel {
+    flex: 1;
 
     display: flex;
 
@@ -238,48 +81,303 @@
 
     gap: 12px;
 
-    justify-content: space-between;
+    min-width: 0;
+
+    transform: scale(1.0);
+
+    transform-origin: top center;
+
+    margin-left: -15px;
+
+    margin-right: -8px;
+
 }
 
-/* ========================= */
-/* EXECUTION WRAPPER */
-/* ========================= */
+/* =========================================================
+RIGHT GOVERNANCE COLUMN
+========================================================= */
 
-.execution-wrapper {
+.right-governance-column {
 
-    position: sticky;
+    width: 360px;
 
-    top: 10px;
-
-    z-index: 20;
-}
-
-/* ========================= */
-/* STATUS CARD */
-/* ========================= */
-
-.execution-status-card {
+    min-width: 360px;
 
     display: flex;
 
     flex-direction: column;
 
-    gap: 8px;
+    gap: 18px;
 
-    background: #161616;
+    transform: scale(0.92);
 
-    border: 1px solid #2a2a2a;
+    transform-origin: top right;
+
+    margin-left: -24px;
+
+}
+
+/* =========================================================
+PANEL CARD
+========================================================= */
+
+.panel-card {
+
+
+    background: #0b1220;
+
+    border: 1px solid rgba(
+        80,
+        120,
+        255,
+        0.12
+    );
 
     border-radius: 12px;
 
-    padding: 12px;
+    padding: 10px;
+
+    box-sizing: border-box;
+
 }
 
-/* ========================= */
-/* STATUS ROW */
-/* ========================= */
+/* =========================================================
+CENTER TERMINAL PANEL
+========================================================= */
 
-.status-row {
+.center-terminal-panel {
+
+    background: #05090f;
+
+    border:
+        1px solid #18202a;
+
+    border-radius: 4px;
+
+    padding: 0;
+
+    overflow: hidden;
+}
+
+/* =========================================================
+CENTER TERMINAL TITLE
+========================================================= */
+
+.center-terminal-title {
+
+    height: 46px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    font-size: 16px;
+
+    font-weight: 700;
+
+    color: #66e3ff;
+
+    letter-spacing: 4px;
+
+    text-transform: uppercase;
+
+    border-bottom:
+        1px solid #18202a;
+
+    font-family:
+        "Consolas",
+        monospace;
+}
+
+/* =========================================================
+TERMINAL MONITOR SECTION
+========================================================= */
+
+.terminal-monitor-section {
+
+    border-bottom:
+        1px solid #18202a;
+}
+
+/* =========================================================
+TERMINAL SECTION HEADER
+========================================================= */
+
+.terminal-section-header {
+
+    height: 46px;
+
+    display: flex;
+
+    align-items: center;
+
+    padding: 0 18px;
+
+    border-bottom:
+        1px solid #18202a;
+
+    font-size: 12px;
+
+    font-weight: 700;
+
+    letter-spacing: 2px;
+
+    text-transform: uppercase;
+
+    color: #66e3ff;
+
+    font-family:
+        "Consolas",
+        monospace;
+}
+
+/* =========================================================
+RESULT TELEMETRY GRID
+========================================================= */
+
+.result-telemetry-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(8, 1fr);
+
+    min-height: 72px;
+}
+
+/* =========================================================
+TELEMETRY CELL
+========================================================= */
+
+.telemetry-cell {
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    padding: 10px 16px;
+
+    border-right:
+        1px solid #18202a;
+}
+
+/* =========================================================
+TELEMETRY LABEL
+========================================================= */
+
+.telemetry-label {
+
+    font-size: 9px;
+
+    color: #d7dde5;
+
+    letter-spacing: 2px;
+
+    text-transform: uppercase;
+
+    font-family:
+        "Consolas",
+        monospace;
+}
+
+/* =========================================================
+TELEMETRY VALUE
+========================================================= */
+
+.telemetry-value {
+
+    font-size: 13px;
+
+    color: #ffffff;
+
+    letter-spacing: 1px;
+
+    font-family:
+        "Consolas",
+        monospace;
+}
+
+/* =========================================================
+TERMINAL GREEN
+========================================================= */
+
+.terminal-green {
+
+    color: #56ff7f;
+}
+
+/* =========================================================
+TERMINAL RED
+========================================================= */
+
+.terminal-red {
+
+    color: #ff5757;
+}
+
+/* =========================================================
+TERMINAL YELLOW
+========================================================= */
+
+.terminal-yellow {
+
+    color: #ffd84d;
+}
+
+/* =========================================================
+EXECUTION TERMINAL GRID
+========================================================= */
+
+.execution-terminal-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        1fr 1fr 1fr;
+}
+
+/* =========================================================
+TERMINAL BLOCK
+========================================================= */
+
+.terminal-block {
+
+    padding: 12px 16px;
+
+    border-right:
+        1px solid #18202a;
+}
+
+/* =========================================================
+TERMINAL BLOCK TITLE
+========================================================= */
+
+.terminal-block-title {
+
+    margin-bottom: 10px;
+
+    font-size: 13px;
+
+    color: #66e3ff;
+
+    letter-spacing: 2px;
+
+    font-family:
+        "Consolas",
+        monospace;
+}
+
+/* =========================================================
+TERMINAL ROW
+========================================================= */
+
+.terminal-row {
 
     display: flex;
 
@@ -287,171 +385,72 @@
 
     align-items: center;
 
-    gap: 10px;
-
-    padding-bottom: 6px;
-
-    border-bottom: 1px solid #242424;
-
-    font-size: 12px;
-}
-
-.status-row:last-child {
-
-    border-bottom: none;
-
-    padding-bottom: 0;
-}
-
-/* ========================= */
-/* LABEL */
-/* ========================= */
-
-.label {
-
-    color: #888;
-
-    font-weight: 500;
-
-    letter-spacing: 0.3px;
-
-    font-size: 11px;
-}
-
-/* ========================= */
-/* VALUE */
-/* ========================= */
-
-.value {
-
-    color: white;
-
-    font-weight: bold;
-
-    text-align: right;
-
-    font-size: 12px;
-}
-
-/* ========================= */
-/* STATUS COLORS */
-/* ========================= */
-
-.running {
-
-    color: #4ade80;
-}
-
-.stopped {
-
-    color: #f87171;
-}
-
-.warning {
-
-    color: #facc15;
-}
-
-.danger {
-
-    color: #f87171;
-}
-
-.long {
-
-    color: #4ade80;
-}
-
-.short {
-
-    color: #f87171;
-}
-
-.online {
-
-    color: #4ade80;
-}
-
-.offline {
-
-    color: #f87171;
-}
-
-/* ========================= */
-/* EXECUTION BUTTONS */
-/* ========================= */
-
-.execution-buttons {
-
-    display: flex;
-
-    gap: 10px;
-}
-
-.execution-buttons button {
-
-    flex: 1;
-
-    padding: 10px 12px;
-
-    border: none;
-
-    border-radius: 10px;
-
-    font-weight: bold;
+    min-height: 38px;
 
     font-size: 13px;
 
-    color: white;
+    letter-spacing: 1px;
 
-    cursor: pointer;
-
-    transition:
-        transform 0.15s,
-        opacity 0.2s,
-        background 0.2s;
+    font-family:
+        "Consolas",
+        monospace;
 }
 
-.execution-buttons button:hover {
+/* =========================================================
+LOG STREAM
+========================================================= */
 
-    transform: translateY(-1px);
+.log-stream {
 
-    opacity: 0.96;
+    padding: 10px 16px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 14px;
 }
 
-/* ========================= */
-/* START BUTTON */
-/* ========================= */
+/* =========================================================
+LOG STREAM LINE
+========================================================= */
 
-.start-btn {
+.log-stream-line {
 
-    background: #166534;
+    display: grid;
+
+    grid-template-columns:
+        90px
+        220px
+        70px
+        1fr;
+
+    align-items: center;
+
+    font-size: 11px;
+
+    letter-spacing: 1px;
+
+    font-family:
+        "Consolas",
+        monospace;
 }
 
-.start-btn:hover {
+/* =========================================================
+CENTER COLUMN
+========================================================= */
 
-    background: #15803d;
+.center-column {
+
+    gap: 6px;
 }
 
-/* ========================= */
-/* STOP BUTTON */
-/* ========================= */
 
-.stop-btn {
+/* =========================================================
+TERMINAL PANEL
+========================================================= */
 
-    background: #991b1b;
-}
-
-.stop-btn:hover {
-
-    background: #b91c1c;
-}
-
-/* ========================= */
-/* FORM */
-/* ========================= */
-
-.form-group {
+.terminal-panel {
 
     display: flex;
 
@@ -459,326 +458,749 @@
 
     gap: 6px;
 
-    margin-bottom: 10px;
+    padding: 14px;
+
+    border-radius: 10px;
+
+    border:
+        1px solid #252b33;
+
+    background: #151a21;
+
 }
 
-.form-group:last-child {
+/* =========================================================
+SECTION NUMBER TITLE
+========================================================= */
 
-    margin-bottom: 0;
+.section-number-title {
+
+    font-size: 15px;
+
+    font-weight: 800;
+
+    color: #f1f5f9;
+
+    margin-bottom: 2px;
+
+    letter-spacing: 0.6px;
+
 }
+/* =========================================================
+GOVERNANCE CARD
+========================================================= */
 
-.form-group label {
+.execution-monitoring-card,
+.human-governance-card {
 
-    font-size: 11px;
+    display: flex;
 
-    color: #999;
+    flex-direction: column;
 
-    font-weight: 500;
-}
+    gap: 16px;
 
-.form-group input,
-.form-group select {
-
-    width: 100%;
-
-    padding: 9px;
+    padding: 14px;
 
     border-radius: 8px;
 
-    border: 1px solid #333;
+    border:
+        1px solid #252b33;
 
-    background: #0b0b0b;
+    background: #151a21;
 
-    color: white;
+}
+
+/* =========================================================
+CARD TITLE
+========================================================= */
+
+.governance-card-title {
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    text-transform: uppercase;
+
+    color: #dfe6f0;
+
+    padding-bottom: 8px;
+
+    border-bottom:
+        1px solid #2a3139;
+
+}
+
+/* =========================================================
+PANEL TITLE
+========================================================= */
+
+.terminal-section-title,
+.panel-title {
 
     font-size: 12px;
 
-    outline: none;
+    font-weight: 700;
 
-    box-sizing: border-box;
+    letter-spacing: 1px;
 
-    transition:
-        border-color 0.2s,
-        background 0.2s;
+    text-transform: uppercase;
+
+    color: #dfe6f0;
+
+    padding-bottom: 12px;
+
+    margin-bottom: 2px;
+
+    border-bottom:
+        1px solid #2a3139;
+
 }
 
-.form-group input:focus,
-.form-group select:focus {
+/* =========================================================
+MONITORING SECTION
+========================================================= */
 
-    border-color: #555;
+.monitoring-section {
 
-    background: #202020;
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 8px;
+
 }
 
-/* ========================= */
-/* STRATEGY / RESULT GRID */
-/* ========================= */
+/* =========================================================
+MONITORING LABEL
+========================================================= */
 
-.monitor-grid {
+.monitoring-label {
+
+    font-size: 10px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.8px;
+
+    text-transform: uppercase;
+
+    color: #8d96a5;
+
+}
+
+/* =========================================================
+MONITORING GRID
+========================================================= */
+
+.monitoring-grid {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 4px;
+
+}
+
+/* =========================================================
+MONITORING ROW
+========================================================= */
+
+.monitoring-row {
+
+    display: flex !important;
+
+    flex-direction: row !important;
+
+    justify-content: space-between !important;
+
+    align-items: center !important;
+
+    width: 100%;
+
+    min-height: 24px;
+
+    gap: 12px;
+
+    padding-bottom: 4px;
+
+    border-bottom:
+        1px solid #20242b;
+
+    font-size: 10px;
+
+}
+
+/* =========================================================
+MONITORING ROW SPAN FIX
+========================================================= */
+
+.monitoring-row span {
+
+    display: inline !important;
+
+    width: auto !important;
+
+    white-space: nowrap;
+
+}
+
+/* =========================================================
+MONITORING LABEL
+========================================================= */
+
+.monitoring-row span:first-child {
+
+    color: #8d96a5;
+
+    letter-spacing: 0.6px;
+
+    text-transform: uppercase;
+
+}
+
+/* =========================================================
+MONITORING VALUE
+========================================================= */
+
+.monitoring-row span:last-child {
+
+    font-weight: 700;
+
+    color: #d7dde5;
+
+}
+
+/* =========================================================
+STATUS COLORS
+========================================================= */
+
+.status-safe {
+
+    color: #59c37a;
+
+}
+
+.status-warning {
+
+    color: #d8a657;
+
+}
+
+.status-danger {
+
+    color: #d96c6c;
+
+}
+/* =========================================================
+CONFIG ROW
+========================================================= */
+
+.config-row {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 14px;
+
+    min-height: 38px;
+
+    padding-bottom: 2px;
+
+    flex-wrap: nowrap;
+
+}
+
+/* =========================================================
+CONFIG LABEL
+========================================================= */
+
+.config-label {
+
+    width: 185px;
+
+    flex-shrink: 0;
+
+    color: #8d96a5;
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.8px;
+
+    text-transform: uppercase;
+
+    white-space: nowrap;
+
+}
+
+/* =========================================================
+CONFIG CONTROL
+========================================================= */
+
+.config-control {
+
+    flex: 1;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: flex-end;
+
+    gap: 10px;
+
+    min-width: 0;
+
+    color: #d7dde5;
+
+    font-size: 12px;
+
+    font-weight: 600;
+
+}
+
+/* =========================================================
+CONFIG SELECT
+========================================================= */
+
+.config-select {
+
+    width: 100%;
+
+    max-width: 190px;
+
+    height: 36px;
+
+    padding: 0 12px;
+
+    border-radius: 8px;
+
+    border:
+        1px solid #2a3139;
+
+    background: #141920;
+
+    color: #d7dde5;
+
+    font-size: 12px;
+
+    font-weight: 600;
+
+}
+
+/* =========================================================
+GOVERNANCE CONTROL GRID
+========================================================= */
+
+.governance-control-grid {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 12px;
+
+}
+
+/* =========================================================
+GOVERNANCE CONTROL ROW
+========================================================= */
+
+.governance-control-row {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 16px;
+
+    flex-wrap: nowrap;
+
+}
+
+/* =========================================================
+GOVERNANCE LABEL
+========================================================= */
+
+.governance-control-row span {
+
+    white-space: nowrap;
+
+    font-size: 12px;
+
+    font-weight: 700;
+
+    color: #d7dde5;
+
+    letter-spacing: 0.6px;
+
+}
+
+/* =========================================================
+GOVERNANCE BUTTON
+========================================================= */
+
+.governance-button {
+
+    min-width: 130px;
+
+    height: 34px;
+
+    padding: 0 14px;
+
+    border-radius: 8px;
+
+    border:
+        1px solid #2a3139;
+
+    background: #171c23;
+
+    color: #d7dde5;
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.8px;
+
+    text-transform: uppercase;
+
+    cursor: pointer;
+
+}
+/* =========================================================
+MAIN OPERATION BUTTONS
+========================================================= */
+
+.main-operation-buttons {
 
     display: grid;
 
     grid-template-columns: 1fr 1fr;
 
-    gap: 10px;
+    gap: 12px;
+
 }
 
-.monitor-item {
+/* =========================================================
+START BUTTON LARGE
+========================================================= */
 
-    background: #151515;
+.start-button-large,
+.stop-button-large {
 
-    border: 1px solid #262626;
+    appearance: none;
+
+    -webkit-appearance: none;
+
+    width: 100%;
+
+    height: 52px;
+
+    border: none !important;
 
     border-radius: 10px;
-
-    padding: 10px;
-
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 6px;
-
-    transition:
-        border-color 0.2s,
-        transform 0.2s,
-        background 0.2s;
-}
-
-.monitor-item:hover {
-
-    border-color: #3a3a3a;
-
-    background: #1b1b1b;
-
-    transform: translateY(-1px);
-}
-
-.monitor-item span {
-
-    font-size: 10px;
-
-    color: #888;
-
-    letter-spacing: 0.3px;
-}
-
-.monitor-item strong {
 
     font-size: 13px;
 
     font-weight: 700;
 
-    line-height: 1.2;
+    letter-spacing: 1px;
+
+    cursor: pointer;
+
 }
 
-/* ========================= */
-/* LOG WRAPPER */
-/* ========================= */
+/* =========================================================
+START BUTTON LARGE
+========================================================= */
 
-.logs-wrapper {
+.start-button-large {
 
-    min-height: 420px;
+    background: #1f8b4c !important;
 
-    max-height: calc(100vh - 220px);
+    color: white;
 
-    display: flex;
-
-    flex-direction: column;
 }
 
-/* ========================= */
-/* LOG CONTAINER */
-/* ========================= */
+/* =========================================================
+STOP BUTTON LARGE
+========================================================= */
 
-.log-container {
+.stop-button-large {
 
-    display: flex;
+    background: #c0392b !important;
 
-    flex-direction: column;
+    color: white;
 
-    gap: 6px;
-
-    overflow-y: auto;
-
-    max-height: calc(100vh - 300px);
-
-    padding-right: 4px;
-
-    scrollbar-width: thin;
 }
 
-/* ========================= */
-/* LOG ROW */
-/* ========================= */
+/* =========================================================
+QUICK ACTIONS GRID
+========================================================= */
 
-.log-row {
+.quick-actions-grid {
 
-    padding: 8px 10px;
+    display: grid !important;
 
-    border-radius: 8px;
+    grid-template-columns:
+        1fr 1fr !important;
 
-    background: #181818;
+    gap: 10px;
 
-    border: 1px solid #242424;
-
-    font-size: 11px;
-
-    font-family: monospace;
-
-    line-height: 1.45;
-
-    word-break: break-word;
-
-    transition:
-        background 0.2s,
-        border-color 0.2s;
 }
 
-.log-row:hover {
+/* =========================================================
+QUICK ACTION BUTTON
+========================================================= */
 
-    background: #1f1f1f;
+.quick-action-button {
 
-    border-color: #333;
-}
+    width: 100%;
 
-/* ========================= */
-/* LOG EMPTY */
-/* ========================= */
-
-.log-empty {
-
-    opacity: 0.5;
-
-    font-size: 11px;
-}
-
-/* ========================= */
-/* TITLES */
-/* ========================= */
-
-h2,
-h3 {
-
-    margin-top: 0;
-
-    margin-bottom: 8px;
-}
-
-h3 {
-
-    font-size: 15px;
-
-    line-height: 1.2;
-}
-
-/* ========================= */
-/* TEXT */
-/* ========================= */
-
-p {
-
-    line-height: 1.5;
-}
-
-/* ========================= */
-/* HFT LOG SCROLLBAR */
-/* ========================= */
-
-.log-container::-webkit-scrollbar,
-.logs-container::-webkit-scrollbar {
-
-    width: 6px;
-}
-
-.log-container::-webkit-scrollbar-track,
-.logs-container::-webkit-scrollbar-track {
-
-    background: #0b0b0b;
-}
-
-.log-container::-webkit-scrollbar-thumb,
-.logs-container::-webkit-scrollbar-thumb {
-
-    background: #222;
+    height: 46px;
 
     border-radius: 10px;
+
+    border:
+        1px solid #2a3139;
+
+    background: #171c23;
+
+    color: #d7dde5;
+
+    font-size: 13px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.8px;
+
+    text-transform: uppercase;
+
+    cursor: pointer;
+
+    transition:
+        background 0.15s ease,
+        border 0.15s ease;
+
 }
 
-.log-container::-webkit-scrollbar-thumb:hover,
-.logs-container::-webkit-scrollbar-thumb:hover {
+.quick-action-button:hover {
 
-    background: #333;
+    background: #20262f;
+
+    border:
+        1px solid #39424d;
+
 }
 
-/* ========================= */
-/* MOBILE */
-/* ========================= */
+/* =========================================================
+SAFE MODE
+========================================================= */
 
-@media (max-width: 1200px) {
+.quick-action-button.safe {
 
-    .full-dashboard-card {
+    border:
+        1px solid rgba(
+            216,
+            166,
+            87,
+            0.45
+        );
 
-        grid-template-columns: 1fr;
-    }
+    color: #d8a657;
 
-    .monitor-grid {
-
-        grid-template-columns: 1fr;
-    }
-
-    .execution-buttons {
-
-        flex-direction: column;
-    }
-
-    .dashboard {
-
-        padding: 10px;
-    }
-
-    .header h1 {
-
-        font-size: 24px;
-    }
-
-    .right-column {
-
-        max-height: none;
-
-        overflow: visible;
-    }
-
-    .logs-wrapper,
-    .log-container {
-
-        max-height: none;
-    }
-
-    .execution-wrapper {
-
-        position: relative;
-
-        top: 0;
-    }
 }
 
-/* =========================
-   STEP 27
-   INTELLIGENCE COLORS
-========================= */
+/* =========================================================
+GLOBAL RESET
+========================================================= */
 
-.value.safe {
+* {
 
-    color: #00ff88;
+    box-shadow: none !important;
+
+    text-shadow: none !important;
+
+    animation: none !important;
+
 }
 
-.value.warning {
+button {
 
-    color: #ffaa00;
+    outline: none;
+
+    box-shadow: none;
+
 }
 
-.value.danger {
+button:focus {
 
-    color: #ff4d4f;
+    outline: none;
+
+}
+
+/* =========================================================
+FINAL TERMINAL NORMALIZATION
+========================================================= */
+
+html,
+body,
+#root {
+
+    margin: 0;
+
+    padding: 0;
+
+    width: 100%;
+
+    min-height: 100%;
+
+    background: #0f1115;
+
+    overflow-x: hidden;
+
+}
+/* =========================================================
+EXECUTION STATUS SECTION
+========================================================= */
+
+.execution-status-section {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 10px;
+
+    margin-top: 4px;
+
+}
+
+/* =========================================================
+EXECUTION STATUS LABEL
+========================================================= */
+
+.execution-status-label {
+
+    color: #8d96a5;
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.8px;
+
+}
+
+/* =========================================================
+EXECUTION STATUS BOX
+========================================================= */
+
+.execution-status-box {
+
+    width: 100%;
+
+    height: 52px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: 10px;
+
+    border:
+        1px solid #2a3139;
+
+    background: #1a2230;
+
+    font-size: 16px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+}
+
+/* =========================================================
+RUNNING
+========================================================= */
+
+.execution-status-box.running {
+
+    color: #59c37a;
+
+}
+
+/* =========================================================
+STOPPED
+========================================================= */
+
+.execution-status-box.stopped {
+
+    color: #ff7b7b;
+
+}
+
+/* =========================================================
+EMERGENCY STOP ROW
+========================================================= */
+
+.emergency-stop-row {
+
+    justify-content: center;
+
+}
+
+/* =========================================================
+EMERGENCY STOP BUTTON
+========================================================= */
+
+.emergency-stop-button {
+
+    width: 100%;
+
+    height: 48px;
+
+    border: none;
+
+    border-radius: 10px;
+
+    background: linear-gradient(
+        135deg,
+        #d93a3a,
+        #ff5f57
+    );
+
+    color: white;
+
+    font-size: 13px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    cursor: pointer;
+
+    transition:
+        opacity 0.15s ease;
+
+}
+
+.emergency-stop-button:hover {
+
+    opacity: 0.92;
+
 }

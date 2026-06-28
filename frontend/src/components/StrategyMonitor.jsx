@@ -1,898 +1,482 @@
 export default function StrategyMonitor({
 
-  strategyData = {},
+    strategyData = {},
 
 }) {
 
-  // =========================
-  // SAFE FORMATTERS
-  // =========================
+    const safeFixed = (
+        value,
+        digits = 2
+    ) => {
 
-  const safeFixed = (
-    value,
-    digits = 2
-  ) => {
-
-    return (
-      value !== null &&
-      value !== undefined &&
-      Number.isFinite(
-        Number(value)
-      )
-    )
-
-      ? Number(value).toFixed(
-          digits
-        )
-
-      : "-";
-
-  };
-
-  // =========================
-  // REALTIME DATA
-  // =========================
-
-  const {
-
-    imbalance = null,
-
-    momentum = null,
-
-    spread = null,
-
-    edge = null,
-
-    delta = null,
-
-    cooldown = false,
-
-    entryReady = false,
-
-    signal = null,
-
-    direction = null,
-
-    strategyState = null,
-
-    edgeScore = null,
-
-    executionAllowed = false,
-
-    marketEnvironment = null,
-
-    spoofDanger = false,
-
-    liquidityGrab = false,
-
-    gammaState = null,
-
-    deltaPressure = null,
-
-    momentumRegime = null,
-
-    liquidityStability = null,
-
-    spoofProbability = null,
-
-    breakoutLong = false,
-
-    breakoutShort = false,
-
-    marketMakingWindow = false,
-
-    emergencyExit = false,
-
-  } = strategyData;
-
-  // =========================
-  // DERIVED VALUES
-  // =========================
-
-  const hasImbalance =
-
-    imbalance !== null &&
-    Number.isFinite(
-      Number(imbalance)
-    );
-
-  const hasMomentum =
-
-    momentum !== null &&
-    Number.isFinite(
-      Number(momentum)
-    );
-
-  const hasEdge =
-
-    edge !== null &&
-    Number.isFinite(
-      Number(edge)
-    );
-
-  const hasDelta =
-
-    delta !== null &&
-    Number.isFinite(
-      Number(delta)
-    );
-
-  const orderFlowDirection =
-
-    hasImbalance
-
-      ? (
-          imbalance >= 0
-            ? "BUY"
-            : "SELL"
-        )
-
-      : "-";
-
-  const momentumState =
-
-    hasMomentum
-
-      ? (
-          Math.abs(momentum) >= 2
-            ? "STRONG"
-            : Math.abs(momentum) >= 1
-            ? "NORMAL"
-            : "WEAK"
-        )
-
-      : "-";
-
-  // =========================
-  // ENTRY QUALITY SCORE
-  // =========================
-
-  const signalStrength =
-
-    (
-      hasEdge &&
-      hasImbalance &&
-      hasMomentum
-    )
-
-      ? Math.min(
-
-          100,
-
-          Math.max(
-
-            0,
-
-            Math.round(
-
-              (
-
-                Math.abs(edge) * 0.5 +
-
-                Math.abs(imbalance) * 0.3 +
-
-                Math.abs(momentum / 3) * 0.2
-
-              ) * 100
-
+        return (
+            value !== null &&
+            value !== undefined &&
+            Number.isFinite(
+                Number(value)
             )
-
-          )
-
         )
 
-      : 0;
+            ? Number(value).toFixed(
+                  digits
+              )
 
-  // =========================
-  // EDGE COLOR
-  // =========================
+            : "-";
 
-  const edgeColor =
+    };
+        const {
 
-    hasEdge
+        executionAllowed = false,
 
-      ? (
-          edge >= 0.7
-            ? "#00ff99"
-            : edge >= 0.4
-            ? "#ffaa00"
-            : "#ff4d4d"
-        )
+        executionState = "--",
 
-      : "#999";
+        executionProfile = "--",
 
-  // =========================
-  // SIGNAL COLOR
-  // =========================
+        runtimeStatus = "--",
 
-  const signalColor =
+        governanceRisk = "--",
 
-    signal === "ENTER_LONG"
-      ? "#00ff99"
+        governanceHealth = "--",
 
-      : signal === "ENTER_SHORT"
-      ? "#ff4d4d"
+        route = "--",
 
-      : "#999";
+        routeReason = "--",
 
-  // =========================
-  // STRATEGY STATE COLOR
-  // =========================
+        marketCondition = "--",
 
-  const strategyStateColor =
+        spread = null,
 
-    strategyState ===
-    "BULLISH_ATTACK"
+        tightSpread = false,
 
-      ? "#00ff99"
+        acceptableSpread = false,
 
-      : strategyState ===
-        "BEARISH_ATTACK"
+        spreadExpansion = false,
 
-      ? "#ff4d4d"
+        latency = null,
 
-      : strategyState ===
-        "SURVIVAL"
+        latencyHealthy = false,
 
-      ? "#ffaa00"
+        executionPressure = "--",
 
-      : "#999";
+        executionSafety = "--",
 
-  // =========================
-  // SPOOF STATUS
-  // =========================
+        marketMakingWindow = false,
 
-  const spoofStatus =
+        emergencyExit = false,
 
-    spoofDanger
+        price = null,
 
-      ? "DANGER"
+        } = strategyData;
 
-      : (
-          spoofProbability !== null &&
-          spoofProbability >= 40
-        )
+        return (
 
-      ? "WARNING"
 
-      : "SAFE";
+        <>
 
-  // =========================
-  // UI
-  // =========================
+            <div className="panel-title">
 
-  return (
+                EXECUTION GOVERNANCE
 
-    <div
-      className="execution-status-card"
-      style={{
-        gap: "10px",
-      }}
-    >
+            </div>
 
-      {/* HEADER */}
+            <div className="telemetry-grid">
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems: "center",
-        }}
-      >
+                <div className="telemetry-item">
 
-        <h3
-          style={{
-            margin: 0,
-            fontSize: "14px",
-          }}
-        >
-          📊 Strategy Monitor
-        </h3>
+                    RUNTIME :
 
-        <span
-          style={{
-            fontSize: "11px",
-            color: "#666",
-            letterSpacing: "0.5px",
-          }}
-        >
-          MICROSTRUCTURE EDGE
-        </span>
+                    <span className="info">
 
-      </div>
+                        GOVERNANCE
 
-      {/* GRID */}
+                    </span>
 
-      <div
-        className="monitor-grid"
-        style={{
-          gap: "8px",
-        }}
-      >
+                </div>
 
-        {/* ORDER FLOW */}
+                <div className="telemetry-item">
 
-        <div className="monitor-item">
+                    EXECUTION :
 
-          <span>
-            ORDER FLOW
-          </span>
+                    <span
+                        className={
+                            executionAllowed
+                                ? "online"
+                                : "danger"
+                        }
+                    >
 
-          <strong
-            className={
-              orderFlowDirection ===
-              "BUY"
+                        {
+                            executionAllowed
+                                ? "AUTHORIZED"
+                                : "BLOCKED"
+                        }
 
-                ? "long"
+                    </span>
 
-                : "short"
-            }
-          >
+                </div>
 
-            {orderFlowDirection}
+            </div>
 
-          </strong>
+            <div className="monitor-section">
 
-        </div>
+                <div className="section-title">
+                    EXECUTION STATUS
+                </div>
 
-        {/* IMBALANCE */}
+                <div className="execution-grid">
 
-        <div className="monitor-item">
+                    <div className="monitor-item">
 
-          <span>
-            IMBALANCE
-          </span>
+                        <span>
+                            STATE
+                        </span>
 
-          <strong>
+                        <strong>
 
-            {safeFixed(
-              imbalance,
-              2
-            )}
+                            {executionState}
 
-          </strong>
+                        </strong>
 
-        </div>
+                    </div>
 
-        {/* MOMENTUM */}
+                    <div className="monitor-item">
 
-        <div className="monitor-item">
+                        <span>
+                            PROFILE
+                        </span>
 
-          <span>
-            MOMENTUM
-          </span>
+                        <strong>
 
-          <strong
-            className={
-              momentumState ===
-              "STRONG"
+                            {executionProfile}
 
-                ? "online"
+                        </strong>
 
-                : momentumState ===
-                  "WEAK"
+                    </div>
 
-                ? "warning"
+                    <div className="monitor-item">
 
-                : ""
-            }
-          >
+                        <span>
+                            ROUTE
+                        </span>
 
-            {momentumState}
+                        <strong>
 
-          </strong>
+                            {route}
 
-        </div>
+                        </strong>
 
-        {/* DELTA */}
+                    </div>
 
-        <div className="monitor-item">
+                    <div className="monitor-item">
 
-          <span>
-            DELTA
-          </span>
+                        <span>
+                            REASON
+                        </span>
 
-          <strong
-            className={
-              hasDelta &&
-              delta >= 0
+                        <strong>
 
-                ? "long"
+                            {routeReason}
 
-                : "short"
-            }
-          >
+                        </strong>
 
-            {safeFixed(
-              delta,
-              2
-            )}
+                    </div>
 
-          </strong>
+                </div>
 
-        </div>
+            </div>
+            <div className="monitor-section">
 
-        {/* SPREAD */}
+                <div className="section-title">
+                    GOVERNANCE HEALTH
+                </div>
 
-        <div className="monitor-item">
+            <div className="brain-grid">
 
-          <span>
-            SPREAD
-          </span>
+                <div className="monitor-item">
 
-          <strong>
+                    <span>
+                        STATUS
+                    </span>
 
-            {safeFixed(
-              spread,
-              4
-            )}
+                    <strong className="neutral">
 
-          </strong>
+                        {runtimeStatus || "--"}
 
-        </div>
+                    </strong>
 
-        {/* EDGE */}
+                </div>
 
-        <div className="monitor-item">
+                    <div className="monitor-item">
 
-          <span>
-            EDGE
-          </span>
+                        <span>
+                            HEALTH
+                        </span>
 
-          <strong
-            style={{
-              color: edgeColor,
-            }}
-          >
+                        <strong>
 
-            {safeFixed(
-              edge,
-              2
-            )}
+                            {
+                                governanceHealth
+                            }
 
-          </strong>
+                        </strong>
 
-        </div>
+                    </div>
 
-        {/* COOLDOWN */}
+                    <div className="monitor-item">
 
-        <div className="monitor-item">
+                        <span>
+                            RISK
+                        </span>
 
-          <span>
-            COOLDOWN
-          </span>
+                        <strong className="neutral">
 
-          <strong
-            className={
-              cooldown
-                ? "danger"
-                : "online"
-            }
-          >
+                            {governanceRisk}
 
-            {cooldown
-              ? "ON"
-              : "OFF"}
+                        </strong>
 
-          </strong>
+                    </div>
 
-        </div>
+                    <div className="monitor-item">
 
-        {/* ENTRY READY */}
+                        <span>
+                            SAFETY
+                        </span>
 
-        <div className="monitor-item">
+                        <strong>
 
-          <span>
-            ENTRY READY
-          </span>
+                            {
+                                executionSafety
+                            }
 
-          <strong
-            className={
-              entryReady
-                ? "online"
-                : "offline"
-            }
-          >
+                        </strong>
 
-            {entryReady
-              ? "YES"
-              : "NO"}
+                    </div>
 
-          </strong>
+                    <div className="monitor-item">
 
-        </div>
+                        <span>
+                            PRESSURE
+                        </span>
 
-        {/* SIGNAL */}
+                        <strong>
 
-        <div className="monitor-item">
+                            {
+                                executionPressure
+                            }
 
-          <span>
-            SIGNAL
-          </span>
+                        </strong>
 
-          <strong
-            style={{
-              color: signalColor,
-            }}
-          >
+                    </div>
 
-            {signal ?? "-"}
+                </div>
 
-          </strong>
+            </div>
+            <div className="monitor-section">
 
-        </div>
+                <div className="section-title">
+                    MARKET CONDITIONS
+                </div>
 
-        {/* DIRECTION */}
+            <div className="safety-grid">
 
-        <div className="monitor-item">
+                <div className="monitor-item">
 
-          <span>
-            DIRECTION
-          </span>
+                    <span>
+                        CONDITION
+                    </span>
 
-          <strong
-            className={
-              direction === "LONG"
-                ? "long"
-                : direction === "SHORT"
-                ? "short"
-                : ""
-            }
-          >
+                    <strong>
 
-            {direction ?? "-"}
+                        {
+                            marketCondition
+                        }
 
-          </strong>
+                    </strong>
 
-        </div>
+                </div>
 
-        {/* STRATEGY STATE */}
+                <div className="monitor-item">
 
-        <div className="monitor-item">
+                    <span>
+                        MM WINDOW
+                    </span>
 
-          <span>
-            STATE
-          </span>
+                    <strong className="neutral">
 
-          <strong
-            style={{
-              color:
-                strategyStateColor,
-            }}
-          >
+                        {
+                            typeof marketMakingWindow === "boolean"
+                                ? (marketMakingWindow ? "YES" : "NO")
+                                : "--"
+                        }
 
-            {strategyState ?? "-"}
+                    </strong>
 
-          </strong>
+                </div>
 
-        </div>
+            </div>
 
-        {/* EDGE SCORE */}
+            </div>
+            <div className="monitor-section">
 
-        <div className="monitor-item">
+                <div className="section-title">
+                    EXECUTION TELEMETRY
+                </div>
 
-          <span>
-            EDGE SCORE
-          </span>
+                <div className="environment-grid">
 
-          <strong>
+                    <div className="monitor-item">
 
-            {edgeScore ?? "-"}
+                        <span>
+                            LATENCY
+                        </span>
 
-          </strong>
+                        <strong>
 
-        </div>
+                            {safeFixed(
+                                latency,
+                                0
+                            )}
 
-        {/* EXECUTION */}
+                        </strong>
 
-        <div className="monitor-item">
+                    </div>
 
-          <span>
-            EXECUTION
-          </span>
+                    <div className="monitor-item">
 
-          <strong
-            className={
-              executionAllowed
-                ? "online"
-                : "danger"
-            }
-          >
+                        <span>
+                            SPREAD
+                        </span>
 
-            {executionAllowed
-              ? "ALLOWED"
-              : "BLOCKED"}
+                        <strong>
 
-          </strong>
+                            {safeFixed(
+                                spread,
+                                4
+                            )}
 
-        </div>
+                        </strong>
 
-        {/* MARKET ENVIRONMENT */}
+                    </div>
 
-        <div className="monitor-item">
+                    <div className="monitor-item">
 
-          <span>
-            ENVIRONMENT
-          </span>
+                        <span>
+                            TIGHT
+                        </span>
 
-          <strong>
+                        <strong>
 
-            {marketEnvironment ??
-              "-"}
+                            {
+                                tightSpread
+                                    ? "YES"
+                                    : "NO"
+                            }
 
-          </strong>
+                        </strong>
 
-        </div>
+                    </div>
 
-        {/* SPOOF STATUS */}
+                    <div className="monitor-item">
 
-        <div className="monitor-item">
+                        <span>
+                            ACCEPTABLE
+                        </span>
 
-          <span>
-            SPOOF
-          </span>
+                        <strong>
 
-          <strong
-            className={
-              spoofDanger
-                ? "danger"
-                : spoofStatus ===
-                  "WARNING"
-                ? "warning"
-                : "online"
-            }
-          >
+                            {
+                                acceptableSpread
+                                    ? "YES"
+                                    : "NO"
+                            }
 
-            {spoofStatus}
+                        </strong>
 
-          </strong>
+                    </div>
 
-        </div>
+                    <div className="monitor-item">
 
-        {/* LIQUIDITY GRAB */}
+                    <span>
+                        EXPANSION
+                    </span>
 
-        <div className="monitor-item">
+                    <strong className="neutral">
 
-          <span>
-            LIQ GRAB
-          </span>
+                        {
 
-          <strong
-            className={
-              liquidityGrab
-                ? "warning"
-                : "online"
-            }
-          >
+                            typeof spreadExpansion === "boolean"
+                                ? (spreadExpansion ? "YES" : "NO")
+                                : "--"
 
-            {liquidityGrab
-              ? "DETECTED"
-              : "CLEAR"}
+                        }
 
-          </strong>
+                    </strong>
 
-        </div>
+                    </div>
 
-        {/* GAMMA */}
+                    <div className="monitor-item">
 
-        <div className="monitor-item">
+                    <span>
+                        LATENCY HEALTH
+                    </span>
 
-          <span>
-            GAMMA
-          </span>
+                    <strong className="neutral">
 
-          <strong>
+                        {
 
-            {gammaState ?? "-"}
+                            typeof latencyHealthy === "boolean"
+                                ? (latencyHealthy ? "YES" : "NO")
+                                : "--"
 
-          </strong>
+                        }
 
-        </div>
+                    </strong>
 
-        {/* DELTA PRESSURE */}
+                    </div>
 
-        <div className="monitor-item">
+                    <div className="monitor-item">
 
-          <span>
-            DELTA PRESSURE
-          </span>
+                        <span>
+                            FAILSAFE
+                        </span>
 
-          <strong>
+                    <strong className="neutral">
 
-            {deltaPressure ?? "-"}
+                        {
 
-          </strong>
+                            typeof emergencyExit === "boolean"
+                                ? (emergencyExit ? "ON" : "OFF")
+                                : "--"
 
-        </div>
+                        }
 
-        {/* MOMENTUM REGIME */}
+                    </strong>
 
-        <div className="monitor-item">
+                    </div>
 
-          <span>
-            MOMENTUM REGIME
-          </span>
+                    <div className="monitor-item">
 
-          <strong>
+                        <span>
+                            PRICE
+                        </span>
 
-            {momentumRegime ??
-              "-"}
+                        <strong>
 
-          </strong>
+                            {safeFixed(
+                                price,
+                                4
+                            )}
 
-        </div>
+                        </strong>
 
-        {/* LIQUIDITY */}
+                    </div>
 
-        <div className="monitor-item">
+                </div>
 
-          <span>
-            LIQUIDITY
-          </span>
+            </div>
 
-          <strong>
+        </>
 
-            {liquidityStability ??
-              "-"}
-
-          </strong>
-
-        </div>
-
-        {/* BREAKOUT */}
-
-        <div className="monitor-item">
-
-          <span>
-            BREAKOUT
-          </span>
-
-          <strong
-            className={
-              breakoutLong
-                ? "long"
-                : breakoutShort
-                ? "short"
-                : ""
-            }
-          >
-
-            {breakoutLong
-              ? "LONG"
-              : breakoutShort
-              ? "SHORT"
-              : "NONE"}
-
-          </strong>
-
-        </div>
-
-        {/* MARKET MAKING */}
-
-        <div className="monitor-item">
-
-          <span>
-            MARKET MAKER
-          </span>
-
-          <strong
-            className={
-              marketMakingWindow
-                ? "online"
-                : "offline"
-            }
-          >
-
-            {marketMakingWindow
-              ? "ACTIVE"
-              : "OFF"}
-
-          </strong>
-
-        </div>
-
-        {/* EMERGENCY EXIT */}
-
-        <div className="monitor-item">
-
-          <span>
-            EMERGENCY EXIT
-          </span>
-
-          <strong
-            className={
-              emergencyExit
-                ? "danger"
-                : "online"
-            }
-          >
-
-            {emergencyExit
-              ? "TRIGGERED"
-              : "SAFE"}
-
-          </strong>
-
-        </div>
-
-      </div>
-
-      {/* ENTRY QUALITY SCORE */}
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "6px",
-          marginTop: "2px",
-        }}
-      >
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent:
-              "space-between",
-
-            fontSize: "11px",
-            color: "#888",
-          }}
-        >
-
-          <span>
-            ENTRY QUALITY SCORE
-          </span>
-
-          <span
-            style={{
-              color: edgeColor,
-              fontWeight: "600",
-            }}
-          >
-            {signalStrength}%
-          </span>
-
-        </div>
-
-        {/* BAR */}
-
-        <div
-          style={{
-            width: "100%",
-            height: "8px",
-
-            background: "#111",
-
-            borderRadius: "999px",
-
-            overflow: "hidden",
-
-            border:
-              "1px solid #222",
-          }}
-        >
-
-          <div
-            style={{
-              width:
-                `${signalStrength}%`,
-
-              height: "100%",
-
-              background:
-                edgeColor,
-
-              transition: "0.25s",
-            }}
-          />
-
-        </div>
-
-      </div>
-
-    </div>
-
-  );
+    );
 
 }

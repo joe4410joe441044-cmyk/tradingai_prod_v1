@@ -25,3 +25,8 @@ dist-ssr
 react_dashboard_dist/
 node_modules/
 dist/
+# Backup files
+*.bak
+*.bak_*
+*.bak_step*
+*.before_*

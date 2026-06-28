@@ -1,112 +1,205 @@
 export default function EmergencySettings({
 
-  config = {},
-  setConfig = () => {},
+    config = {},
+    setConfig = () => {},
 
 }) {
 
-  return (
+    const update = (
+        key,
+        value
+    ) => {
 
-    <div className="panel-section">
+        setConfig({
 
-      <h3>🚨 Emergency Settings</h3>
+            ...config,
 
-      {/* KILL SWITCH */}
+            [key]: value,
 
-      <div className="form-group">
+        });
 
-        <label>Kill Switch</label>
+    };
 
-        <select
-          value={
-            config.kill_switch || "SAFE"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              kill_switch:
-                e.target.value,
-            })
-          }
-        >
+    const emergencyStop =
+        config.emergency_stop || "ENABLED";
 
-          <option>SAFE</option>
-          <option>OFF</option>
+    const autoRiskStop =
+        config.auto_risk_stop || "ON";
 
-        </select>
+    const maxDailyLoss =
+        config.max_daily_loss || 50;
 
-      </div>
+    const maxTrades =
+        config.max_trades || 20;
 
-      {/* MAX DAILY LOSS */}
+    return (
 
-      <div className="form-group">
+        <>
 
-        <label>Max Daily Loss</label>
+            <div className="compact-row">
 
-        <input
-          type="number"
-          value={
-            config.max_daily_loss || 50
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              max_daily_loss:
-                e.target.value,
-            })
-          }
-        />
+                <span>
+                    RISK STATUS
+                </span>
 
-      </div>
+                <span className="warning">
+                    MONITORING
+                </span>
 
-      {/* MAX TRADES */}
+            </div>
 
-      <div className="form-group">
+            <div className="compact-row">
 
-        <label>Max Trades</label>
+                <span>
+                    EMERGENCY STOP
+                </span>
 
-        <input
-          type="number"
-          value={
-            config.max_trades || 20
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              max_trades:
-                e.target.value,
-            })
-          }
-        />
+                <span
+                    className={
+                        emergencyStop === "ENABLED"
+                            ? "online"
+                            : "danger"
+                    }
+                >
 
-      </div>
+                    {emergencyStop}
 
-      {/* AUTO STOP ON DD */}
+                </span>
 
-      <div className="form-group">
+            </div>
 
-        <label>Auto Stop on DD</label>
+            <div className="compact-row">
 
-        <select
-          value={
-            config.auto_stop_dd || "ON"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              auto_stop_dd:
-                e.target.value,
-            })
-          }
-        >
+                <span>
+                    AUTO RISK STOP
+                </span>
 
-          <option>ON</option>
-          <option>OFF</option>
+                <span
+                    className={
+                        autoRiskStop === "ON"
+                            ? "online"
+                            : "warning"
+                    }
+                >
 
-        </select>
+                    {autoRiskStop}
 
-      </div>
+                </span>
 
-    </div>
-  );
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    DAILY LOSS LIMIT
+                </span>
+
+                <span className="danger">
+
+                    {maxDailyLoss} USDT
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    MAX EXECUTIONS
+                </span>
+
+                <span className="warning">
+
+                    {maxTrades}
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    RECOVERY MODE
+                </span>
+
+                <span className="warning">
+                    STANDBY
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    POSITION CLOSE
+                </span>
+
+                <span className="online">
+                    AVAILABLE
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    CIRCUIT BREAKER
+                </span>
+
+                <span className="online">
+                    ENABLED
+                </span>
+
+            </div>
+
+            <div className="control-buttons">
+
+                <button
+                    className="start-button"
+                    onClick={() => {
+
+                        update(
+                            "emergency_stop",
+                            "ENABLED"
+                        );
+
+                        update(
+                            "auto_risk_stop",
+                            "ON"
+                        );
+
+                    }}
+                >
+
+                    CONSERVATIVE
+
+                </button>
+
+                <button
+                    className="stop-button"
+                    onClick={() => {
+
+                        update(
+                            "emergency_stop",
+                            "DISABLED"
+                        );
+
+                        update(
+                            "auto_risk_stop",
+                            "OFF"
+                        );
+
+                    }}
+                >
+
+                    AGGRESSIVE
+
+                </button>
+
+            </div>
+
+        </>
+
+    );
+
 }

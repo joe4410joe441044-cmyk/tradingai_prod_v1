@@ -1,6 +1,6 @@
 export default function executionRouter({
 
-  executionGate = {},
+  telemetry = {},
 
   derivedIntel = {},
 
@@ -13,24 +13,40 @@ export default function executionRouter({
 }) {
 
   // =========================
-  // EXECUTION GATE
+  // TELEMETRY
   // =========================
 
   const {
 
-    shouldExecute = false,
+    belief = "NEUTRAL",
 
-    executionBlocked = false,
+    confidence = 0,
 
-    blockReason = "NONE",
+    survivability = 1,
 
-    executionConfidence = 0,
+    routingQuality = "MEDIUM",
 
-    executionMode = "SURVIVAL",
+    cognitionStability = 1,
 
-    executionPriority = "LOW",
+    restrictionReason = "NONE",
 
-  } = executionGate;
+    marketRegime = "RANGING",
+
+    marketHostility = 0,
+
+    imbalance = 0,
+
+    spreadQuality = "NORMAL",
+
+    liquidityShift = "STABLE",
+
+    tickMomentum = "NEUTRAL",
+
+    volatilityPressure = 0,
+
+    orderFlowBias = "NEUTRAL",
+
+  } = telemetry;
 
   // =========================
   // DERIVED INTELLIGENCE
@@ -38,17 +54,11 @@ export default function executionRouter({
 
   const {
 
-    signal = "WAIT",
+    signal = "OBSERVE",
 
     direction = "NONE",
 
     strategyState = "NEUTRAL",
-
-    marketPhase = "RANGING",
-
-    emergencyExit = false,
-
-    noTradeZone = false,
 
   } = derivedIntel;
 
@@ -93,340 +103,314 @@ export default function executionRouter({
   } = riskData;
 
   // =========================
-  // DEFAULT ROUTE
+  // MICROSTRUCTURE SIGNALS
   // =========================
 
-  let action = "WAIT";
+  const microstructureSignals = {
 
-  let route = "NONE";
+    imbalance,
 
-  let side = "NONE";
+    spreadQuality,
 
-  let qty = 0;
+    liquidityShift,
 
-  let reduceOnly = false;
+    tickMomentum,
 
-  let closePosition = false;
+    volatilityPressure,
 
-  let routerReason = "IDLE";
+    orderFlowBias,
+
+  };
 
   // =========================
-  // EXECUTION BLOCK
+  // BELIEF SYNTHESIS
+  // =========================
+
+  let routerBelief = belief;
+
+  let marketBelief = "NEUTRAL";
+
+  let executionBelief = "NEUTRAL";
+
+  let riskBelief = "STABLE";
+
+  // =========================
+  // MARKET BELIEF
   // =========================
 
   if (
-    executionBlocked ||
-    !shouldExecute
+    marketRegime === "TRENDING_UP"
   ) {
 
-    return {
+    marketBelief = "BULLISH";
 
-      action: "BLOCK",
+  }
 
-      route: "EXECUTION_BLOCKED",
+  else if (
+    marketRegime === "TRENDING_DOWN"
+  ) {
 
-      side: "NONE",
+    marketBelief = "BEARISH";
 
-      qty: 0,
+  }
 
-      reduceOnly: false,
+  else if (
+    marketHostility > 0.7
+  ) {
 
-      closePosition: false,
-
-      executionConfidence,
-
-      executionMode,
-
-      executionPriority,
-
-      blockReason,
-
-      routerReason:
-        "EXECUTION_GATE_BLOCKED",
-
-      signal,
-
-      direction,
-
-      strategyState,
-
-      marketPhase,
-
-      latency,
-
-      orderStatus,
-
-      riskLevel,
-
-    };
+    marketBelief = "HOSTILE";
 
   }
 
   // =========================
-  // EMERGENCY EXIT
+  // EXECUTION BELIEF
   // =========================
 
   if (
-    emergencyExit ||
+    confidence >= 0.8
+  ) {
+
+    executionBelief = "CONFIDENT";
+
+  }
+
+  else if (
+    confidence <= 0.3
+  ) {
+
+    executionBelief = "WEAK";
+
+  }
+
+  // =========================
+  // RISK BELIEF
+  // =========================
+
+  if (
+    survivability < 0.4 ||
     killSwitch
   ) {
 
-    return {
+    riskBelief = "SURVIVAL";
 
-      action: "EXIT",
+  }
 
-      route: "EMERGENCY_EXIT",
+  else if (
+    marketHostility > 0.7
+  ) {
 
-      side: "CLOSE",
-
-      qty: 100,
-
-      reduceOnly: true,
-
-      closePosition: true,
-
-      executionConfidence,
-
-      executionMode,
-
-      executionPriority: "CRITICAL",
-
-      blockReason: "EMERGENCY_EXIT",
-
-      routerReason:
-        "EMERGENCY_PROTECTION",
-
-      signal,
-
-      direction,
-
-      strategyState,
-
-      marketPhase,
-
-      latency,
-
-      orderStatus,
-
-      riskLevel,
-
-    };
+    riskBelief = "DEFENSIVE";
 
   }
 
   // =========================
-  // NO TRADE ZONE
+  // ROUTER STATUS
   // =========================
 
-  if (noTradeZone) {
+  const status =
 
-    return {
+    survivability < 0.4
+      ? "SURVIVAL"
 
-      action: "WAIT",
+      : cognitionStability < 0.5
+      ? "UNSTABLE"
 
-      route: "NO_TRADE_ZONE",
+      : marketHostility > 0.7
+      ? "VOLATILE"
 
-      side: "NONE",
-
-      qty: 0,
-
-      reduceOnly: false,
-
-      closePosition: false,
-
-      executionConfidence,
-
-      executionMode,
-
-      executionPriority,
-
-      blockReason: "NO_TRADE_ZONE",
-
-      routerReason:
-        "MARKET_UNSTABLE",
-
-      signal,
-
-      direction,
-
-      strategyState,
-
-      marketPhase,
-
-      latency,
-
-      orderStatus,
-
-      riskLevel,
-
-    };
-
-  }
+      : "STABLE";
 
   // =========================
-  // LONG ENTRY
+  // DEFAULT ROUTE
+  // =========================
+
+  let route = "OBSERVE";
+
+  let routerReason =
+    "COGNITION_MONITORING";
+
+  // =========================
+  // RESTRICTION SYNTHESIS
   // =========================
 
   if (
-    signal === "ENTER_LONG" &&
-    direction === "BUY"
+    restrictionReason !== "NONE"
   ) {
 
-    action = "ENTER_LONG";
-
-    route = "LONG_ENTRY";
-
-    side = "BUY";
-
-    qty =
-
-      executionConfidence >= 90
-        ? 1.0
-
-        : executionConfidence >= 75
-        ? 0.75
-
-        : executionConfidence >= 60
-        ? 0.5
-
-        : 0.25;
+    route = "RESTRICTED";
 
     routerReason =
-      "LONG_SIGNAL_CONFIRMED";
+      restrictionReason;
 
   }
 
   // =========================
-  // SHORT ENTRY
+  // SURVIVABILITY FIRST
+  // =========================
+
+  else if (
+    survivability < 0.4
+  ) {
+
+    route = "SURVIVAL";
+
+    routerReason =
+      "LOW_SURVIVABILITY";
+
+  }
+
+  // =========================
+  // MARKET HOSTILITY
+  // =========================
+
+  else if (
+    marketHostility > 0.7
+  ) {
+
+    route =
+      "VOLATILITY_DEFENSE";
+
+    routerReason =
+      "HOSTILE_MARKET";
+
+  }
+
+  // =========================
+  // MICROSTRUCTURE ROUTING
+  // =========================
+
+  else if (
+    tickMomentum === "UP" &&
+    orderFlowBias === "BUY"
+  ) {
+
+    route =
+      "MOMENTUM_LONG";
+
+    routerReason =
+      "BULLISH_MICROSTRUCTURE";
+
+  }
+
+  else if (
+    tickMomentum === "DOWN" &&
+    orderFlowBias === "SELL"
+  ) {
+
+    route =
+      "MOMENTUM_SHORT";
+
+    routerReason =
+      "BEARISH_MICROSTRUCTURE";
+
+  }
+
+  else if (
+    liquidityShift === "UNSTABLE"
+  ) {
+
+    route =
+      "LIQUIDITY_RESPONSE";
+
+    routerReason =
+      "LIQUIDITY_INSTABILITY";
+
+  }
+
+  // =========================
+  // ROUTER BELIEF FINALIZATION
   // =========================
 
   if (
-    signal === "ENTER_SHORT" &&
-    direction === "SELL"
+    route === "SURVIVAL"
   ) {
 
-    action = "ENTER_SHORT";
+    routerBelief =
+      "DEFENSIVE";
 
-    route = "SHORT_ENTRY";
+  }
 
-    side = "SELL";
+  else if (
+    route === "RESTRICTED"
+  ) {
 
-    qty =
-
-      executionConfidence >= 90
-        ? 1.0
-
-        : executionConfidence >= 75
-        ? 0.75
-
-        : executionConfidence >= 60
-        ? 0.5
-
-        : 0.25;
-
-    routerReason =
-      "SHORT_SIGNAL_CONFIRMED";
+    routerBelief =
+      "RESTRICTED";
 
   }
 
   // =========================
-  // EXIT CONDITIONS
-  // =========================
-
-  if (
-    signal === "EXIT" ||
-    strategyState === "SURVIVAL"
-  ) {
-
-    action = "EXIT";
-
-    route = "POSITION_EXIT";
-
-    side = "CLOSE";
-
-    qty = 100;
-
-    reduceOnly = true;
-
-    closePosition = true;
-
-    routerReason =
-      "EXIT_SIGNAL_TRIGGERED";
-
-  }
-
-  // =========================
-  // REDUCE CONDITIONS
-  // =========================
-
-  if (
-    executionMode === "DEFENSIVE" &&
-    position !== "NONE"
-  ) {
-
-    action = "REDUCE";
-
-    route = "DEFENSIVE_REDUCTION";
-
-    side =
-      position === "BUY"
-        ? "SELL"
-        : "BUY";
-
-    qty = 50;
-
-    reduceOnly = true;
-
-    routerReason =
-      "DEFENSIVE_MODE_ACTIVE";
-
-  }
-
-  // =========================
-  // FINAL ROUTE
+  // FINAL RETURN
   // =========================
 
   return {
 
-    action,
-
     route,
 
-    side,
+    confidence,
 
-    qty,
+    survivability,
 
-    reduceOnly,
-
-    closePosition,
-
-    executionConfidence,
-
-    executionMode,
-
-    executionPriority,
+    restrictionReason,
 
     routerReason,
 
-    signal,
+    router: {
 
-    direction,
+      status,
 
-    strategyState,
+      belief: routerBelief,
 
-    marketPhase,
+      routingQuality,
 
-    price,
+      lastRouteUpdate:
+        Date.now(),
 
-    entryPrice,
+    },
 
-    balance,
+    cognition: {
 
-    latency,
+      routerBelief,
 
-    orderStatus,
+      marketBelief,
 
-    riskLevel,
+      executionBelief,
+
+      riskBelief,
+
+    },
+
+    market: {
+
+      marketRegime,
+
+      microstructureSignals,
+
+    },
+
+    telemetry: {
+
+      signal,
+
+      direction,
+
+      strategyState,
+
+      price,
+
+      position,
+
+      entryPrice,
+
+      balance,
+
+      latency,
+
+      orderStatus,
+
+      riskLevel,
+
+    },
 
   };
 

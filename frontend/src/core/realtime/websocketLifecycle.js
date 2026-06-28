@@ -36,10 +36,16 @@ export const createRealtimeWebSocketLifecycle = ({
   let lastMessageTime =
     Date.now();
 
-  let staleTriggered =
+  let softStaleTriggered =
+    false;
+  
+  let hardStaleTriggered =
     false;
 
   let packetCounter = 0;
+
+  let manuallyClosed = false;
+
 
   // =========================
   // DEBUG LOG
@@ -103,6 +109,8 @@ export const createRealtimeWebSocketLifecycle = ({
 
   const closeSocket = () => {
 
+    manuallyClosed = true;
+
     if (socket) {
 
       socket.close();
@@ -126,28 +134,53 @@ export const createRealtimeWebSocketLifecycle = ({
       const elapsed =
         now - lastMessageTime;
 
-      if (
-        elapsed > staleTimeout
-      ) {
+  // =========================
+  // SOFT STALE
+  // =========================
 
-        if (!staleTriggered) {
+  if (
+    elapsed > staleTimeout
+  ) {
 
-          staleTriggered = true;
+    if (!softStaleTriggered) {
 
-          console.warn(
-            "⚠️ WS STALE DETECTED"
-          );
+      softStaleTriggered =
+        true;
 
-          if (onStale) {
+      console.warn(
+        "⚠️ WS SOFT STALE"
+      );
 
-            onStale();
+    }
 
-          }
+  }
 
-        }
+  // =========================
+  // HARD STALE
+  // =========================
+
+  if (
+    elapsed > 15000
+  ) {
+
+    if (!hardStaleTriggered) {
+
+      hardStaleTriggered =
+        true;
+
+      console.error(
+        "❌ WS HARD STALE"
+      );
+
+      if (onStale) {
+
+        onStale();
 
       }
 
+    }
+
+  }
     }, 1000);
 
   };
@@ -188,6 +221,12 @@ export const createRealtimeWebSocketLifecycle = ({
 
   const connect = () => {
 
+    cleanup();
+
+    closeSocket();
+
+    manuallyClosed = false;
+
     console.log(
       "🌐 WS CONNECT:",
       url
@@ -195,7 +234,6 @@ export const createRealtimeWebSocketLifecycle = ({
 
     socket =
       new WebSocket(url);
-
     // =========================
     // OPEN
     // =========================
@@ -204,7 +242,11 @@ export const createRealtimeWebSocketLifecycle = ({
 
       reconnectAttempts = 0;
 
-      staleTriggered = false;
+      softStaleTriggered =
+        false;
+
+      hardStaleTriggered =
+        false;
 
       lastMessageTime =
         Date.now();
@@ -236,7 +278,10 @@ export const createRealtimeWebSocketLifecycle = ({
       lastMessageTime =
         Date.now();
 
-      staleTriggered =
+      softStaleTriggered =
+        false;
+
+      hardStaleTriggered =
         false;
 
       packetCounter += 1;
@@ -339,44 +384,59 @@ export const createRealtimeWebSocketLifecycle = ({
       );
 
       cleanup();
+      if (manuallyClosed) {
+
+        console.log(
+          "🛑 WS MANUAL CLOSE"
+        );
+
+        return;
+
+      }
 
       if (onClose) {
 
         onClose(event);
 
       }
-
       if (
         reconnectAttempts <
         maxReconnect
       ) {
 
-        reconnectAttempts += 1;
+        if (!reconnectTimer) {
 
-        if (onReconnect) {
+          reconnectAttempts += 1;
 
-          onReconnect(
-            reconnectAttempts
-          );
+          if (onReconnect) {
+
+            onReconnect(
+              reconnectAttempts
+            );
+
+          }
+
+          reconnectTimer =
+            setTimeout(() => {
+
+              reconnectTimer = null;
+
+              console.log(
+                `♻️ WS RECONNECT ${reconnectAttempts}`
+              );
+
+              connect();
+
+            }, reconnectDelay);
 
         }
 
-        reconnectTimer =
-          setTimeout(() => {
-
-            console.log(
-              `♻️ WS RECONNECT ${reconnectAttempts}`
-            );
-
-            connect();
-
-          }, reconnectDelay);
-
       }
-
+      
     };
 
   };
+
 
   // =========================
   // START

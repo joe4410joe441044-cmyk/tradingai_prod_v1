@@ -1,95 +1,359 @@
 export function positionSizingEngine({
 
-  aiCompositeScore,
+  executionPacket = {},
+  riskPacket = {},
 
-  volatilityRegime,
-  liquidityStability,
-  momentumRegime,
-
-  executionPacket,
-  intelligencePacket,
-
-  riskPacket,
+  spread = 0,
 
 }) {
 
-  const dynamicPositionMultiplier =
+  // =========================
+  // SAFE VALUES
+  // =========================
 
-    aiCompositeScore > 85
+  const latency =
 
-      ? 1.5
+    Number(
+      executionPacket.latency
+    ) || 0;
 
-      : aiCompositeScore > 70
+  const currentDrawdown =
 
-      ? 1.2
+    Number(
+      riskPacket.currentDD
+    ) || 0;
 
-      : aiCompositeScore > 50
+  const safeSpread =
 
-      ? 1
+    Number(
+      spread
+    ) || 0;
 
-      : aiCompositeScore > 30
+  const killSwitch =
 
-      ? 0.5
+    Boolean(
+      riskPacket.killSwitch
+    );
 
-      : 0.25;
+  // =========================
+  // LATENCY STATES
+  // =========================
 
-  const riskAdaptivePositioning =
+  const latencyWarning =
 
-    volatilityRegime === "EXTREME VOL"
+    latency > 80;
 
-      ? "REDUCED"
+  const latencyDanger =
 
-      : liquidityStability === "COLLAPSING"
+    latency > 120;
 
-      ? "MINIMAL"
+  const latencyCritical =
 
-      : aiCompositeScore > 80
+    latency > 180;
 
-      ? "EXPANDED"
+  // =========================
+  // SPREAD STATES
+  // =========================
 
-      : "NORMAL";
+  const spreadWarning =
 
-  const aiSuggestedRisk =
+    safeSpread > 0.02;
 
-    aiCompositeScore > 80
+  const spreadDanger =
 
-      ? 2.0
+    safeSpread > 0.05;
 
-      : aiCompositeScore > 60
+  const spreadCritical =
 
-      ? 1.0
+    safeSpread > 0.1;
 
-      : 0.5;
+  // =========================
+  // POSITION MULTIPLIER
+  // =========================
 
-  const positionScalingState =
+  let dynamicPositionMultiplier =
+    1;
 
-    momentumRegime === "EXPLOSIVE" &&
+  if (
+    latencyWarning ||
+    spreadWarning
+  ) {
 
-    liquidityStability === "STABLE"
+    dynamicPositionMultiplier =
+      0.7;
 
-      ? "SCALE UP"
+  }
 
-      : volatilityRegime === "EXTREME VOL"
+  if (
+    latencyDanger ||
+    spreadDanger
+  ) {
 
-      ? "SCALE DOWN"
+    dynamicPositionMultiplier =
+      0.5;
 
-      : "NORMAL";
+  }
 
-  const exposureControl =
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
 
-    executionPacket.latency > 120 ||
+    dynamicPositionMultiplier =
+      0.25;
 
-    intelligencePacket.spoofProbability > 80
+  }
 
-      ? "RESTRICTED"
+  if (
+    killSwitch
+  ) {
 
-      : "OPEN";
+    dynamicPositionMultiplier =
+      0;
+
+  }
+
+  // =========================
+  // RISK POSITIONING
+  // =========================
+
+  let riskAdaptivePositioning =
+    "NORMAL";
+
+  if (
+    latencyDanger ||
+    spreadDanger
+  ) {
+
+    riskAdaptivePositioning =
+      "REDUCED";
+
+  }
+
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
+
+    riskAdaptivePositioning =
+      "MINIMAL";
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    riskAdaptivePositioning =
+      "BLOCKED";
+
+  }
+
+  // =========================
+  // RISK EXPOSURE
+  // =========================
+
+  let suggestedRisk =
+    1.0;
+
+  if (
+    latencyWarning ||
+    spreadWarning
+  ) {
+
+    suggestedRisk =
+      0.7;
+
+  }
+
+  if (
+    latencyDanger ||
+    spreadDanger
+  ) {
+
+    suggestedRisk =
+      0.5;
+
+  }
+
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
+
+    suggestedRisk =
+      0.25;
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    suggestedRisk =
+      0;
+
+  }
+
+  // =========================
+  // POSITION SCALING
+  // =========================
+
+  let positionScalingState =
+    "NORMAL";
+
+  if (
+    latencyWarning ||
+    spreadWarning
+  ) {
+
+    positionScalingState =
+      "SCALE_DOWN";
+
+  }
+
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
+
+    positionScalingState =
+      "MINIMAL";
+
+  }
+
+  // =========================
+  // EXPOSURE CONTROL
+  // =========================
+
+  let exposureControl =
+    "OPEN";
+
+  if (
+    latencyDanger ||
+    spreadDanger
+  ) {
+
+    exposureControl =
+      "RESTRICTED";
+
+  }
+
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
+
+    exposureControl =
+      "BLOCKED";
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    exposureControl =
+      "EMERGENCY_STOP";
+
+  }
+
+  // =========================
+  // CAPITAL PROTECTION
+  // =========================
 
   const capitalProtectionMode =
 
-    riskPacket.currentDD > 5 ||
+    currentDrawdown > 5 ||
 
-    liquidityStability === "COLLAPSING";
+    latencyDanger ||
+
+    spreadDanger ||
+
+    killSwitch;
+
+  // =========================
+  // POSITION LIMIT
+  // =========================
+
+  let maxPositionExposure =
+    1.0;
+
+  if (
+    currentDrawdown > 3
+  ) {
+
+    maxPositionExposure =
+      0.7;
+
+  }
+
+  if (
+    currentDrawdown > 5
+  ) {
+
+    maxPositionExposure =
+      0.5;
+
+  }
+
+  if (
+    currentDrawdown > 8
+  ) {
+
+    maxPositionExposure =
+      0.25;
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    maxPositionExposure =
+      0;
+
+  }
+
+  // =========================
+  // EXECUTION PROFILE
+  // =========================
+
+  let executionProfile =
+    "STANDARD";
+
+  if (
+    latencyWarning ||
+    spreadWarning
+  ) {
+
+    executionProfile =
+      "LIMITED";
+
+  }
+
+  if (
+    latencyCritical ||
+    spreadCritical
+  ) {
+
+    executionProfile =
+      "DEFENSIVE";
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    executionProfile =
+      "EMERGENCY";
+
+  }
+
+  // =========================
+  // RETURN
+  // =========================
 
   return {
 
@@ -97,13 +361,17 @@ export function positionSizingEngine({
 
     riskAdaptivePositioning,
 
-    aiSuggestedRisk,
+    suggestedRisk,
 
     positionScalingState,
 
     exposureControl,
 
     capitalProtectionMode,
+
+    maxPositionExposure,
+
+    executionProfile,
 
   };
 

@@ -214,7 +214,7 @@ const executionState = {
 
   authoritativePosition: null,
 
-  authoritativeBalance: 0,
+  authoritativeBalance: null,
 
   exchangeMismatchDetected: false,
 
@@ -633,7 +633,7 @@ function processExecutionQueue() {
   });
 
   exchangeAdapter.syncExchangeBalance({
-    balance: 1000,
+    balance: null,
   });
 
   const executionMismatchTelemetry =
@@ -649,8 +649,8 @@ function processExecutionQueue() {
     exchangeAdapter.detectExchangeMismatch({
       localPosition,
       exchangePosition,
-      localBalance: 1000,
-      exchangeBalance: 1000,
+      localBalance: null,
+      exchangeBalance: null,
       localExecution: {
         orderId:
           exchangeExecution?.order?.orderId,
@@ -665,8 +665,8 @@ function processExecutionQueue() {
     exchangeAdapter.reconcileExchangeState({
       localPosition,
       exchangePosition,
-      localBalance: 1000,
-      exchangeBalance: 1000,
+      localBalance: null,
+      exchangeBalance: null,
       localExecution: {
         orderId:
           exchangeExecution?.order?.orderId,

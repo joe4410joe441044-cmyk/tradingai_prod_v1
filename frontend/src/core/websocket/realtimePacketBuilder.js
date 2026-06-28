@@ -384,29 +384,34 @@ export function realtimePacketBuilder(data) {
   // EXECUTION PACKET
   // =========================
 
-  const executionPacket = {
+const runtimePacket = {
 
-    timestamp,
+  timestamp,
 
-    latency:
-      safeNumber(
-        data.latency ??
-        data.ping
-      ),
+  latency:
+    safeNumber(
+      data.latency ??
+      data.ping
+    ),
 
-    orderStatus:
-      data.orderStatus ?? null,
+  runtimeState:
+    data.runtimeState ??
+    data.engineStatus ??
+    null,
 
-    wsStatus:
-      data.wsStatus ?? null,
+  marketRegime:
+    data.marketRegime ??
+    data.executionMode ??
+    null,
 
-    engineStatus:
-      data.engineStatus ?? null,
+  wsStatus:
+    data.wsStatus ?? null,
 
-    executionMode:
-      data.executionMode ?? null,
+  routingQuality:
+    data.routingQuality ??
+    null,
 
-  };
+};
 
   // =========================
   // RISK PACKET
@@ -508,7 +513,7 @@ export function realtimePacketBuilder(data) {
 
     strategyPacket,
 
-    executionPacket,
+    runtimePacket,
 
     riskPacket,
 

@@ -1,404 +1,481 @@
 export default function executionGateEngine({
 
-  derivedIntel = {},
+    derivedIntel = {},
 
-  executionData = {},
+    executionData = {},
 
-  riskData = {},
+    riskData = {},
 
-  strategyData = {},
+    strategyData = {},
 
 }) {
 
-  // =========================
-  // INPUT EXTRACTION
-  // =========================
+    // =========================
+    // INPUT EXTRACTION
+    // =========================
 
-  const {
+    const {
 
-    spreadExplosion = false,
+        spreadExplosion = false,
 
-    executionAnomaly = false,
+        executionAnomaly = false,
 
-    spoofDanger = false,
+        spoofDanger = false,
 
-    noTradeZone = false,
+        noTradeZone = false,
 
-    unstableMarket = false,
+        unstableMarket = false,
 
-    emergencyExit = false,
+        emergencyExit = false,
 
-    marketDanger = "LOW",
+        marketDanger = "LOW",
 
-    confidenceScore = 0,
+        confidenceScore = 0,
 
-    marketPhase = "RANGING",
+        marketPhase = "RANGING",
 
-    signal = "WAIT",
+        signal = "WAIT",
 
-    direction = "NONE",
+        direction = "NONE",
 
-    executionAllowed = false,
+        microstructureSignals = [],
 
-  } = derivedIntel;
+    } = derivedIntel;
 
-  const {
+    const {
 
-    cooldown = false,
+        cooldown = false,
 
-    liquidityGrab = false,
+        liquidityGrab = false,
 
-    breakoutLong = false,
+        breakoutLong = false,
 
-    breakoutShort = false,
+        breakoutShort = false,
 
-  } = strategyData;
+    } = strategyData;
 
-  const {
+    const {
 
-    latency = 0,
+        latency = 0,
 
-    wsStatus = "CONNECTED",
+        wsStatus = "CONNECTED",
 
-    engineStatus = "READY",
+        engineStatus = "READY",
 
-    orderStatus = "IDLE",
+        orderStatus = "IDLE",
 
-  } = executionData;
+    } = executionData;
 
-  const {
+    const {
 
-    killSwitch = false,
+        killSwitch = false,
 
-    riskLevel = "LOW",
+        riskLevel = "LOW",
 
-    currentDD = 0,
+        currentDD = 0,
 
-    dailyLoss = 0,
+        dailyLoss = 0,
 
-    lossStreak = 0,
+        lossStreak = 0,
 
-  } = riskData;
+    } = riskData;
 
-  // =========================
-  // BLOCK STATE
-  // =========================
+    // =========================
+    // ROUTER COGNITION STATE
+    // =========================
 
-  let shouldExecute = true;
+    let restrictionReason = "NONE";
 
-  let executionBlocked = false;
+    let survivability = 100;
 
-  let blockReason = "NONE";
+    let routingQuality = "OPTIMAL";
 
-  let riskOverride = false;
+    let routerBelief = "STABLE";
 
-  let emergencyBlock = false;
+    let executionBelief = "NEUTRAL";
 
-  // =========================
-  // EXECUTION BLOCKERS
-  // =========================
+    let marketBelief = "BALANCED";
 
-  // EMERGENCY EXIT
+    let riskBelief = "STABLE";
 
-  if (emergencyExit) {
+    // =========================
+    // RESTRICTION SYNTHESIS
+    // =========================
 
-    shouldExecute = false;
+    if (emergencyExit) {
 
-    executionBlocked = true;
+        survivability -= 80;
 
-    emergencyBlock = true;
+        restrictionReason =
+            "EMERGENCY_EXIT";
 
-    blockReason =
-      "EMERGENCY_EXIT";
+        routerBelief =
+            "CRITICAL";
 
-  }
+    }
 
-  // KILL SWITCH
+    if (killSwitch) {
 
-  if (killSwitch) {
+        survivability -= 80;
 
-    shouldExecute = false;
+        restrictionReason =
+            "KILL_SWITCH";
 
-    executionBlocked = true;
+        riskBelief =
+            "LOCKDOWN";
 
-    emergencyBlock = true;
+    }
 
-    blockReason =
-      "KILL_SWITCH";
+    if (noTradeZone) {
 
-  }
+        survivability -= 40;
 
-  // NO TRADE ZONE
+        restrictionReason =
+            "NO_TRADE_ZONE";
 
-  if (noTradeZone) {
+    }
 
-    shouldExecute = false;
+    if (spoofDanger) {
 
-    executionBlocked = true;
+        survivability -= 35;
 
-    blockReason =
-      "NO_TRADE_ZONE";
+        restrictionReason =
+            "SPOOF_DANGER";
 
-  }
+        marketBelief =
+            "MANIPULATED";
 
-  // SPOOF DANGER
+    }
 
-  if (spoofDanger) {
+    if (executionAnomaly) {
 
-    shouldExecute = false;
+        survivability -= 40;
 
-    executionBlocked = true;
+        restrictionReason =
+            "EXECUTION_ANOMALY";
 
-    blockReason =
-      "SPOOF_DANGER";
+        executionBelief =
+            "UNSTABLE";
 
-  }
+    }
 
-  // EXECUTION ANOMALY
+    if (spreadExplosion) {
 
-  if (executionAnomaly) {
+        survivability -= 30;
 
-    shouldExecute = false;
+        restrictionReason =
+            "SPREAD_EXPLOSION";
 
-    executionBlocked = true;
+        marketBelief =
+            "VOLATILE";
 
-    blockReason =
-      "EXECUTION_ANOMALY";
+    }
 
-  }
+    if (cooldown) {
 
-  // SPREAD EXPLOSION
+        survivability -= 15;
 
-  if (spreadExplosion) {
+        restrictionReason =
+            "COOLDOWN_ACTIVE";
 
-    shouldExecute = false;
+    }
 
-    executionBlocked = true;
+    if (unstableMarket) {
 
-    blockReason =
-      "SPREAD_EXPLOSION";
+        survivability -= 25;
 
-  }
+        restrictionReason =
+            "UNSTABLE_MARKET";
 
-  // COOLDOWN
+        marketBelief =
+            "CHAOTIC";
 
-  if (cooldown) {
+    }
 
-    shouldExecute = false;
+    if (latency >= 250) {
 
-    executionBlocked = true;
+        survivability -= 35;
 
-    blockReason =
-      "COOLDOWN_ACTIVE";
+        restrictionReason =
+            "LATENCY_SPIKE";
 
-  }
+        routingQuality =
+            "DEGRADED";
 
-  // UNSTABLE MARKET
+    }
 
-  if (unstableMarket) {
+    if (wsStatus !== "CONNECTED") {
 
-    shouldExecute = false;
+        survivability -= 50;
 
-    executionBlocked = true;
+        restrictionReason =
+            "WS_DISCONNECTED";
 
-    blockReason =
-      "UNSTABLE_MARKET";
+        routingQuality =
+            "OFFLINE";
 
-  }
+    }
 
-  // LATENCY SPIKE
+    if (engineStatus !== "READY") {
 
-  if (latency >= 250) {
+        survivability -= 40;
 
-    shouldExecute = false;
+        restrictionReason =
+            "ENGINE_NOT_READY";
 
-    executionBlocked = true;
+        executionBelief =
+            "UNAVAILABLE";
 
-    blockReason =
-      "LATENCY_SPIKE";
+    }
 
-  }
+    if (marketDanger === "HIGH") {
 
-  // WS DISCONNECTED
+        survivability -= 45;
 
-  if (wsStatus !== "CONNECTED") {
+        restrictionReason =
+            "HIGH_MARKET_DANGER";
 
-    shouldExecute = false;
+        marketBelief =
+            "HOSTILE";
 
-    executionBlocked = true;
+    }
 
-    blockReason =
-      "WS_DISCONNECTED";
+    if (currentDD >= 10) {
 
-  }
+        survivability -= 50;
 
-  // ENGINE NOT READY
+        restrictionReason =
+            "MAX_DRAWDOWN_EXCEEDED";
 
-  if (engineStatus !== "READY") {
+        riskBelief =
+            "CRITICAL";
 
-    shouldExecute = false;
+    }
 
-    executionBlocked = true;
+    if (dailyLoss >= 5) {
 
-    blockReason =
-      "ENGINE_NOT_READY";
+        survivability -= 45;
 
-  }
+        restrictionReason =
+            "DAILY_LOSS_LIMIT";
 
-  // HIGH MARKET DANGER
+        riskBelief =
+            "RESTRICTED";
 
-  if (marketDanger === "HIGH") {
+    }
 
-    shouldExecute = false;
+    if (lossStreak >= 5) {
 
-    executionBlocked = true;
+        survivability -= 40;
 
-    blockReason =
-      "HIGH_MARKET_DANGER";
+        restrictionReason =
+            "LOSS_STREAK_LIMIT";
 
-  }
+        riskBelief =
+            "UNSTABLE";
 
-  // HIGH DRAWDOWN
+    }
 
-  if (currentDD >= 10) {
+    // =========================
+    // CONFIDENCE SYNTHESIS
+    // =========================
 
-    shouldExecute = false;
+    const confidence = Math.max(
 
-    executionBlocked = true;
+        0,
 
-    riskOverride = true;
+        Math.min(
 
-    blockReason =
-      "MAX_DRAWDOWN_EXCEEDED";
+            100,
 
-  }
+            Math.round(
 
-  // DAILY LOSS LOCK
+                confidenceScore
 
-  if (dailyLoss >= 5) {
+            )
 
-    shouldExecute = false;
+        )
 
-    executionBlocked = true;
+    );
 
-    riskOverride = true;
+    // =========================
+    // SURVIVABILITY NORMALIZATION
+    // =========================
 
-    blockReason =
-      "DAILY_LOSS_LIMIT";
+    survivability = Math.max(
 
-  }
+        0,
 
-  // LOSS STREAK LOCK
+        Math.min(
 
-  if (lossStreak >= 5) {
+            100,
 
-    shouldExecute = false;
+            Math.round(
 
-    executionBlocked = true;
+                survivability
 
-    riskOverride = true;
+            )
 
-    blockReason =
-      "LOSS_STREAK_LIMIT";
+        )
 
-  }
+    );
 
-  // =========================
-  // EXECUTION CONFIDENCE
-  // =========================
+    // =========================
+    // MARKET REGIME
+    // =========================
 
-  const executionConfidence = Math.max(
+    const marketRegime =
 
-    0,
+        marketDanger === "HIGH"
+            ? "HOSTILE"
 
-    Math.min(
+            : unstableMarket
+            ? "UNSTABLE"
 
-      100,
+            : spreadExplosion
+            ? "VOLATILE"
 
-      Math.round(
+            : marketPhase;
 
-        confidenceScore
+    // =========================
+    // ROUTE SYNTHESIS
+    // =========================
 
-      )
+    const route =
 
-    )
+        survivability <= 20
+            ? "RESTRICTED"
 
-  );
+            : confidence >= 80 &&
+              breakoutLong
+            ? "MOMENTUM_LONG"
 
-  // =========================
-  // EXECUTION MODE
-  // =========================
+            : confidence >= 80 &&
+              breakoutShort
+            ? "MOMENTUM_SHORT"
 
-  const executionMode =
+            : liquidityGrab
+            ? "LIQUIDITY_RESPONSE"
 
-    executionConfidence >= 80
-      ? "AGGRESSIVE"
+            : "OBSERVE";
 
-      : executionConfidence >= 60
-      ? "NORMAL"
+    // =========================
+    // ROUTER BELIEF
+    // =========================
 
-      : executionConfidence >= 40
-      ? "DEFENSIVE"
+    if (
 
-      : "SURVIVAL";
+        survivability >= 80 &&
+        confidence >= 75
 
-  // =========================
-  // EXECUTION PRIORITY
-  // =========================
+    ) {
 
-  const executionPriority =
+        routerBelief =
+            "HIGH_CONVICTION";
 
-    signal === "ENTER_LONG" &&
-    breakoutLong
-      ? "HIGH"
+    }
 
-      : signal === "ENTER_SHORT" &&
-        breakoutShort
-      ? "HIGH"
+    else if (
 
-      : liquidityGrab
-      ? "MEDIUM"
+        survivability >= 60 &&
+        confidence >= 50
 
-      : "LOW";
+    ) {
 
-  // =========================
-  // FINAL EXECUTION STATE
-  // =========================
+        routerBelief =
+            "STABLE";
 
-  return {
+    }
 
-    shouldExecute,
+    else if (
 
-    executionBlocked,
+        survivability >= 40
 
-    blockReason,
+    ) {
 
-    riskOverride,
+        routerBelief =
+            "CAUTIOUS";
 
-    emergencyBlock,
+    }
 
-    executionAllowed:
-      shouldExecute &&
-      executionAllowed,
+    else {
 
-    executionConfidence,
+        routerBelief =
+            "SURVIVAL";
 
-    executionMode,
+    }
 
-    executionPriority,
+    // =========================
+    // FINAL COGNITION STATE
+    // =========================
 
-    marketPhase,
+    return {
 
-    signal,
+        execution: {
 
-    direction,
+            route,
 
-    orderStatus,
+            confidence,
 
-    riskLevel,
+            survivability,
 
-    latency,
+            restrictionReason,
 
-  };
+        },
+
+        router: {
+
+            status:
+                survivability >= 40
+                    ? "ACTIVE"
+                    : "RESTRICTED",
+
+            belief:
+                routerBelief,
+
+            routingQuality,
+
+            lastRouteUpdate:
+                Date.now(),
+
+        },
+
+        cognition: {
+
+            routerBelief,
+
+            marketBelief,
+
+            executionBelief,
+
+            riskBelief,
+
+        },
+
+        market: {
+
+            marketRegime,
+
+            marketPhase,
+
+            microstructureSignals,
+
+        },
+
+        signal,
+
+        direction,
+
+        orderStatus,
+
+        riskLevel,
+
+        latency,
+
+        wsStatus,
+
+        engineStatus,
+
+    };
 
 }

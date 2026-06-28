@@ -93,3 +93,9 @@ Thumbs.db
 # Accidental folders
 # =========================
 site-packages/
+
+# Backup files
+*.bak
+*.bak_*
+*.bak_step*
+*.before_*

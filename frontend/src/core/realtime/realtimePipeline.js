@@ -10,23 +10,17 @@ import {
   createReconnectRecovery
 } from "./reconnectRecovery";
 
-// =========================
-// REALTIME MEMORY
-// =========================
+// =====================================================
+// COGNITION RUNTIME MEMORY
+// =====================================================
 
 const HISTORY_LIMIT = 50;
 
-const SIGNAL_MEMORY_LIMIT = 100;
-
 const THROTTLE_MS = 25;
-
-let realtimeMomentumHistory = [];
 
 let realtimeSpreadHistory = [];
 
 let realtimeLatencyHistory = [];
-
-let signalMemory = [];
 
 let lastPacketTimestamp = 0;
 
@@ -36,20 +30,12 @@ let lastPacketSignature = null;
 
 let websocketHealthScore = 100;
 
-let consecutiveLatencySpikes = 0;
-
-let consecutiveSpreadShocks = 0;
-
-let consecutiveSpoofDanger = 0;
-
-let previousMarketPhase = "UNKNOWN";
-
 const reconnectRecovery =
   createReconnectRecovery();
 
-// =========================
+// =====================================================
 // SAFE NUMBER
-// =========================
+// =====================================================
 
 const safeNumber = (
   value,
@@ -64,30 +50,13 @@ const safeNumber = (
 
 };
 
-// =========================
+// =====================================================
 // AVERAGE
-// =========================
+// =====================================================
 
-const average = (
-  arr = []
-) => {
-
-  if (!arr.length) {
-    return 0;
-  }
-
-  return (
-    arr.reduce(
-      (a, b) => a + b,
-      0
-    ) / arr.length
-  );
-
-};
-
-// =========================
+// =====================================================
 // CLAMP
-// =========================
+// =====================================================
 
 const clamp = (
   value,
@@ -102,9 +71,9 @@ const clamp = (
 
 };
 
-// =========================
+// =====================================================
 // PACKET SIGNATURE
-// =========================
+// =====================================================
 
 const createPacketSignature = (
   data
@@ -114,9 +83,6 @@ const createPacketSignature = (
 
     price:
       data?.price,
-
-    momentum:
-      data?.momentum,
 
     spread:
       data?.spread,
@@ -128,9 +94,9 @@ const createPacketSignature = (
 
 };
 
-// =========================
-// HEALTH SCORING
-// =========================
+// =====================================================
+// WEBSOCKET HEALTH
+// =====================================================
 
 const updateHealthScore = ({
   dropped = false,
@@ -159,111 +125,16 @@ const updateHealthScore = ({
 
 };
 
-// =========================
-// MOMENTUM REGIME
-// =========================
+// =====================================================
+// MARKET REGIME
+// =====================================================
 
-const getMomentumRegime = (
-  momentum
-) => {
-
-  const absMomentum =
-    Math.abs(momentum);
-
-  if (absMomentum < 0.2) {
-    return "WEAK";
-  }
-
-  if (absMomentum < 0.5) {
-    return "BUILDING";
-  }
-
-  if (absMomentum < 1.2) {
-    return "STRONG";
-  }
-
-  return "EXPLOSIVE";
-
-};
-
-// =========================
-// LIQUIDITY STABILITY
-// =========================
-
-const getLiquidityStability = (
+const getMarketRegime = (
   spread
 ) => {
 
-  if (spread < 0.01) {
+  if (spread < 0.005) {
     return "STABLE";
-  }
-
-  if (spread < 0.03) {
-    return "WEAK";
-  }
-
-  return "COLLAPSING";
-
-};
-
-// =========================
-// SPREAD REGIME
-// =========================
-
-const getSpreadRegime = (
-  spread
-) => {
-
-  if (spread < 0.005) {
-    return "TIGHT";
-  }
-
-  if (spread < 0.02) {
-    return "NORMAL";
-  }
-
-  if (spread < 0.05) {
-    return "WIDE";
-  }
-
-  return "DANGER";
-
-};
-
-// =========================
-// EXECUTION QUALITY
-// =========================
-
-const getExecutionQuality = (
-  latency
-) => {
-
-  if (latency < 20) {
-    return "EXCELLENT";
-  }
-
-  if (latency < 50) {
-    return "GOOD";
-  }
-
-  if (latency < 120) {
-    return "DEGRADED";
-  }
-
-  return "CRITICAL";
-
-};
-
-// =========================
-// VOLATILITY REGIME
-// =========================
-
-const getVolatilityRegime = (
-  spread
-) => {
-
-  if (spread < 0.005) {
-    return "CALM";
   }
 
   if (spread < 0.02) {
@@ -274,447 +145,150 @@ const getVolatilityRegime = (
     return "VOLATILE";
   }
 
-  return "EXTREME";
+  return "HOSTILE";
 
 };
 
-// =========================
-// TREND AGGRESSION
-// =========================
+// =====================================================
+// ROUTING QUALITY
+// =====================================================
 
-const getTrendAggression = (
-  momentum
+const getRoutingQuality = (
+  latency
 ) => {
 
-  const absMomentum =
-    Math.abs(momentum);
-
-  if (absMomentum < 0.2) {
-    return "PASSIVE";
+  if (latency < 20) {
+    return "HIGH";
   }
 
-  if (absMomentum < 0.5) {
-    return "ACTIVE";
+  if (latency < 50) {
+    return "MEDIUM";
   }
 
-  if (absMomentum < 1.2) {
-    return "AGGRESSIVE";
+  if (latency < 120) {
+    return "LOW";
   }
 
-  return "EXTREME";
+  return "DEGRADED";
 
 };
 
-// =========================
-// MARKET PHASE
-// =========================
+// =====================================================
+// SURVIVABILITY
+// =====================================================
 
-const getMarketPhase = ({
-  momentumRegime,
-  spreadRegime,
-  spoofDanger,
-  liquidityCollapse,
-  volatilityRegime,
+const calculateSurvivability = ({
+  websocketHealth,
+  latency,
+  spread,
+}) => {
+
+  let score = websocketHealth;
+
+  score -= latency * 0.35;
+
+  score -= spread * 1200;
+
+  return clamp(
+    Math.round(score),
+    0,
+    100
+  ) / 100;
+
+};
+
+// =====================================================
+// MARKET HOSTILITY
+// =====================================================
+
+const calculateMarketHostility = ({
+  spread,
+  latency,
+}) => {
+
+  let hostility = 0;
+
+  hostility += spread * 15;
+
+  hostility += latency * 0.002;
+
+  return Math.min(
+    hostility,
+    1
+  );
+
+};
+
+// =====================================================
+// COGNITION STABILITY
+// =====================================================
+
+const calculateCognitionStability = ({
+  websocketHealth,
+  latency,
+}) => {
+
+  let score =
+    websocketHealth -
+    latency * 0.3;
+
+  return clamp(
+    score,
+    0,
+    100
+  ) / 100;
+
+};
+
+// =====================================================
+// ROUTER BELIEF
+// =====================================================
+
+const synthesizeBelief = ({
+  survivability,
+  marketHostility,
+  tickMomentum,
 }) => {
 
   if (
-    spoofDanger ||
-    liquidityCollapse
+    survivability < 0.4
   ) {
-    return "CHAOTIC";
-  }
 
-  if (
-    momentumRegime === "EXPLOSIVE" &&
-    volatilityRegime === "EXTREME"
-  ) {
-    return "BREAKOUT";
-  }
-
-  if (
-    momentumRegime === "STRONG"
-  ) {
-    return "TRENDING";
-  }
-
-  if (
-    momentumRegime === "WEAK"
-  ) {
-    return "RANGING";
-  }
-
-  if (
-    spreadRegime === "DANGER"
-  ) {
-    return "EXHAUSTION";
-  }
-
-  return "RANGING";
-
-};
-
-// =========================
-// ENTRY TIMING
-// =========================
-
-const getEntryTiming = ({
-  momentumRegime,
-  marketPhase,
-  confidenceScore,
-}) => {
-
-  if (
-    marketPhase === "CHAOTIC"
-  ) {
-    return "AVOID";
-  }
-
-  if (
-    momentumRegime === "BUILDING" &&
-    confidenceScore > 70
-  ) {
-    return "EARLY";
-  }
-
-  if (
-    momentumRegime === "STRONG" &&
-    confidenceScore > 80
-  ) {
-    return "CONFIRMED";
-  }
-
-  if (
-    momentumRegime === "EXPLOSIVE"
-  ) {
-    return "LATE";
-  }
-
-  return "AVOID";
-
-};
-
-// =========================
-// SIGNAL RANK
-// =========================
-
-const getSignalRank = (
-  confidenceScore
-) => {
-
-  if (confidenceScore >= 95) {
-    return "A+";
-  }
-
-  if (confidenceScore >= 85) {
-    return "A";
-  }
-
-  if (confidenceScore >= 70) {
-    return "B";
-  }
-
-  if (confidenceScore >= 50) {
-    return "C";
-  }
-
-  if (confidenceScore >= 30) {
-    return "D";
-  }
-
-  return "AVOID";
-
-};
-
-// =========================
-// RISK BIAS
-// =========================
-
-const getRiskBias = ({
-  marketDanger,
-  confidenceScore,
-  volatilityRegime,
-}) => {
-
-  if (
-    marketDanger === "HIGH"
-  ) {
-    return "SURVIVAL";
-  }
-
-  if (
-    volatilityRegime === "EXTREME"
-  ) {
     return "DEFENSIVE";
+
   }
 
   if (
-    confidenceScore > 85
+    marketHostility > 0.7
   ) {
-    return "OFFENSIVE";
+
+    return "HOSTILE";
+
+  }
+
+  if (
+    tickMomentum === "UP"
+  ) {
+
+    return "BULLISH";
+
+  }
+
+  if (
+    tickMomentum === "DOWN"
+  ) {
+
+    return "BEARISH";
+
   }
 
   return "NEUTRAL";
 
 };
 
-// =========================
-// DYNAMIC ENTRY AGGRESSION
-// =========================
-
-const getEntryAggression = ({
-  confidenceScore,
-  marketDanger,
-  volatilityRegime,
-}) => {
-
-  if (
-    marketDanger === "HIGH"
-  ) {
-    return "BLOCKED";
-  }
-
-  if (
-    volatilityRegime === "EXTREME"
-  ) {
-    return "SCALP_ONLY";
-  }
-
-  if (
-    confidenceScore > 90
-  ) {
-    return "MAX_OFFENSIVE";
-  }
-
-  if (
-    confidenceScore > 75
-  ) {
-    return "AGGRESSIVE";
-  }
-
-  return "NORMAL";
-
-};
-
-// =========================
-// SPOOF RISK
-// =========================
-
-const calculateSpoofRisk = ({
-  fakeWall,
-  spoofProbability,
-  spreadExplosion,
-  liquidityGrab,
-}) => {
-
-  let risk = 0;
-
-  if (fakeWall) {
-    risk += 30;
-  }
-
-  risk += spoofProbability * 50;
-
-  if (spreadExplosion) {
-    risk += 10;
-  }
-
-  if (liquidityGrab) {
-    risk += 10;
-  }
-
-  return clamp(
-    Math.round(risk),
-    0,
-    100
-  );
-
-};
-
-// =========================
-// ENTRY QUALITY
-// =========================
-
-const calculateEntryQuality = ({
-  momentum,
-  spread,
-  latency,
-  spoofRisk,
-  marketDanger,
-}) => {
-
-  let score = 100;
-
-  score -= spread * 1000;
-
-  score -= latency * 0.3;
-
-  score -= spoofRisk * 0.5;
-
-  score += Math.abs(momentum) * 15;
-
-  if (marketDanger === "HIGH") {
-    score -= 40;
-  }
-
-  return clamp(
-    Math.round(score),
-    0,
-    100
-  );
-
-};
-
-// =========================
-// EXECUTION SCORE
-// =========================
-
-const calculateExecutionScore = ({
-  websocketHealth,
-  latency,
-  droppedPackets,
-}) => {
-
-  let score = websocketHealth;
-
-  score -= latency * 0.4;
-
-  score -= droppedPackets * 2;
-
-  return clamp(
-    Math.round(score),
-    0,
-    100
-  );
-
-};
-
-// =========================
-// MARKET STABILITY
-// =========================
-
-const calculateMarketStability = ({
-  spread,
-  latency,
-  spoofRisk,
-}) => {
-
-  let score = 100;
-
-  score -= spread * 1200;
-
-  score -= latency * 0.2;
-
-  score -= spoofRisk * 0.5;
-
-  return clamp(
-    Math.round(score),
-    0,
-    100
-  );
-
-};
-
-// =========================
-// EXPLAINABLE ATTRIBUTION INTELLIGENCE
-// =========================
-
-const calculateAttributionIntel = ({
-  momentum,
-  spread,
-  latency,
-  spoofRisk,
-  confidenceScore,
-}) => {
-
-  const momentumContribution =
-    clamp(
-      Math.abs(momentum) * 35,
-      0,
-      100
-    );
-
-  const liquidityContribution =
-    clamp(
-      100 - (spread * 2500),
-      0,
-      100
-    );
-
-  const executionContribution =
-    clamp(
-      100 - (latency * 0.8),
-      0,
-      100
-    );
-
-  const spoofPenalty =
-    clamp(spoofRisk, 0, 100);
-
-  const volatilityPenalty =
-    spread > 0.05
-      ? 80
-      : spread > 0.02
-        ? 40
-        : 10;
-
-  const totalScore =
-    clamp(
-      Math.round(
-        (
-          momentumContribution * 0.3 +
-          liquidityContribution * 0.25 +
-          executionContribution * 0.2 +
-          confidenceScore * 0.25
-        ) -
-        (
-          spoofPenalty * 0.35 +
-          volatilityPenalty * 0.15
-        )
-      ),
-      0,
-      100
-    );
-
-  const strongestBullishFactor =
-    momentumContribution >= liquidityContribution &&
-      momentumContribution >= executionContribution
-      ? "momentumContribution"
-      : liquidityContribution >= executionContribution
-        ? "liquidityContribution"
-        : "executionContribution";
-
-  const strongestBearishFactor =
-    spoofPenalty >= volatilityPenalty
-      ? "spoofPenalty"
-      : "volatilityPenalty";
-
-  let confidenceEnvironment = "LOW";
-
-  if (totalScore >= 85) {
-    confidenceEnvironment = "EXTREME";
-  } else if (totalScore >= 70) {
-    confidenceEnvironment = "HIGH";
-  } else if (totalScore >= 45) {
-    confidenceEnvironment = "MEDIUM";
-  }
-
-  return {
-    momentumContribution,
-    liquidityContribution,
-    executionContribution,
-    spoofPenalty,
-    volatilityPenalty,
-    totalScore,
-    strongestBullishFactor,
-    strongestBearishFactor,
-    confidenceEnvironment,
-  };
-
-};
-
-// =========================
+// =====================================================
 // REALTIME PIPELINE
-// =========================
+// =====================================================
 
 export default function realtimePipeline({
 
@@ -724,9 +298,6 @@ export default function realtimePipeline({
   setStrategyData,
   setExecutionData,
   setRiskData,
-
-  setSignalIntel,
-  setDerivedIntel,
 
   setMomentumHistory,
   setSpreadHistory,
@@ -816,14 +387,7 @@ export default function realtimePipeline({
 
       riskPacket,
 
-      intelligencePacket,
-
     } = realtimePacketBuilder(data);
-
-    strategyPacket.momentum =
-      safeNumber(
-        strategyPacket.momentum
-      );
 
     strategyPacket.spread =
       safeNumber(
@@ -834,14 +398,6 @@ export default function realtimePipeline({
       safeNumber(
         executionPacket.latency
       );
-
-    realtimeMomentumHistory = [
-
-      strategyPacket.momentum,
-
-      ...realtimeMomentumHistory,
-
-    ].slice(0, HISTORY_LIMIT);
 
     realtimeSpreadHistory = [
 
@@ -870,11 +426,6 @@ export default function realtimePipeline({
 
         riskPacket,
 
-        intelligencePacket,
-
-        momentumHistory:
-          realtimeMomentumHistory,
-
         spreadHistory:
           realtimeSpreadHistory,
 
@@ -899,97 +450,31 @@ export default function realtimePipeline({
       reconnectRecovery
         .createReconnectTelemetryPacket();
 
-    const avgMomentum =
-      average(
-        realtimeMomentumHistory
-      );
 
-    const avgSpread =
-      average(
-        realtimeSpreadHistory
-      );
+    // =====================================================
+    // MARKET REGIME
+    // =====================================================
 
-    const avgLatency =
-      average(
-        realtimeLatencyHistory
-      );
-
-    derivedPacket.avgMomentum = avgMomentum;
-    derivedPacket.avgSpread = avgSpread;
-    derivedPacket.avgLatency = avgLatency;
-
-    derivedPacket.momentumRegime =
-      getMomentumRegime(
-        strategyPacket.momentum
-      );
-
-    derivedPacket.liquidityStability =
-      getLiquidityStability(
+    const marketRegime =
+      getMarketRegime(
         strategyPacket.spread
       );
 
-    derivedPacket.spreadRegime =
-      getSpreadRegime(
-        strategyPacket.spread
+    // =====================================================
+    // ROUTING QUALITY
+    // =====================================================
+
+    const routingQuality =
+      getRoutingQuality(
+        executionPacket.latency
       );
 
-    derivedPacket.volatilityRegime =
-      getVolatilityRegime(
-        strategyPacket.spread
-      );
+    // =====================================================
+    // SURVIVABILITY
+    // =====================================================
 
-    derivedPacket.trendAggression =
-      getTrendAggression(
-        strategyPacket.momentum
-      );
-
-    derivedPacket.spoofRisk =
-      calculateSpoofRisk({
-
-        fakeWall:
-          intelligencePacket.fakeWall,
-
-        spoofProbability:
-          intelligencePacket.spoofProbability,
-
-        spreadExplosion:
-          intelligencePacket.spreadExplosion,
-
-        liquidityGrab:
-          intelligencePacket.liquidityGrab,
-
-      });
-
-    derivedPacket.spoofDanger =
-      derivedPacket.spoofRisk > 70;
-
-    derivedPacket.marketDanger =
-      derivedPacket.spoofDanger
-        ? "HIGH"
-        : "LOW";
-
-    derivedPacket.entryQuality =
-      calculateEntryQuality({
-
-        momentum:
-          strategyPacket.momentum,
-
-        spread:
-          strategyPacket.spread,
-
-        latency:
-          executionPacket.latency,
-
-        spoofRisk:
-          derivedPacket.spoofRisk,
-
-        marketDanger:
-          derivedPacket.marketDanger,
-
-      });
-
-    derivedPacket.executionQuality =
-      calculateExecutionScore({
+    const survivability =
+      calculateSurvivability({
 
         websocketHealth:
           websocketHealthScore,
@@ -997,12 +482,17 @@ export default function realtimePipeline({
         latency:
           executionPacket.latency,
 
-        droppedPackets: 0,
+        spread:
+          strategyPacket.spread,
 
       });
 
-    derivedPacket.marketStability =
-      calculateMarketStability({
+    // =====================================================
+    // MARKET HOSTILITY
+    // =====================================================
+
+    const marketHostility =
+      calculateMarketHostility({
 
         spread:
           strategyPacket.spread,
@@ -1010,241 +500,216 @@ export default function realtimePipeline({
         latency:
           executionPacket.latency,
 
-        spoofRisk:
-          derivedPacket.spoofRisk,
-
       });
 
-    derivedPacket.confidenceScore =
-      clamp(
-        Math.round(
-          (
-            derivedPacket.entryQuality +
-            derivedPacket.executionQuality +
-            derivedPacket.marketStability
-          ) / 3
-        ),
-        0,
-        100
-      );
+    // =====================================================
+    // COGNITION STABILITY
+    // =====================================================
 
-    derivedPacket.marketPhase =
-      getMarketPhase({
+    const cognitionStability =
+      calculateCognitionStability({
 
-        momentumRegime:
-          derivedPacket.momentumRegime,
-
-        spreadRegime:
-          derivedPacket.spreadRegime,
-
-        spoofDanger:
-          derivedPacket.spoofDanger,
-
-        liquidityCollapse:
-          derivedPacket.liquidityStability === "COLLAPSING",
-
-        volatilityRegime:
-          derivedPacket.volatilityRegime,
-
-      });
-
-    derivedPacket.entryTiming =
-      getEntryTiming({
-
-        momentumRegime:
-          derivedPacket.momentumRegime,
-
-        marketPhase:
-          derivedPacket.marketPhase,
-
-        confidenceScore:
-          derivedPacket.confidenceScore,
-
-      });
-
-    derivedPacket.signalRank =
-      getSignalRank(
-        derivedPacket.confidenceScore
-      );
-
-    derivedPacket.riskBias =
-      getRiskBias({
-
-        marketDanger:
-          derivedPacket.marketDanger,
-
-        confidenceScore:
-          derivedPacket.confidenceScore,
-
-        volatilityRegime:
-          derivedPacket.volatilityRegime,
-
-      });
-
-    signalMemory = [
-
-      {
-
-        timestamp: now,
-
-        confidenceScore:
-          derivedPacket.confidenceScore,
-
-        marketPhase:
-          derivedPacket.marketPhase,
-
-        spoofRisk:
-          derivedPacket.spoofRisk,
+        websocketHealth:
+          websocketHealthScore,
 
         latency:
           executionPacket.latency,
 
-      },
+      });
 
-      ...signalMemory,
+    // =====================================================
+    // MICROSTRUCTURE
+    // =====================================================
 
-    ].slice(0, SIGNAL_MEMORY_LIMIT);
+    const microstructureSignals = {
 
-    if (
-      derivedPacket.latencySpike
-    ) {
-      consecutiveLatencySpikes += 1;
-    } else {
-      consecutiveLatencySpikes = 0;
-    }
+      imbalance:
+        derivedPacket.imbalance ?? 0,
 
-    if (
-      derivedPacket.spreadShock
-    ) {
-      consecutiveSpreadShocks += 1;
-    } else {
-      consecutiveSpreadShocks = 0;
-    }
+      spreadQuality:
+        marketRegime,
 
-    if (
-      derivedPacket.spoofDanger
-    ) {
-      consecutiveSpoofDanger += 1;
-    } else {
-      consecutiveSpoofDanger = 0;
-    }
+      liquidityShift:
+        derivedPacket.liquidityShift ??
+        "STABLE",
 
-    derivedPacket.regimeTransition =
-      previousMarketPhase !==
-      derivedPacket.marketPhase;
+      tickMomentum:
+        derivedPacket.tickMomentum ??
+        "NEUTRAL",
 
-    derivedPacket.trendContinuation =
-      previousMarketPhase ===
-      "TRENDING" &&
-      derivedPacket.marketPhase ===
-      "TRENDING";
+      volatilityPressure:
+        marketHostility,
 
-    derivedPacket.trendWeakening =
-      previousMarketPhase ===
-      "TRENDING" &&
-      derivedPacket.marketPhase !==
-      "TRENDING";
+      orderFlowBias:
+        derivedPacket.orderFlowBias ??
+        "NEUTRAL",
 
-    previousMarketPhase =
-      derivedPacket.marketPhase;
+    };
 
-    derivedPacket.confidenceDecay =
-      clamp(
-        derivedPacket.confidenceScore -
-        signalMemory.length * 0.1,
-        0,
-        100
-      );
+    // =====================================================
+    // ROUTER BELIEF
+    // =====================================================
 
-    derivedPacket.entryAggression =
-      getEntryAggression({
+    const belief =
+      synthesizeBelief({
 
-        confidenceScore:
-          derivedPacket.confidenceScore,
+        survivability,
 
-        marketDanger:
-          derivedPacket.marketDanger,
+        marketHostility,
 
-        volatilityRegime:
-          derivedPacket.volatilityRegime,
+        tickMomentum:
+          microstructureSignals
+            .tickMomentum,
 
       });
 
-    derivedPacket.aiStabilityConfidence =
-      clamp(
-        100 - (
-          consecutiveLatencySpikes * 5 +
-          consecutiveSpreadShocks * 4 +
-          consecutiveSpoofDanger * 6
-        ),
-        0,
-        100
-      );
+    // =====================================================
+    // RESTRICTION SYNTHESIS
+    // =====================================================
 
-    derivedPacket.streamDisconnected =
-      disconnectCheck.disconnected;
-
-    derivedPacket.streamStale =
-      staleCheck.stale;
-
-    derivedPacket.reconnectTriggered =
-      reconnectTelemetry
-        .reconnectTriggered;
-
-    derivedPacket.reconnectInProgress =
-      reconnectTelemetry
-        .reconnectInProgress;
-
-    derivedPacket.reconnectCount =
-      reconnectTelemetry
-        .reconnectCount;
-
-    derivedPacket.reconnectFailures =
-      reconnectTelemetry
-        .reconnectFailures;
-
-    derivedPacket.lastReconnectAt =
-      reconnectTelemetry
-        .lastReconnectAt;
-
-    derivedPacket.lastReconnectReason =
-      reconnectTelemetry
-        .lastReconnectReason;
-
-    derivedPacket.reconnectLatency =
-      reconnectTelemetry
-        .reconnectLatency;
-
-    derivedPacket.reconnectRecovered =
-      reconnectTelemetry
-        .reconnectRecovered;
+    let restrictionReason =
+      "NONE";
 
     if (
-      derivedPacket.streamDisconnected ||
-      derivedPacket.streamStale ||
-      derivedPacket.reconnectInProgress
+      staleCheck.stale
     ) {
 
-      derivedPacket.executionAllowed =
-        false;
+      restrictionReason =
+        "STALE_STREAM";
 
     }
 
-    Object.assign(
-      derivedPacket,
-      calculateAttributionIntel({
-        momentum:
-          strategyPacket.momentum,
-        spread:
-          strategyPacket.spread,
-        latency:
-          executionPacket.latency,
-        spoofRisk:
-          derivedPacket.spoofRisk,
-        confidenceScore:
-          derivedPacket.confidenceScore,
-      })
-    );
+    if (
+      disconnectCheck.disconnected
+    ) {
+
+      restrictionReason =
+        "STREAM_DISCONNECTED";
+
+    }
+
+    if (
+      marketHostility > 0.8
+    ) {
+
+      restrictionReason =
+        "HOSTILE_MARKET";
+
+    }
+
+    // =====================================================
+    // COGNITION TELEMETRY
+    // =====================================================
+
+    derivedPacket.cognition = {
+
+      belief,
+
+      confidence:
+        survivability,
+
+      survivability,
+
+      routingQuality,
+
+      cognitionStability,
+
+      restrictionReason,
+
+    };
+
+    // =====================================================
+    // ROUTER TELEMETRY
+    // =====================================================
+
+    derivedPacket.router = {
+
+      status:
+
+        survivability < 0.4
+          ? "SURVIVAL"
+
+          : cognitionStability < 0.5
+          ? "UNSTABLE"
+
+          : marketHostility > 0.7
+          ? "VOLATILE"
+
+          : "STABLE",
+
+      routingQuality,
+
+      lastRouteUpdate:
+        Date.now(),
+
+    };
+
+    // =====================================================
+    // MARKET TELEMETRY
+    // =====================================================
+
+    derivedPacket.market = {
+
+      marketRegime,
+
+      marketHostility,
+
+      microstructureSignals,
+
+    };
+
+    // =====================================================
+    // RECONNECT TELEMETRY
+    // =====================================================
+
+    derivedPacket.runtime = {
+
+      websocketHealth:
+        websocketHealthScore,
+
+      streamDisconnected:
+        disconnectCheck.disconnected,
+
+      streamStale:
+        staleCheck.stale,
+
+      reconnectTriggered:
+        reconnectTelemetry
+          .reconnectTriggered,
+
+      reconnectInProgress:
+        reconnectTelemetry
+          .reconnectInProgress,
+
+      reconnectCount:
+        reconnectTelemetry
+          .reconnectCount,
+
+      reconnectFailures:
+        reconnectTelemetry
+          .reconnectFailures,
+
+      lastReconnectAt:
+        reconnectTelemetry
+          .lastReconnectAt,
+
+      lastReconnectReason:
+        reconnectTelemetry
+          .lastReconnectReason,
+
+      reconnectLatency:
+        reconnectTelemetry
+          .reconnectLatency,
+
+      reconnectRecovered:
+        reconnectTelemetry
+          .reconnectRecovered,
+
+    };
+
+    // =====================================================
+    // MARKET DATA
+    // =====================================================
 
     setMarketData((prev) => ({
 
@@ -1282,25 +747,53 @@ export default function realtimePipeline({
 
     }));
 
-    setStrategyData(
-      strategyPacket
-    );
+    // =====================================================
+    // STRATEGY DATA
+    // =====================================================
 
-    setExecutionData(
-      executionPacket
-    );
+    setStrategyData({
+      ...strategyPacket,
+      cognition:
+        derivedPacket.cognition,
+    });
 
-    setRiskData(
-      riskPacket
-    );
+    // =====================================================
+    // EXECUTION DATA
+    // =====================================================
 
-    setSignalIntel(
-      intelligencePacket
-    );
+    setExecutionData({
 
-    setMomentumHistory(
-      realtimeMomentumHistory
-    );
+      ...executionPacket,
+
+      router:
+        derivedPacket.router,
+
+      market:
+        derivedPacket.market,
+
+      runtime:
+        derivedPacket.runtime,
+
+      cognition:
+        derivedPacket.cognition,
+
+    });
+
+    // =====================================================
+    // RISK DATA
+    // =====================================================
+
+    setRiskData({
+
+      ...riskPacket,
+
+      survivability,
+
+      restrictionReason,
+
+    });
+
+    setMomentumHistory([]);
 
     setSpreadHistory(
       realtimeSpreadHistory
@@ -1310,9 +803,9 @@ export default function realtimePipeline({
       realtimeLatencyHistory
     );
 
-    setDerivedIntel(
-      derivedPacket
-    );
+    // =====================================================
+    // FRONTEND METRICS
+    // =====================================================
 
     setFrontendMetrics((prev) => ({
 
@@ -1321,8 +814,10 @@ export default function realtimePipeline({
       packetsProcessed:
         prev.packetsProcessed + 1,
 
-    }));
+      websocketHealth:
+        websocketHealthScore,
 
+    }));
 
   } catch (err) {
 
@@ -1341,6 +836,9 @@ export default function realtimePipeline({
 
       parseErrors:
         prev.parseErrors + 1,
+
+      websocketHealth:
+        websocketHealthScore,
 
     }));
 

@@ -1,128 +1,209 @@
 export default function ExecutionSettings({
 
-  config = {},
-  setConfig = () => {},
+    config = {},
+    setConfig = () => {},
 
 }) {
 
-  return (
+    const update = (
+        key,
+        value
+    ) => {
 
-    <div className="panel-section">
+        setConfig({
 
-      <h3>⚙️ Execution Settings</h3>
+            ...config,
 
-      {/* COOLDOWN */}
+            [key]: value,
 
-      <div className="form-group">
+        });
 
-        <label>Cooldown</label>
+    };
 
-        <input
-          type="number"
-          value={config.cooldown || 2}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              cooldown: e.target.value,
-            })
-          }
-        />
+    return (
 
-      </div>
+        <>
 
-      {/* MAX ENTRIES */}
+            <div className="compact-row">
 
-      <div className="form-group">
+                <span>
+                    EXECUTION MODE
+                </span>
 
-        <label>Max Entries/min</label>
+                <span className="online">
+                    STANDARD
+                </span>
 
-        <input
-          type="number"
-          value={config.max_entries || 5}
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              max_entries: e.target.value,
-            })
-          }
-        />
+            </div>
 
-      </div>
+            <div className="compact-row">
 
-      {/* ONE SIGNAL ONLY */}
+                <span>
+                    ROUTER MODE
+                </span>
 
-      <div className="form-group">
+                <span className="online">
+                    AUTOMATIC
+                </span>
 
-        <label>One Signal Only</label>
+            </div>
 
-        <select
-          value={
-            config.one_signal_only || "ON"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              one_signal_only:
-                e.target.value,
-            })
-          }
-        >
+            <div className="compact-row">
 
-          <option>ON</option>
-          <option>OFF</option>
+                <span>
+                    EXECUTION STATE
+                </span>
 
-        </select>
+                <span className="online">
+                    ACTIVE
+                </span>
 
-      </div>
+            </div>
 
-      {/* RE-ENTRY DELAY */}
+            <div className="compact-row">
 
-      <div className="form-group">
+                <span>
+                    COOLDOWN
+                </span>
 
-        <label>Re-entry Delay</label>
+                <span>
+                    {
+                        config.cooldown || 2
+                    }s
+                </span>
 
-        <input
-          type="number"
-          value={
-            config.reentry_delay || 3
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              reentry_delay:
-                e.target.value,
-            })
-          }
-        />
+            </div>
 
-      </div>
+            <div className="compact-row">
 
-      {/* SIGNAL LOCK */}
+                <span>
+                    ENTRY LIMIT
+                </span>
 
-      <div className="form-group">
+                <span>
+                    {
+                        config.max_entries || 5
+                    }
+                </span>
 
-        <label>Signal Lock</label>
+            </div>
 
-        <select
-          value={
-            config.signal_lock || "ON"
-          }
-          onChange={(e) =>
-            setConfig({
-              ...config,
-              signal_lock:
-                e.target.value,
-            })
-          }
-        >
+            <div className="compact-row">
 
-          <option>ON</option>
-          <option>OFF</option>
+                <span>
+                    REENTRY DELAY
+                </span>
 
-        </select>
+                <span>
+                    {
+                        config.reentry_delay || 3
+                    }s
+                </span>
 
-      </div>
+            </div>
 
-    </div>
-  );
+            <div className="compact-row">
+
+                <span>
+                    SINGLE SIGNAL
+                </span>
+
+                <span
+                    className={
+                        config.one_signal_only === "OFF"
+                            ? "warning"
+                            : "online"
+                    }
+                >
+
+                    {
+                        config.one_signal_only || "ON"
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    SIGNAL LOCK
+                </span>
+
+                <span
+                    className={
+                        config.signal_lock === "OFF"
+                            ? "warning"
+                            : "online"
+                    }
+                >
+
+                    {
+                        config.signal_lock || "ON"
+                    }
+
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    EXECUTION PROFILE
+                </span>
+
+                <span className="online">
+                    BALANCED
+                </span>
+
+            </div>
+
+            <div className="compact-row">
+
+                <span>
+                    LATENCY MODE
+                </span>
+
+                <span>
+                    LOW LATENCY
+                </span>
+
+            </div>
+
+            <div className="control-buttons">
+
+                <button
+                    className="start-button"
+                    onClick={() =>
+                        update(
+                            "execution_profile",
+                            "CONSERVATIVE"
+                        )
+                    }
+                >
+
+                    CONSERVATIVE
+
+                </button>
+
+                <button
+                    className="stop-button"
+                    onClick={() =>
+                        update(
+                            "execution_profile",
+                            "AGGRESSIVE"
+                        )
+                    }
+                >
+
+                    AGGRESSIVE
+
+                </button>
+
+            </div>
+
+        </>
+
+    );
+
 }

@@ -2,13 +2,12 @@
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import List
-from datetime import datetime
 
 router = APIRouter()
 
 # 🔥 Engine参照（外部から注入）
 engine = None
+
 
 def set_engine(e):
     global engine
@@ -26,60 +25,111 @@ class Position(BaseModel):
     size: float
 
 
-class Log(BaseModel):
-    id: int
-    time: str
-    type: str
-    message: str
-
-
-# =========================
-# ログ管理
-# =========================
-logs_data: List[dict] = []
-MAX_LOGS = 100
-
-
-def add_log(log_type: str, message: str):
-    log = {
-        "id": len(logs_data) + 1,
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "type": log_type,
-        "message": message
-    }
-
-    logs_data.append(log)
-
-    if len(logs_data) > MAX_LOGS:
-        logs_data.pop(0)
-
-
 # =========================
 # Positions（実データ）
 # =========================
-@router.get("/positions", response_model=List[Position])
+@router.get("/positions")
 def get_positions():
+
     if not engine:
-        return []
+
+        return {
+
+            "positions": [],
+
+            "execution": {
+
+                "status": "STOPPED",
+
+                "execution_mode": "SIMULATION",
+
+                "real_order_allowed": False,
+
+                "ws_connected": False,
+
+                "position_active": False,
+
+                "executionAuthorityScore": 0,
+
+                "authoritativeRuntimeState": "STOPPED",
+
+                "runtimeSynchronizationState": "OFFLINE"
+            }
+        }
 
     try:
-        positions = engine.state_manager.get_positions()
 
         result = []
 
-        for p in positions.values():
+        actual_position = getattr(
+            engine,
+            "actual_position",
+            None
+        )
+
+        if actual_position:
+
             result.append({
-                "symbol": p.get("symbol"),
-                "side": p.get("side"),
-                "entry": p.get("entry"),
-                "pnl": p.get("pnl", 0),
-                "size": p.get("size")
+
+                "symbol": (
+                    actual_position.get("symbol")
+                    or getattr(engine, "symbol", None)
+                ),
+
+                "side": actual_position.get(
+                    "side"
+                ),
+
+                "entry": actual_position.get(
+                    "entry_price"
+                ),
+
+                "pnl": actual_position.get(
+                    "pnl",
+                    0
+                ),
+
+                "size": actual_position.get(
+                    "qty"
+                )
             })
 
-        return result
+        snapshot = engine.get_status()
+
+        return {
+
+            "positions": result,
+
+            "execution": snapshot
+        }
 
     except Exception as e:
-        return []
+
+        return {
+
+            "positions": [],
+
+            "execution": {
+
+                "status": "ERROR",
+
+                "execution_mode": "ERROR",
+
+                "real_order_allowed": False,
+
+                "ws_connected": False,
+
+                "position_active": False,
+
+                "executionAuthorityScore": 0,
+
+                "authoritativeRuntimeState": "ERROR",
+
+                "runtimeSynchronizationState": "OFFLINE",
+
+                "error": str(e)
+            }
+        }
 
 
 # =========================
@@ -88,11 +138,3 @@ def get_positions():
 @router.get("/history")
 def get_history():
     return []
-
-
-# =========================
-# Logs
-# =========================
-@router.get("/logs", response_model=List[Log])
-def get_logs():
-    return logs_data

@@ -34,12 +34,41 @@ class StartConfig(BaseModel):
 # STATUS RESPONSE（仕様書）
 # =========================
 class StatusResponse(BaseModel):
+
     status: str
+
     price: float
-    pnl: float
+
+    marketReady: bool
+
+    marketStale: bool
+
+    execution_mode: str
+
+    real_order_allowed: bool
+
+    ws_connected: bool
+
+    position_active: bool
+
+    pendingOrder: bool
+
     balance: float
+
     equity: float
-    symbol: Optional[str]
+
+    pnl: float
+
+    executionAuthorityScore: int
+
+    authoritativeRuntimeState: str
+
+    runtimeSynchronizationState: str
+
+    symbol: Optional[str] = None
+
+    position: Optional[dict] = None
+    actual_position: Optional[dict] = None
 
 
 # =========================
@@ -51,6 +80,27 @@ def start_bot(config: StartConfig):
     bot_manager = get_bot_manager()
 
     config_dict = config.dict()
+    
+    # ===================================
+    # FORCE STRING MODE
+    # ===================================
+
+    config_dict["mode"] = str(
+        config_dict["mode"]
+    ).split(".")[-1]
+
+    config_dict["mode"] = (
+        config_dict["mode"]
+        .replace("'>", "")
+        .replace("'", "")
+        .strip()
+        .lower()
+    )
+
+    print(
+        "🔥 NORMALIZED API MODE:",
+        config_dict["mode"]
+    )
 
     # 🔥 正規化（安全）
     config_dict["symbol"] = config_dict["symbol"].upper()
@@ -92,3 +142,5 @@ def get_status():
 
     bot_manager = get_bot_manager()
     return bot_manager.get_status()
+
+

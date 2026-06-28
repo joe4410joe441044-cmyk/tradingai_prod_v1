@@ -1,133 +1,336 @@
 export function scoringEngine({
 
-  executionPacket,
-  intelligencePacket,
-  riskPacket,
-
-  strategyPacket,
-
-  momentumAcceleration,
-
-  liquidityStability,
-
-  avgSpread,
+  executionPacket = {},
+  riskPacket = {},
+  strategyPacket = {},
 
 }) {
 
-  const executionScore =
+  // =========================
+  // SAFE VALUES
+  // =========================
+
+  const latency =
+
+    Number(
+      executionPacket.latency
+    ) || 0;
+
+  const spread =
+
+    Number(
+      strategyPacket.spread
+    ) || 0;
+
+  const currentDrawdown =
+
+    Number(
+      riskPacket.currentDD
+    ) || 0;
+
+  const killSwitch =
+
+    Boolean(
+      riskPacket.killSwitch
+    );
+
+  // =========================
+  // EXECUTION SCORE
+  // =========================
+
+  let executionScore =
+    100;
+
+  executionScore -=
+    latency * 0.5;
+
+  executionScore -=
+    spread * 1000;
+
+  executionScore =
 
     Math.max(
 
       0,
 
-      100 -
+      Math.min(
 
-      executionPacket.latency -
+        100,
 
-      intelligencePacket.spoofProbability -
-
-      avgSpread * 12
-    );
-
-  const marketSurvivabilityScore =
-
-    Math.max(
-
-      0,
-
-      100 -
-
-      riskPacket.currentDD * 2 -
-
-      intelligencePacket.spoofProbability
-    );
-
-  const trendQualityScore =
-
-    Math.min(
-
-      100,
-
-      Math.abs(
-        momentumAcceleration
-      ) * 20
-    );
-
-  const liquidityScore =
-
-    liquidityStability === "STABLE"
-
-      ? 100
-
-      : liquidityStability === "WEAK"
-
-      ? 60
-
-      : 20;
-
-  const entryConfidenceScore =
-
-    Math.max(
-
-      0,
-
-      (
-        strategyPacket.edge * 15 +
-
-        intelligencePacket.confidenceScore +
-
-        (
-          liquidityStability === "STABLE"
-            ? 20
-            : 0
+        Math.round(
+          executionScore
         )
+
       )
+
     );
 
-  const aiCompositeScore =
+  // =========================
+  // MARKET SCORE
+  // =========================
+
+  let marketScore =
+    100;
+
+  marketScore -=
+    spread * 1200;
+
+  marketScore -=
+    currentDrawdown * 2;
+
+  if (
+    killSwitch
+  ) {
+
+    marketScore -= 50;
+
+  }
+
+  marketScore =
+
+    Math.max(
+
+      0,
+
+      Math.min(
+
+        100,
+
+        Math.round(
+          marketScore
+        )
+
+      )
+
+    );
+
+  // =========================
+  // RISK SCORE
+  // =========================
+
+  let riskScore =
+    100;
+
+  riskScore -=
+    currentDrawdown * 3;
+
+  if (
+    latency > 120
+  ) {
+
+    riskScore -= 20;
+
+  }
+
+  if (
+    spread > 0.05
+  ) {
+
+    riskScore -= 20;
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    riskScore = 0;
+
+  }
+
+  riskScore =
+
+    Math.max(
+
+      0,
+
+      Math.min(
+
+        100,
+
+        Math.round(
+          riskScore
+        )
+
+      )
+
+    );
+
+  // =========================
+  // RUNTIME SCORE
+  // =========================
+
+  const runtimeScore =
 
     Math.round(
 
       (
         executionScore +
-
-        liquidityScore +
-
-        trendQualityScore
+        marketScore +
+        riskScore
       ) / 3
+
     );
 
-  const executionGrade =
+  // =========================
+  // EXECUTION GRADE
+  // =========================
 
-    executionPacket.latency < 40
+  let executionGrade =
+    "C";
 
-      ? "S"
+  if (
+    latency < 30
+  ) {
 
-      : executionPacket.latency < 70
+    executionGrade =
+      "S";
 
-      ? "A"
+  }
 
-      : executionPacket.latency < 100
+  else if (
+    latency < 60
+  ) {
 
-      ? "B"
+    executionGrade =
+      "A";
 
-      : "C";
+  }
+
+  else if (
+    latency < 100
+  ) {
+
+    executionGrade =
+      "B";
+
+  }
+
+  // =========================
+  // MARKET GRADE
+  // =========================
+
+  let marketGrade =
+    "C";
+
+  if (
+    spread < 0.01
+  ) {
+
+    marketGrade =
+      "S";
+
+  }
+
+  else if (
+    spread < 0.02
+  ) {
+
+    marketGrade =
+      "A";
+
+  }
+
+  else if (
+    spread < 0.05
+  ) {
+
+    marketGrade =
+      "B";
+
+  }
+
+  // =========================
+  // GOVERNANCE HEALTH
+  // =========================
+
+  let governanceHealth =
+    "CRITICAL";
+
+  if (
+    runtimeScore >= 85
+  ) {
+
+    governanceHealth =
+      "STABLE";
+
+  }
+
+  else if (
+    runtimeScore >= 65
+  ) {
+
+    governanceHealth =
+      "NORMAL";
+
+  }
+
+  else if (
+    runtimeScore >= 40
+  ) {
+
+    governanceHealth =
+      "DEGRADED";
+
+  }
+
+  // =========================
+  // EXECUTION STATUS
+  // =========================
+
+  let executionStatus =
+    "BLOCKED";
+
+  if (
+    runtimeScore >= 70 &&
+    !killSwitch
+  ) {
+
+    executionStatus =
+      "READY";
+
+  }
+
+  if (
+    runtimeScore >= 85 &&
+    !killSwitch
+  ) {
+
+    executionStatus =
+      "OPTIMAL";
+
+  }
+
+  if (
+    killSwitch
+  ) {
+
+    executionStatus =
+      "EMERGENCY_STOP";
+
+  }
+
+  // =========================
+  // RETURN
+  // =========================
 
   return {
 
     executionScore,
 
-    marketSurvivabilityScore,
+    marketScore,
 
-    trendQualityScore,
+    riskScore,
 
-    liquidityScore,
-
-    entryConfidenceScore,
-
-    aiCompositeScore,
+    runtimeScore,
 
     executionGrade,
+
+    marketGrade,
+
+    governanceHealth,
+
+    executionStatus,
 
   };
 

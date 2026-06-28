@@ -1,6 +1,6 @@
 // ======================================================
-// MICROSTRUCTURE EDGE STRATEGY
-// XRP-focused Order Flow / Liquidity / Momentum Strategy
+// GOVERNANCE EXECUTION STRATEGY
+// RUNTIME EXECUTION CONDITION EVALUATOR
 // ======================================================
 
 export function microstructureStrategy({
@@ -8,7 +8,6 @@ export function microstructureStrategy({
   marketPacket,
   strategyPacket,
   executionPacket,
-  intelligencePacket,
   derivedPacket,
 
 }) {
@@ -16,11 +15,6 @@ export function microstructureStrategy({
   // ======================================================
   // SAFE VALUES
   // ======================================================
-
-  const momentum =
-    Number(
-      strategyPacket?.momentum || 0
-    );
 
   const spread =
     Number(
@@ -37,83 +31,28 @@ export function microstructureStrategy({
       executionPacket?.latency || 0
     );
 
-  const spoofProbability =
-    Number(
-      intelligencePacket?.spoofProbability || 0
+  const executionAllowed =
+    Boolean(
+      derivedPacket?.executionAllowed
     );
 
-  const confidenceScore =
-    Number(
-      derivedPacket?.confidenceScore || 0
-    );
+  const executionSafety =
+    derivedPacket?.executionSafety ||
+    "NORMAL";
 
-  const liquidityStability =
-    derivedPacket?.liquidityStability ||
-    "UNKNOWN";
+  const governanceHealth =
+    derivedPacket?.governanceHealth ||
+    "NORMAL";
 
-  const momentumRegime =
-    derivedPacket?.momentumRegime ||
-    "UNKNOWN";
+  const marketCondition =
+    derivedPacket?.marketCondition ||
+    "STABLE";
 
+  const executionPressure =
+    derivedPacket?.executionPressure ||
+    "LOW";
   // ======================================================
-  // ORDER FLOW
-  // ======================================================
-
-  const buyPressure =
-    momentum > 0
-      ? Math.abs(momentum) * 10
-      : 0;
-
-  const sellPressure =
-    momentum < 0
-      ? Math.abs(momentum) * 10
-      : 0;
-
-  const orderFlowDelta =
-    buyPressure - sellPressure;
-
-  const aggressiveBuyFlow =
-    orderFlowDelta > 5;
-
-  const aggressiveSellFlow =
-    orderFlowDelta < -5;
-
-  // ======================================================
-  // TICK MOMENTUM
-  // ======================================================
-
-  let tickMomentumState =
-    "NEUTRAL";
-
-  if (
-    momentumRegime === "BUILDING"
-  ) {
-
-    tickMomentumState =
-      "ACCELERATING";
-
-  }
-
-  if (
-    momentumRegime === "STRONG"
-  ) {
-
-    tickMomentumState =
-      "TRENDING";
-
-  }
-
-  if (
-    momentumRegime === "EXPLOSIVE"
-  ) {
-
-    tickMomentumState =
-      "PARABOLIC";
-
-  }
-
-  // ======================================================
-  // SPREAD / MARKET MAKING
+  // SPREAD CONDITIONS
   // ======================================================
 
   const tightSpread =
@@ -125,409 +64,320 @@ export function microstructureStrategy({
   const spreadExpansion =
     spread > 0.05;
 
-  const marketMakingWindow =
-    tightSpread &&
-    latency < 30;
-
   // ======================================================
-  // LIQUIDITY GRAB
+  // LATENCY CONDITIONS
   // ======================================================
 
-  const liquidityGrab =
+  const latencyHealthy =
+    latency < 80;
 
-    intelligencePacket?.liquidityGrab ||
-
-    (
-      spreadExpansion &&
-      Math.abs(momentum) > 1
-    );
-
-  const fakeBreakout =
-
-    liquidityGrab &&
-    spoofProbability > 60;
+  const latencyCritical =
+    latency > 150;
 
   // ======================================================
-  // SPOOF DETECTION
+  // MARKET CONDITIONS
   // ======================================================
 
-  const spoofDanger =
-    spoofProbability > 70;
-
-  const fakeWallDetected =
-    intelligencePacket?.fakeWall ||
-    false;
-
-  // ======================================================
-  // VOLATILITY / SIGMA
-  // ======================================================
-
-  let sigmaState =
-    "NORMAL";
-
-  if (
-    spread > 0.05
-  ) {
-
-    sigmaState =
-      "VOLATILE";
-
-  }
-
-  if (
-    spread > 0.1
-  ) {
-
-    sigmaState =
-      "EXTREME";
-
-  }
-
-  // ======================================================
-  // DELTA PRESSURE
-  // ======================================================
-
-  let deltaPressure =
-    "NEUTRAL";
-
-  if (
-    aggressiveBuyFlow
-  ) {
-
-    deltaPressure =
-      "BUY_DOMINANT";
-
-  }
-
-  if (
-    aggressiveSellFlow
-  ) {
-
-    deltaPressure =
-      "SELL_DOMINANT";
-
-  }
-
-  // ======================================================
-  // GAMMA ACCELERATION
-  // ======================================================
-
-  let gammaState =
+  const stableMarket =
+    marketCondition ===
     "STABLE";
 
-  if (
-    Math.abs(momentum) > 1 &&
-    confidenceScore > 80
-  ) {
+  const volatileMarket =
+    marketCondition ===
+    "VOLATILE";
 
-    gammaState =
-      "ACCELERATING";
-
-  }
-
-  if (
-    Math.abs(momentum) > 2
-  ) {
-
-    gammaState =
-      "EXPLODING";
-
-  }
+  const unstableMarket =
+    marketCondition ===
+    "UNSTABLE";
 
   // ======================================================
-  // BREAKOUT ENGINE
-  // ======================================================
-
-  const breakoutLong =
-
-    momentum > 0.8 &&
-    confidenceScore > 75 &&
-    acceptableSpread;
-
-  const breakoutShort =
-
-    momentum < -0.8 &&
-    confidenceScore > 75 &&
-    acceptableSpread;
-
-  // ======================================================
-  // LIQUIDITY ABSORPTION
-  // ======================================================
-
-  const liquidityAbsorption =
-
-    tightSpread &&
-    Math.abs(momentum) < 0.3 &&
-    spoofProbability < 30;
-
-  // ======================================================
-  // MARKET ENVIRONMENT
-  // ======================================================
-
-  let marketEnvironment =
-    "RANGING";
-
-  if (
-    breakoutLong ||
-    breakoutShort
-  ) {
-
-    marketEnvironment =
-      "BREAKOUT";
-
-  }
-
-  if (
-    liquidityGrab
-  ) {
-
-    marketEnvironment =
-      "LIQUIDITY_SWEEP";
-
-  }
-
-  if (
-    spoofDanger
-  ) {
-
-    marketEnvironment =
-      "MANIPULATED";
-
-  }
-
-  // ======================================================
-  // DIRECTION
-  // ======================================================
-
-  let direction =
-    "NONE";
-
-  if (
-    breakoutLong ||
-    aggressiveBuyFlow
-  ) {
-
-    direction =
-      "LONG";
-
-  }
-
-  if (
-    breakoutShort ||
-    aggressiveSellFlow
-  ) {
-
-    direction =
-      "SHORT";
-
-  }
-
-  // ======================================================
-  // EXECUTION FILTER
+  // EXECUTION CONDITIONS
   // ======================================================
 
   const executionHealthy =
-    latency < 80;
 
-  const liquidityHealthy =
-    liquidityStability ===
-    "STABLE";
+    latencyHealthy &&
+    acceptableSpread &&
+    !unstableMarket;
 
-  const executionAllowed =
+  const marketMakingWindow =
 
-    executionHealthy &&
-    liquidityHealthy &&
-    !spoofDanger &&
-    !fakeBreakout &&
-    acceptableSpread;
-
+    tightSpread &&
+    latency < 30 &&
+    stableMarket;
   // ======================================================
-  // SIGNAL ENGINE
+  // ROUTING STATE
   // ======================================================
 
-  let signal =
+  let route =
+    "STANDBY";
+
+  if (
+    stableMarket &&
+    executionHealthy
+  ) {
+
+    route =
+      "NORMAL_EXECUTION";
+
+  }
+
+  if (
+    volatileMarket &&
+    executionHealthy
+  ) {
+
+    route =
+      "LIMITED_EXECUTION";
+
+  }
+
+  if (
+    unstableMarket
+  ) {
+
+    route =
+      "BLOCKED";
+
+  }
+
+  // ======================================================
+  // EXECUTION DECISION
+  // ======================================================
+
+  let executionState =
     "WAIT";
 
   if (
 
-    direction === "LONG" &&
     executionAllowed &&
-    confidenceScore > 70
+    executionHealthy &&
+    stableMarket
 
   ) {
 
-    signal =
-      "ENTER_LONG";
+    executionState =
+      "READY";
 
   }
 
   if (
-
-    direction === "SHORT" &&
-    executionAllowed &&
-    confidenceScore > 70
-
+    unstableMarket
   ) {
 
-    signal =
-      "ENTER_SHORT";
+    executionState =
+      "BLOCKED";
 
   }
 
+  if (
+    latencyCritical
+  ) {
+
+    executionState =
+      "EMERGENCY_BLOCK";
+
+  }
   // ======================================================
-  // EMERGENCY BLOCK
+  // FAILSAFE
   // ======================================================
 
   const emergencyExit =
 
-    spoofDanger ||
-    spreadExpansion ||
-    latency > 150;
+    latencyCritical ||
+    spreadExpansion;
 
   // ======================================================
-  // EDGE SCORE
+  // GOVERNANCE RISK
   // ======================================================
 
-  let edgeScore = 0;
-
-  edgeScore +=
-    confidenceScore * 0.35;
-
-  edgeScore +=
-    Math.abs(momentum) * 20;
-
-  edgeScore +=
-    liquidityHealthy
-      ? 15
-      : 0;
-
-  edgeScore +=
-    tightSpread
-      ? 15
-      : 0;
-
-  edgeScore -=
-    spoofProbability * 0.4;
-
-  edgeScore -=
-    latency * 0.2;
-
-  edgeScore =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(edgeScore)
-      )
-    );
-
-  // ======================================================
-  // STRATEGY STATE
-  // ======================================================
-
-  let strategyState =
-    "NEUTRAL";
+  let governanceRisk =
+    "NORMAL";
 
   if (
-    signal === "ENTER_LONG"
+    unstableMarket
   ) {
 
-    strategyState =
-      "BULLISH_ATTACK";
+    governanceRisk =
+      "HIGH";
 
   }
 
   if (
-    signal === "ENTER_SHORT"
+    latencyCritical
   ) {
 
-    strategyState =
-      "BEARISH_ATTACK";
-
-  }
-
-  if (
-    marketEnvironment ===
-    "MANIPULATED"
-  ) {
-
-    strategyState =
-      "SURVIVAL";
+    governanceRisk =
+      "CRITICAL";
 
   }
 
   // ======================================================
-  // FINAL STRATEGY PACKET
+  // EXECUTION PROFILE
+  // ======================================================
+
+  let executionProfile =
+    "STANDARD";
+
+  if (
+    marketMakingWindow
+  ) {
+
+    executionProfile =
+      "MARKET_MAKING";
+
+  }
+
+  if (
+    volatileMarket
+  ) {
+
+    executionProfile =
+      "LIMITED";
+
+  }
+
+  if (
+    unstableMarket
+  ) {
+
+    executionProfile =
+      "BLOCKED";
+
+  }
+  // ======================================================
+  // RUNTIME STATUS
+  // ======================================================
+
+  let runtimeStatus =
+    "NORMAL";
+
+  if (
+    governanceHealth ===
+    "DEGRADED"
+  ) {
+
+    runtimeStatus =
+      "DEGRADED";
+
+  }
+
+  if (
+    governanceHealth ===
+    "CRITICAL"
+  ) {
+
+    runtimeStatus =
+      "CRITICAL";
+
+  }
+
+  // ======================================================
+  // EXECUTION AUTHORITY
+  // ======================================================
+
+  const executionAuthority =
+
+    executionAllowed &&
+    executionSafety !==
+    "BLOCKED" &&
+    runtimeStatus !==
+    "CRITICAL";
+
+  // ======================================================
+  // ROUTE REASON
+  // ======================================================
+
+  let routeReason =
+    "NORMAL_RUNTIME";
+
+  if (
+    unstableMarket
+  ) {
+
+    routeReason =
+      "UNSTABLE_MARKET";
+
+  }
+
+  if (
+    latencyCritical
+  ) {
+
+    routeReason =
+      "LATENCY_CRITICAL";
+
+  }
+  // ======================================================
+  // FINAL GOVERNANCE PACKET
   // ======================================================
 
   return {
 
-    // signal
-
-    signal,
-    direction,
-    strategyState,
-
     // execution
 
-    executionAllowed,
+    executionAllowed:
+      executionAuthority,
+
+    executionState,
+
+    executionProfile,
+
     emergencyExit,
 
-    // scores
+    // governance
 
-    edgeScore,
-    confidenceScore,
+    governanceRisk,
 
-    // order flow
+    governanceHealth,
 
-    buyPressure,
-    sellPressure,
-    orderFlowDelta,
+    runtimeStatus,
 
-    // regimes
+    // routing
 
-    momentumRegime,
-    liquidityStability,
-    marketEnvironment,
+    route,
 
-    // sigma/delta/gamma
+    routeReason,
 
-    sigmaState,
-    deltaPressure,
-    gammaState,
+    // market
+
+    marketCondition,
+
+    stableMarket,
+
+    volatileMarket,
+
+    unstableMarket,
 
     // spread
 
     spread,
+
     tightSpread,
+
+    acceptableSpread,
+
     spreadExpansion,
 
-    // spoof
+    // latency
 
-    spoofProbability,
-    spoofDanger,
-    fakeWallDetected,
-    fakeBreakout,
+    latency,
 
-    // liquidity
+    latencyHealthy,
 
-    liquidityGrab,
-    liquidityAbsorption,
-
-    // breakout
-
-    breakoutLong,
-    breakoutShort,
+    latencyCritical,
 
     // execution
 
-    latency,
+    executionPressure,
+
+    executionSafety,
+
     marketMakingWindow,
 
     // misc
 
     price,
-    momentum,
 
   };
 

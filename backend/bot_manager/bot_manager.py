@@ -1,0 +1,1234 @@
+# -*- coding: utf-8 -*-
+
+# =========================
+# IMPORTS
+# =========================
+from backend.aggregation.MicrostructureStateBuilder import (
+    MicrostructureStateBuilder
+)
+
+from backend.runtime import runtime_registry
+import traceback
+import os
+import time
+import uuid
+from dotenv import load_dotenv
+
+from backend.utils.log_buffer import (
+    add_log
+)
+
+from backend.bot_manager.runtime_state import (
+    BotRuntimeState
+)
+
+from backend.portfolio.portfolio_manager import (
+    PortfolioManager
+)
+
+from backend.core.orderbook_manager import (
+    OrderBookManager
+)
+
+from backend.strategy.orderflow_depth_strategy import (
+    OrderFlowDepthStrategy,
+)
+
+from backend.market.exchange_factory import (
+    ExchangeFactory
+)
+
+from backend.core.logger import (
+    logger
+)
+
+from backend.execution.kucoin_trade import (
+    KucoinTradeClient
+)
+
+from Bot.engine.execution_engine import (
+    ExecutionEngine
+)
+
+load_dotenv()
+
+# =========================
+# BOT MANAGER
+# =========================
+
+class BotManager:
+
+    def __init__(self):
+
+        self.engine = None
+
+        # ============================================
+        # EXECUTION LOCK
+        # ============================================
+
+        self.pending_order = False
+
+        # ============================================
+        # COOLDOWN
+        # ============================================
+
+        self.last_order_time = 0
+
+        self.cooldown_seconds = 2
+
+        self.last_execution_time = 0
+
+        # ============================================
+        # FAILURE COOLDOWN
+        # ============================================
+
+        self.last_failure_time = 0
+
+        self.failure_cooldown_sec = 10
+
+        self.price_manager = None
+
+        self._running = False
+
+        self.symbol = None
+
+        self.exchange_name = "kucoin"
+
+        self.exchange = None
+
+        self.config = {}
+
+        # =========================
+        # ORDERFLOW COMPONENTS
+        # =========================
+
+        self.ob_manager = None
+
+        self.strategy = None
+
+        self.ws = None
+
+        # =========================
+        # SESSION
+        # =========================
+
+        self.session_id = 0
+
+        # =========================
+        # STATUS
+        # =========================
+
+        self.last_signal = None
+
+        self.last_price = 0
+
+        self.market_ready = False
+
+        self.last_update_time = 0
+
+        # =========================
+        # POSITION
+        # =========================
+
+        self.position = "NONE"
+
+        self.entry_price = None
+
+        # =========================
+        # RISK
+        # =========================
+
+        self.tp_percent = 2.0
+
+        self.sl_percent = 1.0
+
+        # =========================
+        # RUNTIME STATE
+        # =========================
+
+        self.state = BotRuntimeState()
+
+        # ============================================
+        # PROPAGATION UPDATE ID
+        # ============================================
+
+        self.update_id = 0
+
+        # ============================================
+        # ACTIVE RUNTIME
+        # ============================================
+
+        self.active_runtime_id = None
+        # ============================================
+        # MICROSTRUCTURE RUNTIME
+        # ============================================
+
+        self.microstructure_builder = (
+            MicrostructureStateBuilder()
+        )
+
+    # ============================================
+    # POSITION RECONCILIATION
+    # ============================================
+
+    def reconcile_positions(self):
+
+        try:
+
+            if self.state.reconciliation_running:
+
+                return
+
+            now = time.time()
+
+            elapsed = (
+                now
+                - self.state.last_reconciliation_ts
+            )
+
+            if (
+                elapsed
+                < self.state.reconciliation_interval
+            ):
+
+                return
+
+            self.state.reconciliation_running = True
+
+            exchange_position = None
+
+            if (
+                self.engine
+                and hasattr(self.engine, "get_position")
+            ):
+
+                exchange_position = (
+                    self.engine.get_position()
+                )
+
+            self.state.exchange_position_cache = (
+                exchange_position
+            )
+
+            local_position = (
+                self.state.actual_position
+            )
+
+            if (
+                exchange_position is None
+                and local_position is not None
+            ):
+
+                logger.warning(
+                    "[RECONCILIATION] "
+                    "ghost local position detected"
+                )
+
+                self.state.actual_position = None
+
+                self.state.position_state = "FLAT"
+
+            elif (
+                exchange_position is not None
+                and local_position is None
+            ):
+
+                logger.warning(
+                    "[RECONCILIATION] "
+                    "exchange position exists "
+                    "but local state is flat"
+                )
+
+                self.state.actual_position = (
+                    exchange_position
+                )
+
+                self.state.position_state = "OPEN"
+
+            elif (
+                exchange_position is not None
+                and local_position is not None
+            ):
+
+                exchange_side = (
+                    exchange_position.get("side")
+                    if isinstance(exchange_position, dict)
+                    else None
+                )
+
+                local_side = (
+                    local_position.get("side")
+                    if isinstance(local_position, dict)
+                    else None
+                )
+
+                if (
+                    exchange_side
+                    and local_side
+                    and exchange_side != local_side
+                ):
+
+                    logger.warning(
+                        "[RECONCILIATION] "
+                        "position side mismatch"
+                    )
+
+                    self.state.actual_position = (
+                        exchange_position
+                    )
+
+            self.state.last_reconciliation_ts = (
+                time.time()
+            )
+
+        except Exception as e:
+
+            logger.error(
+                f"[RECONCILIATION_ERROR] {e}"
+            )
+
+        finally:
+
+            self.state.reconciliation_running = False
+
+    # ============================================
+    # PROPAGATION TRACE UPDATE
+    # ============================================
+
+    def update_trace(
+        self,
+        stage,
+        timestamp=None
+    ):
+
+        try:
+
+            if timestamp is None:
+
+                timestamp = time.time()
+
+            trace = self.state.runtime_trace
+
+            if stage not in trace:
+
+                return
+
+            trace[stage] = {
+                "ok": True,
+                "timestamp": timestamp,
+                "update_id": self.update_id
+            }
+
+        except Exception as e:
+
+            logger.error(
+                f"[TRACE_UPDATE_ERROR] {e}"
+            )
+
+    # ============================================
+    # START
+    # ============================================
+
+    def start(self, config):
+
+        try:
+
+            self.stop()
+
+            self.session_id += 1
+
+            current_session = (
+                self.session_id
+            )
+
+            print(
+                "🆕 SESSION:",
+                current_session
+            )
+
+            add_log(
+                f"🆕 SESSION: "
+                f"{current_session}"
+            )
+
+            self.position = "NONE"
+
+            self.entry_price = None
+
+            self.last_signal = None
+
+            self.last_price = 0
+
+            self.market_ready = False
+
+            self.pending_order = False
+
+            self.last_update_time = 0
+
+            self.last_order_time = 0
+
+            self.last_failure_time = 0
+
+            self.update_id = 0
+
+            self.symbol = config["symbol"].upper()
+
+            self.config = config
+
+            self.tp_percent = config.get(
+                "tp_percent",
+                2.0
+            )
+
+            self.sl_percent = config.get(
+                "sl_percent",
+                1.0
+            )
+
+            add_log(
+                f"🚀 START BOT: "
+                f"{self.symbol}"
+            )
+
+            self.ob_manager = (
+                OrderBookManager()
+            )
+
+            self.strategy = (
+                OrderFlowDepthStrategy(
+                    self.ob_manager
+                )
+            )
+
+            exchange = None
+
+            if config.get("mode") == "live":
+
+                print(
+                    "🟢 LIVE EXCHANGE ENABLED"
+                )
+
+                add_log(
+                    "🟢 LIVE EXCHANGE ENABLED"
+                )
+
+                exchange = KucoinTradeClient()
+
+            portfolio = PortfolioManager(
+                initial_balance=1000
+            )
+
+            self.engine = ExecutionEngine(
+                exchange=exchange,
+                logger=logger,
+                portfolio=portfolio,
+                notifier=None,
+                price_manager=self.ob_manager
+            )
+
+            if runtime_registry.trading_runtime:
+
+                runtime_registry \
+                    .trading_runtime \
+                    .execution_runtime \
+                    .set_engine(
+                        self.engine
+                    )
+
+            from backend.routers.positions import (
+                set_engine
+            )
+
+            set_engine(self.engine)
+
+            self.reconcile_positions()
+
+            self.engine.set_config(config)
+
+            self.engine.symbol = self.symbol
+
+            self.engine.start()
+
+            runtime_metrics = (
+                self.state.runtime_metrics
+            )
+
+            runtime_metrics[
+                "ws_connected"
+            ] = False
+
+            runtime_metrics[
+                "ws_thread_alive"
+            ] = False
+
+            runtime_metrics[
+                "market_ready"
+            ] = False
+
+            def on_update(
+                symbol,
+                data,
+                runtime_id
+            ):
+
+                now = time.time()
+
+                self.update_id += 1
+
+                rt = self.state.runtime_trace
+
+                rm = self.state.runtime_metrics
+
+                if runtime_id != self.active_runtime_id:
+
+                    print(
+                        "[STALE CALLBACK BLOCKED]",
+                        symbol,
+                        runtime_id,
+                        self.active_runtime_id
+                    )
+
+                    return
+
+                if symbol != self.symbol:
+
+                    print(
+                        "[SYMBOL MISMATCH BLOCKED]",
+                        symbol,
+                        self.symbol
+                    )
+
+                    return
+
+                if current_session != self.session_id:
+
+                    return
+
+                callback_symbol = data.get(
+                    "symbol"
+                )
+
+                print(
+                    "[CALLBACK SYMBOL]",
+                    callback_symbol
+                )
+
+                print(
+                    "[ACTIVE SYMBOL]",
+                    self.symbol
+                )
+
+                if callback_symbol != self.symbol:
+
+                    print(
+                        "[STALE CALLBACK BLOCKED]",
+                        callback_symbol,
+                        self.symbol
+                    )
+
+                    return
+
+                try:
+
+                    # ============================================
+                    # WS RECEIVE
+                    # ============================================
+
+                    self.update_trace(
+                        "ws_receive",
+                        now
+                    )
+
+                    rm[
+                        "last_ws_message"
+                    ] = now
+
+                    rm[
+                        "message_count"
+                    ] += 1
+
+                    rm[
+                        "ws_connected"
+                    ] = True
+
+                    rm[
+                        "ws_thread_alive"
+                    ] = True
+
+                    # ============================================
+                    # CALLBACK FIRE
+                    # ============================================
+
+                    self.update_trace(
+                        "callback_fire",
+                        now
+                    )
+
+                    rm[
+                        "last_callback"
+                    ] = now
+
+                    bids = data.get(
+                        "bids",
+                        {}
+                    )
+
+                    asks = data.get(
+                        "asks",
+                        {}
+                    )
+
+                    price = data.get(
+                        "price",
+                        data.get(
+                            "last_price",
+                            0
+                        )
+                    )
+                    print(
+                        "[PRICE DEBUG]",
+                        data.get("price"),
+                        data.get("last_price")
+                    )
+
+                    add_log(
+                        f"📡 WS CALLBACK "
+                        f"bids={len(bids)} "
+                        f"asks={len(asks)}",
+                        "warning"
+                    )
+
+                    if (
+                        not bids
+                        or not asks
+                    ):
+
+                        print(
+                            "⚠️ EMPTY CALLBACK BOOK"
+                        )
+
+                        return
+
+                    self.ob_manager.update(
+                        bids,
+                        asks
+                    )
+
+                    self.ob_manager.current_price = (
+                        price
+                    )
+
+                    self.last_price = price
+
+                    self.market_ready = True
+
+                    self.last_update_time = (
+                        time.time()
+                    )
+
+                    # ============================================
+                    # RUNTIME PIPELINE
+                    # ============================================
+
+                    try:
+
+                        buy_volume = sum(
+                            float(size)
+                            for size in bids.values()
+                        )
+
+                        sell_volume = sum(
+                            float(size)
+                            for size in asks.values()
+                        )
+
+                        packet = {
+
+                            "buyVolume": buy_volume,
+
+                            "sellVolume": sell_volume,
+
+                            "bestBid": float(
+                                data.get("best_bid", 0)
+                            ),
+
+                            "bestAsk": float(
+                                data.get("best_ask", 0)
+                            ),
+
+                            "lastPrice": float(price),
+                        }
+                        print(
+                            "[PACKET DEBUG]",
+                            packet
+                        )
+
+                        micro_state = (
+                            self.microstructure_builder
+                            .build_microstructure_state(
+                                packet
+                            )
+                        )
+
+                        if runtime_registry.trading_runtime:
+
+                            print(
+                                "[BOTMANAGER] RUNTIME PATH ENABLED"
+                            )
+
+                            runtime_registry.trading_runtime.process_runtime(
+                                micro_state
+                            )
+
+                    except Exception as runtime_error:
+
+                        logger.exception(
+                            "[RUNTIME PIPELINE ERROR]"
+                        )
+
+                    # ============================================
+                    # BOT UPDATE
+                    # ============================================
+
+                    self.update_trace(
+                        "bot_update",
+                        time.time()
+                    )
+
+                    rm[
+                        "last_bot_update"
+                    ] = time.time()
+
+                    rm[
+                        "market_ready"
+                    ] = True
+
+                    rm[
+                        "latency_ms"
+                    ] = (
+                        time.time() - now
+                    ) * 1000
+
+                    self.reconcile_positions()
+
+                    if self.engine:
+
+                        self.engine.on_price(
+                            self.symbol,
+                            price
+                        )
+
+                    signal = None
+
+                    if signal:
+
+                        self.last_signal = signal
+
+                        self.state.strategy_state[
+                            "signal"
+                        ] = signal
+
+                        add_log(
+                            f"🟡 SIGNAL: "
+                            f"{signal}"
+                        )
+
+                        if not self.engine:
+
+                            return
+
+                        if self.pending_order:
+
+                            add_log(
+                                "🛑 PENDING ORDER LOCK",
+                                "warning"
+                            )
+
+                            return
+
+                        current_time = time.time()
+
+                        if (
+                            current_time
+                            - self.last_order_time
+                            < self.cooldown_seconds
+                        ):
+
+                            return
+
+                        if (
+                            current_time
+                            - self.last_failure_time
+                            < self.failure_cooldown_sec
+                        ):
+
+                            return
+
+                        self.pending_order = True
+
+                        self.last_order_time = current_time
+
+                        try:
+
+                            print(
+                                "[BOTMANAGER] SIGNAL HANDOFF TO TRADING_RUNTIME"
+                            )
+
+                        except Exception as execution_error:
+
+                            self.last_failure_time = (
+                                time.time()
+                            )
+
+                            logger.error(
+                                f"[EXECUTION_FAILURE] "
+                                f"{execution_error}"
+                            )
+
+                            logger.error(
+                                traceback.format_exc()
+                            )
+
+                        finally:
+
+                            self.pending_order = False
+
+                except Exception as e:
+
+                    logger.error(
+                        f"❌ on_update ERROR: "
+                        f"{e}"
+                    )
+
+                    logger.error(
+                        traceback.format_exc()
+                    )
+
+            self.active_runtime_id = str(
+                uuid.uuid4()
+            )
+
+            print(
+                "[NEW RUNTIME]",
+                self.active_runtime_id
+            )
+
+            add_log("[TRACE] WS START CALLED")
+
+            self.ws = (
+                ExchangeFactory.create_market_ws(
+                    exchange=self.exchange_name,
+                    symbol=self.symbol,
+                    on_update=on_update,
+                    runtime_id=self.active_runtime_id
+                )
+            )
+
+            print(type(self.ws), flush=True)
+
+            runtime_metrics[
+                "ws_thread_alive"
+            ] = True
+
+            print("[WS START CALLED]")
+
+            self.ws.start()
+
+            self._running = True
+
+            add_log(
+                "🟢 ORDERBOOK WS STARTED"
+            )
+
+            return {
+                "status": "started",
+                "symbol": self.symbol,
+            }
+
+        except Exception as e:
+
+            add_log(
+                traceback.format_exc()
+            )
+
+            add_log(
+                f"❌ BOT START ERROR: "
+                f"{e}"
+            )
+
+            return {
+                "status": "error",
+                "reason": str(e),
+            }
+
+    # =========================
+    # STOP
+    # =========================
+
+    def stop(self):
+
+        add_log(
+            "🛑 BOT STOP"
+        )
+
+        self._running = False
+
+        try:
+
+            if self.ws:
+
+                self.ws.stop()
+
+                time.sleep(1)
+
+            runtime_metrics = (
+                self.state.runtime_metrics
+            )
+
+            runtime_metrics[
+                "ws_connected"
+            ] = False
+
+            runtime_metrics[
+                "ws_thread_alive"
+            ] = False
+
+            runtime_metrics[
+                "market_ready"
+            ] = False
+
+            self.ws = None
+
+            self.strategy = None
+
+            self.ob_manager = None
+
+            from backend.routers.positions import (
+                set_engine
+            )
+
+            set_engine(None)
+
+            if runtime_registry.trading_runtime:
+
+                runtime_registry \
+                    .trading_runtime \
+                    .execution_runtime \
+                    .set_engine(
+                        None
+                    )
+
+            self.engine = None
+
+            self._running = False
+
+            self.position = "NONE"
+
+            self.entry_price = None
+
+            self.last_signal = None
+
+            self.last_price = 0
+
+            self.market_ready = False
+
+            self.last_update_time = 0
+
+            self.pending_order = False
+
+            add_log(
+                "🛑 BOT STOPPED"
+            )
+
+            return {
+                "status": "stopped"
+            }
+
+        except Exception as e:
+
+            add_log(
+                f"❌ STOP ERROR: "
+                f"{e}"
+            )
+
+            return {
+                "status": "error",
+                "reason": str(e),
+            }
+
+    # =========================
+    # RESULT
+    # =========================
+
+    def get_result(self):
+
+        stale_seconds = 0
+
+        if self.last_update_time > 0:
+
+            stale_seconds = (
+                time.time()
+                - self.last_update_time
+            )
+
+        market_stale = (
+            stale_seconds > 5
+        )
+
+        safe_price = (
+            float(self.last_price)
+            if self.market_ready
+            else 0.0
+        )
+
+        actual_position = None
+
+        pending_order = False
+
+        realized_pnl = 0
+
+        unrealized_pnl = 0
+
+        balance = 0.0
+
+        if self.engine:
+
+            actual_position = getattr(
+                self.engine,
+                "actual_position",
+                None
+            )
+
+            pending_order = getattr(
+                self.engine,
+                "pending_order",
+                False
+            )
+
+            realized_pnl = getattr(
+                self.engine,
+                "pnl",
+                0
+            )
+
+            unrealized_pnl = getattr(
+                self.engine,
+                "unrealized_pnl",
+                0
+            )
+
+            try:
+
+                balance = float(
+                    getattr(
+                        self.engine,
+                        "balance",
+                        0.0
+                    )
+                )
+
+            except Exception as e:
+
+                logger.error(
+                    f"❌ BALANCE READ ERROR: {e}"
+                )
+
+                balance = 0.0
+
+        self.update_trace(
+            "status_api",
+            time.time()
+        )
+
+        self.state.runtime_metrics[
+            "last_api_push"
+        ] = time.time()
+
+        return {
+
+            "timestamp": time.time(),
+
+            "price": safe_price,
+
+            "marketReady": self.market_ready,
+
+            "marketStale": market_stale,
+
+            "lastUpdateAge": stale_seconds,
+
+            "pnl": (
+                realized_pnl
+                + unrealized_pnl
+            ),
+
+            "balance": balance,
+
+            "equity": (
+                balance
+                + unrealized_pnl
+            ),
+
+            "position": actual_position,
+
+            "pendingOrder": pending_order,
+
+            "signal": self.last_signal,
+
+            "symbol": self.symbol,
+
+            "status": (
+                "RUNNING"
+                if self._running
+                else "STOPPED"
+            ),
+
+            "runtime_trace": (
+                self.state.runtime_trace
+            ),
+
+            "runtime_metrics": (
+                self.state.runtime_metrics
+            ),
+
+            "strategy_state": (
+                self.state.strategy_state
+            ),
+
+            "execution_state": (
+                self.state.execution_state
+            ),
+
+            "ws_connected": (
+                self.ws is not None
+                and getattr(self.ws, "connected", False)
+            ),
+
+            "execution_mode": (
+                "SIMULATION"
+                if self.config.get(
+                    "dry_run",
+                    True
+                )
+                else "LIVE"
+            ),
+
+            "real_order_allowed": (
+                not self.config.get(
+                    "dry_run",
+                    True
+                )
+            ),
+
+            "cooldown_active": (
+                self.last_execution_time
+                and (
+                    time.time()
+                    - self.last_execution_time
+                ) < 3
+            ),
+
+            "position_active": (
+                actual_position is not None
+            ),
+
+            "position_side": (
+                actual_position.get("side")
+                if actual_position
+                else None
+            ),
+
+            "executionAuthorityScore": 100,
+
+            "authoritativeRuntimeState": (
+                "SYNCHRONIZED"
+                if self.market_ready
+                else "WAITING_MARKET"
+            ),
+
+            "runtimeSynchronizationState": (
+                "HEALTHY"
+                if not market_stale
+                else "STALE"
+            ),
+        }
+
+    # =========================
+    # STATUS
+    # =========================
+
+    def get_status(self):
+
+        if self.engine is None:
+
+            return {
+
+                "status": "STOPPED",
+
+                "price": 0.0,
+
+                "marketReady": False,
+
+                "marketStale": True,
+
+                "execution_mode": "SIMULATION",
+
+                "real_order_allowed": False,
+
+                "ws_connected": False,
+
+                "position": None,
+
+                "position_active": False,
+
+                "pendingOrder": False,
+
+                "balance": 0.0,
+
+                "equity": 0.0,
+
+                "pnl": 0.0,
+
+                "runtime_trace": (
+                    self.state.runtime_trace
+                ),
+
+                "runtime_metrics": (
+                    self.state.runtime_metrics
+                ),
+
+                "strategy_state": (
+                    self.state.strategy_state
+                ),
+
+                "execution_state": (
+                    self.state.execution_state
+                ),
+
+                "executionAuthorityScore": 0,
+
+                "authoritativeRuntimeState": "STOPPED",
+
+                "runtimeSynchronizationState": "OFFLINE"
+            }
+
+        return self.get_result()
+
+# =========================
+# GLOBAL INSTANCE
+# =========================
+
+_bot_manager = None
+
+# =========================
+# GET BOT MANAGER
+# =========================
+
+def get_bot_manager():
+
+    global _bot_manager
+
+    if _bot_manager is None:
+
+        _bot_manager = BotManager()
+
+    return _bot_manager

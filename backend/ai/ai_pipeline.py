@@ -15,22 +15,38 @@ class AIPipeline:
 
     def decide(self, market):
 
-        candles = market.get("candles", [])
+        runtime_state = market.get("runtime_state")
 
-        if len(candles) < 20:
-            return None, None
+        # ==================================
+        # RuntimeState Mode
+        # ==================================
+        if runtime_state is not None:
 
-        # ① 特徴量
-        features = self.feature_engine.build(candles)
+            features = self.feature_engine.build(
+                runtime_state
+            )
+
+        else:
+
+            candles = market.get("candles", [])
+
+            if len(candles) < 20:
+                return None, None
+
+            features = self.feature_engine.build(
+                candles
+            )
 
         market_data = {
             "price": market.get("price"),
             "features": features,
             "trend": market.get("trend"),
-            "volatility": market.get("volatility")
+            "volatility": market.get("volatility"),
+            "runtime_state": runtime_state
         }
 
-        # ② AI判断
-        signal = self.brain.decide(market_data)
+        signal = self.brain.decide(
+            market_data
+        )
 
         return signal, self.brain.get_events(10)

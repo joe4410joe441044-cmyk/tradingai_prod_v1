@@ -8,93 +8,41 @@ import {
 export default function PriceCard({
   price = null,
 }) {
-
-  const prev =
-    useRef(null);
+  const prev = useRef(null);
 
   const hasPrice =
-
     price !== null &&
     price !== undefined &&
     Number.isFinite(
       Number(price)
     );
 
-  const previousPrice =
-
-    prev.current !== null &&
-    prev.current !== undefined &&
-    Number.isFinite(
-      Number(prev.current)
-    )
-
-      ? Number(prev.current)
-
-      : null;
-
   const currentPrice =
-
     hasPrice
       ? Number(price)
       : null;
 
-  const isUp =
-
-    (
-      currentPrice !== null &&
-      previousPrice !== null &&
-      currentPrice >
-        previousPrice
-    );
-
-  const isDown =
-
-    (
-      currentPrice !== null &&
-      previousPrice !== null &&
-      currentPrice <
-        previousPrice
-    );
-
   useEffect(() => {
-
-    if (
-      hasPrice
-    ) {
-
-      prev.current =
-        Number(price);
-
+    if (!hasPrice) {
+      return;
     }
+
+    prev.current =
+      Number(price);
 
   }, [
     price,
     hasPrice,
   ]);
 
-  const color =
-
-    isUp
-
-      ? "#4ade80"
-
-      : isDown
-
-      ? "#f87171"
-
-      : "#fff";
+  const color = "#fff";
 
   const displayPrice =
-
     hasPrice
-
-      ? Number(price)
-          .toLocaleString()
-
+      ? currentPrice.toLocaleString()
       : "-";
 
   return (
-
     <div
       style={{
         background: "#111",
@@ -106,8 +54,6 @@ export default function PriceCard({
         transition: "0.2s",
       }}
     >
-
-      {/* TITLE */}
       <div
         style={{
           fontSize: "12px",
@@ -118,7 +64,6 @@ export default function PriceCard({
         Price
       </div>
 
-      {/* VALUE */}
       <div
         style={{
           fontSize: "32px",
@@ -130,7 +75,6 @@ export default function PriceCard({
         {displayPrice}
       </div>
 
-      {/* DIRECTION */}
       <div
         style={{
           fontSize: "12px",
@@ -138,19 +82,8 @@ export default function PriceCard({
           opacity: 0.7,
         }}
       >
-
-        {isUp && "▲ UP"}
-
-        {isDown && "▼ DOWN"}
-
-        {!isUp &&
-          !isDown &&
-          "-"}
-
+        -
       </div>
-
     </div>
-
   );
-
 }

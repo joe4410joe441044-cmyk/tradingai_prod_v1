@@ -123,9 +123,9 @@ export default function TradeConfigPanel({ onChange }) {
   // =========================
   // 初回同期
   // =========================
-  useEffect(() => {
-    emitChange(config);
-  }, []);
+useEffect(() => {
+  emitChange(config);
+}, [config, emitChange]);
 
   // =========================
   // クリーンアップ（重要）
