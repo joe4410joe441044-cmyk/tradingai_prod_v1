@@ -71,7 +71,7 @@ class MultiTimeFrameManager:
 
 
         #  EE
-EE
+# EE
 
         if not isinstance(timeframe, str) or len(timeframe) < 2:
 
