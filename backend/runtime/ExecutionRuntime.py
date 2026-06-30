@@ -46,6 +46,8 @@ from backend.runtime.adapters.execution_signal_adapter import (
     ExecutionSignalAdapter,
 )
 
+import backend.config as config
+
 
 class ExecutionRuntime:
 
@@ -73,6 +75,12 @@ class ExecutionRuntime:
         # Latest direction-contract trace
         self.signal_adapter_reached = False
         self.last_adapter_output = None
+
+        # Latest ExecutionEngine handoff trace
+        self.handoff_attempted = False
+        self.handoff_executed = False
+        self.handoff_blocked_reason = None
+        self.handoff_signal = None
 
     # ========================================================
     # ENGINE BINDING
@@ -106,7 +114,110 @@ class ExecutionRuntime:
             "signalAdapterReached": self.signal_adapter_reached,
             "normalizedDirection": canonical_direction,
             "adapterOutput": self.last_adapter_output,
+            "handoffAttempted": self.handoff_attempted,
+            "handoffExecuted": self.handoff_executed,
+            "handoffBlockedReason": self.handoff_blocked_reason,
+            "handoffSignal": self.handoff_signal,
         }
+
+    # ========================================================
+    # EXECUTION ENGINE HANDOFF
+    # ========================================================
+
+    def handoff_adapter_output(
+        self,
+        adapter_output,
+    ):
+
+        self.handoff_attempted = True
+        self.handoff_signal = adapter_output
+
+        if self.engine is None:
+
+            self.handoff_blocked_reason = (
+                "ENGINE_UNAVAILABLE"
+            )
+            return
+
+        if adapter_output is None:
+
+            self.handoff_blocked_reason = (
+                "ADAPTER_OUTPUT_UNAVAILABLE"
+            )
+            return
+
+        if getattr(self.engine, "mode", None) == "live":
+
+            self.handoff_blocked_reason = (
+                "ENGINE_MODE_LIVE"
+            )
+            return
+
+        engine_config = getattr(
+            self.engine,
+            "config",
+            {},
+        )
+
+        config_dry_run = (
+            engine_config.get("dry_run")
+            if isinstance(engine_config, dict)
+            else None
+        )
+
+        engine_dry_run = getattr(
+            self.engine,
+            "dry_run",
+            config_dry_run,
+        )
+
+        if engine_dry_run is not True:
+
+            self.handoff_blocked_reason = (
+                "ENGINE_DRY_RUN_NOT_TRUE"
+            )
+            return
+
+        if getattr(self.engine, "exchange", None) is not None:
+
+            self.handoff_blocked_reason = (
+                "ENGINE_EXCHANGE_ATTACHED"
+            )
+            return
+
+        if config.ALLOW_LIVE is not False:
+
+            self.handoff_blocked_reason = (
+                "CONFIG_ALLOW_LIVE_NOT_FALSE"
+            )
+            return
+
+        if config.TRADE_MODE != "paper":
+
+            self.handoff_blocked_reason = (
+                "CONFIG_TRADE_MODE_NOT_PAPER"
+            )
+            return
+
+        try:
+
+            self.engine.submit_signal(
+                adapter_output
+            )
+
+            self.handoff_executed = True
+            self.handoff_blocked_reason = None
+
+        except Exception as e:
+
+            self.handoff_blocked_reason = (
+                "ENGINE_SUBMIT_EXCEPTION"
+            )
+
+            runtime_debug(
+                "ExecutionEngine handoff failed error=%s",
+                e,
+            )
 
     # ========================================================
     # STRATEGY VALIDATION
@@ -290,23 +401,22 @@ class ExecutionRuntime:
         self.governance.register_execution()
 
         # ----------------------------------------------------
-        # Execution Engine Dispatch
+        # Execution Engine Handoff
         # ----------------------------------------------------
 
-        if self.engine:
+        self.signal_adapter_reached = True
 
-            self.signal_adapter_reached = True
-
-            signal = (
-                ExecutionSignalAdapter.adapt(
-                    execution_event
-                )
+        signal = (
+            ExecutionSignalAdapter.adapt(
+                execution_event
             )
+        )
 
-            self.last_adapter_output = signal
+        self.last_adapter_output = signal
 
-            # STEP56-4では adapter到達確認のみ。
-            # ExecutionEngine handoff は次STEP。
+        self.handoff_adapter_output(
+            self.last_adapter_output
+        )
 
         return execution_event
 
@@ -427,6 +537,10 @@ class ExecutionRuntime:
     ):
         self.signal_adapter_reached = False
         self.last_adapter_output = None
+        self.handoff_attempted = False
+        self.handoff_executed = False
+        self.handoff_blocked_reason = None
+        self.handoff_signal = None
 
         if governance_decision is not None:
 

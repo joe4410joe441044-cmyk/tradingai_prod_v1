@@ -17,14 +17,6 @@ from fastapi import WebSocket
 
 import backend.runtime.runtime_registry as registry
 
-from backend.runtime.adapters.execution_signal_adapter import (
-    ExecutionSignalAdapter
-)
-
-from backend.bot_manager.bot_manager import (
-    get_bot_manager
-)
-
 from backend.utils.log_buffer import runtime_debug
 
 
@@ -145,35 +137,6 @@ class ConnectionManager:
                     microstructure_state
                 )
             )
-
-            # ------------------------------------------------
-            # Runtime -> Engine Wiring
-            # ------------------------------------------------
-
-            execution_event = (
-                runtime_result
-                .get("runtime", {})
-                .get("execution")
-            )
-
-            signal = (
-                ExecutionSignalAdapter.adapt(
-                    execution_event
-                )
-            )
-
-            if signal:
-
-                bot_manager = get_bot_manager()
-
-                if (
-                    bot_manager
-                    and bot_manager.engine
-                ):
-
-                    bot_manager.engine.submit_signal(
-                        signal
-                    )
 
             # ------------------------------------------------
             # Broadcast Runtime Telemetry
