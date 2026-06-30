@@ -384,18 +384,6 @@ class ExecutionEngine:
 
                 return
 
-            # =====================================
-            # TEMP SIGNAL EMIT
-            # =====================================
-
-            signal = {
-                "id": int(time.time() * 1000),
-                "side": "BUY",
-                "timestamp": time.time()
-            }
-
-            self.submit_signal(signal)
-
         except Exception:
 
             self.logger.exception("ON_PRICE EXCEPTION")
