@@ -73,10 +73,6 @@ export const ConnectionState = {
 
 };
 
-let connectionState =
-    ConnectionState.DISCONNECTED;
-
-
 /*
 ====================================
 UPDATE RUNTIME STATE
@@ -87,14 +83,18 @@ function updateRuntimeState(
     state
 ) {
 
-    connectionState = state;
-
     telemetryStore.runtime = {
 
         ...telemetryStore.runtime,
 
         connectionState:
             state,
+
+        wsStatus:
+            state,
+
+        websocketConnected:
+            state === ConnectionState.LIVE,
 
         reconnectAttempts,
 
@@ -272,6 +272,17 @@ function connectWebSocket() {
         lastPacketTimestamp =
             Date.now();
 
+        telemetryStore.runtime = {
+
+            ...telemetryStore.runtime,
+
+            lastPacketTimestamp,
+
+            lastMessageTimestamp:
+                lastPacketTimestamp,
+
+        };
+
         let message = null;
 
         /*
@@ -345,17 +356,48 @@ function connectWebSocket() {
             typeof message === "object" &&
             "price" in message
         ) {
+            if ("status" in message) {
+                telemetryStore.runtime = {
+                    ...telemetryStore.runtime,
+                    botStatus: message,
+                    botStatusLastUpdate: lastPacketTimestamp,
+                };
+            }
+
+            const marketUpdate = {
+                price: message.price,
+                lastUpdate: lastPacketTimestamp,
+            };
+
+            if ("balance" in message) {
+                marketUpdate.balance = message.balance;
+            }
+
+            if ("equity" in message) {
+                marketUpdate.equity = message.equity;
+            }
+
+            if ("pnl" in message) {
+                marketUpdate.pnl = message.pnl;
+            }
+
+            if ("availableBalance" in message) {
+                marketUpdate.availableBalance = message.availableBalance;
+            }
+
+            if ("available_balance" in message) {
+                marketUpdate.available_balance = message.available_balance;
+            }
+
+            if ("position_side" in message || "position" in message) {
+                marketUpdate.position =
+                    message.position_side
+                    ?? message.position;
+            }
+
             telemetryStore.market = {
                 ...telemetryStore.market,
-
-                price: message.price,
-                balance: message.balance,
-                equity: message.equity,
-                pnl: message.pnl,
-
-                position:
-                    message.position_side
-                    || "NONE",
+                ...marketUpdate,
             };
         }
 
@@ -375,6 +417,9 @@ function connectWebSocket() {
                 ...telemetryStore.governance,
 
                 ...message.data,
+
+                lastUpdate:
+                    lastPacketTimestamp,
 
             };
 
@@ -418,6 +463,9 @@ function connectWebSocket() {
 
                 ...message.data,
 
+                lastUpdate:
+                    lastPacketTimestamp,
+
             };
 
             console.log(
@@ -445,6 +493,9 @@ function connectWebSocket() {
 
                 ...message.data,
 
+                lastUpdate:
+                    lastPacketTimestamp,
+
             };
 
         }
@@ -466,6 +517,9 @@ function connectWebSocket() {
 
                 ...message.data,
 
+                lastUpdate:
+                    lastPacketTimestamp,
+
             };
 
         }
@@ -486,6 +540,9 @@ function connectWebSocket() {
                 ...telemetryStore.execution,
 
                 ...message.data,
+
+                lastUpdate:
+                    lastPacketTimestamp,
 
             };
 

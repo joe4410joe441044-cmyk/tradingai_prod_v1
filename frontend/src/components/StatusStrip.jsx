@@ -177,7 +177,13 @@ export default function StatusStrip({
                     PIPELINE
                 </span>
 
-                <span className="status-value warning">
+                <span className={
+                    `status-value ${
+                        pipelineStatus === "WAIT"
+                            ? "warning"
+                            : "online"
+                    }`
+                }>
                     {pipelineStatus}
                 </span>
 
@@ -193,7 +199,9 @@ export default function StatusStrip({
                     LOOPS
                 </span>
 
-                <span className="status-value">
+                <span className={
+                    `status-value ${loopCount > 0 ? "online" : "warning"}`
+                }>
                     {loopCount}
                 </span>
 

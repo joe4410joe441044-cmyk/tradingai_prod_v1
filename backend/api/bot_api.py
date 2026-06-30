@@ -5,7 +5,7 @@ from backend.bot_manager import get_bot_manager
 
 from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from backend.utils.log_buffer import runtime_debug
 
 router = APIRouter()
@@ -38,6 +38,10 @@ class StatusResponse(BaseModel):
 
     status: str
 
+    timestamp: float
+
+    last_update: float
+
     price: float
 
     marketReady: bool
@@ -66,10 +70,22 @@ class StatusResponse(BaseModel):
 
     runtimeSynchronizationState: str
 
+    runtime_trace: dict = Field(default_factory=dict)
+
+    runtime_metrics: dict = Field(default_factory=dict)
+
+    strategy_state: dict = Field(default_factory=dict)
+
+    execution_state: dict = Field(default_factory=dict)
+
+    ai_state: Optional[dict] = None
+
+    governance_state: Optional[dict] = None
+
     symbol: Optional[str] = None
 
-    position: Optional[dict] = None
-    actual_position: Optional[dict] = None
+    position: Optional[Any] = None
+    actual_position: Optional[Any] = None
 
 
 # =========================
@@ -139,4 +155,3 @@ def get_status():
 
     bot_manager = get_bot_manager()
     return bot_manager.get_status()
-

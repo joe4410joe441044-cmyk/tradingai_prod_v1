@@ -1,7 +1,12 @@
 import PipelineStageList from "./PipelineStageList";
 import RuntimeLoopList from "./RuntimeLoopList";
 
-export default function RuntimeHealthPanel() {
+export default function RuntimeHealthPanel({
+    stages,
+    loops,
+    selectedStageId,
+    onSelectStage,
+}) {
     return (
         <section className="terminal-monitor-section runtime-health-panel">
             <div className="terminal-section-header">
@@ -9,8 +14,12 @@ export default function RuntimeHealthPanel() {
             </div>
 
             <div className="runtime-health-grid">
-                <PipelineStageList />
-                <RuntimeLoopList />
+                <PipelineStageList
+                    stages={stages}
+                    selectedStageId={selectedStageId}
+                    onSelectStage={onSelectStage}
+                />
+                <RuntimeLoopList loops={loops} />
             </div>
         </section>
     );

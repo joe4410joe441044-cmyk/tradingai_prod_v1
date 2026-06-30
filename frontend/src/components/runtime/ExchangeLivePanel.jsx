@@ -3,10 +3,15 @@ const EMPTY_VALUES = new Set([
     "NO DATA",
     "NONE",
     "UNDEFINED",
+    "NAN",
 ]);
 
 const isAvailable = (value) => {
     if (value === null || value === undefined || value === "") {
+        return false;
+    }
+
+    if (typeof value === "number" && !Number.isFinite(value)) {
         return false;
     }
 
@@ -44,6 +49,21 @@ const formatPnl = (value) => {
     return `${numericValue > 0 ? "+" : ""}${numericValue.toFixed(2)}`;
 };
 
+const formatLastUpdate = (value) => {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return "--";
+    }
+
+    return date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+};
+
 export default function ExchangeLivePanel({
     exchange,
     connection,
@@ -67,13 +87,16 @@ export default function ExchangeLivePanel({
         },
         { label: "POSITION（ポジション）", value: displayValue(position) },
         { label: "PNL（損益）", value: displayValue(pnl, formatPnl) },
-        { label: "LAST UPDATE（最終更新）", value: displayValue(lastUpdate) },
+        {
+            label: "LAST UPDATE（最終更新）",
+            value: displayValue(lastUpdate, formatLastUpdate),
+        },
     ];
 
     return (
         <section className="terminal-monitor-section exchange-live-panel">
             <div className="terminal-section-header">
-                1 | Exchange Live
+                1 | EXCHANGE LIVE
             </div>
 
             <div className="exchange-live-grid">

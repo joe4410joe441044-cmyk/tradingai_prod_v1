@@ -658,6 +658,8 @@ STAGE INSPECTOR
 
     text-align: right;
 
+    white-space: pre-wrap;
+
 }
 
 /* =========================================================
@@ -1532,18 +1534,9 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
 
     min-height: 34px;
 
-    display: grid;
+    display: block;
 
-    grid-template-columns:
-        32px
-        minmax(0, 1fr)
-        48px;
-
-    align-items: center;
-
-    gap: 10px;
-
-    padding: 5px 8px;
+    padding: 0;
 
     border-top:
         1px solid rgba(24, 32, 42, 0.8);
@@ -1557,6 +1550,56 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
     font-size: 11px;
 
     letter-spacing: 0.5px;
+
+}
+
+.pipeline-stage-button {
+
+    width: 100%;
+
+    min-height: 34px;
+
+    display: grid;
+
+    grid-template-columns:
+        32px
+        minmax(0, 1fr)
+        58px;
+
+    align-items: center;
+
+    gap: 10px;
+
+    padding: 5px 8px;
+
+    border: 0;
+
+    border-radius: 3px;
+
+    background: transparent;
+
+    color: inherit;
+
+    font: inherit;
+
+    letter-spacing: inherit;
+
+    text-align: left;
+
+    cursor: pointer;
+
+}
+
+.pipeline-stage-button:hover,
+.pipeline-stage-button.selected {
+
+    background: #18212c;
+
+}
+
+.pipeline-stage-button.selected {
+
+    box-shadow: inset 2px 0 0 #57b8ff !important;
 
 }
 
@@ -1596,7 +1639,7 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
 
 }
 
-.runtime-wait-state {
+.runtime-status {
 
     color: #ffd84d;
 
@@ -1611,6 +1654,31 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
     letter-spacing: 1px;
 
     text-align: right;
+
+}
+
+.runtime-status-wait {
+
+    color: #ffd84d;
+
+}
+
+.runtime-status-active,
+.runtime-status-running {
+
+    color: #57b8ff;
+
+}
+
+.runtime-status-ok {
+
+    color: #59c37a;
+
+}
+
+.runtime-status-error {
+
+    color: #ff7b7b;
 
 }
 

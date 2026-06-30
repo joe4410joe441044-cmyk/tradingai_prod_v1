@@ -1,14 +1,16 @@
-const INSPECTOR_FIELDS = [
-    { label: "BACKEND FILE（ファイル）", value: "--" },
-    { label: "FUNCTION（関数）", value: "--" },
-    { label: "DURATION（実行時間）", value: "--" },
-    { label: "INPUT（入力）", value: "--", expanded: true },
-    { label: "OUTPUT（出力）", value: "--", expanded: true },
-    { label: "EXCEPTION（例外）", value: "None", expanded: true },
-    { label: "RELATED FILES（関連ファイル）", value: "--", expanded: true },
-];
+export default function StageInspectorPanel({ stage }) {
+    const fields = [
+        { label: "BACKEND FILE（ファイル）", value: stage?.backendFile ?? "--" },
+        { label: "FUNCTION（関数）", value: stage?.functionName ?? "--" },
+        { label: "DURATION（実行時間）", value: stage?.duration ?? "--" },
+        { label: "INPUT（入力）", value: stage?.input ?? "--", expanded: true },
+        { label: "OUTPUT（出力）", value: stage?.output ?? "--", expanded: true },
+        { label: "EXCEPTION（例外）", value: stage?.exception ?? "None", expanded: true },
+        { label: "RELATED FILES（関連ファイル）", value: stage?.relatedFiles ?? "--", expanded: true },
+    ];
 
-export default function StageInspectorPanel() {
+    const status = stage?.status ?? "WAIT";
+
     return (
         <section className="stage-inspector-card">
             <div className="governance-card-title">
@@ -18,17 +20,19 @@ export default function StageInspectorPanel() {
             <div className="stage-inspector-selection">
                 <div className="stage-inspector-summary">
                     <span>STAGE（ステージ）</span>
-                    <strong>Not Selected</strong>
+                    <strong>{stage?.name ?? "Not Selected"}</strong>
                 </div>
 
                 <div className="stage-inspector-summary">
                     <span>STATUS（状態）</span>
-                    <strong className="stage-inspector-wait">WAIT</strong>
+                    <strong className={`runtime-status runtime-status-${status.toLowerCase()}`}>
+                        {status}
+                    </strong>
                 </div>
             </div>
 
             <div className="stage-inspector-fields">
-                {INSPECTOR_FIELDS.map((field) => (
+                {fields.map((field) => (
                     <div
                         className={field.expanded
                             ? "stage-inspector-field expanded"

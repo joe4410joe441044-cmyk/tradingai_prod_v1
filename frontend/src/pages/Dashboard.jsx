@@ -1,11 +1,14 @@
 import {
     useEffect,
+    useMemo,
     useState,
 } from "react";
 
 import {
     startWebSocketRuntime,
 } from "../runtime/websocketRuntime";
+import { API } from "../api";
+import usePolling from "../hooks/usePolling";
 import ExchangeLivePanel from "../components/runtime/ExchangeLivePanel";
 import RuntimeHealthPanel from "../components/runtime/RuntimeHealthPanel";
 import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel";
@@ -18,6 +21,7 @@ import QuickActions from "../components/QuickActions";
 import {
     mapExecutionHealth,
 } from "../utils/telemetryUtils";
+import { deriveRuntimeHealth } from "../utils/runtimeHealth";
 
 import {
     telemetryState,
@@ -31,21 +35,71 @@ import TradeSettings from "../components/TradeSettings";
 
 import ExecutionPanel from "../components/ExecutionPanel";
 
-/* =================================================
-   TELEMETRY STORE
-================================================= */
+const fetchBotStatus = async () => {
+    const response = await fetch(API.botStatus());
 
-const governance =
-    telemetryState.governance;
+    if (!response.ok) {
+        throw new Error(`Bot status request failed: ${response.status}`);
+    }
 
-const runtime =
-    telemetryState.runtime;
+    return {
+        data: await response.json(),
+        receivedAt: Date.now(),
+    };
+};
 
-const marketData =
-    telemetryState.market;
+const firstAvailable = (...values) => (
+    values.find((value) => (
+        value !== null
+        && value !== undefined
+        && value !== ""
+        && !(typeof value === "number" && !Number.isFinite(value))
+    ))
+);
 
-const executionData =
-    telemetryState.execution;
+const getPositionSide = (position) => {
+    const candidate = Array.isArray(position)
+        ? position[0]
+        : position;
+
+    if (!candidate) {
+        return undefined;
+    }
+
+    if (typeof candidate !== "object") {
+        return candidate;
+    }
+
+    return firstAvailable(
+        candidate.side,
+        candidate.position_side,
+        candidate.state,
+    );
+};
+
+const normalizeConnection = (value) => {
+    const normalized = String(value ?? "").trim().toUpperCase();
+
+    return ["CONNECTED", "LIVE", "ONLINE", "OPEN"].includes(normalized)
+        ? "CONNECTED"
+        : "DISCONNECTED";
+};
+
+const normalizeTimestamp = (value) => {
+    if (value === null || value === undefined || value === "") {
+        return undefined;
+    }
+
+    const numericValue = Number(value);
+
+    if (Number.isFinite(numericValue)) {
+        return numericValue < 1_000_000_000_000
+            ? numericValue * 1000
+            : numericValue;
+    }
+
+    return value;
+};
 
 /* =================================================
    DASHBOARD
@@ -54,8 +108,14 @@ const executionData =
 
 const Dashboard = ({
     executionEnabled,
-    setExecutionEnabled
+    setExecutionEnabled,
+    onRuntimeHealthChange,
 }) => {
+
+const { data: botStatusSnapshot } = usePolling(
+    fetchBotStatus,
+    5000,
+);
 
 const [tradeSettings, setTradeSettings] = useState({
 
@@ -95,6 +155,84 @@ const [tradeSettings, setTradeSettings] = useState({
 
 });
 const [, forceUpdate] = useState(0);
+const [selectedStageId, setSelectedStageId] = useState(null);
+
+const governance = telemetryState.governance;
+const runtime = telemetryState.runtime;
+const marketData = telemetryState.market;
+const executionData = telemetryState.execution;
+const cognitionData = telemetryState.cognition;
+const executionRuntimeData = telemetryState.executionRuntime;
+
+const statusReceivedAt = botStatusSnapshot?.receivedAt;
+const websocketStatusReceivedAt = runtime?.botStatusLastUpdate;
+const botStatus = runtime?.botStatus && (
+    !statusReceivedAt
+    || websocketStatusReceivedAt >= statusReceivedAt
+)
+    ? runtime.botStatus
+    : botStatusSnapshot?.data;
+const wsMarketData = marketData?.lastUpdate
+    ? marketData
+    : undefined;
+
+const connection = normalizeConnection(firstAvailable(
+    typeof botStatus?.ws_connected === "boolean"
+        ? (botStatus.ws_connected ? "CONNECTED" : "DISCONNECTED")
+        : undefined,
+    runtime?.connectionState,
+    runtime?.wsStatus,
+));
+
+const position = firstAvailable(
+    getPositionSide(botStatus?.actual_position),
+    getPositionSide(botStatus?.position),
+    getPositionSide(wsMarketData?.position),
+);
+
+const lastUpdate = normalizeTimestamp(firstAvailable(
+    botStatus?.last_update,
+    botStatus?.timestamp,
+    statusReceivedAt,
+    runtime?.lastMessageTimestamp,
+));
+
+const runtimeHealth = useMemo(() => deriveRuntimeHealth({
+    botStatus,
+    marketState: marketData?.lastUpdate ? marketData : undefined,
+    aiState: cognitionData?.lastUpdate
+        ? cognitionData
+        : undefined,
+    governanceState: governance?.lastUpdate
+        ? governance
+        : undefined,
+    executionState: executionRuntimeData?.lastUpdate
+        ? executionRuntimeData
+        : undefined,
+    statusReceivedAt,
+}), [
+    botStatus,
+    cognitionData,
+    executionRuntimeData,
+    governance,
+    marketData,
+    statusReceivedAt,
+]);
+
+const selectedStage = runtimeHealth.stages.find(
+    (stage) => stage.id === selectedStageId,
+);
+
+useEffect(() => {
+    onRuntimeHealthChange?.({
+        pipelineStatus: runtimeHealth.pipelineStatus,
+        loopCount: runtimeHealth.loopCount,
+    });
+}, [
+    onRuntimeHealthChange,
+    runtimeHealth.loopCount,
+    runtimeHealth.pipelineStatus,
+]);
 
 useEffect(() => {
     const id = setInterval(() => {
@@ -234,26 +372,43 @@ useEffect(() => {
 
                     <ExchangeLivePanel
                         exchange={tradeSettings.exchange}
-                        connection={runtime?.wsStatus}
-                        mode={tradeSettings.mode ?? governance?.mode}
-                        balance={marketData?.balance}
-                        equity={marketData?.equity}
+                        connection={connection}
+                        mode={firstAvailable(
+                            tradeSettings.mode,
+                            botStatus?.execution_mode,
+                            governance?.mode,
+                        )}
+                        balance={firstAvailable(
+                            botStatus?.balance,
+                            wsMarketData?.balance,
+                        )}
+                        equity={firstAvailable(
+                            botStatus?.equity,
+                            wsMarketData?.equity,
+                        )}
                         availableBalance={
-                            marketData?.availableBalance
-                            ?? marketData?.available_balance
+                            firstAvailable(
+                                wsMarketData?.availableBalance,
+                                wsMarketData?.available_balance,
+                                botStatus?.availableBalance,
+                                botStatus?.available_balance,
+                            )
                         }
-                        position={marketData?.position}
-                        pnl={
-                            marketData?.pnl
-                            ?? marketData?.unrealizedPnL
-                        }
-                        lastUpdate={
-                            marketData?.lastUpdate
-                            ?? marketData?.last_update
-                        }
+                        position={position}
+                        pnl={firstAvailable(
+                            botStatus?.pnl,
+                            wsMarketData?.pnl,
+                            wsMarketData?.unrealizedPnL,
+                        )}
+                        lastUpdate={lastUpdate}
                     />
 
-                    <RuntimeHealthPanel />
+                    <RuntimeHealthPanel
+                        stages={runtimeHealth.stages}
+                        loops={runtimeHealth.loops}
+                        selectedStageId={selectedStageId}
+                        onSelectStage={setSelectedStageId}
+                    />
 
                     {/* =============================================
                        EXECUTION PANEL
@@ -373,7 +528,7 @@ useEffect(() => {
 
                 </div>
 
-                <StageInspectorPanel />
+                <StageInspectorPanel stage={selectedStage} />
 
             </div>
 

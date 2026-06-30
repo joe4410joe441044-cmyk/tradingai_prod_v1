@@ -12,6 +12,7 @@ import traceback
 import os
 import time
 import uuid
+from copy import deepcopy
 from dotenv import load_dotenv
 
 from backend.utils.log_buffer import (
@@ -127,6 +128,17 @@ class BotManager:
         self.market_ready = False
 
         self.last_update_time = 0
+
+        # Keep the latest account values independently from the execution
+        # engine.  stop() intentionally tears the engine down, but account
+        # telemetry must remain readable by the dashboard afterwards.
+        self.account_snapshot = {
+            "balance": 0.0,
+            "equity": 0.0,
+            "pnl": 0.0,
+            "position": None,
+            "last_update": time.time(),
+        }
 
         # =========================
         # POSITION
@@ -842,6 +854,44 @@ class BotManager:
     # STOP
     # =========================
 
+    def _capture_account_snapshot(self):
+
+        if self.engine is None:
+
+            return self.account_snapshot
+
+        try:
+
+            balance = float(
+                getattr(self.engine, "balance", 0.0)
+            )
+
+            realized_pnl = float(
+                getattr(self.engine, "pnl", 0.0)
+            )
+
+            unrealized_pnl = float(
+                getattr(self.engine, "unrealized_pnl", 0.0)
+            )
+
+            self.account_snapshot = {
+                "balance": balance,
+                "equity": balance + unrealized_pnl,
+                "pnl": realized_pnl + unrealized_pnl,
+                "position": deepcopy(
+                    getattr(self.engine, "actual_position", None)
+                ),
+                "last_update": time.time(),
+            }
+
+        except Exception as e:
+
+            logger.error(
+                f"❌ ACCOUNT SNAPSHOT ERROR: {e}"
+            )
+
+        return self.account_snapshot
+
     def stop(self):
 
         add_log(
@@ -879,6 +929,11 @@ class BotManager:
             self.strategy = None
 
             self.ob_manager = None
+
+            # Capture the last backend-owned values before removing the
+            # engine.  /api/bot/status and /ws continue serving this snapshot
+            # while execution is stopped.
+            self._capture_account_snapshot()
 
             from backend.routers.positions import (
                 set_engine
@@ -949,7 +1004,8 @@ class BotManager:
             )
 
         market_stale = (
-            stale_seconds > 5
+            not self._running
+            or stale_seconds > 5
         )
 
         safe_price = (
@@ -958,15 +1014,19 @@ class BotManager:
             else 0.0
         )
 
-        actual_position = None
+        snapshot = self._capture_account_snapshot()
+
+        actual_position = deepcopy(
+            snapshot.get("position")
+        )
 
         pending_order = False
 
-        realized_pnl = 0
+        pnl = float(snapshot.get("pnl", 0.0))
 
-        unrealized_pnl = 0
+        balance = float(snapshot.get("balance", 0.0))
 
-        balance = 0.0
+        equity = float(snapshot.get("equity", balance))
 
         if self.engine:
 
@@ -982,35 +1042,17 @@ class BotManager:
                 False
             )
 
-            realized_pnl = getattr(
-                self.engine,
-                "pnl",
-                0
-            )
+        position_candidate = (
+            actual_position[0]
+            if isinstance(actual_position, list) and actual_position
+            else actual_position
+        )
 
-            unrealized_pnl = getattr(
-                self.engine,
-                "unrealized_pnl",
-                0
-            )
-
-            try:
-
-                balance = float(
-                    getattr(
-                        self.engine,
-                        "balance",
-                        0.0
-                    )
-                )
-
-            except Exception as e:
-
-                logger.error(
-                    f"❌ BALANCE READ ERROR: {e}"
-                )
-
-                balance = 0.0
+        position_side = (
+            position_candidate.get("side")
+            if isinstance(position_candidate, dict)
+            else None
+        )
 
         self.update_trace(
             "status_api",
@@ -1025,6 +1067,8 @@ class BotManager:
 
             "timestamp": time.time(),
 
+            "last_update": snapshot.get("last_update"),
+
             "price": safe_price,
 
             "marketReady": self.market_ready,
@@ -1033,19 +1077,15 @@ class BotManager:
 
             "lastUpdateAge": stale_seconds,
 
-            "pnl": (
-                realized_pnl
-                + unrealized_pnl
-            ),
+            "pnl": pnl,
 
             "balance": balance,
 
-            "equity": (
-                balance
-                + unrealized_pnl
-            ),
+            "equity": equity,
 
             "position": actual_position,
+
+            "actual_position": actual_position,
 
             "pendingOrder": pending_order,
 
@@ -1109,23 +1149,31 @@ class BotManager:
             ),
 
             "position_side": (
-                actual_position.get("side")
-                if actual_position
-                else None
+                position_side
             ),
 
-            "executionAuthorityScore": 100,
+            "executionAuthorityScore": (
+                100 if self.engine is not None else 0
+            ),
 
             "authoritativeRuntimeState": (
-                "SYNCHRONIZED"
-                if self.market_ready
-                else "WAITING_MARKET"
+                "STOPPED"
+                if self.engine is None
+                else (
+                    "SYNCHRONIZED"
+                    if self.market_ready
+                    else "WAITING_MARKET"
+                )
             ),
 
             "runtimeSynchronizationState": (
-                "HEALTHY"
-                if not market_stale
-                else "STALE"
+                "OFFLINE"
+                if self.engine is None
+                else (
+                    "HEALTHY"
+                    if not market_stale
+                    else "STALE"
+                )
             ),
         }
 
@@ -1134,60 +1182,6 @@ class BotManager:
     # =========================
 
     def get_status(self):
-
-        if self.engine is None:
-
-            return {
-
-                "status": "STOPPED",
-
-                "price": 0.0,
-
-                "marketReady": False,
-
-                "marketStale": True,
-
-                "execution_mode": "SIMULATION",
-
-                "real_order_allowed": False,
-
-                "ws_connected": False,
-
-                "position": None,
-
-                "position_active": False,
-
-                "pendingOrder": False,
-
-                "balance": 0.0,
-
-                "equity": 0.0,
-
-                "pnl": 0.0,
-
-                "runtime_trace": (
-                    self.state.runtime_trace
-                ),
-
-                "runtime_metrics": (
-                    self.state.runtime_metrics
-                ),
-
-                "strategy_state": (
-                    self.state.strategy_state
-                ),
-
-                "execution_state": (
-                    self.state.execution_state
-                ),
-
-                "executionAuthorityScore": 0,
-
-                "authoritativeRuntimeState": "STOPPED",
-
-                "runtimeSynchronizationState": "OFFLINE"
-            }
-
         return self.get_result()
 
 # =========================

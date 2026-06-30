@@ -19,6 +19,10 @@ export default function App() {
         executionEnabled,
         setExecutionEnabled
     ] = useState(false);
+    const [runtimeHealthSummary, setRuntimeHealthSummary] = useState({
+        pipelineStatus: "WAIT",
+        loopCount: 0,
+    });
 
     return (
 
@@ -28,6 +32,8 @@ export default function App() {
                 executionEnabled={
                     executionEnabled
                 }
+                pipelineStatus={runtimeHealthSummary.pipelineStatus}
+                loopCount={runtimeHealthSummary.loopCount}
             />
 
             <Dashboard
@@ -37,6 +43,7 @@ export default function App() {
                 setExecutionEnabled={
                     setExecutionEnabled
                 }
+                onRuntimeHealthChange={setRuntimeHealthSummary}
             />
 
         </div>

@@ -3,7 +3,9 @@ import React from "react";
 import StatusStrip from "./StatusStrip";
 
 export default function Header({
-    executionEnabled
+    executionEnabled,
+    pipelineStatus,
+    loopCount,
 }) {
 
     return (
@@ -14,6 +16,8 @@ export default function Header({
                 botRunning={
                     executionEnabled
                 }
+                pipelineStatus={pipelineStatus}
+                loopCount={loopCount}
             />
 
         </header>
