@@ -5,7 +5,7 @@ import json
 import threading
 import time
 
-from backend.utils.log_buffer import add_log
+from backend.utils.log_buffer import add_log, ws_debug
 
 
 class OrderBookWS:
@@ -111,11 +111,10 @@ class OrderBookWS:
 
                     if new_U != expected:
 
-                        add_log(
-                            f"⚠️ SEQUENCE GAP "
-                            f"EXPECTED={expected} "
-                            f"ACTUAL={new_U}",
-                            "warning"
+                        ws_debug(
+                            "Orderbook sequence gap expected=%s actual=%s",
+                            expected,
+                            new_U,
                         )
 
                         self.resnapshot_required = True
@@ -134,10 +133,7 @@ class OrderBookWS:
 
             if not bids or not asks:
 
-                add_log(
-                    "⚠️ EMPTY WS BOOK",
-                    "warning"
-                )
+                ws_debug("Empty WebSocket orderbook")
 
                 return
 
@@ -201,10 +197,7 @@ class OrderBookWS:
                 not self.asks
             ):
 
-                add_log(
-                    "⚠️ EMPTY LOCAL BOOK",
-                    "warning"
-                )
+                ws_debug("Empty local orderbook")
 
                 return
 

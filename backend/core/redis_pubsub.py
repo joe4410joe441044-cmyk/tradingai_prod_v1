@@ -2,6 +2,8 @@ import redis
 import json
 import threading
 
+from backend.utils.log_buffer import logger
+
 
 class RedisPubSub:
 
@@ -24,7 +26,7 @@ class RedisPubSub:
         try:
             self.r.publish(channel, json.dumps(data))
         except Exception as e:
-            print(f"[PubSub Publish Error] {e}")
+            logger.error("PubSub publish error: %s", e)
 
     # =========================
     # SUBSCRIBE LOOP
@@ -55,7 +57,7 @@ class RedisPubSub:
                 try:
                     callback(data)
                 except Exception as e:
-                    print(f"[PubSub Callback Error] {e}")
+                    logger.error("PubSub callback error: %s", e)
 
         self._thread = threading.Thread(target=listen, daemon=True)
         self._thread.start()

@@ -7,11 +7,11 @@ import time
 import base64
 import hmac
 import hashlib
-import logging
 import json
 import os
 
 from dotenv import load_dotenv
+from backend.utils.log_buffer import logger, runtime_debug
 
 
 # =====================================
@@ -34,7 +34,7 @@ class KucoinTradeClient(BaseClient):
         passphrase=None
     ):
 
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
 
         # =====================================
         # ENV LOAD
@@ -55,19 +55,11 @@ class KucoinTradeClient(BaseClient):
             os.getenv("KUCOIN_API_PASSPHRASE")
         )
 
-        print(
-            "🔑 KUCOIN KEY EXISTS:",
-            bool(self.api_key)
-        )
-
-        print(
-            "🔑 KUCOIN SECRET EXISTS:",
-            bool(self.api_secret)
-        )
-
-        print(
-            "🔑 KUCOIN PASSPHRASE EXISTS:",
-            bool(self.passphrase)
+        runtime_debug(
+            "KuCoin credentials configured key=%s secret=%s passphrase=%s",
+            bool(self.api_key),
+            bool(self.api_secret),
+            bool(self.passphrase),
         )
 
         if (
@@ -112,9 +104,10 @@ class KucoinTradeClient(BaseClient):
             symbol
         )
 
-        print(
-            f"[SYMBOL MAP] "
-            f"'{symbol}' -> '{mapped}'"
+        runtime_debug(
+            "KuCoin trade symbol map '%s' -> '%s'",
+            symbol,
+            mapped,
         )
 
         return mapped
@@ -187,10 +180,7 @@ class KucoinTradeClient(BaseClient):
 
         data = res.json()
 
-        print(
-            "🔥 RAW BALANCE:",
-            data
-        )
+        runtime_debug("KuCoin raw balance response=%s", data)
 
         if data.get("code") != "200000":
 
@@ -244,9 +234,7 @@ class KucoinTradeClient(BaseClient):
                 )
             )
 
-        print(
-            f"💰 PARSED BALANCE: {balance}"
-        )
+        runtime_debug("KuCoin parsed balance=%s", balance)
 
         return balance
 
@@ -386,10 +374,7 @@ class KucoinTradeClient(BaseClient):
             )
         }
 
-        print(
-            "📦 SYMBOL RULES:",
-            rules
-        )
+        runtime_debug("KuCoin symbol rules=%s", rules)
 
         return rules
 
@@ -448,10 +433,7 @@ class KucoinTradeClient(BaseClient):
             "leverage": str(leverage)
         }
 
-        print(
-            "🟣 ORDER PAYLOAD:",
-            body_dict
-        )
+        runtime_debug("KuCoin leverage payload=%s", body_dict)
 
         body = json.dumps(body_dict)
 
@@ -471,17 +453,11 @@ class KucoinTradeClient(BaseClient):
 
         if data.get("code") != "200000":
 
-            print(
-                "⚠️ LEVERAGE ERROR:",
-                data
-            )
+            self.logger.error("KuCoin leverage error: %s", data)
 
         else:
 
-            print(
-                "✅ LEVERAGE SET:",
-                leverage
-            )
+            self.logger.info("KuCoin leverage set=%s", leverage)
 
     # =========================
     # ORDER
@@ -495,16 +471,12 @@ class KucoinTradeClient(BaseClient):
         price=None
     ):
 
-        print("🚀 CREATE_ORDER ENTERED")
-
-        print(
-            "🚀 CREATE_ORDER PARAMS:",
-            {
-                "symbol": symbol,
-                "side": side,
-                "qty": qty,
-                "price": price
-            }
+        runtime_debug(
+            "KuCoin create order symbol=%s side=%s qty=%s price=%s",
+            symbol,
+            side,
+            qty,
+            price,
         )
 
         try:
@@ -524,10 +496,7 @@ class KucoinTradeClient(BaseClient):
 
             ticker = self.get_price(symbol)
 
-            print(
-                "📈 TICKER:",
-                ticker
-            )
+            runtime_debug("KuCoin order ticker=%s", ticker)
 
             price_now = float(ticker)
 
@@ -560,32 +529,26 @@ class KucoinTradeClient(BaseClient):
                     "timestamp": time.time(),
                 }
 
-                print(
-                    "🚫 MIN CONTRACT REJECT:",
-                    {
-                        "contracts": contracts,
-                        "min_size": min_size,
-                    }
+                self.logger.warning(
+                    "ORDER REJECTED: below minimum contracts=%s min_size=%s",
+                    contracts,
+                    min_size,
                 )
 
-                print(
-                    "🟢 NORMALIZED RESULT:",
-                    result
-                )
+                runtime_debug("KuCoin normalized result=%s", result)
 
                 return result
 
             qty = int(round(contracts))
 
-            print(
-                "📦 CONTRACT CONVERT:",
-                {
-                    "btc_qty": original_qty,
-                    "price": price_now,
-                    "multiplier": multiplier,
-                    "contracts": contracts,
-                    "final_size": qty
-                }
+            runtime_debug(
+                "KuCoin contract conversion coin_qty=%s price=%s "
+                "multiplier=%s contracts=%s final_size=%s",
+                original_qty,
+                price_now,
+                multiplier,
+                contracts,
+                qty,
             )
 
             qty = self.normalize_qty(
@@ -605,10 +568,7 @@ class KucoinTradeClient(BaseClient):
                     "timestamp": time.time(),
                 }
 
-                print(
-                    "🟢 NORMALIZED RESULT:",
-                    result
-                )
+                runtime_debug("KuCoin normalized result=%s", result)
 
                 return result
 
@@ -655,17 +615,11 @@ class KucoinTradeClient(BaseClient):
                     "timestamp": time.time(),
                 }
 
-                print(
-                    "🟢 NORMALIZED RESULT:",
-                    result
-                )
+                runtime_debug("KuCoin normalized result=%s", result)
 
                 return result
 
-            print(
-                "✅ KUCOIN ORDER SUCCESS:",
-                data
-            )
+            self.logger.info("ORDER SENT: KuCoin response=%s", data)
 
             result = {
                 "success": True,
@@ -681,19 +635,13 @@ class KucoinTradeClient(BaseClient):
                 "timestamp": time.time(),
             }
 
-            print(
-                "🟢 NORMALIZED RESULT:",
-                result
-            )
+            runtime_debug("KuCoin normalized result=%s", result)
 
             return result
 
         except Exception as e:
 
-            print(
-                "❌ KUCOIN ORDER EXCEPTION:",
-                e
-            )
+            self.logger.exception("KUCOIN ORDER EXCEPTION")
 
             result = {
                 "success": False,
@@ -705,10 +653,7 @@ class KucoinTradeClient(BaseClient):
                 "timestamp": time.time(),
             }
 
-            print(
-                "🟢 NORMALIZED RESULT:",
-                result
-            )
+            runtime_debug("KuCoin normalized result=%s", result)
 
             return result
 
@@ -755,17 +700,11 @@ class KucoinTradeClient(BaseClient):
                     "timestamp": time.time(),
                 }
 
-                print(
-                    "🟢 NORMALIZED RESULT:",
-                    result
-                )
+                runtime_debug("KuCoin normalized result=%s", result)
 
                 return result
 
-            print(
-                "✅ KUCOIN ORDER SUCCESS:",
-                data
-            )
+            self.logger.info("ORDER SENT: KuCoin response=%s", data)
 
             result = {
                 "success": True,
@@ -781,19 +720,13 @@ class KucoinTradeClient(BaseClient):
                 "timestamp": time.time(),
             }
 
-            print(
-                "🟢 NORMALIZED RESULT:",
-                result
-            )
+            runtime_debug("KuCoin normalized result=%s", result)
 
             return result
 
         except Exception as e:
 
-            print(
-                "❌ KUCOIN ORDER EXCEPTION:",
-                e
-            )
+            self.logger.exception("KUCOIN ORDER EXCEPTION")
 
             result = {
                 "success": False,
@@ -805,10 +738,7 @@ class KucoinTradeClient(BaseClient):
                 "timestamp": time.time(),
             }
 
-            print(
-                "🟢 NORMALIZED RESULT:",
-                result
-            )
+            runtime_debug("KuCoin normalized result=%s", result)
 
             return result
 
@@ -840,9 +770,7 @@ class KucoinTradeClient(BaseClient):
 
         if not pos:
 
-            print(
-                "⚠️ NO POSITION TO CLOSE"
-            )
+            runtime_debug("KuCoin close skipped: no position")
 
             return {
                 "success": False,
@@ -870,13 +798,11 @@ class KucoinTradeClient(BaseClient):
             pos["qty"] * multiplier
         )
 
-        print(
-            "🔄 CLOSE POSITION CONVERT:",
-            {
-                "contracts": pos["qty"],
-                "multiplier": multiplier,
-                "coin_qty": coin_qty
-            }
+        runtime_debug(
+            "KuCoin close conversion contracts=%s multiplier=%s coin_qty=%s",
+            pos["qty"],
+            multiplier,
+            coin_qty,
         )
 
         return self.create_order(

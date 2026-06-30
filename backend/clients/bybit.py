@@ -1,4 +1,5 @@
 from .base import BaseClient
+from backend.utils.log_buffer import logger
 
 class BybitClient(BaseClient):
     def __init__(self):
@@ -13,4 +14,4 @@ class BybitClient(BaseClient):
         return []
 
     def place_order(self, symbol, side, qty):
-        print(f"[BYBIT] {side} {qty} {symbol}")
+        logger.info("BYBIT ORDER side=%s qty=%s symbol=%s", side, qty, symbol)

@@ -45,7 +45,7 @@ export default function RiskPanel({
 
                 <div className="config-label">
 
-                    MAX DD
+                    MAX DD（最大ドローダウン）
 
                 </div>
 
@@ -79,7 +79,7 @@ export default function RiskPanel({
 
                 <div className="config-label">
 
-                    POSITION SIZE
+                    POSITION SIZE（ポジションサイズ）
 
                 </div>
 
@@ -113,7 +113,7 @@ export default function RiskPanel({
 
                 <div className="config-label">
 
-                    TP
+                    TP（利確）
 
                 </div>
 
@@ -148,7 +148,7 @@ export default function RiskPanel({
 
                 <div className="config-label">
 
-                    SL
+                    SL（損切り）
 
                 </div>
 
@@ -183,7 +183,7 @@ export default function RiskPanel({
 
                 <div className="config-label">
 
-                    TRAILING
+                    TRAILING（トレーリング）
 
                 </div>
 
@@ -205,11 +205,11 @@ export default function RiskPanel({
                     >
 
                         <option value="OFF">
-                            OFF
+                            OFF（無効）
                         </option>
 
                         <option value="ON">
-                            ON
+                            ON（有効）
                         </option>
 
                     </select>

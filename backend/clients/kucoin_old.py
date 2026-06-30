@@ -1,4 +1,5 @@
 from .base import BaseClient
+from backend.utils.log_buffer import logger
 
 class KucoinClient(BaseClient):
     def __init__(self):
@@ -11,4 +12,4 @@ class KucoinClient(BaseClient):
         return []
 
     def place_order(self, symbol, side, qty):
-        print(f"[KUCOIN] {side} {qty} {symbol}")
+        logger.info("KUCOIN ORDER side=%s qty=%s symbol=%s", side, qty, symbol)

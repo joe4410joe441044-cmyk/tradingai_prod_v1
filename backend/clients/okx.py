@@ -1,4 +1,5 @@
 from .base import BaseClient
+from backend.utils.log_buffer import logger
 
 class OkxClient(BaseClient):
     def __init__(self):
@@ -11,4 +12,4 @@ class OkxClient(BaseClient):
         return []
 
     def place_order(self, symbol, side, qty):
-        print(f"[OKX] {side} {qty} {symbol}")
+        logger.info("OKX ORDER side=%s qty=%s symbol=%s", side, qty, symbol)

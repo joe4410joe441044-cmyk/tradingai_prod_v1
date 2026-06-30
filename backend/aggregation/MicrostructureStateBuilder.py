@@ -36,6 +36,8 @@
 
 from datetime import datetime
 
+from backend.utils.log_buffer import runtime_debug
+
 
 class MicrostructureStateBuilder:
 
@@ -95,21 +97,6 @@ class MicrostructureStateBuilder:
             - self.previous_price
         )
         
-        print(
-            "[DELTA DEBUG]",
-            "current=",
-            current_price,
-            "previous=",
-            self.previous_price,
-            "delta=",
-            delta,
-        )
-        
-        print(
-            "[MOMENTUM DELTA]",
-            delta
-        )
-
         self.momentum_window.append(delta)
 
         self.previous_price = current_price
@@ -156,15 +143,14 @@ class MicrostructureStateBuilder:
             )
         )
 
-        print(
-            "[MOMENTUM DEBUG]",
-            "window=",
+        runtime_debug(
+            "Momentum audit current=%s delta=%s "
+            "window=%d positive=%d negative=%d persistence=%s",
+            current_price,
+            delta,
             len(self.momentum_window),
-            "positive=",
             positive,
-            "negative=",
             negative,
-            "persistence=",
             persistence,
         )
 

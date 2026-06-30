@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 import backend.config as config
+from backend.utils.log_buffer import logger
 
 router = APIRouter()
 
@@ -16,11 +17,11 @@ def set_mode(req: ModeRequest):
     if req.mode == "live":
         config.ALLOW_LIVE = True
         config.TRADE_MODE = "live"
-        print("🔴 LIVE MODE ENABLED")
+        logger.warning("LIVE MODE ENABLED")
 
     else:
         config.TRADE_MODE = "paper"
         config.ALLOW_LIVE = False
-        print("🟡 PAPER MODE")
+        logger.info("PAPER MODE ENABLED")
 
     return {"success": True, "mode": config.TRADE_MODE}

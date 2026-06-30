@@ -6,7 +6,7 @@ import threading
 import time
 import requests
 
-from backend.utils.log_buffer import add_log
+from backend.utils.log_buffer import add_log, ws_debug
 
 
 class OrderBookWS:
@@ -246,10 +246,7 @@ class OrderBookWS:
 
             if not self.snapshot_loaded:
 
-                add_log(
-                    "⚠️ SNAPSHOT NOT LOADED",
-                    "warning"
-                )
+                ws_debug("Binance snapshot not loaded")
 
                 return
 
@@ -312,10 +309,7 @@ class OrderBookWS:
 
             if not bids or not asks:
 
-                add_log(
-                    "⚠️ EMPTY WS BOOK",
-                    "warning"
-                )
+                ws_debug("Empty Binance WebSocket book")
 
                 return
 
@@ -379,10 +373,7 @@ class OrderBookWS:
                 not self.asks
             ):
 
-                add_log(
-                    "⚠️ EMPTY LOCAL BOOK",
-                    "warning"
-                )
+                ws_debug("Empty Binance local orderbook")
 
                 return
 

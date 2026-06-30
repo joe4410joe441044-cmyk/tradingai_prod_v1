@@ -20,7 +20,11 @@ import backend.runtime.runtime_registry as registry
 # LOG
 # ============================================================
 
-from backend.utils.log_buffer import add_log
+from backend.utils.log_buffer import (
+    add_log,
+    logger,
+    runtime_debug,
+)
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -116,34 +120,10 @@ class TradingRuntime:
         microstructure_state,
     ):
 
-        print(
-            "[TRADING_RUNTIME] PROCESS START"
-        )
-
-        print(
-            "[TRADING_RUNTIME] MICRO:",
-            microstructure_state
-        )
-
-
-        print(
-            "RUNTIME INPUT TYPE:",
-            type(microstructure_state)
-        )
-
-        print(
-            "RUNTIME INPUT:",
-            microstructure_state
-        )
-
-        print(
-            "RUNTIME INPUT TYPE:",
-            type(microstructure_state)
-        )
-
-        print(
-            "RUNTIME INPUT:",
-            microstructure_state
+        runtime_debug(
+            "TradingRuntime received type=%s state=%s",
+            type(microstructure_state).__name__,
+            microstructure_state,
         )
 
         try:
@@ -166,27 +146,14 @@ class TradingRuntime:
                     })
                 )
 
-                print(
-                    f"AI SIGNAL: {ai_signal}"
+                runtime_debug(
+                    "AI signal=%s",
+                    ai_signal,
                 )
 
-                add_log(
-                    f"AI SIGNAL: {ai_signal}"
-                )
+            except Exception:
 
-            except Exception as e:
-
-                import traceback
-
-                traceback.print_exc()
-
-                print(
-                    f"AI SHADOW ERROR: {e}"
-                )
-
-                add_log(
-                    f"AI SHADOW ERROR: {e}"
-                )
+                logger.exception("AI SHADOW ERROR")
 
 
             # ------------------------------------------------
@@ -200,24 +167,14 @@ class TradingRuntime:
                 )
             )
 
-            print(
-                "STRATEGY RESULT:",
+            runtime_debug(
+                "Strategy result=%s",
                 strategy_result,
             )
             strategy_state = (
                 strategy_result["strategy"]
             )
 
-            print(
-                "[TRADING_RUNTIME] STRATEGY:",
-                strategy_state
-            )
-
-            print(
-                "STRATEGY STATE:",
-                strategy_state,
-            )
-            
             strategy_result = (
                 self.strategy_engine
                 .process_microstructure_strategy(
@@ -245,13 +202,9 @@ class TradingRuntime:
                 )
             )
 
-            print(
-                "[TRADING_RUNTIME] GOVERNANCE:",
-                governance_decision
-            )
-
-            print(
-                f"GOVERNANCE: {governance_decision}"
+            runtime_debug(
+                "Governance decision=%s",
+                governance_decision,
             )
 
             # ------------------------------------------------
@@ -267,9 +220,9 @@ class TradingRuntime:
                 )
             )
 
-            print(
-                "[TRADING_RUNTIME] EXECUTION:",
-                runtime_result
+            runtime_debug(
+                "Execution result=%s",
+                runtime_result,
             )
 
             return runtime_result
@@ -279,7 +232,8 @@ class TradingRuntime:
             self.runtime_healthy = False
 
             add_log(
-                f"❌ TradingRuntime Error: {str(e)}"
+                f"❌ TradingRuntime Error: {str(e)}",
+                "error",
             )
 
             return {
@@ -318,8 +272,6 @@ def health():
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> STARTUP EVENT ENTERED", flush=True)
-
     add_log("🔥 API STARTED")
     add_log("🧠 Production Execution Cognition Runtime Active")
 
@@ -511,4 +463,3 @@ def root():
             "production_execution_cognition"
         ),
     }
-    

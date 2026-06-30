@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from backend.bot_manager import (
     get_bot_manager
 )
+from backend.utils.log_buffer import logger, runtime_debug
 
 router = APIRouter()
 
@@ -58,10 +59,7 @@ def start_bot(config: StartConfig):
         .lower()
     )
 
-    print(
-        "🔥 NORMALIZED API MODE:",
-        config_dict["mode"]
-    )
+    runtime_debug("Normalized API mode=%s", config_dict["mode"])
 
     # =========================
     # SYMBOL NORMALIZE
@@ -86,16 +84,10 @@ def start_bot(config: StartConfig):
             detail="invalid mode"
         )
 
-    print("===================================")
-    print(
-        "🔥 START CONFIG RECEIVED:",
-        config_dict
-    )
-    print("===================================")
-
-    print(
-        "🚀 BOT MANAGER ID:",
-        id(bot_manager)
+    runtime_debug(
+        "Bot start request manager_id=%s config=%s",
+        id(bot_manager),
+        config_dict,
     )
 
     return bot_manager.start(
@@ -116,14 +108,7 @@ def stop_bot():
 
     bot_manager = get_bot_manager()
 
-    print(
-        "🛑 STOP REQUEST"
-    )
-
-    print(
-        "🛑 BOT MANAGER ID:",
-        id(bot_manager)
-    )
+    runtime_debug("Bot stop request manager_id=%s", id(bot_manager))
 
     return bot_manager.stop()
 
@@ -135,9 +120,7 @@ def stop_bot():
 @router.post("/symbol")
 def set_symbol(data: dict):
 
-    print(
-        "⚠️ SYMBOL API DISABLED"
-    )
+    logger.warning("Symbol API disabled")
 
     return {
         "status": "error",

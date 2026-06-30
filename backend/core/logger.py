@@ -1,19 +1,8 @@
-import logging
+"""Shared application logger.
 
-DEBUG_MODE = False
+The handler configuration lives in ``backend.utils.log_buffer`` so importing
+this compatibility module cannot replace the rotating file handler with an
+unbounded stdout handler.
+"""
 
-logger = logging.getLogger("TradingAI")
-
-logger.setLevel(
-    logging.DEBUG if DEBUG_MODE else logging.INFO
-)
-
-formatter = logging.Formatter(
-    "[%(asctime)s] %(levelname)s %(message)s"
-)
-
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
-
-logger.handlers.clear()
-logger.addHandler(stream_handler)
+from backend.utils.log_buffer import logger

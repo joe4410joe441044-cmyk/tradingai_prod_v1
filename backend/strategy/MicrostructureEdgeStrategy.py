@@ -28,6 +28,8 @@
 
 from datetime import datetime
 
+from backend.utils.log_buffer import runtime_debug
+
 
 class MicrostructureEdgeStrategy:
 
@@ -479,33 +481,14 @@ class MicrostructureEdgeStrategy:
                 )
             )
 
-            # ----------------------------------------------------
-            # DEBUG
-            # ----------------------------------------------------
-
-            print(
-                "EDGE_RESULT =",
-                edge_result
-            )
-
-            print(
-                "SPREAD_RESULT =",
-                spread_result
-            )
-
-            print(
-                "LIQUIDITY_RESULT =",
-                liquidity_result
-            )
-
-            print(
-                "MOMENTUM_RESULT =",
-                momentum_result
-            )
-
-            print(
-                "SUPPRESSION_RESULT =",
-                suppression_result
+            runtime_debug(
+                "Strategy audit edge=%s spread=%s liquidity=%s "
+                "momentum=%s suppression=%s",
+                edge_result,
+                spread_result,
+                liquidity_result,
+                momentum_result,
+                suppression_result,
             )
 
             # ----------------------------------------------------

@@ -5,12 +5,12 @@ import json
 import threading
 import time
 
-from backend.utils.log_buffer import add_log
+from backend.utils.log_buffer import DEBUG_WS, add_log
 
 
 class BinanceWSClient:
 
-    DEBUG = False
+    DEBUG = DEBUG_WS
 
     def __init__(
         self,

@@ -6,6 +6,8 @@ import time
 import random
 import websockets
 
+from backend.utils.log_buffer import logger, ws_debug
+
 from runtime.packetIntegrity import (
     process_packet_integrity,
     get_packet_integrity_telemetry,
@@ -149,24 +151,33 @@ class WebSocketRuntime:
         self,
         state
     ):
-
+        previous_state = self.connection_state
         self.connection_state = state
 
-        print(
-            f"[WS STATE] {state}"
-        )
+        if state != previous_state:
+            if state in {
+                ConnectionState.DISCONNECTED,
+                ConnectionState.DEGRADED,
+                ConnectionState.RECONNECTING,
+                ConnectionState.FAILED,
+            }:
+                logger.warning("WS state=%s", state)
+            else:
+                logger.info("WS state=%s", state)
 
 
     def update_runtime_health(
         self,
         health
     ):
-
+        previous_health = self.runtime_health
         self.runtime_health = health
 
-        print(
-            f"[RUNTIME HEALTH] {health}"
-        )
+        if health != previous_health:
+            if health == RuntimeHealth.HEALTHY:
+                logger.info("Runtime health=%s", health)
+            else:
+                logger.warning("Runtime health=%s", health)
 
 
     """
@@ -179,9 +190,7 @@ class WebSocketRuntime:
 
         if self.running:
 
-            print(
-                "[WS] Runtime Already Running"
-            )
+            logger.warning("WebSocket runtime already running")
 
             return
 
@@ -225,9 +234,7 @@ class WebSocketRuntime:
                 RuntimeHealth.HEALTHY
             )
 
-            print(
-                "[WS] Connected"
-            )
+            logger.info("WS CONNECTED")
 
             await self.subscribe()
 
@@ -251,10 +258,7 @@ class WebSocketRuntime:
 
         except Exception as error:
 
-            print(
-                "[WS CONNECT ERROR]",
-                error
-            )
+            logger.error("WS CONNECT ERROR: %s", error)
 
             self.update_runtime_health(
                 RuntimeHealth.DEGRADED
@@ -301,9 +305,7 @@ class WebSocketRuntime:
             ConnectionState.LIVE
         )
 
-        print(
-            "[WS] Subscription Sent"
-        )
+        logger.info("WS subscription sent")
 
 
     """
@@ -334,9 +336,7 @@ class WebSocketRuntime:
 
                     self.malformed_packets += 1
 
-                    print(
-                        "[WS] Malformed Packet"
-                    )
+                    ws_debug("Malformed WebSocket packet rejected")
 
                     continue
 
@@ -398,11 +398,9 @@ class WebSocketRuntime:
                         ]
                     )
 
-                    print(
-                        "[PACKET REJECTED]",
-                        integrity_result[
-                            "reason"
-                        ]
+                    ws_debug(
+                        "WebSocket packet rejected reason=%s",
+                        integrity_result["reason"],
                     )
 
                     continue
@@ -427,10 +425,7 @@ class WebSocketRuntime:
 
         except Exception as error:
 
-            print(
-                "[WS RECEIVE ERROR]",
-                error
-            )
+            logger.error("WS RECEIVE ERROR: %s", error)
 
             self.update_runtime_health(
                 RuntimeHealth.DEGRADED
@@ -450,10 +445,7 @@ class WebSocketRuntime:
         message
     ):
 
-        print(
-            "[WS MESSAGE]",
-            message
-        )
+        ws_debug("WebSocket message=%s", message)
 
         # ====================================
         # SURVIVABILITY UPDATE
@@ -499,10 +491,7 @@ class WebSocketRuntime:
 
             except Exception as error:
 
-                print(
-                    "[HEARTBEAT ERROR]",
-                    error
-                )
+                logger.error("WS HEARTBEAT ERROR: %s", error)
 
                 self.update_runtime_health(
                     RuntimeHealth.DEGRADED
@@ -539,9 +528,7 @@ class WebSocketRuntime:
 
                 self.stale_events += 1
 
-                print(
-                    "[WS] Stale Socket Detected"
-                )
+                logger.warning("WS stale socket detected")
 
                 self.update_runtime_health(
                     RuntimeHealth.DEGRADED
@@ -568,10 +555,7 @@ class WebSocketRuntime:
 
         except Exception as error:
 
-            print(
-                "[FORCE RECONNECT ERROR]",
-                error
-            )
+            logger.error("WS FORCE RECONNECT ERROR: %s", error)
 
         await self.schedule_reconnect()
 
@@ -590,9 +574,7 @@ class WebSocketRuntime:
 
             if self.reconnect_in_progress:
 
-                print(
-                    "[WS] Reconnect Already Running"
-                )
+                ws_debug("WebSocket reconnect already running")
 
                 return
 
@@ -624,8 +606,9 @@ class WebSocketRuntime:
                 backoff + jitter
             )
 
-            print(
-                f"[WS] Reconnect in {reconnect_delay:.2f}s"
+            logger.warning(
+                "WS RECONNECT in %.2fs",
+                reconnect_delay,
             )
 
             await asyncio.sleep(
@@ -805,11 +788,6 @@ class WebSocketRuntime:
 
         except Exception as error:
 
-            print(
-                "[WS STOP ERROR]",
-                error
-            )
+            logger.error("WS STOP ERROR: %s", error)
 
-        print(
-            "[WS] Runtime Stopped"
-        )
+        logger.info("WebSocket runtime stopped")

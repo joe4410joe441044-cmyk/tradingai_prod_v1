@@ -3,6 +3,7 @@
 import time
 import asyncio
 from collections import deque
+from backend.utils.log_buffer import ws_debug
 
 class WSBuffer:
     """
@@ -27,7 +28,11 @@ class WSBuffer:
             # シーケンスチェック（欠損検出）
             if seq is not None and self.last_seq != 0:
                 if seq != self.last_seq + 1:
-                    print(f"[WSBuffer] ⚠ GAP detected: {self.last_seq} → {seq}")
+                    ws_debug(
+                        "WebSocket buffer sequence gap previous=%s current=%s",
+                        self.last_seq,
+                        seq,
+                    )
 
             self.last_seq = seq or self.last_seq
 

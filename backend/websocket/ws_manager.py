@@ -25,6 +25,8 @@ from backend.bot_manager.bot_manager import (
     get_bot_manager
 )
 
+from backend.utils.log_buffer import runtime_debug
+
 
 
 
@@ -134,9 +136,7 @@ class ConnectionManager:
             # Trading Runtime
             # ------------------------------------------------
 
-            print(
-                "[WS_MANAGER] runtime pipeline reached"
-            )
+            runtime_debug("WebSocket manager reached runtime pipeline")
 
             runtime_result = (
 

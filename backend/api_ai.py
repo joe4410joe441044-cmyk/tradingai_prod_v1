@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from backend.utils.log_buffer import logger
 
 app = FastAPI()
 
@@ -307,10 +308,7 @@ def positions():
 
     except Exception as err:
 
-        print(
-            "❌ POSITION BUILD ERROR:",
-            err
-        )
+        logger.error("POSITION BUILD ERROR: %s", err)
 
     # =========================
     # RESPONSE

@@ -1,3 +1,6 @@
+from backend.utils.log_buffer import runtime_debug
+
+
 class LLMEngine:
 
     def analyze(self, market):
@@ -18,8 +21,9 @@ class LLMEngine:
                 runtime_state.imbalance_score
             )
 
-            print(
-                "AI RUNTIME:",
+            runtime_debug(
+                "AI runtime bias=%s momentum=%s orderflow_delta=%s "
+                "imbalance=%s",
                 bias,
                 momentum,
                 runtime_state.orderflow_delta,

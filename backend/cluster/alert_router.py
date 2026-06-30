@@ -1,5 +1,8 @@
+from backend.utils.log_buffer import logger
+
+
 class AlertRouter:
 
     def route(self, alert):
 
-        print("[ALERT]", alert)
+        logger.warning("ALERT: %s", alert)

@@ -491,7 +491,8 @@ GOVERNANCE CARD
 ========================================================= */
 
 .execution-monitoring-card,
-.human-governance-card {
+.human-governance-card,
+.stage-inspector-card {
 
     display: flex;
 
@@ -507,6 +508,155 @@ GOVERNANCE CARD
         1px solid #252b33;
 
     background: #151a21;
+
+}
+
+.execution-state-grid .monitoring-row {
+
+    min-height: 32px;
+
+}
+
+/* =========================================================
+STAGE INSPECTOR
+========================================================= */
+
+.stage-inspector-card {
+
+    min-height: 520px;
+
+}
+
+.stage-inspector-selection {
+
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+
+    gap: 8px;
+
+}
+
+.stage-inspector-summary {
+
+    min-width: 0;
+
+    min-height: 74px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    padding: 12px;
+
+    border:
+        1px solid #252b33;
+
+    border-radius: 6px;
+
+    background: #10151b;
+
+}
+
+.stage-inspector-summary span,
+.stage-inspector-field > span {
+
+    color: #8d96a5;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    text-transform: uppercase;
+
+}
+
+.stage-inspector-summary strong {
+
+    overflow: hidden;
+
+    color: #dfe6f0;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 12px;
+
+    letter-spacing: 0.4px;
+
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
+
+}
+
+.stage-inspector-summary .stage-inspector-wait {
+
+    color: #d8a657;
+
+}
+
+.stage-inspector-fields {
+
+    display: flex;
+
+    flex-direction: column;
+
+}
+
+.stage-inspector-field {
+
+    min-height: 42px;
+
+    display: grid;
+
+    grid-template-columns:
+        110px
+        minmax(0, 1fr);
+
+    align-items: center;
+
+    gap: 12px;
+
+    border-bottom:
+        1px solid #20242b;
+
+}
+
+.stage-inspector-field.expanded {
+
+    min-height: 62px;
+
+    align-items: start;
+
+    padding: 14px 0;
+
+}
+
+.stage-inspector-field code {
+
+    overflow-wrap: anywhere;
+
+    color: #d7dde5;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 10px;
+
+    text-align: right;
 
 }
 
@@ -1202,5 +1352,332 @@ EMERGENCY STOP BUTTON
 .emergency-stop-button:hover {
 
     opacity: 0.92;
+
+}
+
+/* =========================================================
+PRODUCTION RUNTIME V2 - CENTER COLUMN
+========================================================= */
+
+.exchange-live-grid,
+.execution-runtime-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(3, minmax(0, 1fr));
+
+}
+
+.execution-runtime-grid {
+
+    grid-template-columns:
+        repeat(4, minmax(0, 1fr));
+
+}
+
+.runtime-metric {
+
+    min-width: 0;
+
+    min-height: 72px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    gap: 9px;
+
+    padding: 12px 16px;
+
+    border-right:
+        1px solid #18202a;
+
+    border-bottom:
+        1px solid #18202a;
+
+}
+
+.exchange-live-grid .runtime-metric:nth-child(3n),
+.execution-runtime-grid .runtime-metric:nth-child(4n) {
+
+    border-right: 0;
+
+}
+
+.runtime-metric-label {
+
+    overflow: hidden;
+
+    color: #8d96a5;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1.5px;
+
+    text-overflow: ellipsis;
+
+    text-transform: uppercase;
+
+    white-space: nowrap;
+
+}
+
+.runtime-metric-value {
+
+    overflow: hidden;
+
+    color: #f4f7fb;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 13px;
+
+    letter-spacing: 0.8px;
+
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
+
+}
+
+.runtime-health-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        minmax(0, 1.45fr)
+        minmax(260px, 1fr);
+
+}
+
+.runtime-health-group {
+
+    min-width: 0;
+
+    padding: 16px;
+
+    border-right:
+        1px solid #18202a;
+
+}
+
+.runtime-health-group:last-child {
+
+    border-right: 0;
+
+}
+
+.runtime-health-group-title {
+
+    min-height: 34px;
+
+    display: flex;
+
+    align-items: flex-start;
+
+    justify-content: space-between;
+
+    gap: 12px;
+
+    color: #d7dde5;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 12px;
+
+    font-weight: 700;
+
+    letter-spacing: 1.2px;
+
+    text-transform: uppercase;
+
+}
+
+.runtime-health-group-title span {
+
+    color: #596474;
+
+    font-size: 9px;
+
+    white-space: nowrap;
+
+}
+
+.pipeline-stage-list {
+
+    margin: 0;
+
+    padding: 0;
+
+    list-style: none;
+
+}
+
+.pipeline-stage {
+
+    position: relative;
+
+    min-height: 34px;
+
+    display: grid;
+
+    grid-template-columns:
+        32px
+        minmax(0, 1fr)
+        48px;
+
+    align-items: center;
+
+    gap: 10px;
+
+    padding: 5px 8px;
+
+    border-top:
+        1px solid rgba(24, 32, 42, 0.8);
+
+    color: #c8ced7;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 11px;
+
+    letter-spacing: 0.5px;
+
+}
+
+.pipeline-stage:not(:last-child)::after {
+
+    position: absolute;
+
+    bottom: -5px;
+
+    left: 19px;
+
+    z-index: 1;
+
+    color: #40516a;
+
+    content: "↓";
+
+    font-size: 10px;
+
+}
+
+.pipeline-stage-index {
+
+    color: #526176;
+
+    font-size: 9px;
+
+}
+
+.pipeline-stage-name {
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
+
+}
+
+.runtime-wait-state {
+
+    color: #ffd84d;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 10px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    text-align: right;
+
+}
+
+.runtime-loop-list {
+
+    display: flex;
+
+    flex-direction: column;
+
+}
+
+.runtime-loop-row {
+
+    min-height: 42px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 12px;
+
+    border-top:
+        1px solid rgba(24, 32, 42, 0.8);
+
+    color: #c8ced7;
+
+    font-family:
+        "Consolas",
+        monospace;
+
+    font-size: 11px;
+
+    letter-spacing: 0.5px;
+
+}
+
+.execution-timeline {
+
+    border-bottom: 0;
+
+}
+
+.execution-timeline .log-stream {
+
+    min-height: 74px;
+
+    padding: 14px 16px;
+
+}
+
+.log-stream-line.timeline-row {
+
+    grid-template-columns:
+        100px
+        minmax(180px, 1fr)
+        100px;
+
+}
+
+.log-stream-line.timeline-row > div:last-child {
+
+    color: #ffd84d;
+
+    font-weight: 700;
+
+    text-align: right;
 
 }

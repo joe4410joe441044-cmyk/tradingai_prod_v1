@@ -49,17 +49,7 @@ export default function BotControl({
 
             <div className="section-number-title">
 
-                1. MAIN OPERATION
-
-            </div>
-
-            {/* =======================================================
-               PANEL TITLE
-            ======================================================= */}
-
-            <div className="panel-title">
-
-                MAIN OPERATION（メイン操作）
+                1. MAIN OPERATION（メイン操作）
 
             </div>
 

@@ -240,7 +240,7 @@ export default function TradeSettings({
 
                 <div className="config-label">
 
-                    TIMEFRAME（時間軸）
+                    TIMEFRAME（時間足）
 
                 </div>
 

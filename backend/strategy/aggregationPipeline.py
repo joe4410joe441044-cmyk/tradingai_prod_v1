@@ -18,6 +18,8 @@ from backend.websocket.ws_manager import (
     manager
 )
 
+from backend.utils.log_buffer import runtime_debug
+
 
 class AggregationPipeline:
 
@@ -501,8 +503,8 @@ class AggregationPipeline:
             # LIVE EXECUTION COGNITION
             # ========================================
 
-            print(
-                "[AGGREGATION] before process_microstructure_runtime"
+            runtime_debug(
+                "Aggregation forwarding microstructure runtime state"
             )
 
             await manager.process_microstructure_runtime(

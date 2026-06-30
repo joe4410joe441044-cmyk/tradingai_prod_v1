@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import time
-import logging
 from typing import Dict, Any
+from backend.utils.log_buffer import logger as app_logger
 
 
 class RiskManager:
@@ -20,9 +20,7 @@ class RiskManager:
         max_consecutive_losses: int = 5,
         logger=None
     ):
-        print("🔥 NEW RISK MANAGER LOADED")
-
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or app_logger
 
         # =========================
         # CONFIG

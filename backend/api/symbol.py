@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 from backend.bot_manager import get_bot_manager
+from backend.utils.log_buffer import logger, runtime_debug
 
 router = APIRouter()
 
@@ -17,7 +18,7 @@ def set_symbol(data: dict):
         # =========================
         symbol = data.get("symbol")
 
-        print("🔥 SYMBOL REQUEST:", data)
+        runtime_debug("Symbol request=%s", data)
 
         if not symbol:
             return {
@@ -30,14 +31,14 @@ def set_symbol(data: dict):
         # =========================
         symbol = symbol.upper()
 
-        print(f"🔁 SYMBOL APPLY → {symbol}")
+        runtime_debug("Applying symbol=%s", symbol)
 
         # =========================
         # 🔥 Botへ反映（WS含む）
         # =========================
         bot_manager.set_symbol(symbol)
 
-        print(f"✅ SYMBOL APPLIED: {symbol}")
+        logger.info("Symbol applied=%s", symbol)
 
         return {
             "status": "ok",
@@ -45,7 +46,7 @@ def set_symbol(data: dict):
         }
 
     except Exception as e:
-        print("❌ SYMBOL ERROR:", e)
+        logger.error("SYMBOL ERROR: %s", e)
 
         return {
             "status": "error",

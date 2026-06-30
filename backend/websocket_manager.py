@@ -5,7 +5,6 @@ from typing import Set, Dict, Any
 
 from fastapi import WebSocket
 
-print("🔥 WS MANAGER PATCH LOADED")
 class WebSocketManager:
     """
     Central WebSocket Hub

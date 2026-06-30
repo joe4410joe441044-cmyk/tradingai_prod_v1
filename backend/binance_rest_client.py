@@ -5,6 +5,8 @@ import json
 import threading
 import time
 
+from backend.utils.log_buffer import logger, ws_debug
+
 
 class BinanceClient:
     """
@@ -13,7 +15,7 @@ class BinanceClient:
     """
 
     def __init__(self, price_manager, symbol="BTCUSDT", engine=None):
-        print("🔥 USING BinanceClient (WS ONLY)")
+        ws_debug("Using Binance WebSocket-only client")
 
         self.price_manager = price_manager
         self.symbol = symbol.lower()
@@ -49,7 +51,7 @@ class BinanceClient:
             ws_symbol = data.get("s", "").upper()
 
             if not ws_symbol:
-                print("❌ WS SYMBOL MISSING:", data)
+                ws_debug("Binance WebSocket symbol missing data=%s", data)
                 return
 
             # =========================
@@ -65,34 +67,34 @@ class BinanceClient:
                 try:
                     self.engine.on_price(ws_symbol, price)
                 except Exception as e:
-                    print("[ENGINE ERROR]", e)
+                    logger.error("Binance engine callback error: %s", e)
 
         except Exception as e:
-            print("[WS PARSE ERROR]", e)
+            logger.error("Binance WebSocket parse error: %s", e)
 
     # =========================
     # 接続イベント
     # =========================
     def _on_open(self, ws):
-        print(f"🟢 WS CONNECTED: {self.symbol.upper()}")
+        logger.info("WS CONNECTED: %s", self.symbol.upper())
 
     def _on_error(self, ws, error):
-        print("❌ WS ERROR:", error)
+        logger.error("WS ERROR: %s", error)
 
     def _on_close(self, ws, close_status_code, close_msg):
-        print(f"🔴 WS CLOSED: {self.symbol.upper()}")
+        logger.warning("WS DISCONNECTED: %s", self.symbol.upper())
 
     # =========================
     # 実行ループ
     # =========================
     def _run(self):
-        print("🔥 WS LOOP START")
+        ws_debug("Binance WebSocket loop started")
 
         while self._running:
             try:
                 url = f"wss://fstream.binance.com/ws/{self.symbol}@trade"
 
-                print(f"🌐 CONNECT → {url}")
+                logger.info("WS CONNECT: %s", url)
 
                 self.ws = websocket.WebSocketApp(
                     url,
@@ -105,7 +107,7 @@ class BinanceClient:
                 self.ws.run_forever(ping_interval=20, ping_timeout=10)
 
             except Exception as e:
-                print("❌ WS RUN ERROR:", e)
+                logger.error("WS RUN ERROR: %s", e)
 
             # 🔁 再接続
             time.sleep(2)
@@ -151,7 +153,11 @@ class BinanceClient:
         if symbol == self.symbol:
             return
 
-        print(f"🔄 WS SYMBOL SWITCH → {self.symbol.upper()} → {symbol.upper()}")
+        logger.info(
+            "WS SYMBOL SWITCH: %s -> %s",
+            self.symbol.upper(),
+            symbol.upper(),
+        )
 
         self.stop()
         self.symbol = symbol

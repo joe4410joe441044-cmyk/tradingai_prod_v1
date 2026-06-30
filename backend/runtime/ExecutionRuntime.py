@@ -34,6 +34,8 @@ from backend.runtime.governance_runtime import (
     governance_state,
 )
 
+from backend.utils.log_buffer import runtime_debug
+
 from datetime import datetime
 
 from backend.execution.ExecutionGovernance import (
@@ -157,8 +159,8 @@ class ExecutionRuntime:
                 "direction",
                 "NEUTRAL",
             )
-        print(
-            "PERMISSION DIRECTION:",
+        runtime_debug(
+            "Execution permission direction=%s",
             direction,
         )
 
@@ -408,8 +410,8 @@ class ExecutionRuntime:
         governance_decision=None,
         current_exposure=0.0,
     ):
-        print(
-            "EXECUTION GOVERNANCE:",
+        runtime_debug(
+            "Execution governance=%s",
             governance_decision,
         )
 
@@ -549,11 +551,9 @@ class ExecutionRuntime:
             # Dispatch Execution
             # ------------------------------------------------
 
-            print(
-                "DISPATCH DIRECTION:",
-                governance_decision.get(
-                    "direction"
-                ),
+            runtime_debug(
+                "Execution dispatch direction=%s",
+                governance_decision.get("direction"),
             )
 
             execution_event = (

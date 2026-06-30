@@ -2,6 +2,8 @@
 
 import time
 
+from backend.utils.log_buffer import runtime_debug
+
 
 class TradeBrain:
 
@@ -21,35 +23,17 @@ class TradeBrain:
     # =====================================================
     def decide(self, market_data: dict):
 
-        print(
-            "[AI DEBUG] ENTER TradeBrain.decide"
-        )
-
         features = market_data.get("features", [])
 
         if not features:
 
-            print(
-                "[AI DEBUG] NO_FEATURES"
-            )
+            runtime_debug("TradeBrain decision skipped: no features")
 
             return None
 
         lstm_signal = self.lstm.predict(features)
 
-        print(
-            f"[AI DEBUG] LSTM={lstm_signal}"
-        )
-
         llm_signal = self.llm.analyze(market_data)
-
-        print(
-            f"[AI DEBUG] LLM={llm_signal}"
-        )
-
-        print(
-            f"[AI DEBUG] MATCH={lstm_signal == llm_signal}"
-        )
 
         if lstm_signal == llm_signal:
             decision = lstm_signal
@@ -58,8 +42,12 @@ class TradeBrain:
             decision = "HOLD"
             confidence = 0.5
 
-        print(
-            f"[AI DEBUG] DECISION={decision}"
+        runtime_debug(
+            "TradeBrain decision lstm=%s llm=%s match=%s decision=%s",
+            lstm_signal,
+            llm_signal,
+            lstm_signal == llm_signal,
+            decision,
         )
 
         # =========================

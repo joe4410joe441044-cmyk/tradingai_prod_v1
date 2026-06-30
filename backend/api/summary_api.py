@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 from backend.bot_manager import get_bot_manager
+from backend.utils.log_buffer import logger
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ def risk_quick():
         }
 
     except Exception as e:
-        print("[RISK QUICK ERROR]", e)
+        logger.error("RISK QUICK ERROR: %s", e)
         return {
             "kill_switch": False,
             "reason": str(e),
@@ -63,7 +64,7 @@ def get_bot_summary():
         try:
             result = engine.get_result() or {}
         except Exception as e:
-            print("[RESULT ERROR]", e)
+            logger.error("SUMMARY RESULT ERROR: %s", e)
             result = {}
 
         r = getattr(engine, "risk", None)
@@ -99,7 +100,7 @@ def get_bot_summary():
         }
 
     except Exception as e:
-        print("[SUMMARY ERROR]", e)
+        logger.error("SUMMARY ERROR: %s", e)
 
         return {
             "status": "ERROR",

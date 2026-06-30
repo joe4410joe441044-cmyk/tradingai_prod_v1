@@ -1,5 +1,7 @@
 # backend/protection/risk_manager.py
 
+from backend.utils.log_buffer import logger
+
 class KillSwitch:
     def __init__(self):
         self.active = False
@@ -13,7 +15,7 @@ class KillSwitch:
         self.active = True
         self.reason = reason
 
-        print(f"⛔ KILL SWITCH: {reason}")
+        logger.critical("KILL SWITCH: %s", reason)
 
 
 class RiskManager:

@@ -6,11 +6,8 @@ import threading
 import time
 import requests
 import uuid
-import logging
 
-from backend.utils.log_buffer import add_log
-
-logger = logging.getLogger(__name__)
+from backend.utils.log_buffer import add_log, logger, ws_debug
 
 
 class OrderBookWS:
@@ -34,10 +31,10 @@ class OrderBookWS:
             symbol
         )
 
-        logger.warning(
-            f"[SYMBOL MAP] "
-            f"'{symbol}' -> "
-            f"'{normalized}'"
+        ws_debug(
+            "KuCoin symbol map '%s' -> '%s'",
+            symbol,
+            normalized,
         )
 
         return normalized
@@ -120,9 +117,9 @@ class OrderBookWS:
                 f"/api/v1/level2/snapshot?symbol={self.symbol}"
             )
 
-            add_log(
-                f"📸 REQUEST SNAPSHOT: {url}",
-                "warning"
+            ws_debug(
+                "Requesting KuCoin orderbook snapshot url=%s",
+                url,
             )
 
             response = requests.get(
@@ -132,9 +129,9 @@ class OrderBookWS:
 
             data = response.json()
 
-            add_log(
-                f"📸 SNAPSHOT RESPONSE: {data}",
-                "warning"
+            ws_debug(
+                "KuCoin snapshot response=%s",
+                data,
             )
 
             snapshot = (
@@ -168,28 +165,13 @@ class OrderBookWS:
             add_log(
                 f"📸 SNAPSHOT LOADED "
                 f"bids={len(self.bids)} "
-                f"asks={len(self.asks)}",
-                "warning"
-            )
-
-            print(
-                f"📸 SNAPSHOT LOADED "
-                f"bids={len(self.bids)} "
                 f"asks={len(self.asks)}"
             )
-            print(
-                "[SNAPSHOT TOP BIDS]",
-                sorted(
-                    self.bids.keys(),
-                    reverse=True
-                )[:10]
-            )
 
-            print(
-                "[SNAPSHOT TOP ASKS]",
-                sorted(
-                    self.asks.keys()
-                )[:10]
+            ws_debug(
+                "KuCoin snapshot bid_levels=%s ask_levels=%s",
+                sorted(self.bids.keys(), reverse=True)[:10],
+                sorted(self.asks.keys())[:10],
             )
 
         except Exception as e:
@@ -207,8 +189,10 @@ class OrderBookWS:
     def on_message(self, ws, message):
         
         if not hasattr(self, "_first_msg"):
-            print("[FIRST WS MESSAGE]")
-            print(message[:300])
+            ws_debug(
+                "KuCoin first WebSocket message=%s",
+                message[:300],
+            )
             self._first_msg = True
 
 
@@ -230,10 +214,7 @@ class OrderBookWS:
 
             if not self.snapshot_loaded:
 
-                add_log(
-                    "📸 SNAPSHOT NOT LOADED",
-                    "warning"
-                )
+                ws_debug("KuCoin snapshot not loaded; loading now")
 
                 self.load_snapshot()
                 
@@ -253,10 +234,7 @@ class OrderBookWS:
 
             if not change:
 
-                add_log(
-                    "⚠️ EMPTY CHANGE",
-                    "warning"
-                )
+                ws_debug("KuCoin message contained no orderbook change")
 
                 return
 
@@ -271,13 +249,6 @@ class OrderBookWS:
 
                 size = float(size)
             
-                print(
-                    "[CHANGE DEBUG]",
-                    sequence,
-                    price,
-                    side,
-                    size
-                )
             except Exception as e:
 
                 add_log(
@@ -291,13 +262,6 @@ class OrderBookWS:
             # =========================
             # APPLY DELTAS
             # =========================
-
-            print(
-                "[BOOK UPDATE]",
-                side,
-                price,
-                size
-            )
 
             if side == "buy":
 
@@ -336,16 +300,10 @@ class OrderBookWS:
                 not self.asks
             ):
 
-                add_log(
-                    "⚠️ EMPTY LOCAL BOOK",
-                    "warning"
-                )
-
-                add_log(
-                    f"⚠️ EMPTY DETAIL "
-                    f"bids={len(self.bids)} "
-                    f"asks={len(self.asks)}",
-                    "warning"
+                ws_debug(
+                    "Empty KuCoin local book bids=%d asks=%d",
+                    len(self.bids),
+                    len(self.asks),
                 )
 
                 return
@@ -362,21 +320,6 @@ class OrderBookWS:
                 self.asks.keys()
             )
 
-
-            print(
-                "[TOP BIDS]",
-                sorted(
-                    self.bids.keys(),
-                    reverse=True
-                )[:10]
-            )
-
-            print(
-                "[TOP ASKS]",
-                sorted(
-                    self.asks.keys()
-                )[:10]
-            )
 
             # =========================
             # EMPTY CHECK
@@ -396,22 +339,16 @@ class OrderBookWS:
                     "error"
                 )
 
-                add_log(
-                    f"TOP BIDS "
-                    f"{sorted(self.bids.keys(), reverse=True)[:50]}",
-                    "error"
-                )
-
                 common = (
                     set(self.bids.keys())
                     &
                     set(self.asks.keys())
                 )
 
-                add_log(
-                    f"COMMON_PRICES="
-                    f"{sorted(list(common))[:20]}",
-                    "error"
+                ws_debug(
+                    "Crossed KuCoin book details top_bids=%s common_prices=%s",
+                    sorted(self.bids.keys(), reverse=True)[:50],
+                    sorted(list(common))[:20],
                 )
 
                 add_log(
@@ -438,33 +375,26 @@ class OrderBookWS:
                 - self.best_bid
             )
 
-            add_log(
-                f"📊 BID={self.best_bid} "
-                f"ASK={self.best_ask} "
-                f"SPREAD={self.spread}",
-                "info"
-            )
-
             # =========================
             # MID PRICE
             # =========================
-            print(
-                "[BEST PRICE]",
-                self.best_bid,
-                self.best_ask,
-                self.last_price
-            )
 
             self.last_price = (
                 self.best_bid
                 + self.best_ask
             ) / 2
 
-            print(
-                "[BEST DEBUG]",
+            ws_debug(
+                "KuCoin delta sequence=%s side=%s price=%s size=%s "
+                "best_bid=%s best_ask=%s mid_price=%s spread=%s",
+                sequence,
+                side,
+                price,
+                size,
                 self.best_bid,
                 self.best_ask,
-                self.last_price
+                self.last_price,
+                self.spread,
             )
 
             self.last_price_update = time.time()
@@ -518,24 +448,6 @@ class OrderBookWS:
             )
 
             # =========================
-            # LOG
-            # =========================
-
-            add_log(
-                f"📊 "
-                f"BID={self.best_bid} "
-                f"ASK={self.best_ask} "
-                f"SPREAD={self.spread}",
-                "info"
-            )
-            print(
-                "[SEND PRICE]",
-                self.best_bid,
-                self.best_ask,
-                self.last_price
-            )
-
-            # =========================
             # CALLBACK
             # =========================
 
@@ -566,8 +478,6 @@ class OrderBookWS:
     # =========================
 
     def on_open(self, ws):
-        print("[WS OPEN]")
-
         self.connected = True
 
         add_log(
@@ -617,12 +527,6 @@ class OrderBookWS:
         close_status_code,
         close_msg,
     ):
-        print(
-            "[WS CLOSED]",
-            close_status_code,
-            close_msg
-        )
-
         self.connected = False
 
         add_log(
@@ -647,8 +551,6 @@ class OrderBookWS:
     # =========================
 
     def on_error(self, ws, error):
-        print("[WS ERROR]", error)
-
         self.connected = False
 
         add_log(
@@ -691,10 +593,6 @@ class OrderBookWS:
 
     def start(self):
 
-        add_log("[TRACE] ORDERBOOK START")
-
-        print("[ORDERBOOK START]")
-
         if self.running:
 
             add_log(
@@ -702,19 +600,11 @@ class OrderBookWS:
                 "warning"
             )
 
-            logger.warning(
-                "[WS ALREADY RUNNING]"
-            )
-
             return
 
         self.running = True
 
         def run():
-
-            add_log("[TRACE] ORDERBOOK RUN")
-
-            print("[ORDERBOOK RUN]")
 
             while self.running:
                 now = time.time()
@@ -728,10 +618,6 @@ class OrderBookWS:
                     add_log(
                         "⚠️ STALE MARKET DATA",
                         "warning"
-                    )
-
-                    logger.warning(
-                        "[STALE MARKET DATA]"
                     )
 
                     self.connected = False
@@ -762,14 +648,10 @@ class OrderBookWS:
                         f"&connectId={connect_id}"
                     )
 
-                    add_log(
-                        f"🚀 CONNECT URL: "
-                        f"{self.url}",
-                        "warning"
+                    ws_debug(
+                        "Creating KuCoin WebSocket symbol=%s",
+                        self.symbol,
                     )
-                    add_log("[TRACE] CREATING WEBSOCKET")
-
-                    print("[CREATING WEBSOCKET]")
 
                     self.ws = (
                         websocket.WebSocketApp(
@@ -793,10 +675,6 @@ class OrderBookWS:
                         )
                     )
 
-                    add_log("[TRACE] RUN FOREVER")
-                    
-                    print("[RUN FOREVER]")
-
                     self.ws.run_forever(
                         ping_interval=20,
                         ping_timeout=10,
@@ -806,10 +684,6 @@ class OrderBookWS:
                     add_log(
                         "⚠️ WS DISCONNECTED",
                         "warning"
-                    )
-
-                    logger.warning(
-                        "[WS DISCONNECTED]"
                     )
 
                 except Exception as e:

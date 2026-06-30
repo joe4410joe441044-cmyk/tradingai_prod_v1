@@ -4,6 +4,7 @@ from backend.config import (
     TRADE_MODE,
     ALLOW_LIVE
 )
+from backend.utils.log_buffer import add_log
 
 
 def place_order_safe(
@@ -18,7 +19,7 @@ def place_order_safe(
 
     if order["qty"] <= 0:
 
-        print("❌ INVALID QTY:", order)
+        add_log(f"❌ ORDER REJECTED invalid quantity: {order}", "error")
 
         return {
             "success": False,
@@ -32,7 +33,7 @@ def place_order_safe(
 
     if TRADE_MODE != "live" or not ALLOW_LIVE:
 
-        print("🟡 PAPER ORDER:", order)
+        add_log(f"🟡 PAPER ORDER: {order}")
 
         try:
 
@@ -51,7 +52,7 @@ def place_order_safe(
 
         except Exception as e:
 
-            print("❌ PAPER ORDER ERROR:", e)
+            add_log(f"❌ PAPER ORDER ERROR: {e}", "error")
 
             return {
                 "success": False,
@@ -63,7 +64,7 @@ def place_order_safe(
     # LIVE
     # =========================
 
-    print("🔴 LIVE ORDER:", order)
+    add_log(f"🔴 LIVE ORDER: {order}")
 
     try:
 
@@ -77,7 +78,7 @@ def place_order_safe(
 
     except Exception as e:
 
-        print("❌ LIVE ORDER ERROR:", e)
+        add_log(f"❌ LIVE ORDER ERROR: {e}", "error")
 
         return {
             "success": False,

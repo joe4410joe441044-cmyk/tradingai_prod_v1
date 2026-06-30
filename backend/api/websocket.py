@@ -7,10 +7,10 @@ from fastapi import WebSocketDisconnect
 from typing import List
 
 import asyncio
-import logging
 import math
 
 from backend.bot_manager import get_bot_manager
+from backend.utils.log_buffer import logger, ws_debug
 
 # =========================
 # ROUTER
@@ -18,19 +18,11 @@ from backend.bot_manager import get_bot_manager
 
 router = APIRouter()
 
-logger = logging.getLogger(__name__)
-
 # =========================
 # CONNECTIONS
 # =========================
 
 connections: List[WebSocket] = []
-
-# =========================
-# DEBUG
-# =========================
-
-DEBUG_WS = True
 
 # =========================
 # JSON SAFE
@@ -105,11 +97,7 @@ def safe_json(obj):
 
 async def connect(ws: WebSocket):
 
-    print("🔥 BEFORE ACCEPT")
-
     await ws.accept()
-
-    print("🟢 WS ACCEPTED")
 
     connections.append(ws)
 
@@ -140,7 +128,7 @@ async def websocket_endpoint(
     ws: WebSocket
 ):
 
-    print("🔥 WS ROUTE HIT")
+    ws_debug("API WebSocket route opened")
 
     # =========================
     # CONNECT
@@ -150,10 +138,7 @@ async def websocket_endpoint(
 
     bot = get_bot_manager()
 
-    print(
-        "WS BOT ID:",
-        id(bot)
-    )
+    ws_debug("API WebSocket bot id=%s", id(bot))
 
     try:
 

@@ -6,780 +6,259 @@ import {
 
 import "../../styles/dashboard.css";
 
-/* =========================================================
-   SAFE ARRAY
-========================================================= */
-
-const safeArray = (value) => {
-
-    return Array.isArray(value)
-        ? value
-        : [];
-
-};
-
-/* =========================================================
-   FORMAT TIME
-========================================================= */
+const safeArray = (value) => (Array.isArray(value) ? value : []);
 
 const formatTime = (value) => {
-
     if (!value) {
-
         return "--:--:--";
-
     }
 
-    try {
-
-        return new Date(value)
-            .toLocaleTimeString();
-
-    } catch {
-
-        return "--:--:--";
-
+    if (/^\d{2}:\d{2}:\d{2}$/.test(String(value))) {
+        return String(value);
     }
 
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime())
+        ? "--:--:--"
+        : date.toLocaleTimeString();
 };
 
-/* =========================================================
-   SOURCE ENUM
-========================================================= */
+const normalizeSource = (type = "") => {
+    const normalized = String(type).toLowerCase();
 
-const normalizeSource = (
-    type = ""
-) => {
-
-    const t =
-        String(type)
-            .toLowerCase();
-
-    if (
-        t.includes("router")
-    ) {
-
-        return "ROUTER";
-
-    }
-
-    if (
-        t.includes("market")
-    ) {
-
-        return "MARKET";
-
-    }
-
-    if (
-        t.includes("micro")
-    ) {
-
-        return "MICRO";
-
-    }
-
-    if (
-        t.includes("runtime")
-    ) {
-
-        return "SYSTEM";
-
-    }
-
-    if (
-        t.includes("risk")
-    ) {
-
-        return "ENGINE";
-
-    }
-
-    if (
-        t.includes("execution")
-    ) {
-
-        return "EXEC";
-
-    }
-
-    if (
-        t.includes("restriction")
-    ) {
-
-        return "ENGINE";
-
-    }
+    if (normalized.includes("router")) return "ROUTER";
+    if (normalized.includes("market")) return "MARKET";
+    if (normalized.includes("micro")) return "MICRO";
+    if (normalized.includes("risk")) return "ENGINE";
+    if (normalized.includes("execution")) return "EXEC";
+    if (normalized.includes("restriction")) return "ENGINE";
+    if (normalized.includes("runtime")) return "SYSTEM";
 
     return "SYSTEM";
-
 };
 
-/* =========================================================
-   LEVEL ENUM
-========================================================= */
+const normalizeLevel = (type = "") => {
+    const normalized = String(type).toLowerCase();
 
-const normalizeLevel = (
-    type = ""
-) => {
-
-    const t =
-        String(type)
-            .toLowerCase();
-
-    if (
-        t.includes("risk")
-    ) {
-
-        return "WARN";
-
-    }
-
-    if (
-        t.includes("restriction")
-    ) {
-
-        return "WARN";
-
-    }
-
-    if (
-        t.includes("error")
-    ) {
-
+    if (normalized.includes("error") || normalized.includes("failure")) {
         return "ERROR";
-
     }
 
-    if (
-        t.includes("failure")
-    ) {
-
-        return "ERROR";
-
+    if (normalized.includes("risk") || normalized.includes("restriction")) {
+        return "WARN";
     }
 
     return "INFO";
-
 };
 
-/* =========================================================
-   STATE ENUM
-========================================================= */
+const normalizeState = (entry = {}) => {
+    const value = String(
+        entry.state ?? entry.message ?? entry.type ?? ""
+    ).toUpperCase();
 
-const normalizeState = (
-    message = ""
-) => {
+    const knownStates = [
+        "RECONNECT",
+        "STALE",
+        "BLOCKED",
+        "DEGRADED",
+        "FAILURE",
+        "DISCONNECTED",
+        "RECOVERY",
+        "WAIT",
+    ];
 
-    const m =
-        String(message)
-            .toLowerCase();
-
-    if (
-        m.includes("reconnect")
-    ) {
-
-        return "RECONNECT";
-
-    }
-
-    if (
-        m.includes("stale")
-    ) {
-
-        return "STALE";
-
-    }
-
-    if (
-        m.includes("blocked")
-    ) {
-
-        return "BLOCKED";
-
-    }
-
-    if (
-        m.includes("degraded")
-    ) {
-
-        return "DEGRADED";
-
-    }
-
-    if (
-        m.includes("failure")
-    ) {
-
-        return "FAILURE";
-
-    }
-
-    if (
-        m.includes("disconnect")
-    ) {
-
-        return "DISCONNECTED";
-
-    }
-
-    return "UNKNOWN";
-
+    return knownStates.find((state) => value.includes(state)) ?? "UNKNOWN";
 };
 
-/* =========================================================
-   CATEGORY CLASS
-========================================================= */
+const categoryClass = (level = "") => {
+    const normalized = String(level).toLowerCase();
 
-const categoryClass = (
-    level = ""
-) => {
-
-    const t =
-        String(level)
-            .toLowerCase();
-
-    if (
-        t.includes("error")
-    ) {
-
-        return "error";
-
-    }
-
-    if (
-        t.includes("warn")
-    ) {
-
-        return "warning";
-
-    }
+    if (normalized.includes("error")) return "error";
+    if (normalized.includes("warn")) return "warning";
 
     return "system";
-
 };
 
-/* =========================================================
-   BUILD RUNTIME EVENTS
-========================================================= */
+const mapLogEntry = (entry = {}) => ({
+    timestamp: entry.timestamp ?? Date.now(),
+    source: entry.source ?? normalizeSource(entry.type),
+    level: entry.level ?? normalizeLevel(entry.type),
+    state: normalizeState(entry),
+});
 
 const buildRuntimeEvents = ({
-
-    signalLogs = [],
-    tradeLogs = [],
-
-    unifiedTelemetry = {},
-
-    journalTelemetry = {},
-
+    logs,
+    signalLogs,
+    tradeLogs,
+    unifiedTelemetry,
+    journalTelemetry,
 }) => {
+    const runtimeEvents = [];
 
-    const events = [];
-
-
-    /* =====================================================
-       MARKET
-    ===================================================== */
-
-    if (
-        unifiedTelemetry?.market
-            ?.marketHostility >
-        0.7
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "MARKET",
-
-            level:
-                "WARN",
-
-            state:
-                "HOSTILE",
-
+    if (unifiedTelemetry?.market?.marketHostility > 0.7) {
+        runtimeEvents.push({
+            timestamp: Date.now(),
+            source: "MARKET",
+            level: "WARN",
+            state: "HOSTILE",
         });
-
     }
 
-    /* =====================================================
-       RUNTIME
-    ===================================================== */
-
-    if (
-        unifiedTelemetry?.runtime
-            ?.streamStale
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "SYSTEM",
-
-            level:
-                "WARN",
-
-            state:
-                "STALE",
-
+    if (unifiedTelemetry?.runtime?.streamStale) {
+        runtimeEvents.push({
+            timestamp: Date.now(),
+            source: "SYSTEM",
+            level: "WARN",
+            state: "STALE",
         });
-
     }
 
-    if (
-        unifiedTelemetry?.runtime
-            ?.reconnectInProgress
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "SYSTEM",
-
-            level:
-                "WARN",
-
-            state:
-                "RECONNECT",
-
+    if (unifiedTelemetry?.runtime?.reconnectInProgress) {
+        runtimeEvents.push({
+            timestamp: Date.now(),
+            source: "SYSTEM",
+            level: "WARN",
+            state: "RECONNECT",
         });
-
     }
 
-    if (
-        unifiedTelemetry?.runtime
-            ?.websocketHealth < 50
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "SYSTEM",
-
-            level:
-                "WARN",
-
-            state:
-                "DEGRADED",
-
+    if (unifiedTelemetry?.risk?.restrictionReason
+        && unifiedTelemetry.risk.restrictionReason !== "NONE") {
+        runtimeEvents.push({
+            timestamp: Date.now(),
+            source: "ENGINE",
+            level: "WARN",
+            state: "BLOCKED",
         });
-
     }
 
-    /* =====================================================
-       RISK
-    ===================================================== */
-
-    if (
-        unifiedTelemetry?.risk
-            ?.restrictionReason &&
-        unifiedTelemetry?.risk
-            ?.restrictionReason !==
-        "NONE"
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "ENGINE",
-
-            level:
-                "WARN",
-
-            state:
-                "BLOCKED",
-
+    if (journalTelemetry?.crashRecoveryDetected) {
+        runtimeEvents.push({
+            timestamp: Date.now(),
+            source: "SYSTEM",
+            level: "INFO",
+            state: "RECOVERY",
         });
-
     }
 
-    /* =====================================================
-       JOURNAL
-    ===================================================== */
-
-    if (
-        journalTelemetry
-            ?.crashRecoveryDetected
-    ) {
-
-        events.push({
-
-            timestamp:
-                Date.now(),
-
-            source:
-                "SYSTEM",
-
-            level:
-                "INFO",
-
-            state:
-                "RECOVERY",
-
+    [logs, signalLogs, tradeLogs].forEach((entries) => {
+        safeArray(entries).slice(-30).forEach((entry) => {
+            runtimeEvents.push(mapLogEntry(entry));
         });
+    });
 
-    }
-
-    /* =====================================================
-       SIGNAL LOGS
-    ===================================================== */
-
-    safeArray(signalLogs)
-        .slice(-30)
-        .forEach((entry) => {
-
-            events.push({
-
-                timestamp:
-                    entry?.timestamp ??
-                    Date.now(),
-
-                source:
-                    normalizeSource(
-                        entry?.type
-                    ),
-
-                level:
-                    normalizeLevel(
-                        entry?.type
-                    ),
-
-                state:
-                    normalizeState(
-                        entry?.type,
-                        entry?.message
-                    ),
-
-            });
-
-        });
-            /* =====================================================
-       TRADE LOGS
-    ===================================================== */
-
-    safeArray(tradeLogs)
-        .slice(-30)
-        .forEach((entry) => {
-
-            events.push({
-
-                timestamp:
-                    entry?.timestamp ??
-                    Date.now(),
-
-                source:
-                    normalizeSource(
-                        entry?.type
-                    ),
-
-                level:
-                    normalizeLevel(
-                        entry?.type
-                    ),
-
-                state:
-                    normalizeState(
-                        entry?.type,
-                        entry?.message
-                    ),
-
-            });
-
-        });
-
-    return events
-        .sort((a, b) => {
-
-            return (
-                Number(a.timestamp) -
-                Number(b.timestamp)
-            );
-
-        })
+    return runtimeEvents
+        .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
         .slice(-120);
-
 };
 
-/* =========================================================
-   LOGS PANEL
-========================================================= */
-
 export default function LogsPanel({
-
+    logs = [],
     signalLogs = [],
     tradeLogs = [],
-
-    routerTelemetry = {},
-
     unifiedTelemetry = {},
-
     journalTelemetry = {},
-
+    events,
+    title = "CENTER | EVENT STREAM",
+    showLevel = true,
+    embedded = false,
     loading = false,
-
     error = false,
-
 }) {
+    const streamRef = useRef(null);
 
-    const streamRef =
-        useRef(null);
-
-    const runtimeEvents =
-        useMemo(() => {
-
-            return buildRuntimeEvents({
-
-                signalLogs,
-                tradeLogs,
-
-                routerTelemetry,
-
-                unifiedTelemetry,
-
-                journalTelemetry,
-
-            });
-
-        }, [
-
-            signalLogs,
-            tradeLogs,
-
-            routerTelemetry,
-
-            unifiedTelemetry,
-
-            journalTelemetry,
-
-        ]);
-
-    /* =====================================================
-       AUTO SCROLL
-    ===================================================== */
-
-    useEffect(() => {
-
-        if (!streamRef.current) {
-
-            return;
-
+    const runtimeEvents = useMemo(() => {
+        if (Array.isArray(events)) {
+            return events;
         }
 
-        streamRef.current.scrollTop =
-            streamRef.current.scrollHeight;
+        return buildRuntimeEvents({
+            logs,
+            signalLogs,
+            tradeLogs,
+            unifiedTelemetry,
+            journalTelemetry,
+        });
+    }, [
+        events,
+        journalTelemetry,
+        logs,
+        signalLogs,
+        tradeLogs,
+        unifiedTelemetry,
+    ]);
 
+    useEffect(() => {
+        if (streamRef.current) {
+            streamRef.current.scrollTop = streamRef.current.scrollHeight;
+        }
     }, [runtimeEvents]);
 
-    /* =====================================================
-       UI
-    ===================================================== */
+    const rowClassName = showLevel
+        ? "log-stream-line"
+        : "log-stream-line timeline-row";
 
     return (
-
-        <div className="panel-card logs-panel">
-
-            {/* =============================================
-               HEADER
-            ============================================= */}
-
-            <div className="panel-title">
-
-                CENTER | EVENT STREAM
-
+        <section className={embedded
+            ? "terminal-monitor-section logs-panel execution-timeline"
+            : "panel-card logs-panel"
+        }>
+            <div className={embedded ? "terminal-section-header" : "panel-title"}>
+                {title}
             </div>
 
-            {/* =============================================
-               STREAM
-            ============================================= */}
-
-            <div
-                ref={streamRef}
-                className="log-stream"
-            >
-
-                <div className="log-stream-line">
-
-                    <div>
-                        TIME
-                    </div>
-
-                    <div>
-                        SOURCE
-                    </div>
-
-                    <div>
-                        LEVEL
-                    </div>
-
-                    <div>
-                        STATE
-                    </div>
-
+            <div ref={streamRef} className="log-stream">
+                <div className={rowClassName}>
+                    <div>TIME（時刻）</div>
+                    <div>SOURCE（実行元）</div>
+                    {showLevel && <div>LEVEL</div>}
+                    <div>STATE（状態）</div>
                 </div>
-                                {/* =============================================
-                   LOADING
-                ============================================= */}
 
                 {loading && (
-
-                    <div className="log-stream-line">
-
-                        <div>
-                            WAIT
-                        </div>
-
-                        <div>
-                            SYSTEM
-                        </div>
-
-                        <div>
-                            INFO
-                        </div>
-
-                    <div>
-                        CONNECTING
+                    <div className={rowClassName}>
+                        <div>--:--:--</div>
+                        <div>SYSTEM</div>
+                        {showLevel && <div>INFO</div>}
+                        <div>WAIT</div>
                     </div>
-
-                    </div>
-
                 )}
-
-                {/* =============================================
-                   ERROR
-                ============================================= */}
 
                 {error && (
-
-                    <div className="log-stream-line">
-
-                        <div>
-                            ERROR
-                        </div>
-
-                        <div>
-                            SYSTEM
-                        </div>
-
-                        <div
-                            className="terminal-red"
-                        >
-                            ERROR
-                        </div>
-
-                        <div>
-                            FAILURE
-                        </div>
-
+                    <div className={rowClassName}>
+                        <div>--:--:--</div>
+                        <div>SYSTEM</div>
+                        {showLevel && <div className="terminal-red">ERROR</div>}
+                        <div>FAILURE</div>
                     </div>
-
                 )}
 
-                {/* =============================================
-                   EVENTS
-                ============================================= */}
-
-                {runtimeEvents.map(
-
-                    (event, index) => {
-
-                        return (
-
-                            <div
-                                key={`${event.timestamp}-${index}`}
-                                className="log-stream-line"
-                            >
-
-                                <div>
-
-                                    {
-                                        formatTime(
-                                            event.timestamp
-                                        )
-                                    }
-
-                                </div>
-
-                                <div>
-
-                                    {
-                                        event.source
-                                    }
-
-                                </div>
-
-                                <div
-                                    className={
-                                        categoryClass(
-                                            event.level
-                                        )
-                                    }
-                                >
-
-                                    {
-                                        event.level
-                                    }
-
-                                </div>
-
-                                <div>
-
-                                    {
-                                        event.state
-                                    }
-
-                                </div>
-
+                {runtimeEvents.map((event, index) => (
+                    <div
+                        className={rowClassName}
+                        key={`${event.time ?? event.timestamp}-${event.source}-${index}`}
+                    >
+                        <div>{formatTime(event.time ?? event.timestamp)}</div>
+                        <div>{event.source ?? "SYSTEM"}</div>
+                        {showLevel && (
+                            <div className={categoryClass(event.level)}>
+                                {event.level ?? "INFO"}
                             </div>
-
-                        );
-
-                    }
-
-                )}
-
-                {runtimeEvents.length === 0 && !loading && (
-
-                    <div className="log-stream-line">
-
-                        <div>
-                            --
-                        </div>
-
-                        <div>
-                            SYSTEM
-                        </div>
-
-                        <div>
-                            INFO
-                        </div>
-
-                        <div>
-                            DISCONNECTED
-                        </div>
-
+                        )}
+                        <div>{event.state ?? "WAIT"}</div>
                     </div>
+                ))}
 
+                {runtimeEvents.length === 0 && !loading && !error && (
+                    <div className={rowClassName}>
+                        <div>--:--:--</div>
+                        <div>SYSTEM</div>
+                        {showLevel && <div>INFO</div>}
+                        <div>WAIT</div>
+                    </div>
                 )}
-
             </div>
-
-        </div>
-
+        </section>
     );
-
 }

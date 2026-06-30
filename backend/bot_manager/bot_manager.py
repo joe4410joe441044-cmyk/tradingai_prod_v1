@@ -15,7 +15,9 @@ import uuid
 from dotenv import load_dotenv
 
 from backend.utils.log_buffer import (
-    add_log
+    add_log,
+    runtime_debug,
+    ws_debug,
 )
 
 from backend.bot_manager.runtime_state import (
@@ -341,11 +343,6 @@ class BotManager:
                 self.session_id
             )
 
-            print(
-                "🆕 SESSION:",
-                current_session
-            )
-
             add_log(
                 f"🆕 SESSION: "
                 f"{current_session}"
@@ -403,10 +400,6 @@ class BotManager:
             exchange = None
 
             if config.get("mode") == "live":
-
-                print(
-                    "🟢 LIVE EXCHANGE ENABLED"
-                )
 
                 add_log(
                     "🟢 LIVE EXCHANGE ENABLED"
@@ -481,21 +474,22 @@ class BotManager:
 
                 if runtime_id != self.active_runtime_id:
 
-                    print(
-                        "[STALE CALLBACK BLOCKED]",
+                    ws_debug(
+                        "Stale callback blocked symbol=%s runtime_id=%s "
+                        "active_runtime_id=%s",
                         symbol,
                         runtime_id,
-                        self.active_runtime_id
+                        self.active_runtime_id,
                     )
 
                     return
 
                 if symbol != self.symbol:
 
-                    print(
-                        "[SYMBOL MISMATCH BLOCKED]",
+                    ws_debug(
+                        "Callback symbol mismatch blocked symbol=%s active=%s",
                         symbol,
-                        self.symbol
+                        self.symbol,
                     )
 
                     return
@@ -508,22 +502,12 @@ class BotManager:
                     "symbol"
                 )
 
-                print(
-                    "[CALLBACK SYMBOL]",
-                    callback_symbol
-                )
-
-                print(
-                    "[ACTIVE SYMBOL]",
-                    self.symbol
-                )
-
                 if callback_symbol != self.symbol:
 
-                    print(
-                        "[STALE CALLBACK BLOCKED]",
+                    ws_debug(
+                        "Stale callback blocked callback_symbol=%s active=%s",
                         callback_symbol,
-                        self.symbol
+                        self.symbol,
                     )
 
                     return
@@ -585,17 +569,15 @@ class BotManager:
                             0
                         )
                     )
-                    print(
-                        "[PRICE DEBUG]",
+                    ws_debug(
+                        "WebSocket callback symbol=%s active=%s bids=%d "
+                        "asks=%d price=%s last_price=%s",
+                        callback_symbol,
+                        self.symbol,
+                        len(bids),
+                        len(asks),
                         data.get("price"),
-                        data.get("last_price")
-                    )
-
-                    add_log(
-                        f"📡 WS CALLBACK "
-                        f"bids={len(bids)} "
-                        f"asks={len(asks)}",
-                        "warning"
+                        data.get("last_price"),
                     )
 
                     if (
@@ -603,9 +585,7 @@ class BotManager:
                         or not asks
                     ):
 
-                        print(
-                            "⚠️ EMPTY CALLBACK BOOK"
-                        )
+                        ws_debug("Empty callback orderbook")
 
                         return
 
@@ -658,9 +638,9 @@ class BotManager:
 
                             "lastPrice": float(price),
                         }
-                        print(
-                            "[PACKET DEBUG]",
-                            packet
+                        runtime_debug(
+                            "Runtime market packet=%s",
+                            packet,
                         )
 
                         micro_state = (
@@ -671,10 +651,6 @@ class BotManager:
                         )
 
                         if runtime_registry.trading_runtime:
-
-                            print(
-                                "[BOTMANAGER] RUNTIME PATH ENABLED"
-                            )
 
                             runtime_registry.trading_runtime.process_runtime(
                                 micro_state
@@ -770,8 +746,8 @@ class BotManager:
 
                         try:
 
-                            print(
-                                "[BOTMANAGER] SIGNAL HANDOFF TO TRADING_RUNTIME"
+                            runtime_debug(
+                                "BotManager signal handoff to TradingRuntime"
                             )
 
                         except Exception as execution_error:
@@ -808,12 +784,12 @@ class BotManager:
                 uuid.uuid4()
             )
 
-            print(
-                "[NEW RUNTIME]",
-                self.active_runtime_id
+            ws_debug(
+                "New WebSocket runtime id=%s",
+                self.active_runtime_id,
             )
 
-            add_log("[TRACE] WS START CALLED")
+            add_log("ORDERBOOK WS STARTING")
 
             self.ws = (
                 ExchangeFactory.create_market_ws(
@@ -824,13 +800,14 @@ class BotManager:
                 )
             )
 
-            print(type(self.ws), flush=True)
+            ws_debug(
+                "WebSocket client type=%s",
+                type(self.ws).__name__,
+            )
 
             runtime_metrics[
                 "ws_thread_alive"
             ] = True
-
-            print("[WS START CALLED]")
 
             self.ws.start()
 

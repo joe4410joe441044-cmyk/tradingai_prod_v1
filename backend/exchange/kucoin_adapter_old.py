@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from kucoin.client import User, Trade, Market
 
 from Bot.exchanges.base_exchange import BaseExchange
+from backend.utils.log_buffer import logger
 
 load_dotenv()
 
@@ -48,7 +49,7 @@ class KuCoinExchange(BaseExchange):
             return 0.0
 
         except Exception as e:
-            print("[KUCOIN BALANCE ERROR]", e)
+            logger.error("KUCOIN BALANCE ERROR: %s", e)
             return 0.0
 
     # =========================
@@ -82,7 +83,7 @@ class KuCoinExchange(BaseExchange):
             )
 
         except Exception as e:
-            print("[KUCOIN ORDER ERROR]", e)
+            logger.error("KUCOIN ORDER ERROR: %s", e)
             return None
 
     def close_position(self, symbol: str):

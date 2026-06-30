@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from backend.utils.log_buffer import add_log
-from backend.core.logger import logger
+from backend.utils.log_buffer import logger, ws_debug
 
 
 class OrderBookManager:
@@ -55,34 +54,15 @@ class OrderBookManager:
         reconstructed local orderbook 更新
         """
 
-        print("🔥 UPDATE ENTER")
-
-        print(
-            f"📥 MANAGER UPDATE "
-            f"bids={len(bids)} "
-            f"asks={len(asks)}"
-        )
-
         # =========================
         # EMPTY CHECK
         # =========================
 
-        print(
-            f"TRACE INPUT "
-            f"bids={len(bids)} "
-            f"asks={len(asks)}"
-        )
-
         if not bids or not asks:
-
-            print(
-                "⚠️ EMPTY ORDERBOOK"
-            )
-
-            print(
-                "❌ RETURN EMPTY INPUT "
-                f"bids={len(bids)} "
-                f"asks={len(asks)}"
+            ws_debug(
+                "EMPTY ORDERBOOK bids=%d asks=%d",
+                len(bids),
+                len(asks),
             )
 
             return
@@ -95,37 +75,9 @@ class OrderBookManager:
 
         self.asks = dict(asks)
 
-        add_log(
-            f"🔥 WS OB INSTANCE={id(self)}",
-            "warning"
-        )
-
-        add_log(
-            f"🔥 WS BOOK UPDATE "
-            f"bids={len(self.bids)} "
-            f"asks={len(self.asks)}",
-            "warning"
-        )
-
-        print(
-            f"🔥 WS OB INSTANCE={id(self)}"
-        )
-
-        print(
-            f"🔥 WS BOOK UPDATE "
-            f"bids={len(self.bids)} "
-            f"asks={len(self.asks)}"
-        )
-
         # =========================
         # EMPTY CHECK
         # =========================
-
-        print(
-            f"TRACE LOCAL "
-            f"bids={len(self.bids)} "
-            f"asks={len(self.asks)}"
-        )
 
         if (
             not self.bids
@@ -133,14 +85,10 @@ class OrderBookManager:
             not self.asks
         ):
 
-            print(
-                "⚠️ EMPTY LOCAL BOOK"
-            )
-
-            print(
-                "❌ RETURN EMPTY LOCAL BOOK "
-                f"bids={len(self.bids)} "
-                f"asks={len(self.asks)}"
+            ws_debug(
+                "EMPTY LOCAL ORDERBOOK bids=%d asks=%d",
+                len(self.bids),
+                len(self.asks),
             )
 
             return
@@ -153,29 +101,13 @@ class OrderBookManager:
             self.bids.keys()
         )
 
-        print(
-            f"TRACE BEST BID="
-            f"{self.best_bid}"
-        )
-
         self.best_ask = min(
             self.asks.keys()
-        )
-
-        print(
-            f"TRACE BEST ASK="
-            f"{self.best_ask}"
         )
 
         # =========================
         # CROSSED BOOK PROTECTION
         # =========================
-
-        print(
-            f"TRACE CROSS CHECK "
-            f"bid={self.best_bid} "
-            f"ask={self.best_ask}"
-        )
 
         if (
             self.best_bid
@@ -183,16 +115,10 @@ class OrderBookManager:
             self.best_ask
         ):
 
-            print(
-                f"❌ CROSSED BOOK "
-                f"BID={self.best_bid} "
-                f"ASK={self.best_ask}"
-            )
-
-            print(
-                "❌ RETURN CROSSED BOOK "
-                f"bid={self.best_bid} "
-                f"ask={self.best_ask}"
+            ws_debug(
+                "CROSSED ORDERBOOK bid=%s ask=%s",
+                self.best_bid,
+                self.best_ask,
             )
 
             return
@@ -206,17 +132,10 @@ class OrderBookManager:
             + self.best_ask
         ) / 2
 
-        print(
-            f"TRACE CURRENT PRICE="
-            f"{self.current_price}"
-        )
-
         self.spread = (
             self.best_ask
             - self.best_bid
         )
-
-        print("✅ UPDATE SUCCESS")
 
         # =========================
         # TOP LEVELS
@@ -265,39 +184,19 @@ class OrderBookManager:
 
             self.imbalance = 0.0
 
-        # =========================
-        # DEBUG
-        # =========================
-
-        print(
-            f"📊 TOP BID="
-            f"{self.best_bid} "
-            f"ASK={self.best_ask}"
-        )
-
-        print(
-            f"💰 CURRENT PRICE="
-            f"{self.current_price}"
-        )
-
-        print(
-            f"💰 SPREAD="
-            f"{self.spread}"
-        )
-
-        print(
-            f"📊 BID VOLUME="
-            f"{self.bid_volume}"
-        )
-
-        print(
-            f"📊 ASK VOLUME="
-            f"{self.ask_volume}"
-        )
-
-        print(
-            f"📊 IMBALANCE="
-            f"{self.imbalance}"
+        ws_debug(
+            "OrderBook snapshot bids=%d asks=%d best_bid=%s "
+            "best_ask=%s price=%s spread=%s bid_volume=%s "
+            "ask_volume=%s imbalance=%s",
+            len(self.bids),
+            len(self.asks),
+            self.best_bid,
+            self.best_ask,
+            self.current_price,
+            self.spread,
+            self.bid_volume,
+            self.ask_volume,
+            self.imbalance,
         )
 
         # =========================
@@ -305,11 +204,6 @@ class OrderBookManager:
         # =========================
 
         if self.callback:
-
-            print(
-                "🔥 CALLBACK EXECUTE"
-            )
-
             self.callback(
                 self.current_price,
                 self.best_bid,
@@ -324,36 +218,14 @@ class OrderBookManager:
 
     def get_top_n_volume(self, n=5):
 
-        add_log(
-            f"📚 OB INSTANCE={id(self)}",
-            "warning"
-        )
-
-        add_log(
-            f"📚 BOOK SIZES "
-            f"bids={len(self.bids)} "
-            f"asks={len(self.asks)}",
-            "warning"
-        )
-
-        print(
-            f"📚 OB INSTANCE={id(self)}"
-        )
-
-        print(
-            f"📚 BOOK SIZES "
-            f"bids={len(self.bids)} "
-            f"asks={len(self.asks)}"
-        )
-
         if (
             not self.bids
             or
             not self.asks
         ):
 
-            print(
-                "⚠️ EMPTY BOOK IN get_top_n_volume"
+            ws_debug(
+                "EMPTY ORDERBOOK in get_top_n_volume"
             )
 
             return 0.0, 0.0
@@ -369,12 +241,6 @@ class OrderBookManager:
                 self.asks.keys()
             )[:n]
 
-            print(
-                f"📚 TOPN INPUT "
-                f"bids={top_bid_prices[:3]} "
-                f"asks={top_ask_prices[:3]}"
-            )
-
             bid_vol = sum(
                 self.bids[p]
                 for p in top_bid_prices
@@ -385,20 +251,18 @@ class OrderBookManager:
                 for p in top_ask_prices
             )
 
-            print(
-                f"📚 TOPN RESULT "
-                f"bid_vol={bid_vol} "
-                f"ask_vol={ask_vol}"
+            ws_debug(
+                "OrderBook top-n volume n=%d bid_volume=%s ask_volume=%s",
+                n,
+                bid_vol,
+                ask_vol,
             )
 
             return bid_vol, ask_vol
 
-        except Exception as e:
+        except Exception:
 
-            print(
-                "⚠️ OrderBook volume error:",
-                e
-            )
+            logger.exception("OrderBook volume error")
 
             return 0.0, 0.0
 

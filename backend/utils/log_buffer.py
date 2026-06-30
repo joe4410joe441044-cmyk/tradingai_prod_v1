@@ -42,12 +42,42 @@ LOG_FILE = os.path.join(
 
 logger = logging.getLogger("TradingAI")
 
+
+def _env_flag(name, default=False):
+    value = os.getenv(name, str(default))
+    return value.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+LOG_LEVEL_NAME = os.getenv(
+    "TRADINGAI_LOG_LEVEL",
+    "INFO",
+).strip().upper()
+
+LOG_LEVEL = getattr(
+    logging,
+    LOG_LEVEL_NAME,
+    logging.INFO,
+)
+
+DEBUG_RUNTIME = _env_flag(
+    "TRADINGAI_DEBUG_RUNTIME"
+)
+
+DEBUG_WS = _env_flag(
+    "TRADINGAI_DEBUG_WS"
+)
+
 # handler重複防止
 if logger.handlers:
     logger.handlers.clear()
 
-# 本番推奨
-logger.setLevel(logging.INFO)
+# Default: INFO. Audit mode can opt in to DEBUG via environment.
+logger.setLevel(LOG_LEVEL)
 
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)s | %(message)s"
@@ -64,7 +94,7 @@ file_handler = RotatingFileHandler(
     encoding="utf-8"
 )
 
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(LOG_LEVEL)
 file_handler.setFormatter(formatter)
 
 # =========================================
@@ -98,29 +128,9 @@ logger.propagate = False
 # =========================================
 
 def add_log(message, level="info"):
-
-    print(
-        f"ADD_LOG_CALLED: [{level.upper()}] {message}",
-        flush=True
-    )
-
-    logger = logging.getLogger("TradingAI")
-
-    if level.lower() == "info":
-        logger.info(message)
-        
     """
     UI + file logging
     """
-
-    # =====================================
-    # AUDIT TRACE (一時追加)
-    # =====================================
-
-    print(
-        f"ADD_LOG_CALLED: [{level.upper()}] {message}",
-        flush=True
-    )
 
     # -------------------------
     # UI BUFFER
@@ -145,6 +155,18 @@ def add_log(message, level="info"):
 
     else:
         logger.info(message)
+
+
+def runtime_debug(message, *args):
+    """Emit runtime audit details only when explicitly enabled."""
+    if DEBUG_RUNTIME:
+        logger.debug(message, *args)
+
+
+def ws_debug(message, *args):
+    """Emit WebSocket/order-book audit details only when enabled."""
+    if DEBUG_WS:
+        logger.debug(message, *args)
 
 # =========================================
 # GET LOGS

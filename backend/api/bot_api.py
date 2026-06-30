@@ -6,6 +6,7 @@ from backend.bot_manager import get_bot_manager
 from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional
+from backend.utils.log_buffer import runtime_debug
 
 router = APIRouter()
 
@@ -97,23 +98,21 @@ def start_bot(config: StartConfig):
         .lower()
     )
 
-    print(
-        "🔥 NORMALIZED API MODE:",
-        config_dict["mode"]
-    )
+    runtime_debug("Normalized API mode=%s", config_dict["mode"])
 
     # 🔥 正規化（安全）
     config_dict["symbol"] = config_dict["symbol"].upper()
 
-    print("START BOT ID:", id(bot_manager))
-    print("🔥 START CONFIG RECEIVED:", config_dict)
+    runtime_debug(
+        "Bot start request manager_id=%s config=%s",
+        id(bot_manager),
+        config_dict,
+    )
 
     try:
         result = bot_manager.start(config_dict)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    print("🚀 BOT START COMPLETE")
 
     return result
 
@@ -125,11 +124,9 @@ def start_bot(config: StartConfig):
 def stop_bot():
 
     bot_manager = get_bot_manager()
-    print("STOP BOT ID:", id(bot_manager))
+    runtime_debug("Bot stop request manager_id=%s", id(bot_manager))
 
     result = bot_manager.stop()
-
-    print("🛑 BOT STOPPED")
 
     return result
 
@@ -142,5 +139,4 @@ def get_status():
 
     bot_manager = get_bot_manager()
     return bot_manager.get_status()
-
 
