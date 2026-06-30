@@ -129,6 +129,8 @@ class BotManager:
 
         self.last_update_time = 0
 
+        self.latest_runtime_result = None
+
         # Keep the latest account values independently from the execution
         # engine.  stop() intentionally tears the engine down, but account
         # telemetry must remain readable by the dashboard afterwards.
@@ -373,6 +375,8 @@ class BotManager:
             self.pending_order = False
 
             self.last_update_time = 0
+
+            self.latest_runtime_result = None
 
             self.last_order_time = 0
 
@@ -664,8 +668,10 @@ class BotManager:
 
                         if runtime_registry.trading_runtime:
 
-                            runtime_registry.trading_runtime.process_runtime(
-                                micro_state
+                            self.latest_runtime_result = (
+                                runtime_registry.trading_runtime.process_runtime(
+                                    micro_state
+                                )
                             )
 
                     except Exception as runtime_error:
@@ -1028,6 +1034,16 @@ class BotManager:
 
         equity = float(snapshot.get("equity", balance))
 
+        latest_runtime_result = deepcopy(
+            self.latest_runtime_result
+        )
+
+        latest_runtime_trace = (
+            latest_runtime_result
+            if isinstance(latest_runtime_result, dict)
+            else {}
+        )
+
         if self.engine:
 
             actual_position = getattr(
@@ -1090,6 +1106,24 @@ class BotManager:
             "pendingOrder": pending_order,
 
             "signal": self.last_signal,
+
+            "latestRuntimeResult": latest_runtime_result,
+
+            "executionRuntimeReached": bool(
+                latest_runtime_trace.get("executionRuntimeReached")
+            ),
+
+            "signalAdapterReached": bool(
+                latest_runtime_trace.get("signalAdapterReached")
+            ),
+
+            "normalizedDirection": latest_runtime_trace.get(
+                "normalizedDirection"
+            ),
+
+            "adapterOutput": latest_runtime_trace.get(
+                "adapterOutput"
+            ),
 
             "symbol": self.symbol,
 

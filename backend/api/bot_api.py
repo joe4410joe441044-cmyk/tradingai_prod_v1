@@ -82,6 +82,16 @@ class StatusResponse(BaseModel):
 
     governance_state: Optional[dict] = None
 
+    latestRuntimeResult: Optional[dict] = None
+
+    executionRuntimeReached: bool = False
+
+    signalAdapterReached: bool = False
+
+    normalizedDirection: Optional[str] = None
+
+    adapterOutput: Optional[dict] = None
+
     symbol: Optional[str] = None
 
     position: Optional[Any] = None

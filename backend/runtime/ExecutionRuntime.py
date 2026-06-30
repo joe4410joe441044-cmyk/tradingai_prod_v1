@@ -43,8 +43,9 @@ from backend.execution.ExecutionGovernance import (
 )
 
 from backend.runtime.adapters.execution_signal_adapter import (
-ExecutionSignalAdapter
+    ExecutionSignalAdapter,
 )
+
 
 class ExecutionRuntime:
 
@@ -69,6 +70,10 @@ class ExecutionRuntime:
         # ExecutionEngine Binding
         self.engine = None
 
+        # Latest direction-contract trace
+        self.signal_adapter_reached = False
+        self.last_adapter_output = None
+
     # ========================================================
     # ENGINE BINDING
     # ========================================================
@@ -76,6 +81,32 @@ class ExecutionRuntime:
     def set_engine(self, engine):
 
         self.engine = engine
+
+    # ========================================================
+    # DIRECTION CONTRACT
+    # ========================================================
+
+    @staticmethod
+    def normalize_direction(direction):
+
+        return {
+            "BUY": "LONG",
+            "SELL": "SHORT",
+            "LONG": "LONG",
+            "SHORT": "SHORT",
+        }.get(direction)
+
+    def build_direction_contract_trace(
+        self,
+        canonical_direction,
+    ):
+
+        return {
+            "executionRuntimeReached": True,
+            "signalAdapterReached": self.signal_adapter_reached,
+            "normalizedDirection": canonical_direction,
+            "adapterOutput": self.last_adapter_output,
+        }
 
     # ========================================================
     # STRATEGY VALIDATION
@@ -120,6 +151,7 @@ class ExecutionRuntime:
         strategy_state,
         governance_result,
         governance_decision=None,
+        canonical_direction=None,
 
     ):
 
@@ -146,25 +178,12 @@ class ExecutionRuntime:
         # Invalid Direction
         # ----------------------------------------------------
 
-        if governance_decision is not None:
-
-            direction = governance_decision.get(
-                "direction",
-                "NEUTRAL",
-            )
-
-        else:
-
-            direction = strategy_state.get(
-                "direction",
-                "NEUTRAL",
-            )
         runtime_debug(
             "Execution permission direction=%s",
-            direction,
+            canonical_direction,
         )
 
-        if direction not in [
+        if canonical_direction not in [
 
             "LONG",
             "SHORT",
@@ -242,12 +261,8 @@ class ExecutionRuntime:
 
     def dispatch_execution(
         self,
-        governance_decision,
+        canonical_direction,
     ):
-
-        direction = governance_decision.get(
-            "direction"
-        )
 
         execution_event = {
 
@@ -257,7 +272,7 @@ class ExecutionRuntime:
                 "SIMULATED_EXECUTION"
             ),
 
-            "direction": direction,
+            "direction": canonical_direction,
 
             "timestamp": (
                 datetime.utcnow().isoformat()
@@ -280,19 +295,19 @@ class ExecutionRuntime:
 
         if self.engine:
 
+            self.signal_adapter_reached = True
+
             signal = (
                 ExecutionSignalAdapter.adapt(
                     execution_event
                 )
             )
 
-            if signal:
+            self.last_adapter_output = signal
 
-                self.engine.submit_signal(
-                    signal
-                )
-                
-                
+            # STEP56-4では adapter到達確認のみ。
+            # ExecutionEngine handoff は次STEP。
+
         return execution_event
 
 
@@ -410,9 +425,31 @@ class ExecutionRuntime:
         governance_decision=None,
         current_exposure=0.0,
     ):
+        self.signal_adapter_reached = False
+        self.last_adapter_output = None
+
+        if governance_decision is not None:
+
+            source_direction = governance_decision.get(
+                "direction"
+            )
+
+        else:
+
+            source_direction = strategy_state.get(
+                "direction"
+            )
+
+        canonical_direction = self.normalize_direction(
+            source_direction
+        )
+
         runtime_debug(
-            "Execution governance=%s",
+            "Execution governance=%s source_direction=%s "
+            "canonical_direction=%s",
             governance_decision,
+            source_direction,
+            canonical_direction,
         )
 
         try:
@@ -445,6 +482,9 @@ class ExecutionRuntime:
                 ):
                     return {
                         "valid": False,
+                        **self.build_direction_contract_trace(
+                            canonical_direction
+                        ),
                         "runtime": {
                             "executionAllowed": False,
                             "reason": (
@@ -498,6 +538,7 @@ class ExecutionRuntime:
                     strategy_state,
                     governance_result,
                     governance_decision,
+                    canonical_direction,
                 )
             )
 
@@ -527,6 +568,10 @@ class ExecutionRuntime:
 
                     "valid": True,
 
+                    **self.build_direction_contract_trace(
+                        canonical_direction
+                    ),
+
                     "runtime": {
 
                         "executionAllowed": False,
@@ -553,12 +598,12 @@ class ExecutionRuntime:
 
             runtime_debug(
                 "Execution dispatch direction=%s",
-                governance_decision.get("direction"),
+                canonical_direction,
             )
 
             execution_event = (
                 self.dispatch_execution(
-                    governance_decision
+                    canonical_direction
 
                 )
             )
@@ -576,6 +621,10 @@ class ExecutionRuntime:
             return {
 
                 "valid": True,
+
+                **self.build_direction_contract_trace(
+                    canonical_direction
+                ),
 
                 "runtime": {
 
@@ -605,6 +654,10 @@ class ExecutionRuntime:
             return {
 
                 "valid": False,
+
+                **self.build_direction_contract_trace(
+                    canonical_direction
+                ),
 
                 "runtime": {
 
