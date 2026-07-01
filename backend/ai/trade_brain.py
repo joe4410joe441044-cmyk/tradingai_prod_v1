@@ -40,6 +40,15 @@ class TradeBrain:
 
         llm_signal = self.llm.analyze(market_data)
 
+        llm_debug = getattr(
+            self.llm,
+            "latest_debug",
+            None,
+        )
+
+        if not isinstance(llm_debug, dict):
+            llm_debug = {}
+
         if lstm_signal == llm_signal:
             decision = lstm_signal
             confidence = 1.0
@@ -73,6 +82,8 @@ class TradeBrain:
             }
         }
 
+        event.update(llm_debug)
+
         self.latest_decision_debug = {
             "llmInput": market_data,
             "llmOutput": llm_signal,
@@ -82,6 +93,7 @@ class TradeBrain:
                 "llm": llm_signal,
             },
             "consensusReason": event["reason"],
+            **llm_debug,
         }
 
         self._add_event(event)

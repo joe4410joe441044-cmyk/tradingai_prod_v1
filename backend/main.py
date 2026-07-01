@@ -109,6 +109,20 @@ def _build_llm_debug(
     ai_decision_debug=None,
 ):
 
+    def llm_debug_value(key, default=None):
+
+        for source in (
+            ai_decision_debug,
+            latest_ai_event,
+            ai_raw_signal,
+        ):
+            value = extract_value(source, key)
+
+            if value is not None:
+                return value
+
+        return default
+
     llm_output = extract_value(
         ai_decision_debug,
         "llmOutput",
@@ -132,22 +146,16 @@ def _build_llm_debug(
         extract_value(latest_ai_event, "llmInput"),
     )
 
-    reject_buy_reason = extract_value(
-        latest_ai_event,
-        "llmRejectBuyReason",
-        extract_value(ai_raw_signal, "llmRejectBuyReason"),
+    reject_buy_reason = llm_debug_value(
+        "llmRejectBuyReason"
     )
 
-    reject_sell_reason = extract_value(
-        latest_ai_event,
-        "llmRejectSellReason",
-        extract_value(ai_raw_signal, "llmRejectSellReason"),
+    reject_sell_reason = llm_debug_value(
+        "llmRejectSellReason"
     )
 
-    llm_hold_reason = extract_value(
-        latest_ai_event,
-        "llmHoldReason",
-        extract_value(ai_raw_signal, "llmHoldReason"),
+    llm_hold_reason = llm_debug_value(
+        "llmHoldReason"
     )
 
     if llm_decision == "HOLD" and llm_hold_reason is None:
@@ -187,7 +195,40 @@ def _build_llm_debug(
         "llmInput": safe_debug(llm_input),
         "llmOutput": safe_debug(llm_output),
         "llmDecision": safe_debug(llm_decision),
+        "llmDecisionSource": safe_debug(
+            llm_debug_value("llmDecisionSource")
+        ),
+        "llmRuleReason": safe_debug(
+            llm_debug_value("llmRuleReason")
+        ),
         "llmHoldReason": safe_debug(llm_hold_reason),
+        "llmRejectReason": safe_debug(
+            llm_debug_value("llmRejectReason")
+        ),
+        "llmRuleInput": safe_debug(
+            llm_debug_value("llmRuleInput")
+        ),
+        "llmRuleThresholds": safe_debug(
+            llm_debug_value("llmRuleThresholds")
+        ),
+        "llmFallbackUsed": safe_debug(
+            llm_debug_value("llmFallbackUsed")
+        ),
+        "llmFallbackReason": safe_debug(
+            llm_debug_value("llmFallbackReason")
+        ),
+        "llmPromptSummary": safe_debug(
+            llm_debug_value("llmPromptSummary")
+        ),
+        "llmRawOutput": safe_debug(
+            llm_debug_value("llmRawOutput")
+        ),
+        "llmParsedOutput": safe_debug(
+            llm_debug_value("llmParsedOutput")
+        ),
+        "llmParserResult": safe_debug(
+            llm_debug_value("llmParserResult")
+        ),
         "llmRejectBuyReason": safe_debug(reject_buy_reason),
         "llmRejectSellReason": safe_debug(reject_sell_reason),
         "llmConfidence": safe_debug(
