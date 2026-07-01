@@ -86,6 +86,16 @@ def _new_momentum_trace(microstructure_state):
     if not source_present:
         source_value = None
 
+    source_computation = extract_value(
+        microstructure_state,
+        "momentumPersistenceDebug",
+    )
+
+    price_history_generation = extract_value(
+        microstructure_state,
+        "priceHistoryGenerationDebug",
+    )
+
     return {
         "sourceGenerator": (
             "MicrostructureStateBuilder."
@@ -96,6 +106,12 @@ def _new_momentum_trace(microstructure_state):
         ),
         "sourcePresent": source_present,
         "sourceValue": safe_debug(source_value),
+        "sourceComputation": safe_debug(
+            source_computation
+        ),
+        "priceHistoryGeneration": safe_debug(
+            price_history_generation
+        ),
         "strategyInputValue": safe_debug(source_value),
         "strategyFallbackUsed": not source_present,
         "strategyFallbackValue": 0.0,
@@ -218,6 +234,17 @@ def _attach_runtime_debug(runtime_result, debug_result):
 
     if isinstance(runtime_result, dict):
         runtime_result.update(debug_result)
+        runtime_result["runtimeDebug"] = {
+            "momentumTrace": safe_debug(
+                debug_result.get("momentumTrace")
+            ),
+            "priceHistoryTrace": safe_debug(
+                debug_result.get("priceHistoryTrace")
+            ),
+            "aiMomentumTrace": safe_debug(
+                debug_result.get("aiMomentumTrace")
+            ),
+        }
 
     return runtime_result
 
@@ -420,6 +447,17 @@ class TradingRuntime:
         debug_result = build_runtime_debug_result()
         debug_result["momentumTrace"] = (
             _new_momentum_trace(microstructure_state)
+        )
+        debug_result["priceHistoryTrace"] = (
+            debug_result["momentumTrace"].get(
+                "priceHistoryGeneration"
+            )
+        )
+        debug_result["aiMomentumTrace"] = safe_debug(
+            extract_value(
+                microstructure_state,
+                "aiMomentumTrace",
+            )
         )
 
         runtime_debug(

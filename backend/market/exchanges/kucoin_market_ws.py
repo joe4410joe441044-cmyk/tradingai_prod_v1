@@ -80,6 +80,11 @@ class OrderBookWS:
 
         self.last_price_update = time.time()
 
+        # Debug-only counters for tracing the accepted WS price path.
+        self.ws_update_count = 0
+
+        self.last_ws_receive_time = None
+
         self.running = False
 
         # =========================
@@ -447,6 +452,10 @@ class OrderBookWS:
                 self.best_ask
             )
 
+            self.last_ws_receive_time = time.time()
+
+            self.ws_update_count += 1
+
             # =========================
             # CALLBACK
             # =========================
@@ -461,6 +470,13 @@ class OrderBookWS:
                     "price": self.last_price,
                     "bids": self.bids,
                     "asks": self.asks,
+                    "price_path_debug": {
+                        "lastWsPrice": self.last_price,
+                        "lastWsReceiveTime": (
+                            self.last_ws_receive_time
+                        ),
+                        "wsUpdateCount": self.ws_update_count,
+                    },
                 },
                 self.runtime_id
             )

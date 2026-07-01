@@ -129,6 +129,9 @@ class BotManager:
 
         self.last_update_time = 0
 
+        # Debug-only PriceProvider observation counter.
+        self.provider_update_count = 0
+
         self.latest_runtime_result = None
 
         # Keep the latest account values independently from the execution
@@ -384,6 +387,8 @@ class BotManager:
 
             self.update_id = 0
 
+            self.provider_update_count = 0
+
             self.symbol = config["symbol"].upper()
 
             self.config = config
@@ -585,6 +590,16 @@ class BotManager:
                             0
                         )
                     )
+
+                    price_path_debug = dict(
+                        data.get("price_path_debug")
+                        or {}
+                    )
+
+                    price_path_debug.update({
+                        "marketUpdatePrice": price,
+                        "marketUpdateTime": now,
+                    })
                     ws_debug(
                         "WebSocket callback symbol=%s active=%s bids=%d "
                         "asks=%d price=%s last_price=%s",
@@ -605,6 +620,10 @@ class BotManager:
 
                         return
 
+                    provider_previous_price = (
+                        self.ob_manager.current_price
+                    )
+
                     self.ob_manager.update(
                         bids,
                         asks
@@ -613,6 +632,27 @@ class BotManager:
                     self.ob_manager.current_price = (
                         price
                     )
+
+                    self.provider_update_count += 1
+
+                    provider_price = (
+                        self.ob_manager.current_price
+                    )
+
+                    price_path_debug.update({
+                        "providerPrice": provider_price,
+                        "providerPreviousPrice": (
+                            provider_previous_price
+                        ),
+                        "providerUpdateCount": (
+                            self.provider_update_count
+                        ),
+                        "providerTimestamp": now,
+                        "providerPriceChanged": (
+                            provider_previous_price
+                            != provider_price
+                        ),
+                    })
 
                     self.last_price = price
 
@@ -653,6 +693,8 @@ class BotManager:
                             ),
 
                             "lastPrice": float(price),
+
+                            "pricePathDebug": price_path_debug,
                         }
                         runtime_debug(
                             "Runtime market packet=%s",

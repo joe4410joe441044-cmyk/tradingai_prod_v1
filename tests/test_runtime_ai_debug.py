@@ -179,6 +179,8 @@ class RuntimeAIDebugTest(unittest.TestCase):
                 ),
                 "sourcePresent": True,
                 "sourceValue": 0.9,
+                "sourceComputation": None,
+                "priceHistoryGeneration": None,
                 "strategyInputValue": 0.9,
                 "strategyFallbackUsed": False,
                 "strategyFallbackValue": 0.0,
@@ -220,6 +222,28 @@ class RuntimeAIDebugTest(unittest.TestCase):
             microstructure_state["momentumPersistence"],
             0.0,
         )
+        self.assertEqual(
+            microstructure_state["momentumPersistenceDebug"],
+            {
+                "inputReady": True,
+                "priceHistoryLength": 0,
+                "priceHistoryMinRequired": None,
+                "latestPrice": 1.00005,
+                "previousPrice": None,
+                "priceDelta": None,
+                "priceDeltaAbs": None,
+                "priceDeltaPct": None,
+                "direction": "FLAT",
+                "sameDirectionCount": 0,
+                "upMoveCount": 0,
+                "downMoveCount": 0,
+                "flatMoveCount": 1,
+                "returnValue": 0.0,
+                "returnReason": (
+                    "INSUFFICIENT_PRICE_HISTORY"
+                ),
+            },
+        )
 
         result = TradingRuntime().process_runtime(
             microstructure_state
@@ -233,6 +257,10 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "HOLD because momentum_score < 0.50",
         )
         self.assertEqual(trace["sourceValue"], 0.0)
+        self.assertEqual(
+            trace["sourceComputation"],
+            microstructure_state["momentumPersistenceDebug"],
+        )
         self.assertEqual(trace["runtimeStateValue"], 0.0)
         self.assertEqual(trace["tradeBrainValue"], 0.0)
         self.assertEqual(trace["llmEngineValue"], 0.0)
@@ -244,6 +272,457 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertEqual(
             trace["zeroFirstObservedAt"],
             "microstructure_state.momentumPersistence",
+        )
+
+    def test_momentum_source_debug_explains_low_value(self):
+        builder = MicrostructureStateBuilder()
+
+        builder.compute_momentum_persistence(1.0)
+
+        for _ in range(19):
+            builder.compute_momentum_persistence(1.0)
+
+        value = builder.compute_momentum_persistence(1.1)
+        debug = builder.momentum_persistence_debug
+
+        self.assertEqual(value, 0.05)
+        self.assertEqual(debug["priceHistoryLength"], 20)
+        self.assertEqual(debug["previousPrice"], 1.0)
+        self.assertEqual(debug["latestPrice"], 1.1)
+        self.assertAlmostEqual(debug["priceDelta"], 0.1)
+        self.assertEqual(debug["direction"], "UP")
+        self.assertEqual(debug["sameDirectionCount"], 1)
+        self.assertEqual(debug["upMoveCount"], 1)
+        self.assertEqual(debug["downMoveCount"], 0)
+        self.assertEqual(debug["flatMoveCount"], 19)
+        self.assertEqual(debug["returnValue"], 0.05)
+        self.assertEqual(
+            debug["returnReason"],
+            "DOMINANT_DIRECTION_RATIO",
+        )
+
+    @staticmethod
+    def _market_tick(price, timestamp):
+        return {
+            "buyVolume": 10.0,
+            "sellVolume": 8.0,
+            "bestBid": price - 0.0001,
+            "bestAsk": price + 0.0001,
+            "lastPrice": price,
+            "pricePathDebug": {
+                "marketUpdateTime": timestamp,
+            },
+        }
+
+    def test_fast_twenty_ticks_do_not_fill_ai_momentum_history(self):
+        builder = MicrostructureStateBuilder()
+
+        first_state = builder.build_microstructure_state(
+            self._market_tick(1.0, 100.0)
+        )
+        first_trace = first_state["aiMomentumTrace"]
+
+        self.assertEqual(first_trace["deltaCount"], 0)
+        self.assertEqual(
+            first_trace["comparisonMetrics"]["activeDeltaRatio"],
+            0,
+        )
+
+        for index in range(1, 20):
+            state = builder.build_microstructure_state(
+                self._market_tick(
+                    1.0 + (index * 0.001),
+                    100.0 + (index * 0.01),
+                )
+            )
+
+        trace = state["aiMomentumTrace"]
+
+        self.assertLess(trace["deltaCount"], 20)
+        self.assertEqual(trace["sampleCount"], 2)
+        self.assertEqual(trace["deltaCount"], 1)
+        self.assertEqual(
+            trace["reason"],
+            "INSUFFICIENT_AI_PRICE_HISTORY",
+        )
+        self.assertEqual(len(builder.momentum_window), 19)
+
+    def test_twenty_one_samples_at_100ms_fill_ai_momentum_history(self):
+        builder = MicrostructureStateBuilder()
+
+        for index in range(21):
+            state = builder.build_microstructure_state(
+                self._market_tick(
+                    1.0 + (index * 0.001),
+                    200.0 + (index * 0.1),
+                )
+            )
+
+        trace = state["aiMomentumTrace"]
+
+        self.assertEqual(trace["sampleCount"], 21)
+        self.assertEqual(trace["deltaCount"], 20)
+        self.assertEqual(trace["timeSpanMs"], 2000.0)
+        self.assertEqual(trace["minIntervalMs"], 100.0)
+        self.assertEqual(trace["maxIntervalMs"], 100.0)
+        self.assertEqual(trace["positiveDeltaCount"], 20)
+        self.assertEqual(trace["negativeDeltaCount"], 0)
+        self.assertEqual(trace["flatDeltaCount"], 0)
+        self.assertEqual(trace["dominantDirection"], "UP")
+        self.assertEqual(trace["dominantDirectionCount"], 20)
+        self.assertEqual(
+            trace["samplePrices"],
+            [1.0 + (index * 0.001) for index in range(21)],
+        )
+        self.assertEqual(
+            trace["sampleDeltas"],
+            [
+                newer - older
+                for older, newer in zip(
+                    trace["samplePrices"],
+                    trace["samplePrices"][1:],
+                )
+            ],
+        )
+        self.assertEqual(trace["firstPrice"], 1.0)
+        self.assertEqual(trace["lastPrice"], 1.02)
+        self.assertAlmostEqual(trace["netPriceChange"], 0.02)
+        self.assertAlmostEqual(trace["absNetPriceChange"], 0.02)
+        self.assertEqual(trace["value"], 1.0)
+        self.assertEqual(trace["reason"], "OK")
+        self.assertEqual(state["aiMomentumPersistence"], 1.0)
+
+    def test_ai_momentum_trace_distinguishes_mixed_and_flat_deltas(self):
+        builder = MicrostructureStateBuilder()
+        prices = [100.0, 101.0, 100.0, 100.0, 102.0]
+
+        for index, price in enumerate(prices):
+            state = builder.build_microstructure_state(
+                self._market_tick(
+                    price,
+                    250.0 + (index * 0.1),
+                )
+            )
+
+        trace = state["aiMomentumTrace"]
+
+        self.assertEqual(trace["positiveDeltaCount"], 2)
+        self.assertEqual(trace["negativeDeltaCount"], 1)
+        self.assertEqual(trace["flatDeltaCount"], 1)
+        self.assertEqual(trace["dominantDirection"], "UP")
+        self.assertEqual(trace["dominantDirectionCount"], 2)
+        self.assertEqual(trace["samplePrices"], prices)
+        self.assertEqual(trace["sampleDeltas"], [1.0, -1.0, 0.0, 2.0])
+        self.assertEqual(trace["firstPrice"], 100.0)
+        self.assertEqual(trace["lastPrice"], 102.0)
+        self.assertEqual(trace["netPriceChange"], 2.0)
+        self.assertEqual(trace["absNetPriceChange"], 2.0)
+        self.assertEqual(trace["value"], 0.5)
+        self.assertEqual(
+            trace["comparisonMetrics"],
+            {
+                "currentMomentum": trace["value"],
+                "flatExcludedMomentum": 2 / 3,
+                "activeDeltaRatio": 3 / 4,
+                "netPriceChange": trace["netPriceChange"],
+                "absNetPriceChange": trace["absNetPriceChange"],
+            },
+        )
+
+    def test_ai_momentum_trace_distinguishes_tie_from_all_flat(self):
+        tied_builder = MicrostructureStateBuilder()
+
+        for index, price in enumerate([100.0, 101.0, 100.0]):
+            tied_state = tied_builder.build_microstructure_state(
+                self._market_tick(
+                    price,
+                    260.0 + (index * 0.1),
+                )
+            )
+
+        tied_trace = tied_state["aiMomentumTrace"]
+
+        self.assertEqual(tied_trace["dominantDirection"], "TIE")
+        self.assertEqual(tied_trace["dominantDirectionCount"], 1)
+        self.assertEqual(tied_trace["netPriceChange"], 0.0)
+        self.assertEqual(tied_trace["absNetPriceChange"], 0.0)
+
+        flat_builder = MicrostructureStateBuilder()
+
+        for index in range(3):
+            flat_state = flat_builder.build_microstructure_state(
+                self._market_tick(
+                    100.0,
+                    270.0 + (index * 0.1),
+                )
+            )
+
+        flat_trace = flat_state["aiMomentumTrace"]
+
+        self.assertEqual(flat_trace["positiveDeltaCount"], 0)
+        self.assertEqual(flat_trace["negativeDeltaCount"], 0)
+        self.assertEqual(flat_trace["flatDeltaCount"], 2)
+        self.assertEqual(flat_trace["dominantDirection"], "FLAT")
+        self.assertEqual(flat_trace["dominantDirectionCount"], 0)
+        self.assertEqual(
+            flat_trace["comparisonMetrics"]["flatExcludedMomentum"],
+            0,
+        )
+        self.assertEqual(
+            flat_trace["comparisonMetrics"]["activeDeltaRatio"],
+            0.0,
+        )
+
+    def test_ai_momentum_history_does_not_change_existing_momentum(self):
+        builder = MicrostructureStateBuilder()
+        momentum_only_builder = MicrostructureStateBuilder()
+        prices = [1.0, 1.1, 1.05, 1.2, 1.2]
+        expected_values = [
+            momentum_only_builder.compute_momentum_persistence(price)
+            for price in prices
+        ]
+        actual_values = []
+
+        for index, price in enumerate(prices):
+            state = builder.build_microstructure_state(
+                self._market_tick(
+                    price,
+                    300.0 + (index * 0.01),
+                )
+            )
+            actual_values.append(state["momentumPersistence"])
+
+        self.assertEqual(actual_values, expected_values)
+        self.assertEqual(
+            builder.momentum_window,
+            momentum_only_builder.momentum_window,
+        )
+
+    def test_runtime_debug_exposes_ai_momentum_trace(self):
+        builder = MicrostructureStateBuilder()
+        state = builder.build_microstructure_state(
+            self._market_tick(1.0, 400.0)
+        )
+
+        runtime_result = TradingRuntime().process_runtime(state)
+
+        self.assertEqual(
+            runtime_result["aiMomentumTrace"],
+            state["aiMomentumTrace"],
+        )
+        self.assertEqual(
+            runtime_result["runtimeDebug"]["aiMomentumTrace"],
+            state["aiMomentumTrace"],
+        )
+        self.assertEqual(
+            set(runtime_result["aiMomentumTrace"]),
+            {
+                "sampleCount",
+                "deltaCount",
+                "timeSpanMs",
+                "minIntervalMs",
+                "maxIntervalMs",
+                "positiveDeltaCount",
+                "negativeDeltaCount",
+                "flatDeltaCount",
+                "dominantDirection",
+                "dominantDirectionCount",
+                "samplePrices",
+                "sampleDeltas",
+                "firstPrice",
+                "lastPrice",
+                "netPriceChange",
+                "absNetPriceChange",
+                "value",
+                "reason",
+                "comparisonMetrics",
+            },
+        )
+
+    def test_runtime_debug_exposes_price_history_generation_path(self):
+        builder = MicrostructureStateBuilder()
+
+        first_state = builder.build_microstructure_state({
+            "buyVolume": 10.0,
+            "sellVolume": 8.0,
+            "bestBid": 0.9,
+            "bestAsk": 1.1,
+            "lastPrice": 1.0,
+            "pricePathDebug": {
+                "lastWsPrice": 1.0,
+                "lastWsReceiveTime": 100.0,
+                "wsUpdateCount": 1,
+                "marketUpdatePrice": 1.0,
+                "marketUpdateTime": 100.1,
+                "providerPrice": 1.0,
+                "providerPreviousPrice": 0.0,
+                "providerUpdateCount": 1,
+                "providerTimestamp": 100.1,
+                "providerPriceChanged": True,
+            },
+        })
+
+        second_state = builder.build_microstructure_state({
+            "buyVolume": 10.0,
+            "sellVolume": 8.0,
+            "bestBid": 0.9,
+            "bestAsk": 1.1,
+            "lastPrice": 1.0,
+            "pricePathDebug": {
+                "lastWsPrice": 1.0,
+                "lastWsReceiveTime": 101.0,
+                "wsUpdateCount": 2,
+                "marketUpdatePrice": 1.0,
+                "marketUpdateTime": 101.1,
+                "providerPrice": 1.0,
+                "providerPreviousPrice": 1.0,
+                "providerUpdateCount": 2,
+                "providerTimestamp": 101.1,
+                "providerPriceChanged": False,
+            },
+        })
+
+        runtime_result = TradingRuntime().process_runtime(
+            second_state
+        )
+        trace = runtime_result["priceHistoryTrace"]
+
+        self.assertEqual(
+            trace,
+            second_state["priceHistoryGenerationDebug"],
+        )
+        self.assertTrue({
+            "lastWsPrice",
+            "lastWsReceiveTime",
+            "wsUpdateCount",
+            "marketUpdatePrice",
+            "marketUpdateTime",
+            "providerPrice",
+            "providerPreviousPrice",
+            "providerUpdateCount",
+            "providerTimestamp",
+            "providerPriceChanged",
+            "historyLength",
+            "historyCapacity",
+            "last20Prices",
+            "last20PriceDeltas",
+            "last20Timestamps",
+            "historyWindowMs",
+            "historyWindowSeconds",
+            "averageIntervalMs",
+            "minIntervalMs",
+            "maxIntervalMs",
+            "updatesPerSecondEstimate",
+            "priceChangeEventsInLast20",
+            "ticksUntilPriceChange",
+            "samePriceRunLength",
+            "latest20TimeRange",
+            "duplicatePriceCount",
+            "uniquePriceCount",
+            "flatPriceCount",
+            "newestHistoryPrice",
+            "oldestHistoryPrice",
+            "historyUpdatedAt",
+            "bufferAppendAttempted",
+            "bufferAppendExecuted",
+            "bufferIgnored",
+            "bufferIgnoreReason",
+        }.issubset(trace))
+        self.assertEqual(trace["lastWsPrice"], 1.0)
+        self.assertEqual(trace["wsUpdateCount"], 2)
+        self.assertEqual(trace["marketUpdatePrice"], 1.0)
+        self.assertEqual(trace["providerPrice"], 1.0)
+        self.assertFalse(trace["providerPriceChanged"])
+        self.assertEqual(trace["historyLength"], 2)
+        self.assertEqual(trace["historyCapacity"], 20)
+        self.assertEqual(trace["last20Prices"], [1.0, 1.0])
+        self.assertEqual(trace["last20PriceDeltas"], [None, 0.0])
+        self.assertEqual(trace["last20Timestamps"], [100.1, 101.1])
+        self.assertAlmostEqual(trace["historyWindowMs"], 1000.0)
+        self.assertAlmostEqual(trace["historyWindowSeconds"], 1.0)
+        self.assertAlmostEqual(trace["averageIntervalMs"], 1000.0)
+        self.assertAlmostEqual(trace["minIntervalMs"], 1000.0)
+        self.assertAlmostEqual(trace["maxIntervalMs"], 1000.0)
+        self.assertAlmostEqual(
+            trace["updatesPerSecondEstimate"],
+            1.0,
+        )
+        self.assertEqual(trace["priceChangeEventsInLast20"], 0)
+        self.assertIsNone(trace["ticksUntilPriceChange"])
+        self.assertEqual(trace["samePriceRunLength"], 2)
+        self.assertEqual(
+            trace["latest20TimeRange"],
+            {
+                "oldestTimestamp": 100.1,
+                "newestTimestamp": 101.1,
+            },
+        )
+        self.assertEqual(trace["duplicatePriceCount"], 1)
+        self.assertEqual(trace["uniquePriceCount"], 1)
+        self.assertEqual(trace["flatPriceCount"], 1)
+        self.assertEqual(trace["newestHistoryPrice"], 1.0)
+        self.assertEqual(trace["oldestHistoryPrice"], 1.0)
+        self.assertEqual(trace["historyUpdatedAt"], 101.1)
+        self.assertTrue(trace["bufferAppendAttempted"])
+        self.assertTrue(trace["bufferAppendExecuted"])
+        self.assertFalse(trace["bufferIgnored"])
+        self.assertIsNone(trace["bufferIgnoreReason"])
+        self.assertEqual(
+            runtime_result["runtimeDebug"]["momentumTrace"][
+                "priceHistoryGeneration"
+            ],
+            trace,
+        )
+
+        self.assertEqual(
+            first_state["priceHistoryGenerationDebug"][
+                "historyLength"
+            ],
+            1,
+        )
+
+    def test_price_history_debug_measures_latest_twenty_time_width(self):
+        builder = MicrostructureStateBuilder()
+
+        for index in range(20):
+            price = 1.0 if index < 3 else 1.1
+            state = builder.build_microstructure_state({
+                "buyVolume": 10.0,
+                "sellVolume": 8.0,
+                "bestBid": 0.9,
+                "bestAsk": 1.1,
+                "lastPrice": price,
+                "pricePathDebug": {
+                    "marketUpdateTime": 100.0 + (
+                        index * 0.01
+                    ),
+                },
+            })
+
+        trace = state["priceHistoryGenerationDebug"]
+
+        self.assertEqual(trace["historyLength"], 20)
+        self.assertAlmostEqual(trace["historyWindowMs"], 190.0)
+        self.assertAlmostEqual(
+            trace["historyWindowSeconds"],
+            0.19,
+        )
+        self.assertAlmostEqual(trace["averageIntervalMs"], 10.0)
+        self.assertAlmostEqual(trace["minIntervalMs"], 10.0)
+        self.assertAlmostEqual(trace["maxIntervalMs"], 10.0)
+        self.assertAlmostEqual(
+            trace["updatesPerSecondEstimate"],
+            100.0,
+        )
+        self.assertEqual(trace["priceChangeEventsInLast20"], 1)
+        self.assertEqual(trace["ticksUntilPriceChange"], 3)
+        self.assertEqual(trace["samePriceRunLength"], 17)
+        self.assertEqual(
+            trace["latest20TimeRange"],
+            {
+                "oldestTimestamp": 100.0,
+                "newestTimestamp": 100.19,
+            },
         )
 
     def test_trade_brain_exposes_rule_debug_on_event_and_runtime_debug(self):
