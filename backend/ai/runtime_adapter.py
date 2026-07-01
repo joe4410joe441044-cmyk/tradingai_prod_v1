@@ -7,6 +7,15 @@ class RuntimeAdapter:
 
     def build(self, microstructure_state):
 
+        if "aiMomentumPersistence" in microstructure_state:
+            momentum_score = (
+                microstructure_state["aiMomentumPersistence"]
+            )
+        else:
+            momentum_score = (
+                microstructure_state["momentumPersistence"]
+            )
+
         return RuntimeState(
             symbol="XRPUSDT",
 
@@ -16,7 +25,7 @@ class RuntimeAdapter:
             ),
 
             momentum_score=(
-                microstructure_state["momentumPersistence"]
+                momentum_score
             ),
 
             volatility_score=(

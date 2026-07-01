@@ -5,6 +5,7 @@ from backend.aggregation.MicrostructureStateBuilder import (
     MicrostructureStateBuilder,
 )
 from backend.ai.llm_engine import LLMEngine
+from backend.ai.runtime_adapter import RuntimeAdapter
 from backend.ai.trade_brain import TradeBrain
 from backend.main import TradingRuntime, _build_llm_debug
 
@@ -25,6 +26,24 @@ class _HoldLLM:
 
 
 class RuntimeAIDebugTest(unittest.TestCase):
+
+    @staticmethod
+    def _microstructure_state(**overrides):
+        state = {
+            "buyPressure": 0.60,
+            "sellPressure": 0.40,
+            "momentumPersistence": 0.05,
+            "spreadVolatility": 0.1,
+            "liquidityQuality": 1.0,
+            "imbalanceStrength": 1.0,
+            "spreadQuality": 1.0,
+            "spread": 0.0001,
+            "absorptionDetected": False,
+            "stagnantHeavyFlow": False,
+            "fakePressureDetected": False,
+        }
+        state.update(overrides)
+        return state
 
     @staticmethod
     def _runtime_state(
@@ -90,6 +109,22 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertFalse(
             engine.latest_debug["llmFallbackUsed"]
         )
+
+    def test_runtime_adapter_prefers_ai_momentum_persistence(self):
+        runtime_state = RuntimeAdapter().build(
+            self._microstructure_state(
+                aiMomentumPersistence=0.75,
+            )
+        )
+
+        self.assertEqual(runtime_state.momentum_score, 0.75)
+
+    def test_runtime_adapter_falls_back_to_strategy_momentum(self):
+        runtime_state = RuntimeAdapter().build(
+            self._microstructure_state()
+        )
+
+        self.assertEqual(runtime_state.momentum_score, 0.05)
 
     def test_llm_engine_records_legacy_hold_fallback_reason(self):
         engine = LLMEngine()
@@ -186,7 +221,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
                 "strategyFallbackValue": 0.0,
                 "strategyOutputPresent": False,
                 "strategyOutputValue": None,
-                "runtimeAdapterFallbackUsed": False,
+                "runtimeAdapterFallbackUsed": True,
                 "runtimeStateValue": 0.9,
                 "tradeBrainFallbackUsed": False,
                 "tradeBrainValue": 0.9,
@@ -207,6 +242,79 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "LSTM=BUY, LLM=HOLD",
         )
         self.assertEqual(result["governanceDecision"], "BLOCK")
+
+    def test_runtime_debug_groups_ai_llm_and_trade_brain_values(self):
+        result = TradingRuntime().process_runtime(
+            self._microstructure_state(
+                momentumPersistence=0.9,
+            )
+        )
+        runtime_debug = result["runtimeDebug"]
+
+        for key in (
+            "momentumTrace",
+            "aiMomentumTrace",
+            "momentumPipelineTrace",
+            "priceHistoryTrace",
+            "aiRuntimeReached",
+            "aiInput",
+            "aiOutput",
+            "aiDecision",
+            "aiReason",
+            "aiHoldReason",
+            "llmDebug",
+            "tradeBrainDebug",
+        ):
+            self.assertIn(key, runtime_debug)
+
+        self.assertTrue(runtime_debug["aiRuntimeReached"])
+        self.assertEqual(
+            runtime_debug["aiInput"],
+            result["aiInput"],
+        )
+        self.assertEqual(
+            runtime_debug["aiOutput"],
+            result["aiOutput"],
+        )
+        self.assertEqual(
+            runtime_debug["aiDecision"],
+            result["aiDecision"],
+        )
+        self.assertEqual(
+            runtime_debug["aiHoldReason"],
+            result["aiHoldReason"],
+        )
+        self.assertEqual(
+            runtime_debug["aiReason"],
+            result["consensusReason"],
+        )
+        self.assertEqual(
+            runtime_debug["llmDebug"],
+            {
+                "input": result["llmInput"],
+                "output": result["llmOutput"],
+                "decision": result["llmDecision"],
+                "confidence": result["llmConfidence"],
+                "reason": result["llmRuleReason"],
+                "decisionSource": result["llmDecisionSource"],
+                "longCandidate": result["aiLongCandidate"],
+                "shortCandidate": result["aiShortCandidate"],
+                "rawSignal": result["aiRawSignal"],
+            },
+        )
+        self.assertEqual(
+            runtime_debug["tradeBrainDebug"],
+            {
+                "aiRuntimeReached": result["aiRuntimeReached"],
+                "aiInput": result["aiInput"],
+                "aiOutput": result["aiOutput"],
+                "aiDecision": result["aiDecision"],
+                "aiHoldReason": result["aiHoldReason"],
+                "llmDecision": result["llmDecision"],
+                "llmDecisionSource": result["llmDecisionSource"],
+                "consensusReason": result["consensusReason"],
+            },
+        )
 
     def test_momentum_trace_proves_zero_exists_at_source(self):
         builder = MicrostructureStateBuilder()
@@ -428,6 +536,20 @@ class RuntimeAIDebugTest(unittest.TestCase):
                 "absNetPriceChange": trace["absNetPriceChange"],
             },
         )
+        self.assertEqual(
+            trace["candidateMetrics"],
+            {
+                "directionPurity": 2 / 3,
+                "activityRatio": 3 / 4,
+                "priceDirection": "UP",
+                "priceMove": 2.0,
+                "directionConfirmed": True,
+                "activityGatePassed": True,
+                "priceMoveGatePassed": True,
+                "proposedMomentumScore": 2 / 3,
+                "proposedMomentumUsable": True,
+            },
+        )
 
     def test_ai_momentum_trace_distinguishes_tie_from_all_flat(self):
         tied_builder = MicrostructureStateBuilder()
@@ -446,6 +568,19 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertEqual(tied_trace["dominantDirectionCount"], 1)
         self.assertEqual(tied_trace["netPriceChange"], 0.0)
         self.assertEqual(tied_trace["absNetPriceChange"], 0.0)
+        self.assertEqual(
+            tied_trace["candidateMetrics"]["priceDirection"],
+            "FLAT",
+        )
+        self.assertFalse(
+            tied_trace["candidateMetrics"]["directionConfirmed"]
+        )
+        self.assertFalse(
+            tied_trace["candidateMetrics"]["priceMoveGatePassed"]
+        )
+        self.assertFalse(
+            tied_trace["candidateMetrics"]["proposedMomentumUsable"]
+        )
 
         flat_builder = MicrostructureStateBuilder()
 
@@ -471,6 +606,20 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertEqual(
             flat_trace["comparisonMetrics"]["activeDeltaRatio"],
             0.0,
+        )
+        self.assertEqual(
+            flat_trace["candidateMetrics"],
+            {
+                "directionPurity": 0,
+                "activityRatio": 0.0,
+                "priceDirection": "FLAT",
+                "priceMove": 0.0,
+                "directionConfirmed": False,
+                "activityGatePassed": False,
+                "priceMoveGatePassed": False,
+                "proposedMomentumScore": 0,
+                "proposedMomentumUsable": False,
+            },
         )
 
     def test_ai_momentum_history_does_not_change_existing_momentum(self):
@@ -536,7 +685,163 @@ class RuntimeAIDebugTest(unittest.TestCase):
                 "value",
                 "reason",
                 "comparisonMetrics",
+                "candidateMetrics",
             },
+        )
+        self.assertEqual(
+            runtime_result["runtimeDebug"]["aiMomentumTrace"][
+                "candidateMetrics"
+            ],
+            state["aiMomentumTrace"]["candidateMetrics"],
+        )
+
+    def test_runtime_debug_exposes_momentum_pipeline_divergence(self):
+        microstructure_state = {
+            "buyPressure": 0.60,
+            "sellPressure": 0.40,
+            "momentumPersistence": 0.05,
+            "aiMomentumPersistence": 0.30,
+            "aiMomentumTrace": {
+                "value": 0.30,
+                "comparisonMetrics": {
+                    "flatExcludedMomentum": 0.75,
+                },
+                "candidateMetrics": {
+                    "proposedMomentumScore": 0.75,
+                },
+            },
+            "spreadVolatility": 0.1,
+            "liquidityQuality": 1.0,
+            "imbalanceStrength": 1.0,
+            "spreadQuality": 1.0,
+            "spread": 0.0001,
+            "absorptionDetected": False,
+            "stagnantHeavyFlow": False,
+            "fakePressureDetected": False,
+        }
+
+        runtime_result = TradingRuntime().process_runtime(
+            microstructure_state
+        )
+        trace = runtime_result["runtimeDebug"][
+            "momentumPipelineTrace"
+        ]
+
+        self.assertEqual(
+            set(trace),
+            {
+                "microstructureMomentumPersistence",
+                "microstructureAiMomentumPersistence",
+                "runtimeAdapterInputMomentum",
+                "runtimeAdapterInputAiMomentum",
+                "runtimeStateMomentumScore",
+                "tradeBrainInputMomentumScore",
+                "llmInputMomentumScore",
+                "llmRuleInputMomentumScore",
+                "aiMomentumTraceValue",
+                "aiMomentumFlatExcludedMomentum",
+                "aiMomentumProposedMomentumScore",
+                "allValuesEqual",
+                "mismatchDetected",
+                "mismatchReason",
+            },
+        )
+        self.assertEqual(
+            trace,
+            {
+                "microstructureMomentumPersistence": 0.05,
+                "microstructureAiMomentumPersistence": 0.30,
+                "runtimeAdapterInputMomentum": 0.05,
+                "runtimeAdapterInputAiMomentum": 0.30,
+                "runtimeStateMomentumScore": 0.30,
+                "tradeBrainInputMomentumScore": 0.30,
+                "llmInputMomentumScore": 0.30,
+                "llmRuleInputMomentumScore": 0.30,
+                "aiMomentumTraceValue": 0.30,
+                "aiMomentumFlatExcludedMomentum": 0.75,
+                "aiMomentumProposedMomentumScore": 0.75,
+                "allValuesEqual": False,
+                "mismatchDetected": True,
+                "mismatchReason": (
+                    "PROPOSED_SCORE_DIFFERS_FROM_LLM_INPUT"
+                ),
+            },
+        )
+        self.assertEqual(
+            runtime_result["runtimeDebug"]["aiMomentumTrace"],
+            microstructure_state["aiMomentumTrace"],
+        )
+        self.assertIn(
+            "comparisonMetrics",
+            runtime_result["runtimeDebug"]["aiMomentumTrace"],
+        )
+        self.assertIn(
+            "candidateMetrics",
+            runtime_result["runtimeDebug"]["aiMomentumTrace"],
+        )
+        self.assertEqual(
+            microstructure_state["momentumPersistence"],
+            0.05,
+        )
+        self.assertEqual(
+            runtime_result["llmInput"]["runtime_state"][
+                "momentum_score"
+            ],
+            0.30,
+        )
+        self.assertEqual(
+            runtime_result["llmInput"]["features"][
+                "feature_map"
+            ]["momentum_score"],
+            0.30,
+        )
+        self.assertEqual(
+            runtime_result["llmRuleInput"]["momentum_score"],
+            0.30,
+        )
+        self.assertEqual(runtime_result["llmDecision"], "HOLD")
+
+    def test_llm_buy_sell_hold_conditions_remain_unchanged(self):
+        engine = LLMEngine()
+
+        self.assertEqual(
+            engine.RUNTIME_RULE_THRESHOLDS,
+            {
+                "buy_bias_gt": 0.15,
+                "sell_bias_lt": -0.15,
+                "momentum_gte": 0.50,
+                "imbalance_gt": 0,
+            },
+        )
+        self.assertEqual(
+            engine.analyze({
+                "runtime_state": self._runtime_state(
+                    directional_bias=0.16,
+                    momentum_score=0.50,
+                    imbalance_score=0.01,
+                ),
+            }),
+            "BUY",
+        )
+        self.assertEqual(
+            engine.analyze({
+                "runtime_state": self._runtime_state(
+                    directional_bias=-0.16,
+                    momentum_score=0.50,
+                    imbalance_score=0.01,
+                ),
+            }),
+            "SELL",
+        )
+        self.assertEqual(
+            engine.analyze({
+                "runtime_state": self._runtime_state(
+                    directional_bias=0.16,
+                    momentum_score=0.49,
+                    imbalance_score=0.01,
+                ),
+            }),
+            "HOLD",
         )
 
     def test_runtime_debug_exposes_price_history_generation_path(self):

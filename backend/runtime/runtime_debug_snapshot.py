@@ -14,6 +14,7 @@ def build_runtime_debug_result():
         "strategyDirection": None,
         "strategyConfidence": None,
         "momentumTrace": None,
+        "momentumPipelineTrace": None,
         "priceHistoryTrace": None,
         "aiMomentumTrace": None,
         "aiRuntimeReached": False,

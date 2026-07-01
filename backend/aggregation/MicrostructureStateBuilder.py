@@ -414,6 +414,37 @@ class MicrostructureStateBuilder:
         )
         delta_count = len(self._ai_momentum_deltas)
         active_delta_count = positive + negative
+        flat_excluded_momentum = (
+            dominant_direction_count / active_delta_count
+            if active_delta_count > 0
+            else 0
+        )
+        active_delta_ratio = (
+            active_delta_count / delta_count
+            if delta_count > 0
+            else 0
+        )
+
+        if net_price_change is None:
+            price_direction = None
+        elif net_price_change > 0:
+            price_direction = "UP"
+        elif net_price_change < 0:
+            price_direction = "DOWN"
+        else:
+            price_direction = "FLAT"
+
+        direction_confirmed = (
+            (dominant_direction in ("UP", "BUY")
+             and price_direction == "UP")
+            or (dominant_direction in ("DOWN", "SELL")
+                and price_direction == "DOWN")
+        )
+        activity_gate_passed = active_delta_ratio >= 0.35
+        price_move_gate_passed = (
+            abs_net_price_change is not None
+            and abs_net_price_change > 0
+        )
 
         timestamps = [
             sample["timestamp"]
@@ -470,19 +501,25 @@ class MicrostructureStateBuilder:
             "reason": reason,
             "comparisonMetrics": {
                 "currentMomentum": persistence,
-                "flatExcludedMomentum": (
-                    dominant_direction_count
-                    / active_delta_count
-                    if active_delta_count > 0
-                    else 0
-                ),
-                "activeDeltaRatio": (
-                    active_delta_count / delta_count
-                    if delta_count > 0
-                    else 0
-                ),
+                "flatExcludedMomentum": flat_excluded_momentum,
+                "activeDeltaRatio": active_delta_ratio,
                 "netPriceChange": net_price_change,
                 "absNetPriceChange": abs_net_price_change,
+            },
+            "candidateMetrics": {
+                "directionPurity": flat_excluded_momentum,
+                "activityRatio": active_delta_ratio,
+                "priceDirection": price_direction,
+                "priceMove": abs_net_price_change,
+                "directionConfirmed": direction_confirmed,
+                "activityGatePassed": activity_gate_passed,
+                "priceMoveGatePassed": price_move_gate_passed,
+                "proposedMomentumScore": flat_excluded_momentum,
+                "proposedMomentumUsable": (
+                    direction_confirmed
+                    and activity_gate_passed
+                    and price_move_gate_passed
+                ),
             },
         }
 
