@@ -13,6 +13,7 @@ def build_runtime_debug_result():
         "strategySignal": None,
         "strategyDirection": None,
         "strategyConfidence": None,
+        "momentumTrace": None,
         "aiRuntimeReached": False,
         "aiInput": None,
         "aiOutput": None,

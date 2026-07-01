@@ -1,6 +1,9 @@
 import unittest
 from types import SimpleNamespace
 
+from backend.aggregation.MicrostructureStateBuilder import (
+    MicrostructureStateBuilder,
+)
 from backend.ai.llm_engine import LLMEngine
 from backend.ai.trade_brain import TradeBrain
 from backend.main import TradingRuntime, _build_llm_debug
@@ -164,6 +167,33 @@ class RuntimeAIDebugTest(unittest.TestCase):
             result["llmParserResult"],
             "NOT_APPLICABLE_RULE_ENGINE",
         )
+        self.assertEqual(
+            result["momentumTrace"],
+            {
+                "sourceGenerator": (
+                    "MicrostructureStateBuilder."
+                    "compute_momentum_persistence"
+                ),
+                "sourceField": (
+                    "microstructure_state.momentumPersistence"
+                ),
+                "sourcePresent": True,
+                "sourceValue": 0.9,
+                "strategyInputValue": 0.9,
+                "strategyFallbackUsed": False,
+                "strategyFallbackValue": 0.0,
+                "strategyOutputPresent": False,
+                "strategyOutputValue": None,
+                "runtimeAdapterFallbackUsed": False,
+                "runtimeStateValue": 0.9,
+                "tradeBrainFallbackUsed": False,
+                "tradeBrainValue": 0.9,
+                "llmEngineFallbackUsed": False,
+                "llmEngineValue": 0.9,
+                "valueChanged": False,
+                "zeroFirstObservedAt": None,
+            },
+        )
         self.assertIsNone(result["llmRejectBuyReason"])
         self.assertIsNone(result["llmRejectSellReason"])
         self.assertEqual(
@@ -175,6 +205,46 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "LSTM=BUY, LLM=HOLD",
         )
         self.assertEqual(result["governanceDecision"], "BLOCK")
+
+    def test_momentum_trace_proves_zero_exists_at_source(self):
+        builder = MicrostructureStateBuilder()
+        microstructure_state = builder.build_microstructure_state({
+            "buyVolume": 60000.0,
+            "sellVolume": 40000.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.0001,
+            "lastPrice": 1.00005,
+        })
+
+        self.assertEqual(
+            microstructure_state["momentumPersistence"],
+            0.0,
+        )
+
+        result = TradingRuntime().process_runtime(
+            microstructure_state
+        )
+        trace = result["momentumTrace"]
+
+        self.assertEqual(result["strategyDirection"], "LONG")
+        self.assertEqual(result["llmDecision"], "HOLD")
+        self.assertEqual(
+            result["llmHoldReason"],
+            "HOLD because momentum_score < 0.50",
+        )
+        self.assertEqual(trace["sourceValue"], 0.0)
+        self.assertEqual(trace["runtimeStateValue"], 0.0)
+        self.assertEqual(trace["tradeBrainValue"], 0.0)
+        self.assertEqual(trace["llmEngineValue"], 0.0)
+        self.assertFalse(trace["strategyFallbackUsed"])
+        self.assertFalse(trace["runtimeAdapterFallbackUsed"])
+        self.assertFalse(trace["tradeBrainFallbackUsed"])
+        self.assertFalse(trace["llmEngineFallbackUsed"])
+        self.assertFalse(trace["valueChanged"])
+        self.assertEqual(
+            trace["zeroFirstObservedAt"],
+            "microstructure_state.momentumPersistence",
+        )
 
     def test_trade_brain_exposes_rule_debug_on_event_and_runtime_debug(self):
         engine = LLMEngine()

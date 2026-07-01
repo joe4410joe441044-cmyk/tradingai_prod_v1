@@ -73,6 +73,95 @@ from backend.ai.runtime_adapter import (
 app = FastAPI()
 
 
+def _new_momentum_trace(microstructure_state):
+
+    missing = object()
+    source_value = extract_value(
+        microstructure_state,
+        "momentumPersistence",
+        missing,
+    )
+    source_present = source_value is not missing
+
+    if not source_present:
+        source_value = None
+
+    return {
+        "sourceGenerator": (
+            "MicrostructureStateBuilder."
+            "compute_momentum_persistence"
+        ),
+        "sourceField": (
+            "microstructure_state.momentumPersistence"
+        ),
+        "sourcePresent": source_present,
+        "sourceValue": safe_debug(source_value),
+        "strategyInputValue": safe_debug(source_value),
+        "strategyFallbackUsed": not source_present,
+        "strategyFallbackValue": 0.0,
+        "strategyOutputPresent": None,
+        "strategyOutputValue": None,
+        "runtimeAdapterFallbackUsed": None,
+        "runtimeStateValue": None,
+        "tradeBrainFallbackUsed": None,
+        "tradeBrainValue": None,
+        "llmEngineFallbackUsed": None,
+        "llmEngineValue": None,
+        "valueChanged": None,
+        "zeroFirstObservedAt": (
+            "microstructure_state.momentumPersistence"
+            if source_present and source_value == 0
+            else None
+        ),
+    }
+
+
+def _update_momentum_trace_consistency(momentum_trace):
+
+    stages = (
+        (
+            "microstructure_state.momentumPersistence",
+            momentum_trace.get("sourceValue"),
+        ),
+        (
+            "runtime_state.momentum_score",
+            momentum_trace.get("runtimeStateValue"),
+        ),
+        (
+            "TradeBrain.llmInput.runtime_state.momentum_score",
+            momentum_trace.get("tradeBrainValue"),
+        ),
+        (
+            "LLMEngine.llmRuleInput.momentum_score",
+            momentum_trace.get("llmEngineValue"),
+        ),
+    )
+    observed_values = [
+        value
+        for _, value in stages
+        if value is not None
+    ]
+
+    momentum_trace["zeroFirstObservedAt"] = next(
+        (
+            stage
+            for stage, value in stages
+            if value == 0
+        ),
+        None,
+    )
+
+    if len(observed_values) < 2:
+        momentum_trace["valueChanged"] = None
+        return
+
+    first_value = observed_values[0]
+    momentum_trace["valueChanged"] = any(
+        value != first_value
+        for value in observed_values[1:]
+    )
+
+
 def _record_strategy_debug(debug_result, strategy_result):
 
     strategy_state = extract_value(
@@ -93,6 +182,36 @@ def _record_strategy_debug(debug_result, strategy_result):
             extract_value(strategy_state, "confidence")
         ),
     })
+
+    momentum_trace = debug_result.get("momentumTrace")
+
+    if isinstance(momentum_trace, dict):
+        missing = object()
+        strategy_momentum = missing
+
+        for key in (
+            "momentum_score",
+            "momentumScore",
+            "momentumPersistence",
+            "momentum",
+        ):
+            strategy_momentum = extract_value(
+                strategy_state,
+                key,
+                missing,
+            )
+
+            if strategy_momentum is not missing:
+                break
+
+        momentum_trace["strategyOutputPresent"] = (
+            strategy_momentum is not missing
+        )
+        momentum_trace["strategyOutputValue"] = safe_debug(
+            None
+            if strategy_momentum is missing
+            else strategy_momentum
+        )
 
 
 def _attach_runtime_debug(runtime_result, debug_result):
@@ -299,6 +418,9 @@ class TradingRuntime:
     ):
 
         debug_result = build_runtime_debug_result()
+        debug_result["momentumTrace"] = (
+            _new_momentum_trace(microstructure_state)
+        )
 
         runtime_debug(
             "TradingRuntime received type=%s state=%s",
@@ -318,6 +440,17 @@ class TradingRuntime:
                     self.runtime_adapter.build(
                         microstructure_state
                     )
+                )
+
+                momentum_trace = debug_result["momentumTrace"]
+                momentum_trace["runtimeAdapterFallbackUsed"] = (
+                    False
+                )
+                momentum_trace["runtimeStateValue"] = safe_debug(
+                    extract_value(runtime_state, "momentum_score")
+                )
+                _update_momentum_trace_consistency(
+                    momentum_trace
                 )
 
                 ai_input = {
@@ -404,15 +537,41 @@ class TradingRuntime:
                     "aiRawSignal": safe_debug(ai_raw_signal),
                 })
 
-                debug_result.update(
-                    _build_llm_debug(
-                        latest_ai_event,
-                        ai_raw_signal,
-                        extract_value(
-                            self.ai_pipeline.brain,
-                            "latest_decision_debug",
-                        ),
+                ai_decision_debug = extract_value(
+                    self.ai_pipeline.brain,
+                    "latest_decision_debug",
+                )
+                llm_debug = _build_llm_debug(
+                    latest_ai_event,
+                    ai_raw_signal,
+                    ai_decision_debug,
+                )
+                debug_result.update(llm_debug)
+
+                trade_brain_input = extract_value(
+                    ai_decision_debug,
+                    "llmInput",
+                )
+                trade_brain_runtime_state = extract_value(
+                    trade_brain_input,
+                    "runtime_state",
+                )
+                momentum_trace["tradeBrainValue"] = safe_debug(
+                    extract_value(
+                        trade_brain_runtime_state,
+                        "momentum_score",
                     )
+                )
+                momentum_trace["tradeBrainFallbackUsed"] = False
+                momentum_trace["llmEngineValue"] = safe_debug(
+                    extract_value(
+                        llm_debug.get("llmRuleInput"),
+                        "momentum_score",
+                    )
+                )
+                momentum_trace["llmEngineFallbackUsed"] = False
+                _update_momentum_trace_consistency(
+                    momentum_trace
                 )
 
                 runtime_debug(
