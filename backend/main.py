@@ -14,6 +14,12 @@ from fastapi.middleware.cors import (
 
 import backend.runtime.runtime_registry as registry
 
+from backend.runtime.runtime_debug_snapshot import (
+    build_runtime_debug_result,
+    extract_value,
+    safe_debug,
+)
+
 
 
 # ============================================================
@@ -65,6 +71,137 @@ from backend.ai.runtime_adapter import (
 # ============================================================
 
 app = FastAPI()
+
+
+def _record_strategy_debug(debug_result, strategy_result):
+
+    strategy_state = extract_value(
+        strategy_result,
+        "strategy",
+    )
+
+    debug_result.update({
+        "strategyRuntimeReached": True,
+        "strategyOutput": safe_debug(strategy_result),
+        "strategySignal": safe_debug(
+            extract_value(strategy_state, "signal")
+        ),
+        "strategyDirection": safe_debug(
+            extract_value(strategy_state, "direction")
+        ),
+        "strategyConfidence": safe_debug(
+            extract_value(strategy_state, "confidence")
+        ),
+    })
+
+
+def _attach_runtime_debug(runtime_result, debug_result):
+
+    if isinstance(runtime_result, dict):
+        runtime_result.update(debug_result)
+
+    return runtime_result
+
+
+def _build_llm_debug(
+    latest_ai_event,
+    ai_raw_signal,
+    ai_decision_debug=None,
+):
+
+    llm_output = extract_value(
+        ai_decision_debug,
+        "llmOutput",
+        extract_value(ai_raw_signal, "llm"),
+    )
+
+    llm_decision = extract_value(
+        ai_decision_debug,
+        "llmDecision",
+        llm_output,
+    )
+
+    lstm_decision = extract_value(
+        ai_raw_signal,
+        "lstm",
+    )
+
+    llm_input = extract_value(
+        ai_decision_debug,
+        "llmInput",
+        extract_value(latest_ai_event, "llmInput"),
+    )
+
+    reject_buy_reason = extract_value(
+        latest_ai_event,
+        "llmRejectBuyReason",
+        extract_value(ai_raw_signal, "llmRejectBuyReason"),
+    )
+
+    reject_sell_reason = extract_value(
+        latest_ai_event,
+        "llmRejectSellReason",
+        extract_value(ai_raw_signal, "llmRejectSellReason"),
+    )
+
+    llm_hold_reason = extract_value(
+        latest_ai_event,
+        "llmHoldReason",
+        extract_value(ai_raw_signal, "llmHoldReason"),
+    )
+
+    if llm_decision == "HOLD" and llm_hold_reason is None:
+        llm_hold_reason = (
+            "LLM returned HOLD without exposed reason"
+        )
+
+    consensus_input = extract_value(
+        ai_decision_debug,
+        "consensusInput",
+        extract_value(latest_ai_event, "consensusInput"),
+    )
+
+    if (
+        consensus_input is None
+        and (
+            lstm_decision is not None
+            or llm_output is not None
+        )
+    ):
+        consensus_input = {
+            "lstm": lstm_decision,
+            "llm": llm_output,
+        }
+
+    consensus_reason = extract_value(
+        ai_decision_debug,
+        "consensusReason",
+        extract_value(
+            latest_ai_event,
+            "consensusReason",
+            extract_value(latest_ai_event, "reason"),
+        ),
+    )
+
+    return {
+        "llmInput": safe_debug(llm_input),
+        "llmOutput": safe_debug(llm_output),
+        "llmDecision": safe_debug(llm_decision),
+        "llmHoldReason": safe_debug(llm_hold_reason),
+        "llmRejectBuyReason": safe_debug(reject_buy_reason),
+        "llmRejectSellReason": safe_debug(reject_sell_reason),
+        "llmConfidence": safe_debug(
+            extract_value(ai_raw_signal, "llmConfidence")
+        ),
+        "llmScore": safe_debug(
+            extract_value(ai_raw_signal, "llmScore")
+        ),
+        "llmProbability": safe_debug(
+            extract_value(ai_raw_signal, "llmProbability")
+        ),
+        "consensusInput": safe_debug(consensus_input),
+        "consensusReason": safe_debug(consensus_reason),
+    }
 
 # ============================================================
 # TRADING RUNTIME
@@ -120,6 +257,8 @@ class TradingRuntime:
         microstructure_state,
     ):
 
+        debug_result = build_runtime_debug_result()
+
         runtime_debug(
             "TradingRuntime received type=%s state=%s",
             type(microstructure_state).__name__,
@@ -140,11 +279,111 @@ class TradingRuntime:
                     )
                 )
 
-                ai_signal, ai_events = (
-                    self.ai_pipeline.decide({
-                        "runtime_state": runtime_state
-                    })
+                ai_input = {
+                    "runtime_state": runtime_state
+                }
+
+                debug_result["aiInput"] = safe_debug(
+                    ai_input
                 )
+
+                runtime_debug(
+                    "[STEP56-6][AI_INPUT] %s",
+                    debug_result["aiInput"],
+                )
+
+                ai_signal, ai_events = (
+                    self.ai_pipeline.decide(
+                        ai_input
+                    )
+                )
+
+                latest_ai_event = (
+                    ai_events[-1]
+                    if isinstance(ai_events, (list, tuple))
+                    and ai_events
+                    else None
+                )
+
+                ai_raw_signal = extract_value(
+                    latest_ai_event,
+                    "data",
+                )
+
+                ai_hold_reason = None
+
+                if ai_signal == "HOLD":
+                    ai_hold_reason = extract_value(
+                        latest_ai_event,
+                        "reason",
+                    )
+
+                debug_result.update({
+                    "aiRuntimeReached": True,
+                    "aiOutput": safe_debug({
+                        "signal": ai_signal,
+                        "events": ai_events,
+                    }),
+                    "aiConfidence": safe_debug(
+                        extract_value(
+                            latest_ai_event,
+                            "confidence",
+                        )
+                    ),
+                    "aiScore": safe_debug(
+                        extract_value(
+                            latest_ai_event,
+                            "score",
+                            extract_value(ai_raw_signal, "score"),
+                        )
+                    ),
+                    "aiDecision": safe_debug(ai_signal),
+                    "aiDirection": safe_debug(ai_signal),
+                    "aiHoldReason": safe_debug(ai_hold_reason),
+                    "aiLongCandidate": safe_debug(
+                        extract_value(
+                            latest_ai_event,
+                            "longCandidate",
+                            extract_value(
+                                ai_raw_signal,
+                                "longCandidate",
+                            ),
+                        )
+                    ),
+                    "aiShortCandidate": safe_debug(
+                        extract_value(
+                            latest_ai_event,
+                            "shortCandidate",
+                            extract_value(
+                                ai_raw_signal,
+                                "shortCandidate",
+                            ),
+                        )
+                    ),
+                    "aiRawSignal": safe_debug(ai_raw_signal),
+                })
+
+                debug_result.update(
+                    _build_llm_debug(
+                        latest_ai_event,
+                        ai_raw_signal,
+                        extract_value(
+                            self.ai_pipeline.brain,
+                            "latest_decision_debug",
+                        ),
+                    )
+                )
+
+                runtime_debug(
+                    "[STEP56-6][AI_OUTPUT] %s",
+                    debug_result["aiOutput"],
+                )
+
+                if ai_signal == "HOLD":
+                    runtime_debug(
+                        "[STEP56-6][HOLD_REASON] %s",
+                        debug_result["aiHoldReason"],
+                    )
 
                 runtime_debug(
                     "AI signal=%s",
@@ -167,6 +406,16 @@ class TradingRuntime:
                 )
             )
 
+            _record_strategy_debug(
+                debug_result,
+                strategy_result,
+            )
+
+            runtime_debug(
+                "[STEP56-6][STRATEGY] %s",
+                debug_result["strategyOutput"],
+            )
+
             runtime_debug(
                 "Strategy result=%s",
                 strategy_result,
@@ -182,6 +431,11 @@ class TradingRuntime:
                 )
             )
 
+            _record_strategy_debug(
+                debug_result,
+                strategy_result,
+            )
+
             if not strategy_result["valid"]:
 
                 return {
@@ -189,17 +443,85 @@ class TradingRuntime:
                     "reason": (
                         "STRATEGY_FAILED"
                     ),
+                    **debug_result,
                 }
 
             strategy_state = (
                 strategy_result["strategy"]
             )
+
+            governance_input = {
+                "strategy_state": strategy_state,
+                "ai_signal": ai_signal,
+            }
+
+            debug_result["governanceInput"] = safe_debug(
+                governance_input
+            )
+
+            runtime_debug(
+                "[STEP56-6][GOV_INPUT] %s",
+                debug_result["governanceInput"],
+            )
+
             governance_decision = (
                 self.governance_runtime
                 .process_governance(
                     strategy_state,
                     ai_signal,
                 )
+            )
+
+            governance_allowed = extract_value(
+                governance_decision,
+                "allowed",
+            )
+
+            governance_decision_value = extract_value(
+                governance_decision,
+                "decision",
+            )
+
+            if (
+                governance_decision_value is None
+                and governance_allowed is not None
+            ):
+                governance_decision_value = (
+                    "ALLOW"
+                    if governance_allowed
+                    else "BLOCK"
+                )
+
+            debug_result.update({
+                "governanceRuntimeReached": True,
+                "governanceOutput": safe_debug(
+                    governance_decision
+                ),
+                "governanceDecision": safe_debug(
+                    governance_decision_value
+                ),
+                "governanceAllowed": safe_debug(
+                    governance_allowed
+                ),
+                "governanceBlockedReason": safe_debug(
+                    extract_value(
+                        governance_decision,
+                        "blockedReason",
+                        extract_value(
+                            governance_decision,
+                            "blocked_reason",
+                            extract_value(
+                                governance_decision,
+                                "reason",
+                            ),
+                        ),
+                    )
+                ),
+            })
+
+            runtime_debug(
+                "[STEP56-6][GOV_OUTPUT] %s",
+                debug_result["governanceOutput"],
             )
 
             runtime_debug(
@@ -225,7 +547,10 @@ class TradingRuntime:
                 runtime_result,
             )
 
-            return runtime_result
+            return _attach_runtime_debug(
+                runtime_result,
+                debug_result,
+            )
 
         except Exception as e:
 
@@ -239,6 +564,7 @@ class TradingRuntime:
             return {
                 "valid": False,
                 "reason": str(e),
+                **debug_result,
             }
 
 

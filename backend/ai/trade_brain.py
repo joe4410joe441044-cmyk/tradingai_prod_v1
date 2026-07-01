@@ -18,10 +18,15 @@ class TradeBrain:
         # 最大保持数
         self.max_events = 200
 
+        # 直近の decide 呼び出しで実際に観測した値（デバッグ専用）
+        self.latest_decision_debug = None
+
     # =====================================================
     # DECISION ENGINE（完全版）
     # =====================================================
     def decide(self, market_data: dict):
+
+        self.latest_decision_debug = None
 
         features = market_data.get("features", [])
 
@@ -66,6 +71,17 @@ class TradeBrain:
                 "llm": llm_signal,
                 "price": market_data.get("price", 0)
             }
+        }
+
+        self.latest_decision_debug = {
+            "llmInput": market_data,
+            "llmOutput": llm_signal,
+            "llmDecision": llm_signal,
+            "consensusInput": {
+                "lstm": lstm_signal,
+                "llm": llm_signal,
+            },
+            "consensusReason": event["reason"],
         }
 
         self._add_event(event)
