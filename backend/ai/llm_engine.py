@@ -1,12 +1,15 @@
 from backend.utils.log_buffer import runtime_debug
 
 
+LLM_MOMENTUM_THRESHOLD = 0.25
+
+
 class LLMEngine:
 
     RUNTIME_RULE_THRESHOLDS = {
         "buy_bias_gt": 0.15,
         "sell_bias_lt": -0.15,
-        "momentum_gte": 0.50,
+        "momentum_gte": LLM_MOMENTUM_THRESHOLD,
         "imbalance_gt": 0,
     }
 
@@ -88,7 +91,7 @@ class LLMEngine:
 
             if (
                 bias > 0.15
-                and momentum >= 0.50
+                and momentum >= LLM_MOMENTUM_THRESHOLD
                 and imbalance > 0
             ):
                 return self._record_debug(
@@ -96,7 +99,7 @@ class LLMEngine:
                     source="runtime_state_rule",
                     rule_reason=(
                         "BUY because directional_bias > 0.15, "
-                        "momentum_score >= 0.50, and "
+                        f"momentum_score >= {LLM_MOMENTUM_THRESHOLD:.2f}, and "
                         "imbalance_score > 0"
                     ),
                     rule_input={
@@ -113,7 +116,7 @@ class LLMEngine:
 
             if (
                 bias < -0.15
-                and momentum >= 0.50
+                and momentum >= LLM_MOMENTUM_THRESHOLD
                 and imbalance > 0
             ):
                 return self._record_debug(
@@ -121,7 +124,7 @@ class LLMEngine:
                     source="runtime_state_rule",
                     rule_reason=(
                         "SELL because directional_bias < -0.15, "
-                        "momentum_score >= 0.50, and "
+                        f"momentum_score >= {LLM_MOMENTUM_THRESHOLD:.2f}, and "
                         "imbalance_score > 0"
                     ),
                     rule_input={
@@ -144,9 +147,9 @@ class LLMEngine:
                     "directional_bias >= -0.15 for SELL"
                 )
 
-            if not momentum >= 0.50:
+            if not momentum >= LLM_MOMENTUM_THRESHOLD:
                 failed_conditions.append(
-                    "momentum_score < 0.50"
+                    f"momentum_score < {LLM_MOMENTUM_THRESHOLD:.2f}"
                 )
 
             if not imbalance > 0:

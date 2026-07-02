@@ -62,7 +62,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
         engine = LLMEngine()
         runtime_state = self._runtime_state(
             directional_bias=0.0,
-            momentum_score=0.4,
+            momentum_score=0.24,
             imbalance_score=0.0,
         )
 
@@ -74,7 +74,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
         expected_reason = (
             "HOLD because directional_bias <= 0.15 for BUY and "
             "directional_bias >= -0.15 for SELL; "
-            "momentum_score < 0.50; imbalance_score <= 0"
+            "momentum_score < 0.25; imbalance_score <= 0"
         )
 
         self.assertEqual(
@@ -93,7 +93,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             engine.latest_debug["llmRuleInput"],
             {
                 "directional_bias": 0.0,
-                "momentum_score": 0.4,
+                "momentum_score": 0.24,
                 "imbalance_score": 0.0,
             },
         )
@@ -102,12 +102,47 @@ class RuntimeAIDebugTest(unittest.TestCase):
             {
                 "buy_bias_gt": 0.15,
                 "sell_bias_lt": -0.15,
-                "momentum_gte": 0.50,
+                "momentum_gte": 0.25,
                 "imbalance_gt": 0,
             },
         )
         self.assertFalse(
             engine.latest_debug["llmFallbackUsed"]
+        )
+
+    def test_llm_engine_applies_momentum_threshold_boundary(self):
+        engine = LLMEngine()
+
+        below_threshold = self._runtime_state(
+            directional_bias=0.16,
+            momentum_score=0.24,
+            imbalance_score=0.1,
+        )
+        self.assertEqual(
+            engine.analyze({"runtime_state": below_threshold}),
+            "HOLD",
+        )
+        self.assertEqual(
+            engine.latest_debug["llmHoldReason"],
+            "HOLD because momentum_score < 0.25",
+        )
+        self.assertEqual(
+            engine.latest_debug["llmRuleThresholds"]["momentum_gte"],
+            0.25,
+        )
+
+        at_threshold = self._runtime_state(
+            directional_bias=0.16,
+            momentum_score=0.25,
+            imbalance_score=0.1,
+        )
+        self.assertEqual(
+            engine.analyze({"runtime_state": at_threshold}),
+            "BUY",
+        )
+        self.assertEqual(
+            engine.latest_debug["llmRuleThresholds"]["momentum_gte"],
+            0.25,
         )
 
     def test_runtime_adapter_prefers_ai_momentum_persistence(self):
@@ -362,7 +397,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertEqual(result["llmDecision"], "HOLD")
         self.assertEqual(
             result["llmHoldReason"],
-            "HOLD because momentum_score < 0.50",
+            "HOLD because momentum_score < 0.25",
         )
         self.assertEqual(trace["sourceValue"], 0.0)
         self.assertEqual(
@@ -799,9 +834,9 @@ class RuntimeAIDebugTest(unittest.TestCase):
             runtime_result["llmRuleInput"]["momentum_score"],
             0.30,
         )
-        self.assertEqual(runtime_result["llmDecision"], "HOLD")
+        self.assertEqual(runtime_result["llmDecision"], "BUY")
 
-    def test_llm_buy_sell_hold_conditions_remain_unchanged(self):
+    def test_llm_buy_sell_hold_conditions_use_momentum_threshold(self):
         engine = LLMEngine()
 
         self.assertEqual(
@@ -809,7 +844,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             {
                 "buy_bias_gt": 0.15,
                 "sell_bias_lt": -0.15,
-                "momentum_gte": 0.50,
+                "momentum_gte": 0.25,
                 "imbalance_gt": 0,
             },
         )
@@ -817,7 +852,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             engine.analyze({
                 "runtime_state": self._runtime_state(
                     directional_bias=0.16,
-                    momentum_score=0.50,
+                    momentum_score=0.25,
                     imbalance_score=0.01,
                 ),
             }),
@@ -827,7 +862,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             engine.analyze({
                 "runtime_state": self._runtime_state(
                     directional_bias=-0.16,
-                    momentum_score=0.50,
+                    momentum_score=0.25,
                     imbalance_score=0.01,
                 ),
             }),
@@ -837,7 +872,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             engine.analyze({
                 "runtime_state": self._runtime_state(
                     directional_bias=0.16,
-                    momentum_score=0.49,
+                    momentum_score=0.24,
                     imbalance_score=0.01,
                 ),
             }),
@@ -1037,7 +1072,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "features": [1.0],
             "runtime_state": self._runtime_state(
                 directional_bias=0.2,
-                momentum_score=0.4,
+                momentum_score=0.24,
                 imbalance_score=1.0,
             ),
         }
@@ -1053,17 +1088,17 @@ class RuntimeAIDebugTest(unittest.TestCase):
 
         self.assertEqual(
             event["llmHoldReason"],
-            "HOLD because momentum_score < 0.50",
+            "HOLD because momentum_score < 0.25",
         )
         self.assertEqual(
             result["llmHoldReason"],
-            "HOLD because momentum_score < 0.50",
+            "HOLD because momentum_score < 0.25",
         )
         self.assertEqual(
             result["llmRuleInput"],
             {
                 "directional_bias": 0.2,
-                "momentum_score": 0.4,
+                "momentum_score": 0.24,
                 "imbalance_score": 1.0,
             },
         )
