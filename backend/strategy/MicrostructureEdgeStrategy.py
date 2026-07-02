@@ -213,9 +213,94 @@ class MicrostructureEdgeStrategy:
         if fake_pressure:
             liquidity_safe = False
 
+        triggered_reasons = []
+
+        if absorption:
+            triggered_reasons.append(
+                "absorptionDetected"
+            )
+
+        if fake_pressure:
+            triggered_reasons.append(
+                "fakePressureDetected"
+            )
+
+        if stagnant_flow:
+            triggered_reasons.append(
+                "stagnantHeavyFlow"
+            )
+
+        liquidity_instability_debug = dict(
+            microstructure_state.get(
+                "liquidityInstabilityDebug",
+                {},
+            )
+            or {}
+        )
+        liquidity_instability_debug.setdefault(
+            "priceDelta",
+            None,
+        )
+        liquidity_instability_debug.setdefault(
+            "buyVolume",
+            None,
+        )
+        liquidity_instability_debug.setdefault(
+            "sellVolume",
+            None,
+        )
+        liquidity_instability_debug.setdefault(
+            "totalVolume",
+            None,
+        )
+        liquidity_instability_debug.setdefault(
+            "buyPressure",
+            float(
+                microstructure_state.get(
+                    "buyPressure",
+                    0.0,
+                )
+            ),
+        )
+        liquidity_instability_debug.setdefault(
+            "sellPressure",
+            float(
+                microstructure_state.get(
+                    "sellPressure",
+                    0.0,
+                )
+            ),
+        )
+        liquidity_instability_debug.setdefault(
+            "pressureDiff",
+            abs(
+                liquidity_instability_debug["buyPressure"]
+                - liquidity_instability_debug["sellPressure"]
+            ),
+        )
+        liquidity_instability_debug.setdefault(
+            "spread",
+            float(
+                microstructure_state.get(
+                    "spread",
+                    0.0,
+                )
+            ),
+        )
+        liquidity_instability_debug.update({
+            "absorptionDetected": absorption,
+            "fakePressureDetected": fake_pressure,
+            "stagnantHeavyFlow": stagnant_flow,
+            "liquiditySafe": liquidity_safe,
+            "triggeredReasons": triggered_reasons,
+        })
+
         return {
             "liquiditySafe": liquidity_safe,
             "absorptionDetected": absorption,
+            "liquidityInstabilityDebug": (
+                liquidity_instability_debug
+            ),
         }
 
     # ============================================================
@@ -409,6 +494,12 @@ class MicrostructureEdgeStrategy:
             "suppressionReason": (
                 suppression_result[
                     "suppressionReason"
+                ]
+            ),
+
+            "liquidityInstabilityDebug": (
+                liquidity_result[
+                    "liquidityInstabilityDebug"
                 ]
             ),
 

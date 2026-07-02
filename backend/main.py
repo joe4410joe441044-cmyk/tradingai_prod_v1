@@ -314,6 +314,15 @@ def _record_strategy_debug(debug_result, strategy_result):
         "strategyConfidence": safe_debug(
             extract_value(strategy_state, "confidence")
         ),
+        "liquidityInstabilityDebug": safe_debug(
+            extract_value(
+                strategy_state,
+                "liquidityInstabilityDebug",
+                debug_result.get(
+                    "liquidityInstabilityDebug"
+                ),
+            )
+        ),
     })
 
     momentum_trace = debug_result.get("momentumTrace")
@@ -363,6 +372,11 @@ def _attach_runtime_debug(runtime_result, debug_result):
             ),
             "aiMomentumTrace": safe_debug(
                 debug_result.get("aiMomentumTrace")
+            ),
+            "liquidityInstabilityDebug": safe_debug(
+                debug_result.get(
+                    "liquidityInstabilityDebug"
+                )
             ),
             "aiRuntimeReached": safe_debug(
                 debug_result.get("aiRuntimeReached")
@@ -653,6 +667,12 @@ class TradingRuntime:
             extract_value(
                 microstructure_state,
                 "aiMomentumTrace",
+            )
+        )
+        debug_result["liquidityInstabilityDebug"] = safe_debug(
+            extract_value(
+                microstructure_state,
+                "liquidityInstabilityDebug",
             )
         )
 

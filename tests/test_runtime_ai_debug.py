@@ -351,6 +351,74 @@ class RuntimeAIDebugTest(unittest.TestCase):
             },
         )
 
+    def test_runtime_debug_exposes_liquidity_instability_reasons(self):
+        builder = MicrostructureStateBuilder()
+        state = builder.build_microstructure_state({
+            "buyVolume": 90000.0,
+            "sellVolume": 1000.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.0004,
+            "lastPrice": 1.0005,
+        })
+
+        runtime_result = TradingRuntime().process_runtime(state)
+        liquidity_debug = runtime_result["runtimeDebug"][
+            "liquidityInstabilityDebug"
+        ]
+
+        self.assertEqual(
+            liquidity_debug,
+            {
+                "absorptionDetected": True,
+                "fakePressureDetected": True,
+                "stagnantHeavyFlow": True,
+                "liquiditySafe": False,
+                "priceDelta": 0.0,
+                "buyVolume": 90000.0,
+                "sellVolume": 1000.0,
+                "totalVolume": 91000.0,
+                "buyPressure": 90000.0 / 91000.0,
+                "sellPressure": 1000.0 / 91000.0,
+                "pressureDiff": (
+                    (90000.0 / 91000.0)
+                    - (1000.0 / 91000.0)
+                ),
+                "spread": 1.0004 - 1.0,
+                "triggeredReasons": [
+                    "absorptionDetected",
+                    "fakePressureDetected",
+                    "stagnantHeavyFlow",
+                ],
+            },
+        )
+        self.assertEqual(
+            runtime_result["strategyOutput"]["strategy"][
+                "suppressionReason"
+            ],
+            "LIQUIDITY_INSTABILITY",
+        )
+
+    def test_liquidity_debug_does_not_change_safe_result(self):
+        builder = MicrostructureStateBuilder()
+        state = builder.build_microstructure_state({
+            "buyVolume": 10.0,
+            "sellVolume": 10.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.0001,
+            "lastPrice": 1.00005,
+        })
+
+        runtime_result = TradingRuntime().process_runtime(state)
+        liquidity_debug = runtime_result["runtimeDebug"][
+            "liquidityInstabilityDebug"
+        ]
+
+        self.assertTrue(liquidity_debug["liquiditySafe"])
+        self.assertEqual(
+            liquidity_debug["triggeredReasons"],
+            [],
+        )
+
     def test_momentum_trace_proves_zero_exists_at_source(self):
         builder = MicrostructureStateBuilder()
         microstructure_state = builder.build_microstructure_state({

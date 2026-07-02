@@ -988,6 +988,27 @@ class MicrostructureStateBuilder:
             )
         )
 
+        # Debug-only snapshot of the exact values used by the liquidity
+        # detectors above. Strategy, governance, and execution logic do not
+        # consume this structure.
+        liquidity_instability_debug = {
+            "absorptionDetected": absorption_detected,
+            "fakePressureDetected": fake_pressure_detected,
+            "stagnantHeavyFlow": stagnant_heavy_flow,
+            "liquiditySafe": None,
+            "priceDelta": price_delta,
+            "buyVolume": buy_volume,
+            "sellVolume": sell_volume,
+            "totalVolume": total_volume,
+            "buyPressure": buy_pressure,
+            "sellPressure": sell_pressure,
+            "pressureDiff": abs(
+                buy_pressure - sell_pressure
+            ),
+            "spread": spread,
+            "triggeredReasons": [],
+        }
+
         # ----------------------------------------------------
         # Final State
         # ----------------------------------------------------
@@ -1053,6 +1074,9 @@ class MicrostructureStateBuilder:
 
             "fakePressureDetected":
                 fake_pressure_detected,
+
+            "liquidityInstabilityDebug":
+                liquidity_instability_debug,
 
             "timestamp":
                 datetime.utcnow().isoformat(),
