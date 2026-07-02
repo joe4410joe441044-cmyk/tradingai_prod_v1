@@ -19,11 +19,17 @@ class Mode(str, Enum):
     live = "live"
 
 
+class Exchange(str, Enum):
+    kucoin = "kucoin"
+    binance = "binance"
+
+
 # =========================
 # CONFIG（仕様書）
 # =========================
 class StartConfig(BaseModel):
     symbol: str = Field(..., example="BTCUSDT")
+    exchange: Exchange = Exchange.kucoin
     risk_percent: float = Field(..., gt=0)
     sl_percent: float = Field(..., gt=0)
     leverage: float = Field(..., gt=0)
@@ -94,6 +100,12 @@ class StatusResponse(BaseModel):
 
     symbol: Optional[str] = None
 
+    exchange: Optional[str] = None
+
+    orderbookSource: Optional[str] = None
+
+    orderbookSymbol: Optional[str] = None
+
     position: Optional[Any] = None
     actual_position: Optional[Any] = None
 
@@ -106,7 +118,7 @@ def start_bot(config: StartConfig):
 
     bot_manager = get_bot_manager()
 
-    config_dict = config.dict()
+    config_dict = config.model_dump()
     
     # ===================================
     # FORCE STRING MODE
@@ -123,6 +135,10 @@ def start_bot(config: StartConfig):
         .strip()
         .lower()
     )
+
+    config_dict["exchange"] = str(
+        config_dict["exchange"]
+    ).split(".")[-1].lower()
 
     runtime_debug("Normalized API mode=%s", config_dict["mode"])
 

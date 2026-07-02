@@ -103,7 +103,7 @@ export default function TradeSettings({
                         className="config-select"
                         value={
                             values.exchange
-                            || "BINANCE"
+                            || "KUCOIN"
                         }
                         onChange={(e) =>
                             handle(
@@ -113,16 +113,12 @@ export default function TradeSettings({
                         }
                     >
 
-                        <option value="BINANCE">
-                            BINANCE
-                        </option>
-
-                        <option value="BYBIT">
-                            BYBIT
-                        </option>
-
                         <option value="KUCOIN">
                             KUCOIN
+                        </option>
+
+                        <option value="BINANCE">
+                            BINANCE
                         </option>
 
                     </select>

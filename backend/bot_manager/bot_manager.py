@@ -97,6 +97,10 @@ class BotManager:
 
         self.exchange_name = "kucoin"
 
+        self.orderbook_source = "kucoin_futures"
+
+        self.orderbook_symbol = None
+
         self.exchange = None
 
         self.config = {}
@@ -344,6 +348,27 @@ class BotManager:
                 f"[TRACE_UPDATE_ERROR] {e}"
             )
 
+    def attach_orderbook_runtime_debug(self, runtime_result):
+
+        if not isinstance(runtime_result, dict):
+            return runtime_result
+
+        runtime_debug_result = runtime_result.get(
+            "runtimeDebug"
+        )
+
+        if not isinstance(runtime_debug_result, dict):
+            runtime_debug_result = {}
+            runtime_result["runtimeDebug"] = runtime_debug_result
+
+        runtime_debug_result.update({
+            "exchange": self.exchange_name,
+            "orderbookSource": self.orderbook_source,
+            "orderbookSymbol": self.orderbook_symbol,
+        })
+
+        return runtime_result
+
     # ============================================
     # START
     # ============================================
@@ -391,7 +416,28 @@ class BotManager:
 
             self.symbol = config["symbol"].upper()
 
-            self.config = config
+            orderbook_context = (
+                ExchangeFactory.describe_orderbook(
+                    config.get("exchange", "kucoin"),
+                    self.symbol,
+                )
+            )
+
+            self.exchange_name = orderbook_context["exchange"]
+
+            self.orderbook_source = orderbook_context[
+                "orderbookSource"
+            ]
+
+            self.orderbook_symbol = orderbook_context[
+                "orderbookSymbol"
+            ]
+
+            self.config = dict(config)
+
+            self.config["exchange"] = self.exchange_name
+
+            config = self.config
 
             self.tp_percent = config.get(
                 "tp_percent",
@@ -716,6 +762,10 @@ class BotManager:
                                 )
                             )
 
+                            self.attach_orderbook_runtime_debug(
+                                self.latest_runtime_result
+                            )
+
                     except Exception as runtime_error:
 
                         logger.exception(
@@ -880,6 +930,9 @@ class BotManager:
             return {
                 "status": "started",
                 "symbol": self.symbol,
+                "exchange": self.exchange_name,
+                "orderbookSource": self.orderbook_source,
+                "orderbookSymbol": self.orderbook_symbol,
             }
 
         except Exception as e:
@@ -1168,6 +1221,12 @@ class BotManager:
             ),
 
             "symbol": self.symbol,
+
+            "exchange": self.exchange_name,
+
+            "orderbookSource": self.orderbook_source,
+
+            "orderbookSymbol": self.orderbook_symbol,
 
             "status": (
                 "RUNNING"

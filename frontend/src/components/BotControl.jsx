@@ -99,6 +99,10 @@ export default function BotControl({
                                                 String(config.mode)
                                                     .toLowerCase(),
 
+                                            exchange:
+                                                String(config.exchange || "kucoin")
+                                                    .toLowerCase(),
+
                                             risk_percent:
                                                 config.risk_percent ?? 1,
 

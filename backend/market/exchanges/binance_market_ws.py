@@ -18,16 +18,9 @@ class OrderBookWS:
         runtime_id,
     ):
 
-        self.symbol = symbol.lower()
+        self.original_symbol = symbol.upper()
 
-        # =========================
-        # KUCOIN SYMBOL
-        # =========================
-
-        self.kucoin_symbol = (
-            self.symbol.upper()
-            .replace("USDT", "USDTM")
-        )
+        self.symbol = self.original_symbol.lower()
 
         self.url = (
             "wss://stream.binance.com:9443/ws/"
@@ -88,17 +81,19 @@ class OrderBookWS:
 
     def load_orderbook_snapshot(self):
 
+        self.snapshot_loaded = False
+
         try:
 
             url = (
-                "https://api-futures.kucoin.com"
-                "/api/v1/level2/snapshot"
-                f"?symbol={self.kucoin_symbol}"
+                "https://api.binance.com"
+                "/api/v3/depth"
+                f"?symbol={self.original_symbol}&limit=5000"
             )
 
             add_log(
                 f"📚 LOADING SNAPSHOT: "
-                f"{self.kucoin_symbol}",
+                f"{self.original_symbol}",
                 "info"
             )
 
@@ -109,7 +104,7 @@ class OrderBookWS:
 
             data = response.json()
 
-            if "data" not in data:
+            if "lastUpdateId" not in data:
 
                 add_log(
                     f"❌ INVALID SNAPSHOT: "
@@ -127,7 +122,7 @@ class OrderBookWS:
             # LOAD BIDS
             # =========================
 
-            for bid in data["data"]["bids"]:
+            for bid in data["bids"]:
 
                 price = float(
                     bid[0]
@@ -143,7 +138,7 @@ class OrderBookWS:
             # LOAD ASKS
             # =========================
 
-            for ask in data["data"]["asks"]:
+            for ask in data["asks"]:
 
                 price = float(
                     ask[0]
@@ -208,6 +203,12 @@ class OrderBookWS:
 
             self.snapshot_loaded = True
 
+            self.snapshot_sequence = int(
+                data["lastUpdateId"]
+            )
+
+            self.last_sequence_end = self.snapshot_sequence
+
             add_log(
                 f"📚 SNAPSHOT LOADED "
                 f"BIDS={len(self.bids)} "
@@ -268,46 +269,32 @@ class OrderBookWS:
                 # INITIALIZE
                 # =========================
 
-                if self.last_sequence_end is None:
+                if new_u <= self.last_sequence_end:
+                    return
 
-                    self.last_sequence_end = (
-                        new_u
+                expected = self.last_sequence_end + 1
+
+                if new_U > expected:
+                    add_log(
+                        f"⚠️ BINANCE SEQUENCE GAP "
+                        f"EXPECTED={expected} "
+                        f"ACTUAL={new_U}",
+                        "warning"
                     )
 
-                else:
+                    self.snapshot_loaded = False
 
-                    expected = (
-                        self.last_sequence_end + 1
-                    )
+                    self.load_orderbook_snapshot()
 
-                    # if new_U != expected:
-                    #
-                    #     add_log(
-                    #         f"⚠️ SEQUENCE GAP "
-                    #         f"EXPECTED={expected} "
-                    #         f"ACTUAL={new_U}",
-                    #         "warning"
-                    #     )
-                    #
-                    #     self.resnapshot_required = True
-                    #
-                    #     self.snapshot_loaded = False
-                    #
-                    #     self.load_orderbook_snapshot()
+                    return
 
-                    # =========================
-                    # UPDATE AFTER VALIDATION
-                    # =========================
-
-                    self.last_sequence_end = (
-                        new_u
-                    )
+                self.last_sequence_end = new_u
 
             # =========================
             # EMPTY CHECK
             # =========================
 
-            if not bids or not asks:
+            if not bids and not asks:
 
                 ws_debug("Empty Binance WebSocket book")
 
@@ -487,9 +474,9 @@ class OrderBookWS:
             # =========================
 
             self.on_update(
-                self.symbol,
+                self.original_symbol,
                 {
-                    "symbol": self.symbol,
+                    "symbol": self.original_symbol,
                     "bids": dict(self.bids),
                     "asks": dict(self.asks),
                     "best_bid": self.best_bid,
@@ -515,6 +502,8 @@ class OrderBookWS:
     def on_open(self, ws):
 
         self.connected = True
+
+        self.load_orderbook_snapshot()
 
         add_log(
             f"🟢 ORDERBOOK WS CONNECTED: "
@@ -574,12 +563,6 @@ class OrderBookWS:
 
         self.running = True
 
-        # =========================
-        # LOAD SNAPSHOT FIRST
-        # =========================
-
-        self.load_orderbook_snapshot()
-
         def run():
 
             while self.running:
@@ -618,6 +601,8 @@ class OrderBookWS:
                         ping_interval=20,
                         ping_timeout=10,
                     )
+
+                    self.connected = False
 
                 except Exception as e:
 

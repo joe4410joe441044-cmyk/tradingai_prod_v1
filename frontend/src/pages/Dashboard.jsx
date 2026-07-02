@@ -121,7 +121,7 @@ const [tradeSettings, setTradeSettings] = useState({
 
     mode: "PAPER",
 
-    exchange: "BINANCE",
+    exchange: "KUCOIN",
 
     symbol: "XRPUSDT",
 
@@ -371,7 +371,10 @@ useEffect(() => {
                     </div>
 
                     <ExchangeLivePanel
-                        exchange={tradeSettings.exchange}
+                        exchange={firstAvailable(
+                            botStatus?.exchange,
+                            tradeSettings.exchange,
+                        )}
                         connection={connection}
                         mode={firstAvailable(
                             tradeSettings.mode,

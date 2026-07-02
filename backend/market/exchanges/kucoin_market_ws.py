@@ -10,26 +10,34 @@ import uuid
 from backend.utils.log_buffer import add_log, logger, ws_debug
 
 
+def normalize_futures_symbol(symbol):
+
+    normalized_symbol = str(symbol).strip().upper()
+
+    mapping = {
+        "BTCUSDT": "XBTUSDTM",
+        "XBTUSDT": "XBTUSDTM",
+        "ETHUSDT": "ETHUSDTM",
+        "XRPUSDT": "XRPUSDTM",
+    }
+
+    if normalized_symbol in mapping:
+        return mapping[normalized_symbol]
+
+    if normalized_symbol.endswith("USDTM"):
+        return normalized_symbol
+
+    if normalized_symbol.endswith("USDT"):
+        return f"{normalized_symbol}M"
+
+    return normalized_symbol
+
+
 class OrderBookWS:
 
     def normalize_symbol(self, symbol):
 
-        mapping = {
-
-            "BTCUSDT": "XBTUSDTM",
-
-            "XBTUSDT": "XBTUSDTM",
-
-            "ETHUSDT": "ETHUSDTM",
-
-            "XRPUSDT": "XRPUSDTM",
-
-        }
-
-        normalized = mapping.get(
-            symbol,
-            symbol
-        )
+        normalized = normalize_futures_symbol(symbol)
 
         ws_debug(
             "KuCoin symbol map '%s' -> '%s'",
@@ -115,6 +123,8 @@ class OrderBookWS:
 
     def load_snapshot(self):
 
+        self.snapshot_loaded = False
+
         try:
 
             url = (
@@ -162,6 +172,12 @@ class OrderBookWS:
                 float(price): float(size)
                 for price, size in asks
             }
+
+            self.snapshot_sequence = int(
+                snapshot.get("sequence", 0)
+            )
+
+            self.last_sequence_end = self.snapshot_sequence
 
             self.snapshot_loaded = True
 
@@ -222,6 +238,9 @@ class OrderBookWS:
                 ws_debug("KuCoin snapshot not loaded; loading now")
 
                 self.load_snapshot()
+
+                if not self.snapshot_loaded:
+                    return
                 
             # =========================
             # FUTURES CHANGE
@@ -236,6 +255,17 @@ class OrderBookWS:
                 data.get("data", {})
                     .get("sequence")
             )
+
+            if sequence is None:
+                ws_debug("KuCoin delta missing sequence")
+                return
+
+            sequence = int(sequence)
+
+            if sequence <= self.last_sequence_end:
+                return
+
+            self.last_sequence_end = sequence
 
             if not change:
 

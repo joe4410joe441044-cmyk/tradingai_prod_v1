@@ -11,11 +11,17 @@ class Mode(str, Enum):
     live = "live"
 
 
+class Exchange(str, Enum):
+    kucoin = "kucoin"
+    binance = "binance"
+
+
 # =========================
 # BOT START REQUEST
 # =========================
 class BotStartRequest(BaseModel):
     symbol: str = Field(..., example="BTCUSDT")
+    exchange: Exchange = Exchange.kucoin
     risk_percent: float = Field(..., gt=0)
     leverage: float = Field(..., gt=0)
     sl_percent: float = Field(..., gt=0)
