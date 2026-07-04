@@ -138,6 +138,8 @@ async def websocket_endpoint(
 
     bot = get_bot_manager()
 
+    bot.set_browser_ws_connection_count(len(connections))
+
     ws_debug("API WebSocket bot id=%s", id(bot))
 
     try:
@@ -199,3 +201,5 @@ async def websocket_endpoint(
     finally:
 
         disconnect(ws)
+
+        bot.set_browser_ws_connection_count(len(connections))

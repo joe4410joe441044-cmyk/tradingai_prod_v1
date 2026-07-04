@@ -1663,6 +1663,14 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
 
 }
 
+.runtime-status-idle,
+.runtime-status-stopped,
+.runtime-status-blocked {
+
+    color: #d8a657;
+
+}
+
 .runtime-status-active,
 .runtime-status-running {
 
@@ -1736,15 +1744,26 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
     grid-template-columns:
         100px
         minmax(180px, 1fr)
-        100px;
+        100px
+        minmax(220px, 1fr);
+
+}
+
+.log-stream-line.timeline-row > div:nth-child(3) {
+
+    color: #ffd84d;
+
+    font-weight: 700;
+
+    text-align: right;
 
 }
 
 .log-stream-line.timeline-row > div:last-child {
 
-    color: #ffd84d;
+    color: #aeb7c4;
 
-    font-weight: 700;
+    overflow-wrap: anywhere;
 
     text-align: right;
 

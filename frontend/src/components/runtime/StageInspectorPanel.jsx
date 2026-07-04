@@ -10,7 +10,7 @@ export default function StageInspectorPanel({ stage }) {
         { label: "RELATED FILES（関連ファイル）", value: stage?.relatedFiles ?? "--", expanded: true },
     ];
 
-    const status = stage?.status ?? "WAIT";
+    const status = stage?.status ?? "ERROR";
 
     return (
         <section className="stage-inspector-card">
@@ -21,7 +21,7 @@ export default function StageInspectorPanel({ stage }) {
             <div className="stage-inspector-selection">
                 <div className="stage-inspector-summary">
                     <span>STAGE（ステージ）</span>
-                    <strong>{stage?.name ?? "Not Selected"}</strong>
+                    <strong>{stage?.name ?? "Runtime Health Snapshot"}</strong>
                 </div>
 
                 <div className="stage-inspector-summary">

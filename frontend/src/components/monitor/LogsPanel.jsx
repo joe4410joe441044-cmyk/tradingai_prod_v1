@@ -214,6 +214,7 @@ export default function LogsPanel({
                     <div>SOURCE（実行元）</div>
                     {showLevel && <div>LEVEL</div>}
                     <div>STATE（状態）</div>
+                    {!showLevel && <div>REASON（理由）</div>}
                 </div>
 
                 {loading && (
@@ -222,6 +223,7 @@ export default function LogsPanel({
                         <div>SYSTEM</div>
                         {showLevel && <div>INFO</div>}
                         <div>WAIT</div>
+                        {!showLevel && <div>--</div>}
                     </div>
                 )}
 
@@ -231,6 +233,7 @@ export default function LogsPanel({
                         <div>SYSTEM</div>
                         {showLevel && <div className="terminal-red">ERROR</div>}
                         <div>FAILURE</div>
+                        {!showLevel && <div>--</div>}
                     </div>
                 )}
 
@@ -247,6 +250,7 @@ export default function LogsPanel({
                             </div>
                         )}
                         <div>{event.state ?? "WAIT"}</div>
+                        {!showLevel && <div>{event.reason ?? "--"}</div>}
                     </div>
                 ))}
 
@@ -255,7 +259,8 @@ export default function LogsPanel({
                         <div>--:--:--</div>
                         <div>SYSTEM</div>
                         {showLevel && <div>INFO</div>}
-                        <div>WAIT</div>
+                        <div>NO EVENTS</div>
+                        {!showLevel && <div>SNAPSHOT_TIMELINE_EMPTY</div>}
                     </div>
                 )}
             </div>

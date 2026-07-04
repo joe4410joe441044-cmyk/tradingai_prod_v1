@@ -58,7 +58,9 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         values = {
             "running": True,
             "market_stale": False,
-            "ws_connected": True,
+            "exchange_ws_connected": True,
+            "browser_ws_connected": True,
+            "browser_ws_clients": 1,
             "engine_available": True,
             "runtime_healthy": True,
             "runtime_result": runtime_result,
@@ -91,11 +93,22 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertTrue(snapshot["executionEnabled"])
         self.assertFalse(snapshot["executionAllowed"])
         self.assertEqual(snapshot["executionReason"], "AI_HOLD")
+        self.assertEqual(snapshot["schemaVersion"], 2)
+        self.assertEqual(snapshot["bot"]["status"], "RUNNING")
+        self.assertEqual(snapshot["browserWebSocket"]["status"], "LIVE")
+        self.assertEqual(snapshot["exchangeWebSocket"]["status"], "LIVE")
+        self.assertEqual(snapshot["runtimeEngine"]["status"], "ACTIVE")
+        self.assertEqual(snapshot["tradingAction"]["status"], "IDLE_BY_AI_HOLD")
+        self.assertEqual(
+            snapshot["executionEngine"]["status"],
+            "ENABLED_BUT_IDLE",
+        )
+        self.assertIsNone(snapshot["blockingReason"])
         self.assertEqual(snapshot["loops"]["strategy-loop"], "RUNNING")
         self.assertEqual(snapshot["loops"]["ai-loop"], "RUNNING")
         self.assertEqual(snapshot["loops"]["governance-loop"], "RUNNING")
         self.assertEqual(snapshot["loops"]["execution-queue"], "RUNNING")
-        self.assertEqual(snapshot["stages"]["execution-runtime"]["status"], "OK")
+        self.assertEqual(snapshot["stages"]["execution-runtime"]["status"], "IDLE")
         self.assertEqual(
             snapshot["stages"]["execution-governance"]["status"],
             "IDLE",
@@ -103,22 +116,53 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["stages"]["execution-engine"]["status"], "IDLE")
         self.assertEqual(len(snapshot["timeline"]), 3)
         self.assertEqual(snapshot["timeline"][-1]["source"], "Execution Runtime")
+        self.assertEqual(snapshot["timeline"][-1]["state"], "IDLE")
+        self.assertEqual(snapshot["timeline"][-1]["reason"], "AI_HOLD")
 
     def test_runtime_exception_is_critical(self):
         snapshot = self._active_snapshot(runtime_healthy=False)
 
         self.assertEqual(snapshot["health"], "CRITICAL")
         self.assertFalse(snapshot["runtimeHealthy"])
+        self.assertEqual(snapshot["blockingReason"], "RUNTIME_EXCEPTION")
+
+    def test_browser_and_exchange_websockets_are_not_mixed(self):
+        browser_down = self._active_snapshot(browser_ws_connected=False)
+        exchange_down = self._active_snapshot(exchange_ws_connected=False)
+
+        self.assertEqual(
+            browser_down["blockingReason"],
+            "BROWSER_WS_DISCONNECTED",
+        )
+        self.assertEqual(browser_down["exchangeWebSocket"]["status"], "LIVE")
+        self.assertEqual(exchange_down["browserWebSocket"]["status"], "LIVE")
+        self.assertEqual(
+            exchange_down["blockingReason"],
+            "EXCHANGE_WS_DISCONNECTED",
+        )
+
+    def test_stage_inspector_metadata_is_backend_owned(self):
+        snapshot = self._active_snapshot()
+        stage = snapshot["stages"]["trading-runtime"]
+
+        self.assertEqual(stage["name"], "TradingRuntime")
+        self.assertEqual(stage["backendFile"], "backend/main.py")
+        self.assertEqual(
+            stage["functionName"],
+            "TradingRuntime.process_runtime",
+        )
+        self.assertIn("output", stage)
 
     def test_stopped_runtime_does_not_reuse_previous_cycle_as_running(self):
         snapshot = self._active_snapshot(
             running=False,
             market_stale=True,
-            ws_connected=False,
+            exchange_ws_connected=False,
+            browser_ws_connected=False,
             engine_available=False,
         )
 
-        self.assertEqual(snapshot["pipelineStatus"], "WAIT")
+        self.assertEqual(snapshot["pipelineStatus"], "STOPPED")
         self.assertEqual(snapshot["loops"]["strategy-loop"], "WAIT")
         self.assertEqual(snapshot["stages"]["strategy-plugin"]["status"], "WAIT")
         self.assertEqual(snapshot["timeline"], [])

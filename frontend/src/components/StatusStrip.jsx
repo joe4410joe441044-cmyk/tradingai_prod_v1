@@ -1,9 +1,9 @@
 import React from "react";
 export default function StatusStrip({
 
-    botRunning = false,
+    botStatus = "STOPPED",
 
-    wsConnected = false,
+    wsStatus = "DISCONNECTED",
 
     engineStatus = "BLOCKED",
 
@@ -42,7 +42,7 @@ export default function StatusStrip({
                 <span
                     className={
                         `status-value ${
-                            botRunning
+                            botStatus === "RUNNING"
                                 ? "online"
                                 : "danger"
                         }`
@@ -50,9 +50,7 @@ export default function StatusStrip({
                 >
 
                     {
-                        botRunning
-                            ? "稼働中"
-                            : "停止中"
+                        botStatus
                     }
 
                 </span>
@@ -66,13 +64,13 @@ export default function StatusStrip({
             <div className="status-item">
 
                 <span className="status-label">
-                    WS / 接続
+                    BROWSER WS / 画面接続
                 </span>
 
                 <span
                     className={
                         `status-value ${
-                            wsConnected
+                            wsStatus === "LIVE"
                                 ? "online"
                                 : "danger"
                         }`
@@ -80,9 +78,7 @@ export default function StatusStrip({
                 >
 
                     {
-                        wsConnected
-                            ? "接続中"
-                            : "切断"
+                        wsStatus
                     }
 
                 </span>
@@ -96,7 +92,7 @@ export default function StatusStrip({
             <div className="status-item">
 
                 <span className="status-label">
-                    ENGINE / エンジン
+                    RUNTIME ENGINE
                 </span>
 
                 <span
@@ -110,9 +106,7 @@ export default function StatusStrip({
                 >
 
                     {
-                        engineStatus === "ACTIVE"
-                            ? "稼働"
-                            : engineStatus
+                        engineStatus
                     }
 
                 </span>
@@ -150,7 +144,9 @@ export default function StatusStrip({
                 <span
                     className={
                         `status-value ${
-                            executionState === "ENABLED"
+                            ["READY", "EXECUTED", "ENABLED_BUT_IDLE"].includes(
+                                executionState,
+                            )
                                 ? "online"
                                 : "warning"
                         }`
@@ -158,11 +154,7 @@ export default function StatusStrip({
                 >
 
                     {
-                        executionState === "ENABLED"
-                            ? "有効"
-                            : executionState === "BLOCKED"
-                                ? "ブロック"
-                                : "無効"
+                        executionState
                     }
 
                 </span>

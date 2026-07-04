@@ -119,6 +119,10 @@ class BotManager:
 
         self.ws = None
 
+        # Browser monitor WebSockets are distinct from the exchange market
+        # feed WebSocket.  The API router updates this observation-only count.
+        self.browser_ws_clients = 0
+
         # =========================
         # SESSION
         # =========================
@@ -1176,14 +1180,19 @@ class BotManager:
         runtime_health = build_runtime_health_snapshot(
             running=self._running,
             market_stale=market_stale,
-            ws_connected=websocket_connected,
+            exchange_ws_connected=websocket_connected,
+            browser_ws_connected=self.browser_ws_clients > 0,
+            browser_ws_clients=self.browser_ws_clients,
             engine_available=self.engine is not None,
             runtime_healthy=runtime_healthy,
             runtime_result=latest_runtime_trace,
             runtime_trace=self.state.runtime_trace,
             runtime_metrics=self.state.runtime_metrics,
             governance_state=governance_state,
-            snapshot_timestamp=time.time(),
+            snapshot_timestamp=(
+                self.state.runtime_metrics.get("last_bot_update")
+                or time.time()
+            ),
         )
         runtime_states = runtime_health["states"]
 
@@ -1362,6 +1371,11 @@ class BotManager:
 
     def get_status(self):
         return self.get_result()
+
+    def set_browser_ws_connection_count(self, count):
+        """Record connected dashboard clients without affecting trading."""
+
+        self.browser_ws_clients = max(0, int(count or 0))
 
 # =========================
 # GLOBAL INSTANCE

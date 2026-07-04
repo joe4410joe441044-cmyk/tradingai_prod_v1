@@ -3,8 +3,8 @@ import React from "react";
 import StatusStrip from "./StatusStrip";
 
 export default function Header({
-    botRunning,
-    wsConnected,
+    botStatus,
+    wsStatus,
     engineStatus,
     executionState,
     latency,
@@ -17,8 +17,8 @@ export default function Header({
         <header className="app-header">
 
             <StatusStrip
-                botRunning={botRunning}
-                wsConnected={wsConnected}
+                botStatus={botStatus}
+                wsStatus={wsStatus}
                 engineStatus={engineStatus}
                 executionState={executionState}
                 latency={latency == null || latency === "--"

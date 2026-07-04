@@ -18,9 +18,6 @@ import FilterSettings from "../components/FilterSettings";
 import SafetySettings from "../components/SafetySettings";
 import QuickActions from "../components/QuickActions";
 
-import {
-    mapExecutionHealth,
-} from "../utils/telemetryUtils";
 import { deriveRuntimeHealth } from "../utils/runtimeHealth";
 
 import {
@@ -160,8 +157,6 @@ const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
 const governance = telemetryState.governance;
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
-const cognitionData = telemetryState.cognition;
-const executionRuntimeData = telemetryState.executionRuntime;
 
 const statusReceivedAt = botStatusSnapshot?.receivedAt;
 const websocketStatusReceivedAt = runtime?.botStatusLastUpdate;
@@ -180,11 +175,6 @@ const exchangeConnection = normalizeConnection(firstAvailable(
         ? (botStatus.ws_connected ? "CONNECTED" : "DISCONNECTED")
         : undefined,
 ));
-const browserConnection = normalizeConnection(firstAvailable(
-    runtime?.connectionState,
-    runtime?.wsStatus,
-));
-
 const position = firstAvailable(
     getPositionSide(botStatus?.actual_position),
     getPositionSide(botStatus?.position),
@@ -200,58 +190,50 @@ const lastUpdate = normalizeTimestamp(firstAvailable(
 
 const runtimeHealth = useMemo(() => deriveRuntimeHealth({
     botStatus,
-    marketState: marketData?.lastUpdate ? marketData : undefined,
-    aiState: cognitionData?.lastUpdate
-        ? cognitionData
-        : undefined,
-    governanceState: governance?.lastUpdate
-        ? governance
-        : undefined,
-    executionState: executionRuntimeData?.lastUpdate
-        ? executionRuntimeData
-        : undefined,
-    statusReceivedAt,
 }), [
     botStatus,
-    cognitionData,
-    executionRuntimeData,
-    governance,
-    marketData,
-    statusReceivedAt,
 ]);
 
-const browserWsConnected = browserConnection === "CONNECTED";
-const executionHealth = mapExecutionHealth(
-    runtimeHealth.runtimeHealthy,
-    runtimeHealth.health === "DEGRADED" || !browserWsConnected,
+const browserWsConnected = runtimeHealth.browserWebSocket.connected === true;
+const executionStatus = runtimeHealth.executionEngine.status ?? "UNKNOWN";
+const apiHealth = botStatusSnapshot?.data?.runtime_health;
+const wsHealth = runtime?.botStatus?.runtime_health;
+const apiWsMismatch = Boolean(
+    apiHealth?.statusFingerprint
+    && wsHealth?.statusFingerprint
+    && apiHealth.statusFingerprint !== wsHealth.statusFingerprint
+    && apiHealth.snapshotId === wsHealth.snapshotId,
 );
-const executionStatus = runtimeHealth.executionEnabled
-    ? "ENABLED"
-    : "DISABLED";
+const displayedHealth = apiWsMismatch ? "CRITICAL" : runtimeHealth.health;
+const displayedBlockingReason = apiWsMismatch
+    ? "API_WS_MISMATCH"
+    : runtimeHealth.blockingReason;
 
 const selectedStage = runtimeHealth.stages.find(
     (stage) => stage.id === selectedStageId,
-);
+) ?? runtimeHealth.stages.find(
+    (stage) => stage.id === runtimeHealth.activeStageId,
+) ?? runtimeHealth.stages[0];
 
 useEffect(() => {
     onRuntimeHealthChange?.({
-        botRunning: runtimeHealth.running,
-        wsConnected: browserWsConnected,
-        engineStatus: runtimeHealth.engineAvailable ? "ACTIVE" : "STOPPED",
+        botStatus: runtimeHealth.running ? "RUNNING" : "STOPPED",
+        wsStatus: runtimeHealth.browserWebSocket.status,
+        engineStatus: runtimeHealth.runtimeEngine.status,
         executionState: executionStatus,
-        latency: botStatus?.runtime_metrics?.latency_ms,
+        latency: runtimeHealth.latencyMs,
         pipelineStatus: runtimeHealth.pipelineStatus,
         loopCount: runtimeHealth.loopCount,
     });
 }, [
-    botStatus?.runtime_metrics?.latency_ms,
-    browserWsConnected,
     executionStatus,
     onRuntimeHealthChange,
-    runtimeHealth.engineAvailable,
+    runtimeHealth.browserWebSocket.status,
+    runtimeHealth.latencyMs,
     runtimeHealth.loopCount,
     runtimeHealth.pipelineStatus,
     runtimeHealth.running,
+    runtimeHealth.runtimeEngine.status,
 ]);
 
 useEffect(() => {
@@ -449,22 +431,22 @@ useEffect(() => {
 
                     <ExecutionPanel
 
-                        executionAllowed={
-                            runtimeHealth.executionEnabled
+                        executionStatus={
+                            runtimeHealth.executionEngine.status
                         }
 
                         runtimePhase={
-                            runtimeHealth.executionAllowed
-                                ? "AUTHORIZED"
-                                : (runtimeHealth.executionReason ?? "IDLE")
+                            runtimeHealth.tradingAction.reason
+                                ? `${runtimeHealth.tradingAction.status}: ${runtimeHealth.tradingAction.reason}`
+                                : runtimeHealth.tradingAction.status
                         }
 
                         websocketStatus={
-                            browserConnection
+                            runtimeHealth.browserWebSocket.status
                         }
 
                         latency={
-                            botStatus?.runtime_metrics?.latency_ms
+                            runtimeHealth.latencyMs
                         }
 
                         balance={
@@ -509,50 +491,74 @@ useEffect(() => {
 
                     <div className="monitoring-grid execution-state-grid">
                         <div className="monitoring-row">
-                            <span>EXECUTION STATUS（実行状態）</span>
+                            <span>RUNTIME HEALTH（稼働健全性）</span>
                             <span className={
-                                runtimeHealth.executionEnabled
+                                displayedHealth === "HEALTHY"
                                     ? "status-safe"
-                                    : "status-danger"
+                                    : displayedHealth === "DEGRADED"
+                                        ? "status-warning"
+                                        : "status-danger"
                             }>
-                                {runtimeHealth.executionEnabled
-                                    ? "ENABLED"
-                                    : "DISABLED"}
+                                {displayedHealth}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
-                            <span>WS（通信）</span>
+                            <span>TRADING ACTION（取引判断）</span>
                             <span className={
-                                browserWsConnected
+                                runtimeHealth.tradingAction.status === "ORDER_SUBMITTED"
                                     ? "status-safe"
-                                    : "status-danger"
+                                    : "status-warning"
                             }>
-                                {browserConnection}
+                                {runtimeHealth.tradingAction.status ?? "--"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>EXECUTION ENGINE（実行エンジン）</span>
+                            <span className={runtimeHealth.executionEngine.available
+                                ? "status-safe"
+                                : "status-danger"
+                            }>
+                                {runtimeHealth.executionEngine.status ?? "--"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>BROWSER WS（画面通信）</span>
+                            <span className={browserWsConnected ? "status-safe" : "status-danger"}>
+                                {runtimeHealth.browserWebSocket.status ?? "--"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>EXCHANGE WS（取引所通信）</span>
+                            <span className={runtimeHealth.exchangeWebSocket.connected
+                                ? "status-safe"
+                                : "status-danger"
+                            }>
+                                {runtimeHealth.exchangeWebSocket.status ?? "--"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>ACTION REASON（待機理由）</span>
+                            <span>{runtimeHealth.tradingAction.reason ?? "--"}</span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>BLOCKING REASON（障害理由）</span>
+                            <span className={displayedBlockingReason
+                                ? "status-danger"
+                                : "status-safe"
+                            }>
+                                {displayedBlockingReason ?? "NONE"}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>LATENCY（遅延）</span>
-                            <span>{botStatus?.runtime_metrics?.latency_ms ?? "--"}</span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>HEALTH（健全性）</span>
-                            <span className={
-                                executionHealth === "HEALTHY"
-                                    ? "status-safe"
-                                    : executionHealth === "DEGRADED"
-                                        ? "status-warning"
-                                        : "status-danger"
-                            }>
-                                {executionHealth}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>POSITION（ポジション）</span>
-                            <span>{marketData?.position ?? "--"}</span>
+                            <span>{runtimeHealth.latencyMs ?? "--"}</span>
                         </div>
                     </div>
 

@@ -20,10 +20,10 @@ export default function App() {
         setExecutionEnabled
     ] = useState(false);
     const [runtimeHealthSummary, setRuntimeHealthSummary] = useState({
-        botRunning: false,
-        wsConnected: false,
+        botStatus: "STOPPED",
+        wsStatus: "DISCONNECTED",
         engineStatus: "STOPPED",
-        executionState: "DISABLED",
+        executionState: "UNAVAILABLE",
         latency: "--",
         pipelineStatus: "WAIT",
         loopCount: 0,
