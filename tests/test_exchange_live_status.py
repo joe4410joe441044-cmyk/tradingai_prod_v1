@@ -44,6 +44,31 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         response = StatusResponse(**stopped)
         self.assertEqual(response.last_update, stopped["last_update"])
 
+    def test_status_labels_paper_values_and_real_account_safety(self):
+        bot = BotManager()
+        bot.config = {"mode": "live"}
+
+        status = bot.get_status()
+        response = StatusResponse(**status)
+
+        self.assertEqual(response.accountSource, "PAPER_SIMULATION")
+        self.assertEqual(response.balanceSource, "PAPER_SIMULATION")
+        self.assertEqual(response.positionSource, "PAPER_SIMULATION")
+        self.assertEqual(response.selectedMode, "LIVE")
+        self.assertEqual(response.executionMode, "SIMULATION")
+        self.assertTrue(response.dryRun)
+        self.assertFalse(response.realOrderAllowed)
+        self.assertFalse(response.realAccountConnected)
+        self.assertEqual(response.exchangeAuth, "NOT_VERIFIED")
+        self.assertIsNone(response.realBalance)
+        self.assertIsNone(response.realPosition)
+        self.assertEqual(
+            response.safetyReason,
+            "LIVE_NOT_ENABLED / DRY_RUN_ACTIVE",
+        )
+        self.assertFalse(status["real_order_allowed"])
+        self.assertEqual(status["execution_mode"], "SIMULATION")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,5 +23,9 @@ echo "===== runtime health tests ====="
 ./venv/bin/python -m unittest tests/test_runtime_health_snapshot.py
 
 echo
+echo "===== account source metadata tests ====="
+./venv/bin/python -m unittest tests/test_exchange_live_status.py
+
+echo
 echo "===== runtime ai debug tests ====="
 ./venv/bin/python -m unittest tests/test_runtime_ai_debug.py

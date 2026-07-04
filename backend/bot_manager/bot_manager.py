@@ -12,6 +12,7 @@ from backend.runtime.governance_runtime import governance_state
 from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
 )
+from backend import config as backend_config
 import traceback
 import os
 import time
@@ -1280,6 +1281,39 @@ class BotManager:
             else None
         )
 
+        dry_run = bool(
+            self.config.get("dry_run", True)
+        )
+
+        selected_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().upper()
+
+        real_order_allowed = bool(
+            not dry_run
+            and backend_config.ALLOW_LIVE is True
+            and backend_config.TRADE_MODE == "live"
+        )
+
+        execution_mode = (
+            "LIVE"
+            if real_order_allowed
+            else "SIMULATION"
+        )
+
+        safety_reasons = []
+
+        if selected_mode == "LIVE" and not real_order_allowed:
+            safety_reasons.append("LIVE_NOT_ENABLED")
+
+        if dry_run:
+            safety_reasons.append("DRY_RUN_ACTIVE")
+
+        if not safety_reasons and not real_order_allowed:
+            safety_reasons.append("LIVE_NOT_ENABLED")
+
+        safety_reason = " / ".join(safety_reasons) or "NONE"
+
         return {
 
             "timestamp": time.time(),
@@ -1366,21 +1400,37 @@ class BotManager:
                 websocket_connected
             ),
 
-            "execution_mode": (
-                "SIMULATION"
-                if self.config.get(
-                    "dry_run",
-                    True
-                )
-                else "LIVE"
-            ),
+            # Account values in this snapshot are owned by the paper
+            # portfolio.  Real account fields remain explicitly disconnected
+            # until authenticated exchange telemetry is implemented.
+            "accountSource": "PAPER_SIMULATION",
 
-            "real_order_allowed": (
-                not self.config.get(
-                    "dry_run",
-                    True
-                )
-            ),
+            "balanceSource": "PAPER_SIMULATION",
+
+            "positionSource": "PAPER_SIMULATION",
+
+            "realOrderAllowed": real_order_allowed,
+
+            "executionMode": execution_mode,
+
+            "dryRun": dry_run,
+
+            "selectedMode": selected_mode,
+
+            "safetyReason": safety_reason,
+
+            "exchangeAuth": "NOT_VERIFIED",
+
+            "realAccountConnected": False,
+
+            "realBalance": None,
+
+            "realPosition": None,
+
+            # Keep legacy names aligned for existing API consumers.
+            "execution_mode": execution_mode,
+
+            "real_order_allowed": real_order_allowed,
 
             "cooldown_active": (
                 self.last_execution_time

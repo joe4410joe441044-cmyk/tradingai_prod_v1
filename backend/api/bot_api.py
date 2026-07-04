@@ -58,6 +58,30 @@ class StatusResponse(BaseModel):
 
     real_order_allowed: bool
 
+    accountSource: str = "PAPER_SIMULATION"
+
+    balanceSource: str = "PAPER_SIMULATION"
+
+    positionSource: str = "PAPER_SIMULATION"
+
+    realOrderAllowed: bool = False
+
+    executionMode: str = "SIMULATION"
+
+    dryRun: bool = True
+
+    selectedMode: str = "PAPER"
+
+    safetyReason: str = "DRY_RUN_ACTIVE"
+
+    exchangeAuth: str = "NOT_VERIFIED"
+
+    realAccountConnected: bool = False
+
+    realBalance: Optional[float] = None
+
+    realPosition: Optional[Any] = None
+
     ws_connected: bool
 
     position_active: bool

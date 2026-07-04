@@ -32,6 +32,17 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         const monitor = page.getByTestId("runtime-health-monitor");
         await expect(monitor).toBeVisible();
         await expect(page.getByText("2 | Runtime Health", { exact: true })).toBeVisible();
+        await expect(page.getByText("Paper Balance:（模擬残高）", { exact: true }).first()).toBeVisible();
+        await expect(page.getByText("Paper Equity:（模擬純資産）", { exact: true }).first()).toBeVisible();
+        await expect(page.getByText("Paper Position:（模擬ポジション）", { exact: true }).first()).toBeVisible();
+        await expect(page.getByText("Paper PnL:（模擬損益）", { exact: true })).toBeVisible();
+        await expect(page.getByTestId("paper-balance")).not.toHaveText("--");
+        await expect(page.getByTestId("real-balance")).toHaveText("NOT CONNECTED");
+        await expect(page.getByTestId("real-position")).toHaveText("NOT CONNECTED");
+        await expect(page.getByTestId("exchange-auth")).toHaveText("NOT_VERIFIED");
+        await expect(page.getByTestId("account-source")).toHaveText("PAPER_SIMULATION");
+        await expect(page.getByTestId("real-order-allowed")).toHaveText("false");
+        await expect(page.getByTestId("execution-mode")).toHaveText("SIMULATION");
 
         await expectMonitorValue(page, "bot-state", "STOPPED");
         await expectMonitorValue(page, "trading-runtime", "STOPPED");
@@ -69,5 +80,19 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expect(monitor).not.toContainText("IDLE_BY_AI_HOLD");
         await expect(monitor).not.toContainText("Execution Reason: AI_HOLD");
         await expect(page.getByTestId("current-decision")).not.toHaveText("HOLD");
+    });
+
+    test("LIVE selection remains clearly identified as simulation", async ({ page }) => {
+        await page.goto("/");
+
+        await page.locator("select.config-select").first().selectOption("LIVE");
+
+        await expect(page.getByTestId("selected-mode")).toHaveText("LIVE");
+        await expect(page.getByTestId("execution-mode")).toHaveText("SIMULATION");
+        await expect(page.getByTestId("real-orders")).toHaveText("DISABLED");
+        await expect(page.getByTestId("safety-reason")).toHaveText(
+            "LIVE_NOT_ENABLED / DRY_RUN_ACTIVE",
+        );
+        await expect(page.getByTestId("dry-run")).toHaveText("true");
     });
 });

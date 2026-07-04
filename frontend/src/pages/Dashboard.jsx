@@ -372,11 +372,47 @@ useEffect(() => {
                             tradeSettings.exchange,
                         )}
                         connection={exchangeConnection}
-                        mode={firstAvailable(
+                        selectedMode={firstAvailable(
                             tradeSettings.mode,
-                            botStatus?.execution_mode,
+                            botStatus?.selectedMode,
                             governance?.mode,
                         )}
+                        executionMode={firstAvailable(
+                            botStatus?.executionMode,
+                            botStatus?.execution_mode,
+                            "SIMULATION",
+                        )}
+                        realOrderAllowed={firstAvailable(
+                            botStatus?.realOrderAllowed,
+                            botStatus?.real_order_allowed,
+                            false,
+                        ) === true}
+                        dryRun={firstAvailable(
+                            botStatus?.dryRun,
+                            true,
+                        ) !== false}
+                        safetyReason={botStatus?.safetyReason}
+                        accountSource={firstAvailable(
+                            botStatus?.accountSource,
+                            "NOT_CONNECTED",
+                        )}
+                        balanceSource={firstAvailable(
+                            botStatus?.balanceSource,
+                            "NOT_CONNECTED",
+                        )}
+                        positionSource={firstAvailable(
+                            botStatus?.positionSource,
+                            "NOT_CONNECTED",
+                        )}
+                        exchangeAuth={firstAvailable(
+                            botStatus?.exchangeAuth,
+                            "NOT_VERIFIED",
+                        )}
+                        realAccountConnected={
+                            botStatus?.realAccountConnected === true
+                        }
+                        realBalance={botStatus?.realBalance}
+                        realPosition={botStatus?.realPosition}
                         balance={firstAvailable(
                             botStatus?.balance,
                             wsMarketData?.balance,
@@ -443,6 +479,10 @@ useEffect(() => {
 
                         positionSide={
                             position
+                        }
+
+                        accountSource={
+                            botStatus?.accountSource
                         }
 
                     />
@@ -620,7 +660,7 @@ useEffect(() => {
                         </div>
 
                         <div className="monitoring-row">
-                            <span>POSITION（ポジション）</span>
+                            <span>Paper Position:（模擬ポジション）</span>
                             <span>{position ?? "--"}</span>
                         </div>
                     </div>
