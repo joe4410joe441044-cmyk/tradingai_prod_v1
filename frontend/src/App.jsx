@@ -20,6 +20,11 @@ export default function App() {
         setExecutionEnabled
     ] = useState(false);
     const [runtimeHealthSummary, setRuntimeHealthSummary] = useState({
+        botRunning: false,
+        wsConnected: false,
+        engineStatus: "STOPPED",
+        executionState: "DISABLED",
+        latency: "--",
         pipelineStatus: "WAIT",
         loopCount: 0,
     });
@@ -29,11 +34,7 @@ export default function App() {
         <div className="app-shell">
 
             <Header
-                executionEnabled={
-                    executionEnabled
-                }
-                pipelineStatus={runtimeHealthSummary.pipelineStatus}
-                loopCount={runtimeHealthSummary.loopCount}
+                {...runtimeHealthSummary}
             />
 
             <Dashboard

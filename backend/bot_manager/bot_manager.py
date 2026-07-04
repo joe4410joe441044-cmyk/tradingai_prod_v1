@@ -8,6 +8,10 @@ from backend.aggregation.MicrostructureStateBuilder import (
 )
 
 from backend.runtime import runtime_registry
+from backend.runtime.governance_runtime import governance_state
+from backend.runtime.runtime_health_snapshot import (
+    build_runtime_health_snapshot,
+)
 import traceback
 import os
 import time
@@ -1143,6 +1147,46 @@ class BotManager:
             else {}
         )
 
+        self.update_trace(
+            "status_api",
+            time.time()
+        )
+
+        self.state.runtime_metrics[
+            "last_api_push"
+        ] = time.time()
+
+        trading_runtime = runtime_registry.trading_runtime
+        execution_runtime = (
+            getattr(trading_runtime, "execution_runtime", None)
+            if trading_runtime is not None
+            else None
+        )
+        runtime_healthy = bool(
+            trading_runtime is not None
+            and getattr(trading_runtime, "runtime_healthy", False)
+            and execution_runtime is not None
+            and getattr(execution_runtime, "runtime_healthy", False)
+        )
+        websocket_connected = bool(
+            self.ws is not None
+            and getattr(self.ws, "connected", False)
+        )
+
+        runtime_health = build_runtime_health_snapshot(
+            running=self._running,
+            market_stale=market_stale,
+            ws_connected=websocket_connected,
+            engine_available=self.engine is not None,
+            runtime_healthy=runtime_healthy,
+            runtime_result=latest_runtime_trace,
+            runtime_trace=self.state.runtime_trace,
+            runtime_metrics=self.state.runtime_metrics,
+            governance_state=governance_state,
+            snapshot_timestamp=time.time(),
+        )
+        runtime_states = runtime_health["states"]
+
         if self.engine:
 
             actual_position = getattr(
@@ -1168,15 +1212,6 @@ class BotManager:
             if isinstance(position_candidate, dict)
             else None
         )
-
-        self.update_trace(
-            "status_api",
-            time.time()
-        )
-
-        self.state.runtime_metrics[
-            "last_api_push"
-        ] = time.time()
 
         return {
 
@@ -1247,16 +1282,21 @@ class BotManager:
             ),
 
             "strategy_state": (
-                self.state.strategy_state
+                runtime_states["strategy"]
             ),
 
             "execution_state": (
-                self.state.execution_state
+                runtime_states["execution"]
             ),
 
+            "ai_state": runtime_states["ai"],
+
+            "governance_state": runtime_states["governance"],
+
+            "runtime_health": runtime_health,
+
             "ws_connected": (
-                self.ws is not None
-                and getattr(self.ws, "connected", False)
+                websocket_connected
             ),
 
             "execution_mode": (

@@ -6,6 +6,7 @@ export default function StageInspectorPanel({ stage }) {
         { label: "INPUT（入力）", value: stage?.input ?? "--", expanded: true },
         { label: "OUTPUT（出力）", value: stage?.output ?? "--", expanded: true },
         { label: "EXCEPTION（例外）", value: stage?.exception ?? "None", expanded: true },
+        { label: "REASON（理由）", value: stage?.reason ?? "--", expanded: true },
         { label: "RELATED FILES（関連ファイル）", value: stage?.relatedFiles ?? "--", expanded: true },
     ];
 

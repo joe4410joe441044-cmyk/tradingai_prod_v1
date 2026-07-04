@@ -1,18 +1,10 @@
 import LogsPanel from "../monitor/LogsPanel";
 
-const INITIAL_TIMELINE_EVENTS = [
-    {
-        time: "12:00:01",
-        source: "TradingRuntime",
-        state: "WAIT",
-    },
-];
-
-export default function ExecutionTimelinePanel() {
+export default function ExecutionTimelinePanel({ events = [] }) {
     return (
         <LogsPanel
             embedded
-            events={INITIAL_TIMELINE_EVENTS}
+            events={events}
             showLevel={false}
             title="4 | Execution Timeline"
         />

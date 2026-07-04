@@ -230,6 +230,115 @@ const durationValue = (value) => (
         : "--"
 );
 
+const deriveAuthoritativeRuntimeHealth = (snapshot) => {
+    const health = snapshot.runtime_health;
+    const metrics = snapshot.runtime_metrics || {};
+    const states = health.states || {};
+    const backendStages = health.stages || {};
+
+    const outputByStage = {
+        "start-request": {
+            status: snapshot.status,
+            symbol: snapshot.symbol,
+        },
+        "trading-runtime": {
+            authoritativeRuntimeState: snapshot.authoritativeRuntimeState,
+            runtimeSynchronizationState: snapshot.runtimeSynchronizationState,
+        },
+        "market-data": {
+            price: snapshot.price,
+            marketReady: snapshot.marketReady,
+            marketStale: snapshot.marketStale,
+        },
+        "order-book": {
+            wsConnected: snapshot.ws_connected,
+            messageCount: metrics.message_count,
+        },
+        "runtime-adapter": snapshot.latestRuntimeResult?.aiInput,
+        "runtime-state": snapshot.latestRuntimeResult?.aiInput?.runtime_state,
+        "strategy-plugin": states.strategy,
+        "ai-plugin": states.ai,
+        "governance-runtime": states.governance,
+        "execution-runtime": states.execution,
+        "execution-governance": states.execution,
+        "execution-signal-adapter": states.execution?.adapterOutput,
+        "execution-engine": {
+            engineAvailable: health.engineAvailable,
+            handoffAttempted: states.execution?.handoffAttempted,
+            handoffExecuted: states.execution?.handoffExecuted,
+            blockedReason: states.execution?.handoffBlockedReason,
+        },
+        "exchange-client": {
+            exchange: snapshot.exchange,
+            executionMode: snapshot.execution_mode,
+        },
+        "exchange-api": {
+            status: snapshot.status,
+            timestamp: snapshot.timestamp,
+        },
+        complete: {
+            executionAllowed: health.executionAllowed,
+            reason: health.executionReason,
+        },
+    };
+
+    const stages = STAGE_DEFINITIONS.map((definition) => {
+        const backendStage = backendStages[definition.id] || {};
+        const status = backendStage.status || "WAIT";
+
+        return {
+            ...definition,
+            status,
+            duration: backendStage.reached
+                ? durationValue(metrics.latency_ms)
+                : "--",
+            input: displayValue(
+                definition.id === "strategy-plugin"
+                    ? snapshot.latestRuntimeResult?.governanceInput?.strategy_state
+                    : undefined,
+            ),
+            output: displayValue(outputByStage[definition.id]),
+            exception: status === "ERROR"
+                ? displayValue(backendStage.reason)
+                : "None",
+            reason: displayValue(backendStage.reason),
+            relatedFiles: definition.relatedFiles.join("\n") || "--",
+        };
+    });
+
+    const loopNames = {
+        "runtime-loop": "Runtime Loop",
+        "market-feed": "Market Feed",
+        "orderbook-ws": "OrderBook WS",
+        "strategy-loop": "Strategy Loop",
+        "ai-loop": "AI Loop",
+        "governance-loop": "Governance Loop",
+        "execution-queue": "Execution Queue",
+        "exchange-sync": "Exchange Sync",
+        "portfolio-sync": "Portfolio Sync",
+    };
+    const loops = Object.entries(health.loops || {}).map(([id, status]) => ({
+        id,
+        name: loopNames[id] || id,
+        status,
+    }));
+
+    return {
+        running: String(snapshot.status || "").toUpperCase() === "RUNNING",
+        stages,
+        loops,
+        timeline: Array.isArray(health.timeline) ? health.timeline : [],
+        pipelineStatus: health.pipelineStatus || "WAIT",
+        loopCount: loops.filter((loop) => loop.status !== "WAIT").length,
+        runtimeHealthy: health.runtimeHealthy === true,
+        health: health.health || "CRITICAL",
+        engineAvailable: health.engineAvailable === true,
+        executionEnabled: health.executionEnabled === true,
+        executionAllowed: health.executionAllowed === true,
+        executionReason: health.executionReason,
+    };
+};
+
 export function deriveRuntimeHealth({
     botStatus,
     marketState,
@@ -239,6 +348,13 @@ export function deriveRuntimeHealth({
     statusReceivedAt,
 } = {}) {
     const snapshot = botStatus || {};
+    if (
+        snapshot.runtime_health
+        && typeof snapshot.runtime_health === "object"
+        && snapshot.runtime_health.stages
+    ) {
+        return deriveAuthoritativeRuntimeHealth(snapshot);
+    }
     const running = String(snapshot.status || "").toUpperCase() === "RUNNING";
     const trace = snapshot.runtime_trace || {};
     const metrics = snapshot.runtime_metrics || {};
@@ -425,5 +541,12 @@ export function deriveRuntimeHealth({
         loops,
         pipelineStatus: !running ? "WAIT" : (completed ? "OK" : "ACTIVE"),
         loopCount: running ? loopCount : 0,
+        timeline: [],
+        runtimeHealthy: running && !snapshot.marketStale,
+        health: running && !snapshot.marketStale ? "HEALTHY" : "CRITICAL",
+        engineAvailable: snapshot.executionAuthorityScore > 0,
+        executionEnabled: false,
+        executionAllowed: false,
+        executionReason: undefined,
     };
 }

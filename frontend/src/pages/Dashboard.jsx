@@ -155,12 +155,11 @@ const [tradeSettings, setTradeSettings] = useState({
 
 });
 const [, forceUpdate] = useState(0);
-const [selectedStageId, setSelectedStageId] = useState(null);
+const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
 
 const governance = telemetryState.governance;
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
-const executionData = telemetryState.execution;
 const cognitionData = telemetryState.cognition;
 const executionRuntimeData = telemetryState.executionRuntime;
 
@@ -219,19 +218,48 @@ const runtimeHealth = useMemo(() => deriveRuntimeHealth({
     statusReceivedAt,
 ]);
 
+const browserWsConnected = connection === "CONNECTED";
+const executionHealth = mapExecutionHealth(
+    runtimeHealth.runtimeHealthy,
+    runtimeHealth.health === "DEGRADED" || !browserWsConnected,
+);
+const executionStatus = runtimeHealth.executionEnabled
+    ? "ENABLED"
+    : "DISABLED";
+
 const selectedStage = runtimeHealth.stages.find(
     (stage) => stage.id === selectedStageId,
 );
 
 useEffect(() => {
     onRuntimeHealthChange?.({
+        botRunning: runtimeHealth.running,
+        wsConnected: browserWsConnected,
+        engineStatus: runtimeHealth.engineAvailable ? "ACTIVE" : "STOPPED",
+        executionState: executionStatus,
+        latency: botStatus?.runtime_metrics?.latency_ms,
         pipelineStatus: runtimeHealth.pipelineStatus,
         loopCount: runtimeHealth.loopCount,
     });
 }, [
+    botStatus?.runtime_metrics?.latency_ms,
+    browserWsConnected,
+    executionStatus,
     onRuntimeHealthChange,
+    runtimeHealth.engineAvailable,
     runtimeHealth.loopCount,
     runtimeHealth.pipelineStatus,
+    runtimeHealth.running,
+]);
+
+useEffect(() => {
+    if (botStatus?.runtime_health) {
+        setExecutionEnabled(runtimeHealth.executionEnabled);
+    }
+}, [
+    botStatus?.runtime_health,
+    runtimeHealth.executionEnabled,
+    setExecutionEnabled,
 ]);
 
 useEffect(() => {
@@ -420,34 +448,33 @@ useEffect(() => {
                     <ExecutionPanel
 
                         executionAllowed={
-                            governance?.executionEnabled
-                            ?? executionData?.executionAllowed
-                            ?? executionEnabled
+                            runtimeHealth.executionEnabled
                         }
 
                         runtimePhase={
-                            executionData?.runtimePhase
-                            ?? runtime?.runtimePhase
+                            runtimeHealth.executionAllowed
+                                ? "AUTHORIZED"
+                                : (runtimeHealth.executionReason ?? "IDLE")
                         }
 
                         websocketStatus={
-                            runtime?.wsStatus
+                            connection
                         }
 
                         latency={
-                            runtime?.latency
+                            botStatus?.runtime_metrics?.latency_ms
                         }
 
                         balance={
-                            marketData?.balance
+                            botStatus?.balance
                         }
 
                         equity={
-                            marketData?.equity
+                            botStatus?.equity
                         }
 
                         positionSide={
-                            marketData?.position
+                            position
                         }
 
                     />
@@ -456,7 +483,7 @@ useEffect(() => {
                        LOGS PANEL
                     ============================================= */}
 
-                    <ExecutionTimelinePanel />
+                    <ExecutionTimelinePanel events={runtimeHealth.timeline} />
 
                 </div>
 
@@ -482,44 +509,42 @@ useEffect(() => {
                         <div className="monitoring-row">
                             <span>EXECUTION STATUS（実行状態）</span>
                             <span className={
-                                governance?.executionEnabled
+                                runtimeHealth.executionEnabled
                                     ? "status-safe"
                                     : "status-danger"
                             }>
-                                {governance?.executionEnabled
+                                {runtimeHealth.executionEnabled
                                     ? "ENABLED"
-                                    : "BLOCKED"}
+                                    : "DISABLED"}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>WS（通信）</span>
                             <span className={
-                                runtime?.wsStatus === "CONNECTED"
+                                browserWsConnected
                                     ? "status-safe"
                                     : "status-danger"
                             }>
-                                {runtime?.wsStatus ?? "--"}
+                                {connection}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>LATENCY（遅延）</span>
-                            <span>{runtime?.latency ?? "--"}</span>
+                            <span>{botStatus?.runtime_metrics?.latency_ms ?? "--"}</span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>HEALTH（健全性）</span>
                             <span className={
-                                mapExecutionHealth(runtime?.latency)
-                                === "STABLE（安定）"
+                                executionHealth === "HEALTHY"
                                     ? "status-safe"
-                                    : mapExecutionHealth(runtime?.latency)
-                                    === "NORMAL（正常）"
+                                    : executionHealth === "DEGRADED"
                                         ? "status-warning"
                                         : "status-danger"
                             }>
-                                {mapExecutionHealth(runtime?.latency)}
+                                {executionHealth}
                             </span>
                         </div>
 

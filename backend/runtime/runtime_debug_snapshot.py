@@ -8,6 +8,9 @@ import math
 def build_runtime_debug_result():
     """Return a fresh, JSON-safe telemetry skeleton for one runtime cycle."""
     return {
+        "runtimeStageTrace": {},
+        "runtimeAdapterReached": False,
+        "runtimeStateReached": False,
         "strategyRuntimeReached": False,
         "strategyOutput": None,
         "strategySignal": None,

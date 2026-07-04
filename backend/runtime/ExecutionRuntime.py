@@ -81,6 +81,7 @@ class ExecutionRuntime:
         self.handoff_executed = False
         self.handoff_blocked_reason = None
         self.handoff_signal = None
+        self.execution_governance_reached = False
 
     # ========================================================
     # ENGINE BINDING
@@ -111,6 +112,7 @@ class ExecutionRuntime:
 
         return {
             "executionRuntimeReached": True,
+            "executionGovernanceReached": self.execution_governance_reached,
             "signalAdapterReached": self.signal_adapter_reached,
             "normalizedDirection": canonical_direction,
             "adapterOutput": self.last_adapter_output,
@@ -119,6 +121,11 @@ class ExecutionRuntime:
             "handoffBlockedReason": self.handoff_blocked_reason,
             "handoffSignal": self.handoff_signal,
         }
+
+    def mark_execution_governance_reached(self):
+        """Record monitoring telemetry without changing the decision path."""
+
+        self.execution_governance_reached = True
 
     # ========================================================
     # EXECUTION ENGINE HANDOFF
@@ -541,6 +548,7 @@ class ExecutionRuntime:
         self.handoff_executed = False
         self.handoff_blocked_reason = None
         self.handoff_signal = None
+        self.execution_governance_reached = False
 
         if governance_decision is not None:
 
@@ -628,6 +636,8 @@ class ExecutionRuntime:
             # ------------------------------------------------
             # Governance
             # ------------------------------------------------
+
+            self.mark_execution_governance_reached()
 
             governance_wrapper = (
                 self.governance

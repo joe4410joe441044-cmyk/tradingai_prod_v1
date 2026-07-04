@@ -12,6 +12,8 @@ from fastapi.middleware.cors import (
     CORSMiddleware,
 )
 
+import time
+
 import backend.runtime.runtime_registry as registry
 
 from backend.runtime.runtime_debug_snapshot import (
@@ -365,6 +367,22 @@ def _record_strategy_debug(debug_result, strategy_result):
         )
 
 
+def _record_runtime_stage(
+    debug_result,
+    stage_id,
+    status="OK",
+    reason=None,
+):
+    """Record observation-only stage timing for Runtime Health Monitor."""
+
+    debug_result.setdefault("runtimeStageTrace", {})[stage_id] = {
+        "reached": True,
+        "status": status,
+        "reason": safe_debug(reason),
+        "timestamp": time.time(),
+    }
+
+
 def _attach_runtime_debug(runtime_result, debug_result):
 
     if isinstance(runtime_result, dict):
@@ -666,6 +684,11 @@ class TradingRuntime:
     ):
 
         debug_result = build_runtime_debug_result()
+        _record_runtime_stage(
+            debug_result,
+            "trading-runtime",
+            status="ACTIVE",
+        )
         debug_result["momentumTrace"] = (
             _new_momentum_trace(microstructure_state)
         )
@@ -715,6 +738,10 @@ class TradingRuntime:
                         microstructure_state
                     )
                 )
+                debug_result["runtimeAdapterReached"] = True
+                debug_result["runtimeStateReached"] = True
+                _record_runtime_stage(debug_result, "runtime-adapter")
+                _record_runtime_stage(debug_result, "runtime-state")
 
                 momentum_trace = debug_result["momentumTrace"]
                 missing = object()
@@ -828,6 +855,7 @@ class TradingRuntime:
                     ),
                     "aiRawSignal": safe_debug(ai_raw_signal),
                 })
+                _record_runtime_stage(debug_result, "ai-plugin")
 
                 ai_decision_debug = extract_value(
                     self.ai_pipeline.brain,
@@ -931,6 +959,7 @@ class TradingRuntime:
                 debug_result,
                 strategy_result,
             )
+            _record_runtime_stage(debug_result, "strategy-plugin")
 
             runtime_debug(
                 "[STEP56-6][STRATEGY] %s",
@@ -1039,6 +1068,11 @@ class TradingRuntime:
                     )
                 ),
             })
+            _record_runtime_stage(
+                debug_result,
+                "governance-runtime",
+                reason=debug_result["governanceBlockedReason"],
+            )
 
             runtime_debug(
                 "[STEP56-6][GOV_OUTPUT] %s",
@@ -1061,6 +1095,14 @@ class TradingRuntime:
                     governance_decision,
                     current_exposure=0.0,
                 )
+            )
+            _record_runtime_stage(
+                debug_result,
+                "execution-runtime",
+                reason=extract_value(
+                    extract_value(runtime_result, "runtime", {}),
+                    "reason",
+                ),
             )
 
             runtime_debug(

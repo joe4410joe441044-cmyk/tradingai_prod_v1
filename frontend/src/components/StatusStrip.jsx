@@ -160,7 +160,9 @@ export default function StatusStrip({
                     {
                         executionState === "ENABLED"
                             ? "有効"
-                            : "無効"
+                            : executionState === "BLOCKED"
+                                ? "ブロック"
+                                : "無効"
                     }
 
                 </span>

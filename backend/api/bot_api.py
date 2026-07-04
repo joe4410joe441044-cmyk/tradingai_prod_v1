@@ -88,6 +88,8 @@ class StatusResponse(BaseModel):
 
     governance_state: Optional[dict] = None
 
+    runtime_health: dict = Field(default_factory=dict)
+
     latestRuntimeResult: Optional[dict] = None
 
     executionRuntimeReached: bool = False
