@@ -355,14 +355,22 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         bot.attach_orderbook_runtime_debug(
             bot.latest_runtime_result
         )
-        status = bot.get_status()
-        response = StatusResponse(**status)
+        stopped_status = bot.get_status()
+
+        # Runtime Debug is current-cycle data.  It must not remain current
+        # while the bot is stopped, but the same payload must be exposed when
+        # this fixture represents a running bot.
+        self.assertIsNone(stopped_status["latestRuntimeResult"])
+
+        bot._running = True
+        running_status = bot.get_status()
+        response = StatusResponse(**running_status)
 
         self.assertEqual(response.exchange, "kucoin")
         self.assertEqual(response.orderbookSource, "kucoin_futures")
         self.assertEqual(response.orderbookSymbol, "XRPUSDTM")
         self.assertEqual(
-            status["latestRuntimeResult"]["runtimeDebug"],
+            running_status["latestRuntimeResult"]["runtimeDebug"],
             {
                 "momentumTrace": {"sourceValue": 0.25},
                 "exchange": "kucoin",

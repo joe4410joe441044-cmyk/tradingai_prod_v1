@@ -553,6 +553,12 @@ def build_runtime_health_snapshot(
 
     normalized = {
         "bot": {"status": "RUNNING" if active else "STOPPED", "running": active},
+        "executionAuthority": {
+            "status": (
+                "ENABLED" if execution_enabled else "DISABLED_BY_OPERATOR"
+            ),
+            "enabled": execution_enabled,
+        },
         "browserWebSocket": {
             "status": "LIVE" if browser_ws_connected else "DISCONNECTED",
             "connected": bool(browser_ws_connected),
@@ -647,6 +653,7 @@ def build_runtime_health_snapshot(
         for key in (
             "bot",
             "lifecycle",
+            "executionAuthority",
             "browserWebSocket",
             "exchangeWebSocket",
             "runtimeEngine",

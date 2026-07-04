@@ -95,6 +95,8 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["executionReason"], "AI_HOLD")
         self.assertEqual(snapshot["schemaVersion"], 2)
         self.assertEqual(snapshot["bot"]["status"], "RUNNING")
+        self.assertEqual(snapshot["executionAuthority"]["status"], "ENABLED")
+        self.assertTrue(snapshot["executionAuthority"]["enabled"])
         self.assertEqual(snapshot["browserWebSocket"]["status"], "LIVE")
         self.assertEqual(snapshot["exchangeWebSocket"]["status"], "LIVE")
         self.assertEqual(snapshot["runtimeEngine"]["status"], "ACTIVE")
@@ -183,6 +185,8 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
             snapshot["executionEngine"]["status"],
             "UNAVAILABLE_BY_BOT_STOP",
         )
+        self.assertEqual(snapshot["executionAuthority"]["status"], "ENABLED")
+        self.assertTrue(snapshot["executionAuthority"]["enabled"])
         self.assertFalse(snapshot["executionEngine"]["available"])
         self.assertEqual(
             snapshot["tradingAction"]["status"],
@@ -205,9 +209,50 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
 
         self.assertFalse(snapshot["executionEngine"]["enabled"])
         self.assertEqual(
+            snapshot["executionAuthority"]["status"],
+            "DISABLED_BY_OPERATOR",
+        )
+        self.assertEqual(
             snapshot["executionEngine"]["status"],
             "DISABLED_BY_OPERATOR",
         )
+
+    def test_execution_engine_status_matches_available_enabled_allowed(self):
+        cases = (
+            (
+                "unavailable",
+                {"engine_available": False},
+                "UNAVAILABLE",
+            ),
+            (
+                "ready",
+                {"runtime_result": {
+                    "aiDecision": "BUY",
+                    "governanceAllowed": True,
+                    "governanceBlockedReason": None,
+                    "runtime": {"executionAllowed": True, "reason": None},
+                }},
+                "READY",
+            ),
+            (
+                "blocked",
+                {"runtime_result": {
+                    "aiDecision": "BUY",
+                    "governanceAllowed": False,
+                    "governanceBlockedReason": "RISK_BLOCK",
+                    "runtime": {
+                        "executionAllowed": False,
+                        "reason": "RISK_BLOCK",
+                    },
+                }},
+                "ENABLED_IDLE_BLOCKED",
+            ),
+        )
+
+        for name, overrides, expected in cases:
+            with self.subTest(name=name):
+                snapshot = self._active_snapshot(**overrides)
+                self.assertEqual(snapshot["executionEngine"]["status"], expected)
 
     def test_lifecycle_revision_changes_status_fingerprint(self):
         first = self._active_snapshot(

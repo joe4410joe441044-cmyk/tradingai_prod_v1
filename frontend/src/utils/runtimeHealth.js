@@ -47,6 +47,10 @@ const missingSnapshot = () => ({
     cycleId: null,
     statusFingerprint: null,
     running: false,
+    executionAuthority: {
+        status: "DISABLED_BY_OPERATOR",
+        enabled: false,
+    },
     browserWebSocket: { status: "DISCONNECTED", connected: false },
     exchangeWebSocket: { status: "UNKNOWN", connected: false },
     runtimeEngine: { status: "ERROR", healthy: false },
@@ -165,6 +169,12 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         cycleId: health.cycleId,
         statusFingerprint: health.statusFingerprint,
         running: health.bot?.running === true,
+        executionAuthority: health.executionAuthority || {
+            status: health.executionEngine?.enabled === true
+                ? "ENABLED"
+                : "DISABLED_BY_OPERATOR",
+            enabled: health.executionEngine?.enabled === true,
+        },
         browserWebSocket: health.browserWebSocket || {},
         exchangeWebSocket: health.exchangeWebSocket || {},
         runtimeEngine: health.runtimeEngine || {},
@@ -199,7 +209,11 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         blockingReason: health.blockingReason,
         issues: Array.isArray(health.issues) ? health.issues : [],
         engineAvailable: health.executionEngine?.available === true,
-        executionEnabled: health.executionEngine?.enabled === true,
+        executionEnabled: health.executionAuthority?.enabled === true
+            || (
+                !health.executionAuthority
+                && health.executionEngine?.enabled === true
+            ),
         executionAllowed: health.executionEngine?.allowed === true,
         executionReason: health.executionEngine?.reason,
         latencyMs: health.latencyMs,

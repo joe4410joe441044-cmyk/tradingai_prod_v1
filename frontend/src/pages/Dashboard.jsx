@@ -503,10 +503,7 @@ useEffect(() => {
                                 ? "status-safe"
                                 : "status-warning"
                             }>
-                                {runtimeHealth.executionEnabled
-                                    ? "ENABLED"
-                                    : "DISABLED_BY_OPERATOR"
-                                }
+                                {runtimeHealth.executionAuthority.status}
                             </span>
                         </div>
 

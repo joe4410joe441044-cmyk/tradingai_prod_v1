@@ -9,6 +9,7 @@ const backendHealth = {
     snapshotId: "cycle-1",
     statusFingerprint: "same-health",
     bot: { status: "RUNNING", running: true },
+    executionAuthority: { status: "ENABLED", enabled: true },
     browserWebSocket: { status: "LIVE", connected: true, clientCount: 1 },
     exchangeWebSocket: { status: "LIVE", connected: true },
     runtimeEngine: { status: "ACTIVE", healthy: true },
@@ -88,6 +89,7 @@ test("authoritative backend health snapshot drives every monitor status", () => 
     assert.equal(result.browserWebSocket.status, "LIVE");
     assert.equal(result.exchangeWebSocket.status, "LIVE");
     assert.equal(result.runtimeEngine.status, "ACTIVE");
+    assert.equal(result.executionAuthority.status, "ENABLED");
     assert.equal(result.executionEngine.status, "ENABLED_IDLE_BY_AI_HOLD");
     assert.equal(result.tradingAction.status, "IDLE_BY_AI_HOLD");
     assert.equal(result.executionReason, "AI_HOLD");
@@ -141,6 +143,8 @@ test("stopped snapshot keeps the previous hold out of current UI state", () => {
     });
 
     assert.equal(result.running, false);
+    assert.equal(result.executionAuthority.status, "ENABLED");
+    assert.equal(result.executionEnabled, true);
     assert.equal(result.executionEngine.status, "UNAVAILABLE_BY_BOT_STOP");
     assert.equal(result.tradingAction.status, "NONE_BY_BOT_STOP");
     assert.equal(result.tradingAction.decision, "N/A");
