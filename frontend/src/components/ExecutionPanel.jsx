@@ -51,7 +51,7 @@ export default function ExecutionPanel({
         {
             label: "STATUS（状態）",
             value: executionStatus,
-            className: ["READY", "EXECUTED", "ENABLED_BUT_IDLE"].includes(
+            className: ["READY", "EXECUTED", "ENABLED_IDLE_BY_AI_HOLD"].includes(
                 executionStatus,
             ) ? "terminal-green" : "terminal-red",
         },

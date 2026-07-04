@@ -37,7 +37,7 @@ export default function StatusStrip({ runtimeHealth }) {
                         `status-value ${
                             botStatus === "RUNNING"
                                 ? "online"
-                                : "danger"
+                                : "warning"
                         }`
                     }
                 >
@@ -137,7 +137,7 @@ export default function StatusStrip({ runtimeHealth }) {
                 <span
                     className={
                         `status-value ${
-                            ["READY", "EXECUTED", "ENABLED_BUT_IDLE"].includes(
+                            ["READY", "EXECUTED", "ENABLED_IDLE_BY_AI_HOLD"].includes(
                                 executionState,
                             )
                                 ? "online"
@@ -166,9 +166,9 @@ export default function StatusStrip({ runtimeHealth }) {
 
                 <span className={
                     `status-value ${
-                        pipelineStatus === "WAIT"
-                            ? "warning"
-                            : "online"
+                        pipelineStatus === "OK"
+                            ? "online"
+                            : "warning"
                     }`
                 }>
                     {pipelineStatus}
@@ -177,13 +177,13 @@ export default function StatusStrip({ runtimeHealth }) {
             </div>
 
             {/* ============================================= */}
-            {/* LOOPS */}
+            {/* STAGES */}
             {/* ============================================= */}
 
             <div className="status-item">
 
                 <span className="status-label">
-                    LOOPS
+                    STAGES
                 </span>
 
                 <span className={

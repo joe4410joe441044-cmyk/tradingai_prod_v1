@@ -84,7 +84,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         values.update(overrides)
         return build_runtime_health_snapshot(**values)
 
-    def test_hold_cycle_is_healthy_and_reached_loops_are_running(self):
+    def test_hold_cycle_is_healthy_and_reached_stages_are_explicit(self):
         snapshot = self._active_snapshot()
 
         self.assertEqual(snapshot["health"], "HEALTHY")
@@ -101,13 +101,13 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["tradingAction"]["status"], "IDLE_BY_AI_HOLD")
         self.assertEqual(
             snapshot["executionEngine"]["status"],
-            "ENABLED_BUT_IDLE",
+            "ENABLED_IDLE_BY_AI_HOLD",
         )
         self.assertIsNone(snapshot["blockingReason"])
-        self.assertEqual(snapshot["loops"]["strategy-loop"], "RUNNING")
-        self.assertEqual(snapshot["loops"]["ai-loop"], "RUNNING")
-        self.assertEqual(snapshot["loops"]["governance-loop"], "RUNNING")
-        self.assertEqual(snapshot["loops"]["execution-queue"], "RUNNING")
+        self.assertEqual(snapshot["loops"]["strategy-loop"], "REACHED")
+        self.assertEqual(snapshot["loops"]["ai-loop"], "EVALUATED")
+        self.assertEqual(snapshot["loops"]["governance-loop"], "EVALUATED")
+        self.assertEqual(snapshot["loops"]["execution-queue"], "REACHED")
         self.assertEqual(snapshot["stages"]["execution-runtime"]["status"], "IDLE")
         self.assertEqual(
             snapshot["stages"]["execution-governance"]["status"],
@@ -159,13 +159,75 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
             market_stale=True,
             exchange_ws_connected=False,
             browser_ws_connected=False,
-            engine_available=False,
+            # STOPPING can briefly overlap engine teardown; lifecycle state
+            # must still make current execution availability false.
+            engine_available=True,
         )
 
-        self.assertEqual(snapshot["pipelineStatus"], "STOPPED")
-        self.assertEqual(snapshot["loops"]["strategy-loop"], "WAIT")
-        self.assertEqual(snapshot["stages"]["strategy-plugin"]["status"], "WAIT")
+        self.assertEqual(snapshot["health"], "HEALTHY")
+        self.assertIsNone(snapshot["blockingReason"])
+        self.assertEqual(snapshot["pipelineStatus"], "SUSPENDED_BY_BOT_STOP")
+        self.assertEqual(
+            snapshot["loops"]["strategy-loop"],
+            "SUSPENDED_BY_BOT_STOP",
+        )
+        self.assertEqual(
+            snapshot["stages"]["strategy-plugin"]["status"],
+            "SUSPENDED_BY_BOT_STOP",
+        )
+        self.assertEqual(
+            snapshot["exchangeWebSocket"]["status"],
+            "DISCONNECTED_BY_BOT_STOP",
+        )
+        self.assertEqual(
+            snapshot["executionEngine"]["status"],
+            "UNAVAILABLE_BY_BOT_STOP",
+        )
+        self.assertFalse(snapshot["executionEngine"]["available"])
+        self.assertEqual(
+            snapshot["tradingAction"]["status"],
+            "NONE_BY_BOT_STOP",
+        )
+        self.assertEqual(snapshot["tradingAction"]["decision"], "N/A")
+        self.assertEqual(snapshot["executionReason"], "BOT_STOPPED")
+        self.assertEqual(snapshot["ai"]["decision"], "N/A")
+        self.assertEqual(snapshot["ai"]["reason"], "BOT_STOPPED")
+        self.assertEqual(
+            snapshot["lastCompletedDecision"]["decision"],
+            "HOLD",
+        )
         self.assertEqual(snapshot["timeline"], [])
+
+    def test_disabled_authority_is_not_reported_as_enabled_idle(self):
+        snapshot = self._active_snapshot(
+            governance_state={"execution_enabled": False},
+        )
+
+        self.assertFalse(snapshot["executionEngine"]["enabled"])
+        self.assertEqual(
+            snapshot["executionEngine"]["status"],
+            "DISABLED_BY_OPERATOR",
+        )
+
+    def test_lifecycle_revision_changes_status_fingerprint(self):
+        first = self._active_snapshot(
+            lifecycle_revision=10,
+            lifecycle_state="RUNNING",
+            cycle_id="1:5",
+        )
+        second = self._active_snapshot(
+            lifecycle_revision=11,
+            lifecycle_state="STOPPING",
+            cycle_id="1:5",
+        )
+
+        self.assertNotEqual(
+            first["statusFingerprint"],
+            second["statusFingerprint"],
+        )
+        self.assertEqual(second["lifecycleRevision"], 11)
+        self.assertEqual(second["lifecycle"]["state"], "STOPPING")
+        self.assertEqual(second["cycleId"], "1:5")
 
 
 if __name__ == "__main__":

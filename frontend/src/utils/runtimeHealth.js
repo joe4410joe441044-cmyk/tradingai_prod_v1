@@ -42,6 +42,9 @@ const displayDuration = (value) => (
 const missingSnapshot = () => ({
     snapshotPresent: false,
     snapshotId: null,
+    lifecycleRevision: null,
+    generatedAt: null,
+    cycleId: null,
     statusFingerprint: null,
     running: false,
     browserWebSocket: { status: "DISCONNECTED", connected: false },
@@ -114,15 +117,15 @@ const normalizeStage = ([id, stage = {}]) => ({
 });
 
 const LOOP_NAMES = {
-    "runtime-loop": "Runtime Loop",
-    "market-feed": "Market Feed",
-    "orderbook-ws": "OrderBook WS",
-    "strategy-loop": "Strategy Loop",
-    "ai-loop": "AI Loop",
-    "governance-loop": "Governance Loop",
-    "execution-queue": "Execution Queue",
-    "exchange-sync": "Exchange Sync",
-    "portfolio-sync": "Portfolio Sync",
+    "runtime-loop": "Runtime Stage",
+    "market-feed": "Market Feed Stage",
+    "orderbook-ws": "OrderBook WS Stage",
+    "strategy-loop": "Strategy Stage",
+    "ai-loop": "AI Stage",
+    "governance-loop": "Governance Stage",
+    "execution-queue": "Execution Stage",
+    "exchange-sync": "Exchange Sync Stage",
+    "portfolio-sync": "Portfolio Sync Stage",
 };
 
 const normalizeTimelineEvent = (event = {}) => {
@@ -156,6 +159,10 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         schemaVersion: health.schemaVersion,
         source: health.source,
         snapshotId: health.snapshotId,
+        lifecycleRevision: health.lifecycleRevision,
+        lifecycle: health.lifecycle || {},
+        generatedAt: health.generatedAt,
+        cycleId: health.cycleId,
         statusFingerprint: health.statusFingerprint,
         running: health.bot?.running === true,
         browserWebSocket: health.browserWebSocket || {},
@@ -179,7 +186,7 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
             : [],
         pipelineStatus: health.pipeline?.status || health.pipelineStatus || "UNKNOWN",
         loopCount: loops.filter(({ status }) => (
-            status === "RUNNING" || status === "OK"
+            ["RUNNING", "OK", "REACHED", "EVALUATED"].includes(status)
         )).length,
         session: health.session?.status
             || health.states?.governance?.session_state

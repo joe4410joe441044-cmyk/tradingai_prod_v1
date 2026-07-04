@@ -17,6 +17,7 @@ import os
 import time
 import uuid
 from copy import deepcopy
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from backend.utils.log_buffer import (
@@ -96,6 +97,12 @@ class BotManager:
         self.price_manager = None
 
         self._running = False
+
+        self.lifecycle_state = "STOPPED"
+
+        self.lifecycle_revision = 0
+
+        self.lifecycle_changed_at = time.time()
 
         self.symbol = None
 
@@ -381,11 +388,27 @@ class BotManager:
     # START
     # ============================================
 
+    def _set_lifecycle_state(self, state):
+
+        if self.lifecycle_state == state:
+
+            return
+
+        self.lifecycle_state = state
+
+        self.lifecycle_revision += 1
+
+        self.lifecycle_changed_at = time.time()
+
     def start(self, config):
 
         try:
 
             self.stop()
+
+            self._set_lifecycle_state(
+                "STARTING"
+            )
 
             self.session_id += 1
 
@@ -935,6 +958,10 @@ class BotManager:
 
             self._running = True
 
+            self._set_lifecycle_state(
+                "RUNNING"
+            )
+
             add_log(
                 "🟢 ORDERBOOK WS STARTED"
             )
@@ -948,6 +975,12 @@ class BotManager:
             }
 
         except Exception as e:
+
+            self._running = False
+
+            self._set_lifecycle_state(
+                "STOPPED"
+            )
 
             add_log(
                 traceback.format_exc()
@@ -1007,11 +1040,18 @@ class BotManager:
 
     def stop(self):
 
+        self._set_lifecycle_state(
+            "STOPPING"
+        )
+
         add_log(
             "🛑 BOT STOP"
         )
 
         self._running = False
+
+        # Invalidate callbacks from the old exchange WebSocket immediately.
+        self.active_runtime_id = None
 
         try:
 
@@ -1067,6 +1107,10 @@ class BotManager:
 
             self._running = False
 
+            self._set_lifecycle_state(
+                "STOPPED"
+            )
+
             self.position = "NONE"
 
             self.entry_price = None
@@ -1090,6 +1134,10 @@ class BotManager:
             }
 
         except Exception as e:
+
+            self._set_lifecycle_state(
+                "STOPPED"
+            )
 
             add_log(
                 f"❌ STOP ERROR: "
@@ -1141,13 +1189,13 @@ class BotManager:
 
         equity = float(snapshot.get("equity", balance))
 
-        latest_runtime_result = deepcopy(
+        completed_runtime_result = deepcopy(
             self.latest_runtime_result
         )
 
         latest_runtime_trace = (
-            latest_runtime_result
-            if isinstance(latest_runtime_result, dict)
+            completed_runtime_result
+            if self._running and isinstance(completed_runtime_result, dict)
             else {}
         )
 
@@ -1185,7 +1233,11 @@ class BotManager:
             browser_ws_clients=self.browser_ws_clients,
             engine_available=self.engine is not None,
             runtime_healthy=runtime_healthy,
-            runtime_result=latest_runtime_trace,
+            runtime_result=(
+                completed_runtime_result
+                if isinstance(completed_runtime_result, dict)
+                else {}
+            ),
             runtime_trace=self.state.runtime_trace,
             runtime_metrics=self.state.runtime_metrics,
             governance_state=governance_state,
@@ -1193,6 +1245,12 @@ class BotManager:
                 self.state.runtime_metrics.get("last_bot_update")
                 or time.time()
             ),
+            lifecycle_revision=self.lifecycle_revision,
+            lifecycle_state=self.lifecycle_state,
+            cycle_id=(
+                f"{self.session_id}:{self.update_id}"
+            ),
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
         runtime_states = runtime_health["states"]
 
@@ -1250,7 +1308,7 @@ class BotManager:
 
             "signal": self.last_signal,
 
-            "latestRuntimeResult": latest_runtime_result,
+            "latestRuntimeResult": latest_runtime_trace or None,
 
             "executionRuntimeReached": bool(
                 latest_runtime_trace.get("executionRuntimeReached")

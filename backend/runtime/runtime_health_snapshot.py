@@ -254,13 +254,23 @@ def build_runtime_health_snapshot(
     runtime_metrics,
     governance_state,
     snapshot_timestamp,
+    lifecycle_revision=0,
+    lifecycle_state=None,
+    cycle_id=None,
+    generated_at=None,
 ):
     """Return UI-ready facts sourced only from backend runtime state."""
 
-    result = runtime_result if isinstance(runtime_result, dict) else {}
+    completed_result = (
+        runtime_result if isinstance(runtime_result, dict) else {}
+    )
     trace = runtime_trace if isinstance(runtime_trace, dict) else {}
     metrics = runtime_metrics if isinstance(runtime_metrics, dict) else {}
     active = bool(running)
+    execution_available = active and bool(engine_available)
+    # A completed cycle remains useful as history, but it must not be exposed
+    # as the current decision after the bot lifecycle has stopped.
+    result = completed_result if active else {}
 
     market_reached = active and not market_stale and (
         _trace_reached(trace.get("ws_receive"))
@@ -351,11 +361,11 @@ def build_runtime_health_snapshot(
         "execution-governance": _execution_state(result),
         "execution-signal-adapter": result.get("adapterOutput"),
         "execution-engine": {
-            "available": bool(engine_available),
+            "available": execution_available,
             "handoffAttempted": handoff_attempted,
             "handoffExecuted": handoff_executed,
         },
-        "exchange-client": {"available": bool(engine_available)},
+        "exchange-client": {"available": execution_available},
         "exchange-api": {"status": "AVAILABLE" if active else "IDLE"},
         "complete": {
             "executionAllowed": execution_allowed,
@@ -457,16 +467,30 @@ def build_runtime_health_snapshot(
     }
 
     loops = {
-        "runtime-loop": "RUNNING" if active else "STOPPED",
-        "market-feed": "RUNNING" if market_reached else "STOPPED",
-        "orderbook-ws": "RUNNING" if orderbook_reached else "STOPPED",
-        "strategy-loop": "RUNNING" if strategy_reached else "WAIT",
-        "ai-loop": "RUNNING" if ai_reached else "WAIT",
-        "governance-loop": "RUNNING" if governance_reached else "WAIT",
-        "execution-queue": "RUNNING" if execution_reached else "WAIT",
-        "exchange-sync": "OK" if active and engine_available else "WAIT",
-        "portfolio-sync": "OK" if active and engine_available else "WAIT",
+        "runtime-loop": "REACHED" if active and result else "IDLE",
+        "market-feed": "REACHED" if market_reached else "IDLE",
+        "orderbook-ws": "REACHED" if orderbook_reached else "IDLE",
+        "strategy-loop": "REACHED" if strategy_reached else "IDLE",
+        "ai-loop": "EVALUATED" if ai_reached else "IDLE",
+        "governance-loop": "EVALUATED" if governance_reached else "IDLE",
+        "execution-queue": "REACHED" if execution_reached else "IDLE",
+        "exchange-sync": "REACHED" if active and engine_available else "IDLE",
+        "portfolio-sync": "REACHED" if active and engine_available else "IDLE",
     }
+
+    if not active:
+        for stage_id, stage in stages.items():
+            if stage_id in {"start-request", "trading-runtime"}:
+                stage["status"] = "STOPPED"
+            else:
+                stage["status"] = "SUSPENDED_BY_BOT_STOP"
+            stage["reached"] = False
+            stage["reason"] = "BOT_STOPPED"
+            stage["exception"] = None
+        loops = {
+            key: "SUSPENDED_BY_BOT_STOP"
+            for key in loops
+        }
 
     issues = []
     if active and not browser_ws_connected:
@@ -485,8 +509,8 @@ def build_runtime_health_snapshot(
         issues.append("ENGINE_UNAVAILABLE")
 
     if not active:
-        severity = "STOPPED"
-        blocking_reason = "BOT_STOPPED"
+        severity = "HEALTHY"
+        blocking_reason = None
     elif issues:
         severity = "CRITICAL"
         blocking_reason = issues[0]
@@ -494,22 +518,37 @@ def build_runtime_health_snapshot(
         severity = "HEALTHY"
         blocking_reason = None
 
-    pipeline_status = (
-        "STOPPED" if not active else ("OK" if execution_reached else "ACTIVE")
+    pipeline_status = "SUSPENDED_BY_BOT_STOP" if not active else (
+        "OK" if execution_reached else "ACTIVE"
     )
-    execution_engine_status = (
-        "UNAVAILABLE" if not engine_available else (
-            "EXECUTED" if handoff_executed else (
-                "READY" if execution_allowed else "ENABLED_BUT_IDLE"
-            )
-        )
-    )
-    trading_action_status = (
-        "IDLE_BY_AI_HOLD" if hold_cycle else (
-            "ORDER_SUBMITTED" if handoff_executed else (
-                "READY" if execution_allowed else "IDLE"
-            )
-        )
+    if not active:
+        execution_engine_status = "UNAVAILABLE_BY_BOT_STOP"
+    elif not execution_available:
+        execution_engine_status = "UNAVAILABLE"
+    elif not execution_enabled:
+        execution_engine_status = "DISABLED_BY_OPERATOR"
+    elif execution_allowed:
+        execution_engine_status = "READY"
+    elif hold_cycle:
+        execution_engine_status = "ENABLED_IDLE_BY_AI_HOLD"
+    else:
+        execution_engine_status = "ENABLED_IDLE_BLOCKED"
+
+    if not active:
+        trading_action_status = "NONE_BY_BOT_STOP"
+    elif hold_cycle:
+        trading_action_status = "IDLE_BY_AI_HOLD"
+    elif handoff_executed:
+        trading_action_status = "ORDER_SUBMITTED"
+    elif execution_allowed:
+        trading_action_status = "READY"
+    else:
+        trading_action_status = "IDLE"
+
+    current_reason = "BOT_STOPPED" if not active else trading_reason
+    current_decision = "N/A" if not active else result.get("aiDecision")
+    resolved_lifecycle_state = lifecycle_state or (
+        "RUNNING" if active else "STOPPED"
     )
 
     normalized = {
@@ -520,7 +559,9 @@ def build_runtime_health_snapshot(
             "clientCount": int(browser_ws_clients or 0),
         },
         "exchangeWebSocket": {
-            "status": "LIVE" if exchange_ws_connected else "DISCONNECTED",
+            "status": "LIVE" if exchange_ws_connected else (
+                "DISCONNECTED_BY_BOT_STOP" if not active else "DISCONNECTED"
+            ),
             "connected": bool(exchange_ws_connected),
         },
         "runtimeEngine": {
@@ -534,71 +575,89 @@ def build_runtime_health_snapshot(
             "running": active,
         },
         "marketFeed": {
-            "status": "LIVE" if market_reached else "MISSING_OR_STALE",
+            "status": "LIVE" if market_reached else (
+                "SUSPENDED_BY_BOT_STOP" if not active else "MISSING_OR_STALE"
+            ),
             "healthy": market_reached,
             "stale": bool(market_stale),
         },
         "orderBook": {
-            "status": "LIVE" if orderbook_reached else "MISSING_OR_STALE",
+            "status": "LIVE" if orderbook_reached else (
+                "SUSPENDED_BY_BOT_STOP" if not active else "MISSING_OR_STALE"
+            ),
             "healthy": orderbook_reached,
         },
         "strategy": {
             "reached": strategy_reached,
-            "status": strategy_status,
-            "reason": strategy_reason,
+            "status": strategy_status if active else "SUSPENDED_BY_BOT_STOP",
+            "reason": strategy_reason if active else "BOT_STOPPED",
         },
         "ai": {
             "reached": ai_reached,
-            "status": ai_status,
-            "reason": "AI_HOLD" if hold_cycle else None,
-            "detail": ai_reason,
-            "decision": result.get("aiDecision"),
+            "status": ai_status if active else "SUSPENDED_BY_BOT_STOP",
+            "reason": "AI_HOLD" if hold_cycle else current_reason,
+            "detail": ai_reason if active else None,
+            "decision": current_decision,
         },
         "governance": {
             "reached": governance_reached,
-            "status": governance_status,
-            "reason": result.get("governanceBlockedReason"),
-            "allowed": result.get("governanceAllowed"),
+            "status": governance_status if active else "SUSPENDED_BY_BOT_STOP",
+            "reason": result.get("governanceBlockedReason") if active else "BOT_STOPPED",
+            "allowed": result.get("governanceAllowed") if active else False,
         },
         "executionQueue": {
             "reached": execution_reached,
-            "status": "RUNNING" if execution_reached else "WAIT",
-            "reason": trading_reason,
+            "status": "REACHED" if execution_reached else (
+                "SUSPENDED_BY_BOT_STOP" if not active else "IDLE"
+            ),
+            "reason": current_reason,
         },
         "signalAdapter": {
             "reached": signal_adapter_reached,
-            "status": "READY" if signal_adapter_reached else (
-                "IDLE" if execution_reached else "WAIT"
+            "status": "SUSPENDED_BY_BOT_STOP" if not active else (
+                "READY" if signal_adapter_reached else (
+                    "IDLE" if execution_reached else "WAIT"
+                )
             ),
-            "reason": trading_reason,
+            "reason": current_reason,
         },
         "executionEngine": {
-            "available": bool(engine_available),
+            "available": execution_available,
             "enabled": execution_enabled,
             "allowed": execution_allowed,
             "status": execution_engine_status,
-            "reason": trading_reason,
+            "reason": current_reason,
         },
         "tradingAction": {
             "status": trading_action_status,
-            "reason": trading_reason,
-            "decision": result.get("aiDecision"),
+            "reason": current_reason,
+            "decision": current_decision,
         },
         "pipeline": {"status": pipeline_status},
         "severity": severity,
         "blockingReason": blocking_reason,
         "issues": issues,
+        "lifecycle": {
+            "state": resolved_lifecycle_state,
+            "revision": int(lifecycle_revision or 0),
+        },
     }
     status_fingerprint = _fingerprint({
         key: normalized[key]
         for key in (
             "bot",
+            "lifecycle",
             "browserWebSocket",
             "exchangeWebSocket",
             "runtimeEngine",
             "runtimeLoop",
             "marketFeed",
             "orderBook",
+            "strategy",
+            "ai",
+            "governance",
+            "executionEngine",
+            "tradingAction",
             "pipeline",
             "severity",
             "blockingReason",
@@ -611,6 +670,9 @@ def build_runtime_health_snapshot(
         "source": "BotManager.get_result",
         "snapshotId": str(metrics.get("last_bot_update") or snapshot_timestamp),
         "snapshotTimestamp": snapshot_timestamp,
+        "generatedAt": generated_at or datetime.now(timezone.utc).isoformat(),
+        "cycleId": cycle_id,
+        "lifecycleRevision": int(lifecycle_revision or 0),
         "cycleTimestamp": metrics.get("last_bot_update"),
         "statusFingerprint": status_fingerprint,
         **normalized,
@@ -618,10 +680,10 @@ def build_runtime_health_snapshot(
         "runtimeHealthy": bool(runtime_healthy),
         "health": severity,
         "pipelineStatus": pipeline_status,
-        "engineAvailable": bool(engine_available),
+        "engineAvailable": execution_available,
         "executionEnabled": execution_enabled,
         "executionAllowed": execution_allowed,
-        "executionReason": trading_reason,
+        "executionReason": current_reason,
         "stages": stages,
         "loops": loops,
         "timeline": _timeline(result, stages, active),
@@ -631,6 +693,18 @@ def build_runtime_health_snapshot(
             "governance": _governance_state(result, governance_state),
             "execution": _execution_state(result),
         },
+        "lastCompletedDecision": (
+            {
+                "decision": completed_result.get("aiDecision"),
+                "reason": (
+                    completed_result.get("aiHoldReason")
+                    or completed_result.get("governanceBlockedReason")
+                    or completed_result.get("handoffBlockedReason")
+                ),
+            }
+            if not active and completed_result
+            else None
+        ),
         "activeStageId": "trading-runtime" if active else "start-request",
         "latencyMs": metrics.get("latency_ms"),
     }

@@ -2,8 +2,8 @@ export default function RuntimeLoopList({ loops = [] }) {
     return (
         <div className="runtime-health-group">
             <div className="runtime-health-group-title">
-                RUNTIME LOOPS（ランタイムループ）
-                <span>{loops.length} LOOPS</span>
+                RUNTIME STAGES（ランタイム到達段階）
+                <span>{loops.length} STAGES</span>
             </div>
 
             <div className="runtime-loop-list">

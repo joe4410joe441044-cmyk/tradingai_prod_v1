@@ -24,7 +24,7 @@ const backendHealth = {
         available: true,
         enabled: true,
         allowed: false,
-        status: "ENABLED_BUT_IDLE",
+        status: "ENABLED_IDLE_BY_AI_HOLD",
         reason: "AI_HOLD",
     },
     tradingAction: {
@@ -88,7 +88,7 @@ test("authoritative backend health snapshot drives every monitor status", () => 
     assert.equal(result.browserWebSocket.status, "LIVE");
     assert.equal(result.exchangeWebSocket.status, "LIVE");
     assert.equal(result.runtimeEngine.status, "ACTIVE");
-    assert.equal(result.executionEngine.status, "ENABLED_BUT_IDLE");
+    assert.equal(result.executionEngine.status, "ENABLED_IDLE_BY_AI_HOLD");
     assert.equal(result.tradingAction.status, "IDLE_BY_AI_HOLD");
     assert.equal(result.executionReason, "AI_HOLD");
     assert.equal(result.pipelineStatus, "OK");
@@ -114,4 +114,36 @@ test("missing snapshot is explicit critical telemetry, not a WAIT placeholder", 
     assert.equal(result.stages[0].name, "Runtime Health Snapshot");
     assert.equal(result.stages[0].status, "ERROR");
     assert.equal(result.timeline.length, 0);
+});
+
+test("stopped snapshot keeps the previous hold out of current UI state", () => {
+    const stoppedHealth = {
+        ...backendHealth,
+        bot: { status: "STOPPED", running: false },
+        lifecycleRevision: 8,
+        lifecycle: { state: "STOPPED", revision: 8 },
+        executionEngine: {
+            available: false,
+            enabled: true,
+            allowed: false,
+            status: "UNAVAILABLE_BY_BOT_STOP",
+            reason: "BOT_STOPPED",
+        },
+        tradingAction: {
+            status: "NONE_BY_BOT_STOP",
+            decision: "N/A",
+            reason: "BOT_STOPPED",
+        },
+        timeline: [],
+    };
+    const result = deriveRuntimeHealth({
+        botStatus: { runtime_health: stoppedHealth },
+    });
+
+    assert.equal(result.running, false);
+    assert.equal(result.executionEngine.status, "UNAVAILABLE_BY_BOT_STOP");
+    assert.equal(result.tradingAction.status, "NONE_BY_BOT_STOP");
+    assert.equal(result.tradingAction.decision, "N/A");
+    assert.equal(result.timeline.length, 0);
+    assert.equal(result.lifecycleRevision, 8);
 });

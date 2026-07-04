@@ -12,12 +12,17 @@ import {
 import {
     API,
 } from "../api";
+import {
+    requestBotStop,
+} from "../runtime/botLifecycle";
 
 export default function BotControl({
 
     config,
 
     executionEnabled,
+
+    botRunning,
 
     setExecutionEnabledState,
 
@@ -30,10 +35,10 @@ export default function BotControl({
        STATUS
     ======================================================= */
 
-    const executionStatus =
+    const executionAuthorityStatus =
         executionEnabled
-            ? "RUNNING（稼働中）"
-            : "STOPPED（停止中）";
+            ? "ENABLED（注文許可）"
+            : "DISABLED_BY_OPERATOR（注文停止）";
 
     /* =======================================================
        UI
@@ -135,30 +140,11 @@ export default function BotControl({
 
                             }
 
-                            const result =
-                                await setExecutionEnabled(
-                                    true
-                                );
-
-                            updateExecutionRuntimeTelemetry({
-
-                                executionAllowed: true,
-
-                                governanceReason:
-                                    "MANUAL_START",
-
-                                suppressionReason:
-                                    "NONE",
-
-                            });
+                            const result = await response.json();
 
                             console.log(
                                 "START RESULT",
                                 result
-                            );
-
-                            setExecutionEnabledState(
-                                true
                             );
 
                             forceUpdate(
@@ -191,21 +177,8 @@ export default function BotControl({
 
                         try {
 
-                            const result =
-                                await setExecutionEnabled(
-                                    false
-                                );
-
-                            updateExecutionRuntimeTelemetry({
-
-                                executionAllowed: false,
-
-                                governanceReason:
-                                    "MANUAL_STOP",
-
-                                suppressionReason:
-                                    "EXECUTION_DISABLED",
-
+                            const result = await requestBotStop({
+                                endpoint: API.botStop(),
                             });
 
                             console.log(
@@ -213,9 +186,7 @@ export default function BotControl({
                                 result
                             );
 
-                            setExecutionEnabledState(
-                                false
-                            );
+                            forceUpdate(v => v + 1);
 
                         } catch (error) {
 
@@ -240,15 +211,35 @@ export default function BotControl({
             </div>
 
             {/* =======================================================
-               EXECUTION STATUS
+               BOT STATUS
             ======================================================= */}
 
             <div className="execution-status-section">
 
                 <div className="execution-status-label">
 
-                    EXECUTION STATUS（実行状態）
+                    BOT STATE（ボット状態）
 
+                </div>
+
+                <div
+                    className={
+                        botRunning
+                            ? "execution-status-box running"
+                            : "execution-status-box stopped"
+                    }
+                >
+
+                    {botRunning ? "RUNNING（稼働中）" : "STOPPED（停止中）"}
+
+                </div>
+
+            </div>
+
+            <div className="execution-status-section">
+
+                <div className="execution-status-label">
+                    EXECUTION AUTHORITY（注文送信許可）
                 </div>
 
                 <div
@@ -258,10 +249,42 @@ export default function BotControl({
                             : "execution-status-box stopped"
                     }
                 >
-
-                    {executionStatus}
-
+                    {executionAuthorityStatus}
                 </div>
+
+                <button
+                    className={executionEnabled
+                        ? "stop-button-large"
+                        : "start-button-large"
+                    }
+                    onClick={async () => {
+                        try {
+                            const enabled = !executionEnabled;
+                            const result = await setExecutionEnabled(enabled);
+
+                            updateExecutionRuntimeTelemetry({
+                                executionAllowed: enabled,
+                                governanceReason: enabled
+                                    ? "MANUAL_EXECUTION_ENABLE"
+                                    : "MANUAL_EXECUTION_DISABLE",
+                                suppressionReason: enabled
+                                    ? "NONE"
+                                    : "EXECUTION_DISABLED",
+                            });
+
+                            console.log("EXECUTION AUTHORITY RESULT", result);
+                            setExecutionEnabledState(enabled);
+                        } catch (error) {
+                            console.error("EXECUTION AUTHORITY ERROR", error);
+                        }
+                    }}
+                    type="button"
+                >
+                    {executionEnabled
+                        ? "DISABLE ORDERS（注文停止）"
+                        : "ENABLE ORDERS（注文許可）"
+                    }
+                </button>
 
             </div>
 
