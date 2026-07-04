@@ -17,19 +17,6 @@ const displayValue = (value) => {
     return String(value);
 };
 
-const displayAmount = (value) => {
-    const numericValue = Number(value);
-
-    if (value === null || value === undefined || !Number.isFinite(numericValue)) {
-        return "--";
-    }
-
-    return numericValue.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
-
 const displayLatency = (value) => {
     if (value === null || value === undefined || value === "") {
         return "--";
@@ -43,12 +30,7 @@ export default function ExecutionPanel({
     runtimePhase,
     websocketStatus,
     latency,
-    balance,
-    equity,
-    positionSide,
-    accountSource,
 }) {
-    const paperSource = accountSource === "PAPER_SIMULATION";
     const metrics = [
         {
             label: "STATUS（状態）",
@@ -60,19 +42,6 @@ export default function ExecutionPanel({
         { label: "PHASE（実行段階）", value: displayValue(runtimePhase) },
         { label: "WS（通信）", value: displayValue(websocketStatus) },
         { label: "LATENCY（遅延）", value: displayLatency(latency) },
-        {
-            label: "Paper Balance:（模擬残高）",
-            value: displayAmount(paperSource ? balance : undefined),
-        },
-        {
-            label: "Paper Equity:（模擬純資産）",
-            value: displayAmount(paperSource ? equity : undefined),
-        },
-        {
-            label: "Paper Position:（模擬ポジション）",
-            value: displayValue(paperSource ? positionSide : undefined),
-        },
-        { label: "Source:（データソース）", value: displayValue(accountSource) },
     ];
 
     return (

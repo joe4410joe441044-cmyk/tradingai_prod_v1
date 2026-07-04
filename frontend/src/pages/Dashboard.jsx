@@ -9,7 +9,7 @@ import {
 } from "../runtime/websocketRuntime";
 import { API } from "../api";
 import usePolling from "../hooks/usePolling";
-import ExchangeLivePanel from "../components/runtime/ExchangeLivePanel";
+import AccountRuntimeOverview from "../components/runtime/AccountRuntimeOverview";
 import RuntimeHealthPanel from "../components/runtime/RuntimeHealthPanel";
 import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel";
 import StageInspectorPanel from "../components/runtime/StageInspectorPanel";
@@ -32,6 +32,7 @@ import RiskPanel from "../components/RiskPanel";
 import TradeSettings from "../components/TradeSettings";
 
 import ExecutionPanel from "../components/ExecutionPanel";
+
 
 const fetchBotStatus = async () => {
     const response = await fetch(API.botStatus());
@@ -73,14 +74,6 @@ const getPositionSide = (position) => {
         candidate.position_side,
         candidate.state,
     );
-};
-
-const normalizeConnection = (value) => {
-    const normalized = String(value ?? "").trim().toUpperCase();
-
-    return ["CONNECTED", "LIVE", "ONLINE", "OPEN"].includes(normalized)
-        ? "CONNECTED"
-        : "DISCONNECTED";
 };
 
 const normalizeTimestamp = (value) => {
@@ -168,11 +161,6 @@ const wsMarketData = marketData?.lastUpdate
     ? marketData
     : undefined;
 
-const exchangeConnection = normalizeConnection(firstAvailable(
-    typeof botStatus?.ws_connected === "boolean"
-        ? (botStatus.ws_connected ? "CONNECTED" : "DISCONNECTED")
-        : undefined,
-));
 const position = firstAvailable(
     getPositionSide(botStatus?.actual_position),
     getPositionSide(botStatus?.position),
@@ -358,20 +346,11 @@ useEffect(() => {
 
                 <div className="panel-card center-terminal-panel">
 
-                    {/* =============================================
-                       CENTER TERMINAL TITLE
-                    ============================================= */}
-
-                    <div className="center-terminal-title">
-                        CENTER（中央監視）
-                    </div>
-
-                    <ExchangeLivePanel
+                    <AccountRuntimeOverview
                         exchange={firstAvailable(
                             botStatus?.exchange,
                             tradeSettings.exchange,
                         )}
-                        connection={exchangeConnection}
                         selectedMode={firstAvailable(
                             tradeSettings.mode,
                             botStatus?.selectedMode,
@@ -445,46 +424,21 @@ useEffect(() => {
                         onSelectStage={setSelectedStageId}
                     />
 
-                    {/* =============================================
-                       EXECUTION PANEL
-                    ============================================= */}
-
                     <ExecutionPanel
-
                         executionStatus={
                             runtimeHealth.executionEngine.status
                         }
-
                         runtimePhase={
                             runtimeHealth.tradingAction.reason
                                 ? `${runtimeHealth.tradingAction.status}: ${runtimeHealth.tradingAction.reason}`
                                 : runtimeHealth.tradingAction.status
                         }
-
                         websocketStatus={
                             runtimeHealth.browserWebSocket.status
                         }
-
                         latency={
                             runtimeHealth.latencyMs
                         }
-
-                        balance={
-                            botStatus?.balance
-                        }
-
-                        equity={
-                            botStatus?.equity
-                        }
-
-                        positionSide={
-                            position
-                        }
-
-                        accountSource={
-                            botStatus?.accountSource
-                        }
-
                     />
 
                     {/* =============================================
@@ -659,10 +613,6 @@ useEffect(() => {
                             <span>{runtimeHealth.latencyMs ?? "--"}</span>
                         </div>
 
-                        <div className="monitoring-row">
-                            <span>Paper Position:（模擬ポジション）</span>
-                            <span>{position ?? "--"}</span>
-                        </div>
                     </div>
 
                 </div>

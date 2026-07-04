@@ -1768,3 +1768,534 @@ PRODUCTION RUNTIME V2 - CENTER COLUMN
     text-align: right;
 
 }
+
+/* =========================================================
+STEP56-68 - SEMANTIC OPERATIONS CONSOLE
+Paper / Real / Execution / Connection remain visually and
+structurally independent. These final overrides intentionally
+replace the legacy scaled three-column layout.
+========================================================= */
+
+.dashboard {
+    height: calc(100vh - 43px);
+    min-height: 0;
+    padding: 8px;
+    overflow: hidden;
+    background: #080d14;
+}
+
+.dashboard-layout {
+    display: grid !important;
+    grid-template-columns:
+        minmax(290px, 340px)
+        minmax(640px, 1fr)
+        minmax(300px, 350px);
+    gap: 8px;
+    align-items: stretch;
+    height: 100%;
+}
+
+.left-column,
+.center-column,
+.right-governance-column {
+    width: auto;
+    min-width: 0;
+    max-height: 100%;
+    margin: 0;
+    transform: none;
+}
+
+.left-column,
+.right-governance-column {
+    gap: 8px;
+    padding-right: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-color: #273548 #0b1119;
+    scrollbar-width: thin;
+}
+
+.center-column {
+    gap: 0;
+    overflow: hidden;
+}
+
+.panel-card {
+    padding: 6px;
+    border-color: rgba(45, 93, 160, 0.3);
+    border-radius: 8px;
+    background: #0a121d;
+}
+
+.center-terminal-panel {
+    height: 100%;
+    padding: 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-color: #1d2b3c;
+    background: #050a10;
+    scrollbar-color: #273548 #080d14;
+    scrollbar-width: thin;
+}
+
+.left-column .terminal-panel {
+    gap: 4px;
+    padding: 10px;
+    border-radius: 7px;
+}
+
+.left-column .panel-title,
+.left-column .section-number-title {
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.left-column .panel-title {
+    padding-bottom: 7px;
+}
+
+.left-column .config-row {
+    min-height: 30px;
+    gap: 8px;
+}
+
+.left-column .config-label {
+    width: 142px;
+    overflow: hidden;
+    font-size: 8px;
+    letter-spacing: 0.45px;
+    text-overflow: ellipsis;
+}
+
+.left-column .config-select {
+    height: 29px;
+    max-width: 150px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 10px;
+}
+
+.left-column .main-operation-buttons {
+    gap: 8px;
+}
+
+.left-column .start-button-large,
+.left-column .stop-button-large {
+    height: 40px;
+    border-radius: 6px;
+    font-size: 10px;
+}
+
+.left-column .execution-status-section {
+    gap: 5px;
+    margin-top: 2px;
+}
+
+.left-column .execution-status-label {
+    font-size: 8px;
+}
+
+.left-column .execution-status-box {
+    height: 38px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.left-column .emergency-stop-button,
+.left-column .quick-action-button {
+    height: 36px;
+    border-radius: 6px;
+    font-size: 9px;
+}
+
+.left-column .quick-actions-grid {
+    gap: 6px;
+}
+
+.account-runtime-overview {
+    --paper-color: #2f9dff;
+    --paper-soft: rgba(47, 157, 255, 0.12);
+    --real-color: #ff565f;
+    --real-soft: rgba(255, 86, 95, 0.1);
+    --execution-color: #20cf72;
+    --execution-soft: rgba(32, 207, 114, 0.1);
+    --connection-color: #b65cff;
+    --connection-soft: rgba(182, 92, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding-bottom: 6px;
+    font-family: "Consolas", monospace;
+}
+
+.account-separation-grid,
+.operational-separation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.operational-separation-grid {
+    grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+}
+
+.semantic-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    background: #09111a;
+}
+
+.semantic-card-paper {
+    color: var(--paper-color);
+    background: linear-gradient(135deg, var(--paper-soft), transparent 62%), #09111a;
+}
+
+.semantic-card-real {
+    color: var(--real-color);
+    background: linear-gradient(135deg, var(--real-soft), transparent 62%), #120c11;
+}
+
+.semantic-card-execution {
+    color: var(--execution-color);
+    background: linear-gradient(135deg, var(--execution-soft), transparent 62%), #08120e;
+}
+
+.semantic-card-connection {
+    color: var(--connection-color);
+    background: linear-gradient(135deg, var(--connection-soft), transparent 62%), #100b16;
+}
+
+.semantic-card-header {
+    min-height: 45px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 10px;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 34%, transparent);
+}
+
+.semantic-card-header.compact {
+    min-height: 42px;
+}
+
+.semantic-card-kicker {
+    display: block;
+    margin-bottom: 2px;
+    color: #687689;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.semantic-card h2 {
+    margin: 0;
+    color: currentColor;
+    font-size: 12px;
+    line-height: 1.15;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.semantic-badge {
+    flex: 0 0 auto;
+    padding: 4px 6px;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    color: currentColor;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.semantic-metric-grid {
+    display: grid;
+}
+
+.semantic-metric-grid.three-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.semantic-metric {
+    min-width: 0;
+    min-height: 51px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 8px;
+    border-right: 1px solid rgba(105, 125, 151, 0.18);
+    border-bottom: 1px solid rgba(105, 125, 151, 0.18);
+    background: rgba(5, 11, 17, 0.38);
+}
+
+.semantic-metric:nth-child(3n) {
+    border-right: 0;
+}
+
+.semantic-metric:nth-last-child(-n + 3) {
+    border-bottom: 0;
+}
+
+.semantic-metric-label {
+    overflow: hidden;
+    color: #8390a2;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.semantic-metric-value {
+    overflow: hidden;
+    color: #e8eef7;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tone-paper {
+    color: #75bdff;
+}
+
+.tone-real,
+.tone-danger {
+    color: #ff737a;
+}
+
+.tone-execution {
+    color: #36e783;
+}
+
+.tone-connection {
+    color: #ce91ff;
+}
+
+.tone-warning {
+    color: #ffc640;
+}
+
+.tone-safe {
+    color: #35db7e;
+}
+
+.semantic-card-note {
+    min-height: 25px;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    padding: 5px 9px;
+    border-top: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+    background: color-mix(in srgb, currentColor 7%, transparent);
+    color: currentColor;
+    font-size: 7px;
+    line-height: 1.25;
+}
+
+.semantic-legend {
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    border: 1px solid #1a2635;
+    border-radius: 4px;
+    background: #08101a;
+    color: #7f8b9b;
+    font-size: 7px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.semantic-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.semantic-legend i {
+    width: 7px;
+    height: 7px;
+    border-radius: 1px;
+}
+
+.legend-paper {
+    background: var(--paper-color);
+}
+
+.legend-real {
+    background: var(--real-color);
+}
+
+.legend-execution {
+    background: var(--execution-color);
+}
+
+.legend-connection {
+    background: var(--connection-color);
+}
+
+.terminal-section-header {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 9px;
+}
+
+.runtime-health-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(230px, 1fr);
+}
+
+.runtime-health-group {
+    padding: 8px 10px;
+}
+
+.runtime-health-group-title {
+    min-height: 25px;
+    font-size: 9px;
+}
+
+.pipeline-stage-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 10px;
+}
+
+.pipeline-stage,
+.pipeline-stage-button {
+    min-height: 27px;
+}
+
+.pipeline-stage {
+    font-size: 8px;
+}
+
+.pipeline-stage-button {
+    grid-template-columns: 18px minmax(50px, 1fr) minmax(96px, auto);
+    gap: 5px;
+    padding: 3px 5px;
+}
+
+.pipeline-stage-name,
+.pipeline-stage .runtime-status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pipeline-stage .runtime-status {
+    font-size: 6px;
+}
+
+.pipeline-stage:not(:last-child)::after {
+    display: none;
+}
+
+.runtime-status,
+.runtime-loop-row {
+    font-size: 7px;
+}
+
+.runtime-loop-row {
+    min-height: 27px;
+}
+
+.execution-timeline .log-stream {
+    min-height: 55px;
+    padding: 8px 10px;
+}
+
+.execution-runtime-panel .runtime-metric {
+    min-height: 42px;
+    gap: 5px;
+    padding: 6px 10px;
+}
+
+.log-stream-line.timeline-row {
+    grid-template-columns: 70px minmax(100px, 1fr) 74px minmax(120px, 1fr);
+    font-size: 8px;
+}
+
+.execution-monitoring-card,
+.stage-inspector-card {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 6px;
+}
+
+.execution-state-grid .monitoring-row {
+    min-height: 25px;
+}
+
+.monitoring-row {
+    min-height: 22px;
+    gap: 7px;
+    padding-bottom: 3px;
+    font-size: 8px;
+}
+
+.monitoring-row span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.governance-card-title {
+    padding-bottom: 6px;
+    font-size: 9px;
+}
+
+.stage-inspector-card {
+    min-height: 0;
+}
+
+.stage-inspector-selection {
+    gap: 6px;
+}
+
+.stage-inspector-summary {
+    min-height: 50px;
+    gap: 5px;
+    padding: 7px;
+}
+
+.stage-inspector-summary span,
+.stage-inspector-field > span {
+    font-size: 7px;
+}
+
+.stage-inspector-summary strong {
+    font-size: 9px;
+}
+
+.stage-inspector-field {
+    min-height: 28px;
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 7px;
+}
+
+.stage-inspector-field.expanded {
+    min-height: 37px;
+    padding: 6px 0;
+}
+
+.stage-inspector-field code {
+    font-size: 7px;
+}
+
+@media (max-width: 1279px) {
+    .dashboard {
+        overflow: auto;
+    }
+
+    .dashboard-layout {
+        min-width: 1240px;
+    }
+}
