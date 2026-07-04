@@ -175,10 +175,12 @@ const wsMarketData = marketData?.lastUpdate
     ? marketData
     : undefined;
 
-const connection = normalizeConnection(firstAvailable(
+const exchangeConnection = normalizeConnection(firstAvailable(
     typeof botStatus?.ws_connected === "boolean"
         ? (botStatus.ws_connected ? "CONNECTED" : "DISCONNECTED")
         : undefined,
+));
+const browserConnection = normalizeConnection(firstAvailable(
     runtime?.connectionState,
     runtime?.wsStatus,
 ));
@@ -218,7 +220,7 @@ const runtimeHealth = useMemo(() => deriveRuntimeHealth({
     statusReceivedAt,
 ]);
 
-const browserWsConnected = connection === "CONNECTED";
+const browserWsConnected = browserConnection === "CONNECTED";
 const executionHealth = mapExecutionHealth(
     runtimeHealth.runtimeHealthy,
     runtimeHealth.health === "DEGRADED" || !browserWsConnected,
@@ -403,7 +405,7 @@ useEffect(() => {
                             botStatus?.exchange,
                             tradeSettings.exchange,
                         )}
-                        connection={connection}
+                        connection={exchangeConnection}
                         mode={firstAvailable(
                             tradeSettings.mode,
                             botStatus?.execution_mode,
@@ -458,7 +460,7 @@ useEffect(() => {
                         }
 
                         websocketStatus={
-                            connection
+                            browserConnection
                         }
 
                         latency={
@@ -526,7 +528,7 @@ useEffect(() => {
                                     ? "status-safe"
                                     : "status-danger"
                             }>
-                                {connection}
+                                {browserConnection}
                             </span>
                         </div>
 
