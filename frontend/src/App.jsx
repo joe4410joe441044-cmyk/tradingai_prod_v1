@@ -1,8 +1,7 @@
-import React, { useState } from "react";
+import React from "react";
 
 import "./App.css";
 
-import Header from "./components/header";
 import Dashboard from "./pages/Dashboard";
 
 /* =================================================
@@ -10,42 +9,11 @@ import Dashboard from "./pages/Dashboard";
 ================================================= */
 
 export default function App() {
-
-    /* =============================================
-       GLOBAL EXECUTION STATE
-    ============================================= */
-
-    const [
-        executionEnabled,
-        setExecutionEnabled
-    ] = useState(false);
-    const [runtimeHealthSummary, setRuntimeHealthSummary] = useState({
-        botStatus: "STOPPED",
-        wsStatus: "DISCONNECTED",
-        engineStatus: "STOPPED",
-        executionState: "UNAVAILABLE",
-        latency: "--",
-        pipelineStatus: "WAIT",
-        loopCount: 0,
-    });
-
     return (
 
         <div className="app-shell">
 
-            <Header
-                {...runtimeHealthSummary}
-            />
-
-            <Dashboard
-                executionEnabled={
-                    executionEnabled
-                }
-                setExecutionEnabled={
-                    setExecutionEnabled
-                }
-                onRuntimeHealthChange={setRuntimeHealthSummary}
-            />
+            <Dashboard />
 
         </div>
 

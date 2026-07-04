@@ -100,6 +100,9 @@ test("authoritative backend health snapshot drives every monitor status", () => 
     );
     assert.equal(result.stages[0].backendFile, "backend/main.py");
     assert.equal(result.timeline[0].reason, "AI_HOLD");
+    assert.equal(result.timeline[0].state, "IDLE_BY_AI_HOLD");
+    assert.equal(result.session, "UNKNOWN");
+    assert.equal(result.version, "V2");
 });
 
 test("missing snapshot is explicit critical telemetry, not a WAIT placeholder", () => {

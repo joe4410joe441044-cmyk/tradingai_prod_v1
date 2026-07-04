@@ -222,7 +222,7 @@ export default function LogsPanel({
                         <div>--:--:--</div>
                         <div>SYSTEM</div>
                         {showLevel && <div>INFO</div>}
-                        <div>WAIT</div>
+                        <div>LOADING</div>
                         {!showLevel && <div>--</div>}
                     </div>
                 )}
@@ -249,7 +249,7 @@ export default function LogsPanel({
                                 {event.level ?? "INFO"}
                             </div>
                         )}
-                        <div>{event.state ?? "WAIT"}</div>
+                        <div>{event.state ?? "UNKNOWN"}</div>
                         {!showLevel && <div>{event.reason ?? "--"}</div>}
                     </div>
                 ))}

@@ -13,6 +13,7 @@ import ExchangeLivePanel from "../components/runtime/ExchangeLivePanel";
 import RuntimeHealthPanel from "../components/runtime/RuntimeHealthPanel";
 import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel";
 import StageInspectorPanel from "../components/runtime/StageInspectorPanel";
+import Header from "../components/header";
 
 import FilterSettings from "../components/FilterSettings";
 import SafetySettings from "../components/SafetySettings";
@@ -103,11 +104,7 @@ const normalizeTimestamp = (value) => {
 ================================================= */
 
 
-const Dashboard = ({
-    executionEnabled,
-    setExecutionEnabled,
-    onRuntimeHealthChange,
-}) => {
+const Dashboard = () => {
 
 const { data: botStatusSnapshot } = usePolling(
     fetchBotStatus,
@@ -152,6 +149,7 @@ const [tradeSettings, setTradeSettings] = useState({
 
 });
 const [, forceUpdate] = useState(0);
+const [executionEnabled, setExecutionEnabled] = useState(false);
 const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
 
 const governance = telemetryState.governance;
@@ -195,7 +193,6 @@ const runtimeHealth = useMemo(() => deriveRuntimeHealth({
 ]);
 
 const browserWsConnected = runtimeHealth.browserWebSocket.connected === true;
-const executionStatus = runtimeHealth.executionEngine.status ?? "UNKNOWN";
 const apiHealth = botStatusSnapshot?.data?.runtime_health;
 const wsHealth = runtime?.botStatus?.runtime_health;
 const apiWsMismatch = Boolean(
@@ -216,29 +213,12 @@ const selectedStage = runtimeHealth.stages.find(
 ) ?? runtimeHealth.stages[0];
 
 useEffect(() => {
-    onRuntimeHealthChange?.({
-        botStatus: runtimeHealth.running ? "RUNNING" : "STOPPED",
-        wsStatus: runtimeHealth.browserWebSocket.status,
-        engineStatus: runtimeHealth.runtimeEngine.status,
-        executionState: executionStatus,
-        latency: runtimeHealth.latencyMs,
-        pipelineStatus: runtimeHealth.pipelineStatus,
-        loopCount: runtimeHealth.loopCount,
-    });
-}, [
-    executionStatus,
-    onRuntimeHealthChange,
-    runtimeHealth.browserWebSocket.status,
-    runtimeHealth.latencyMs,
-    runtimeHealth.loopCount,
-    runtimeHealth.pipelineStatus,
-    runtimeHealth.running,
-    runtimeHealth.runtimeEngine.status,
-]);
-
-useEffect(() => {
     if (botStatus?.runtime_health) {
-        setExecutionEnabled(runtimeHealth.executionEnabled);
+        const updateId = setTimeout(() => {
+            setExecutionEnabled(runtimeHealth.executionEnabled);
+        }, 0);
+
+        return () => clearTimeout(updateId);
     }
 }, [
     botStatus?.runtime_health,
@@ -262,6 +242,8 @@ useEffect(() => {
 
     return (
 
+        <>
+        <Header runtimeHealth={runtimeHealth} />
         <div className="dashboard">
 
             <div className="dashboard-layout">
@@ -560,6 +542,11 @@ useEffect(() => {
                             <span>LATENCY（遅延）</span>
                             <span>{runtimeHealth.latencyMs ?? "--"}</span>
                         </div>
+
+                        <div className="monitoring-row">
+                            <span>POSITION（ポジション）</span>
+                            <span>{position ?? "--"}</span>
+                        </div>
                     </div>
 
                 </div>
@@ -571,6 +558,7 @@ useEffect(() => {
         </div>
 
     </div>
+    </>
 
     );
 

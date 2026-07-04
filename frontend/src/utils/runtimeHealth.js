@@ -81,6 +81,8 @@ const missingSnapshot = () => ({
     timeline: [],
     pipelineStatus: "ERROR",
     loopCount: 0,
+    session: "UNKNOWN",
+    version: "UNKNOWN",
     runtimeHealthy: false,
     health: "CRITICAL",
     blockingReason: "SNAPSHOT_MISSING",
@@ -123,6 +125,18 @@ const LOOP_NAMES = {
     "portfolio-sync": "Portfolio Sync",
 };
 
+const normalizeTimelineEvent = (event = {}) => {
+    const reason = String(event.reason ?? "").toUpperCase();
+    const state = String(event.state ?? "").toUpperCase();
+
+    return {
+        ...event,
+        state: state === "IDLE" && reason.includes("AI_HOLD")
+            ? "IDLE_BY_AI_HOLD"
+            : event.state,
+    };
+};
+
 export function deriveRuntimeHealth({ botStatus } = {}) {
     const health = botStatus?.runtime_health;
 
@@ -160,11 +174,19 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         stages,
         activeStageId: health.activeStageId || stages[0]?.id,
         loops,
-        timeline: Array.isArray(health.timeline) ? health.timeline : [],
+        timeline: Array.isArray(health.timeline)
+            ? health.timeline.map(normalizeTimelineEvent)
+            : [],
         pipelineStatus: health.pipeline?.status || health.pipelineStatus || "UNKNOWN",
         loopCount: loops.filter(({ status }) => (
             status === "RUNNING" || status === "OK"
         )).length,
+        session: health.session?.status
+            || health.states?.governance?.session_state
+            || "UNKNOWN",
+        version: health.schemaVersion == null
+            ? "UNKNOWN"
+            : `V${health.schemaVersion}`,
         runtimeHealthy: health.runtimeHealthy === true,
         health: health.severity || health.health || "CRITICAL",
         blockingReason: health.blockingReason,

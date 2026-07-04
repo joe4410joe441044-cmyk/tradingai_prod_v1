@@ -1,24 +1,17 @@
 import React from "react";
-export default function StatusStrip({
+export default function StatusStrip({ runtimeHealth }) {
 
-    botStatus = "STOPPED",
-
-    wsStatus = "DISCONNECTED",
-
-    engineStatus = "BLOCKED",
-
-    latency = "--",
-
-    executionState = "DISABLED",
-
-    pipelineStatus = "WAIT",
-
-    loopCount = 0,
-
-    session = "LOCAL",
-
-    version = "V2",
-}) {
+    const botStatus = runtimeHealth.running ? "RUNNING" : "STOPPED";
+    const wsStatus = runtimeHealth.browserWebSocket.status;
+    const engineStatus = runtimeHealth.runtimeEngine.status;
+    const executionState = runtimeHealth.executionEngine.status;
+    const pipelineStatus = runtimeHealth.pipelineStatus;
+    const loopCount = runtimeHealth.loopCount;
+    const session = runtimeHealth.session;
+    const version = runtimeHealth.version;
+    const latency = runtimeHealth.latencyMs == null
+        ? "--"
+        : `${Number(runtimeHealth.latencyMs).toFixed(2)} ms`;
 
 
     /* =====================================================
