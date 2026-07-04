@@ -66,6 +66,7 @@ export default function BotControl({
 
                 <button
                     className="start-button-large"
+                    data-testid="bot-start-button"
                     onClick={async () => {
 
                         console.log(
@@ -169,6 +170,7 @@ export default function BotControl({
 
                 <button
                     className="stop-button-large"
+                    data-testid="bot-stop-button"
                     onClick={async () => {
 
                         console.log(

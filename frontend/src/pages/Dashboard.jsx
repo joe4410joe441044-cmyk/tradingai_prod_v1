@@ -467,7 +467,10 @@ useEffect(() => {
                    EXECUTION MONITORING
                 ============================================= */}
 
-                <div className="execution-monitoring-card">
+                <div
+                    className="execution-monitoring-card"
+                    data-testid="runtime-health-monitor"
+                >
 
                     <div className="governance-card-title">
                         EXECUTION MONITORING（実行監視）
@@ -489,11 +492,40 @@ useEffect(() => {
 
                         <div className="monitoring-row">
                             <span>BOT STATE（ボット状態）</span>
-                            <span className={runtimeHealth.running
+                            <span
+                                data-testid="bot-state"
+                                className={runtimeHealth.running
                                 ? "status-safe"
                                 : "status-warning"
-                            }>
+                                }
+                            >
                                 {runtimeHealth.running ? "RUNNING" : "STOPPED"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>TRADING RUNTIME（取引ランタイム）</span>
+                            <span
+                                data-testid="trading-runtime"
+                                className={runtimeHealth.runtimeEngine.healthy
+                                    ? "status-safe"
+                                    : "status-warning"
+                                }
+                            >
+                                {runtimeHealth.runtimeEngine.status ?? "--"}
+                            </span>
+                        </div>
+
+                        <div className="monitoring-row">
+                            <span>PIPELINE（パイプライン）</span>
+                            <span
+                                data-testid="pipeline-status"
+                                className={runtimeHealth.pipelineStatus === "OK"
+                                    ? "status-safe"
+                                    : "status-warning"
+                                }
+                            >
+                                {runtimeHealth.pipelineStatus ?? "--"}
                             </span>
                         </div>
 
@@ -509,28 +541,36 @@ useEffect(() => {
 
                         <div className="monitoring-row">
                             <span>TRADING ACTION（取引判断）</span>
-                            <span className={
+                            <span
+                                data-testid="trading-action"
+                                className={
                                 runtimeHealth.tradingAction.status === "ORDER_SUBMITTED"
                                     ? "status-safe"
                                     : "status-warning"
-                            }>
+                                }
+                            >
                                 {runtimeHealth.tradingAction.status ?? "--"}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>DECISION（判断）</span>
-                            <span>{runtimeHealth.tradingAction.decision ?? "--"}</span>
+                            <span data-testid="current-decision">
+                                {runtimeHealth.tradingAction.decision ?? "--"}
+                            </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>EXECUTION ENGINE（実行エンジン）</span>
-                            <span className={runtimeHealth.executionEngine.available
+                            <span
+                                data-testid="execution-engine"
+                                className={runtimeHealth.executionEngine.available
                                 ? "status-safe"
                                 : runtimeHealth.running
                                     ? "status-danger"
                                     : "status-warning"
-                            }>
+                                }
+                            >
                                 {runtimeHealth.executionEngine.status ?? "--"}
                             </span>
                         </div>
@@ -544,19 +584,24 @@ useEffect(() => {
 
                         <div className="monitoring-row">
                             <span>EXCHANGE WS（取引所通信）</span>
-                            <span className={runtimeHealth.exchangeWebSocket.connected
+                            <span
+                                data-testid="exchange-ws"
+                                className={runtimeHealth.exchangeWebSocket.connected
                                 ? "status-safe"
                                 : runtimeHealth.running
                                     ? "status-danger"
                                     : "status-warning"
-                            }>
+                                }
+                            >
                                 {runtimeHealth.exchangeWebSocket.status ?? "--"}
                             </span>
                         </div>
 
                         <div className="monitoring-row">
                             <span>ACTION REASON（待機理由）</span>
-                            <span>{runtimeHealth.tradingAction.reason ?? "--"}</span>
+                            <span data-testid="action-reason">
+                                {runtimeHealth.tradingAction.reason ?? "--"}
+                            </span>
                         </div>
 
                         <div className="monitoring-row">
