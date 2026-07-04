@@ -18,6 +18,7 @@ def build_runtime_debug_result():
         "priceHistoryTrace": None,
         "aiMomentumTrace": None,
         "liquidityInstabilityDebug": None,
+        "liquidityDeteriorationDebug": None,
         "aiRuntimeReached": False,
         "aiInput": None,
         "aiOutput": None,

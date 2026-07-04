@@ -730,6 +730,10 @@ class BotManager:
 
                             "sellVolume": sell_volume,
 
+                            "orderbookBids": bids,
+
+                            "orderbookAsks": asks,
+
                             "bestBid": float(
                                 data.get("best_bid", 0)
                             ),

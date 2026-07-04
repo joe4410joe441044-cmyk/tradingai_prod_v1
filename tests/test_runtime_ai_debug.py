@@ -292,6 +292,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "momentumPipelineTrace",
             "priceHistoryTrace",
             "aiRuntimeReached",
+            "liquidityDeteriorationDebug",
             "aiInput",
             "aiOutput",
             "aiDecision",
@@ -383,6 +384,32 @@ class RuntimeAIDebugTest(unittest.TestCase):
                     (90000.0 / 91000.0)
                     - (1000.0 / 91000.0)
                 ),
+                "orderbookAggregationMode": "SCALAR_FALLBACK",
+                "orderbookAggregationDepth": 20,
+                "rawFullBidTotal": 90000.0,
+                "rawFullAskTotal": 1000.0,
+                "rawFullTotalVolume": 91000.0,
+                "rawFullPressureDiff": (
+                    (90000.0 / 91000.0)
+                    - (1000.0 / 91000.0)
+                ),
+                "strategyBidTotal": 90000.0,
+                "strategyAskTotal": 1000.0,
+                "strategyTotalVolume": 91000.0,
+                "strategyPressureDiff": (
+                    (90000.0 / 91000.0)
+                    - (1000.0 / 91000.0)
+                ),
+                "excludedBidLevels": 0,
+                "excludedAskLevels": 0,
+                "excludedBidVolume": 0.0,
+                "excludedAskVolume": 0.0,
+                "minIncludedBid": None,
+                "maxIncludedAsk": None,
+                "minRawBid": None,
+                "maxRawBid": None,
+                "minRawAsk": None,
+                "maxRawAsk": None,
                 "spread": 1.0004 - 1.0,
                 "triggeredReasons": [
                     "absorptionDetected",
@@ -397,6 +424,96 @@ class RuntimeAIDebugTest(unittest.TestCase):
             ],
             "LIQUIDITY_INSTABILITY",
         )
+
+    def test_orderbook_top20_excludes_far_bid_from_strategy_input(self):
+        builder = MicrostructureStateBuilder()
+        bids = {
+            float(100 - index): 1.0
+            for index in range(20)
+        }
+        bids[0.00001] = 4091811.0
+        asks = {
+            float(101 + index): 2.0
+            for index in range(20)
+        }
+
+        state = builder.build_microstructure_state({
+            "buyVolume": 9999999.0,
+            "sellVolume": 9999999.0,
+            "orderbookBids": bids,
+            "orderbookAsks": asks,
+            "bestBid": 100.0,
+            "bestAsk": 101.0,
+            "lastPrice": 100.5,
+        })
+        debug = state["liquidityInstabilityDebug"]
+
+        self.assertEqual(debug["orderbookAggregationMode"], "TOP_N")
+        self.assertEqual(debug["orderbookAggregationDepth"], 20)
+        self.assertEqual(debug["rawFullBidTotal"], 4091831.0)
+        self.assertEqual(debug["strategyBidTotal"], 20.0)
+        self.assertEqual(debug["buyVolume"], 20.0)
+        self.assertEqual(debug["strategyAskTotal"], 40.0)
+        self.assertAlmostEqual(debug["pressureDiff"], 1.0 / 3.0)
+        self.assertEqual(
+            debug["strategyPressureDiff"],
+            debug["pressureDiff"],
+        )
+        self.assertEqual(debug["excludedBidLevels"], 1)
+        self.assertEqual(debug["excludedBidVolume"], 4091811.0)
+        self.assertEqual(debug["minIncludedBid"], 81.0)
+        self.assertEqual(debug["minRawBid"], 0.00001)
+
+    def test_orderbook_top20_excludes_far_ask_from_strategy_input(self):
+        builder = MicrostructureStateBuilder()
+        bids = {
+            float(100 - index): 3.0
+            for index in range(20)
+        }
+        asks = {
+            float(101 + index): 1.0
+            for index in range(20)
+        }
+        asks[1000.0] = 500000.0
+
+        state = builder.build_microstructure_state({
+            "orderbookBids": bids,
+            "orderbookAsks": asks,
+            "bestBid": 100.0,
+            "bestAsk": 101.0,
+            "lastPrice": 100.5,
+        })
+        debug = state["liquidityInstabilityDebug"]
+
+        self.assertEqual(debug["rawFullAskTotal"], 500020.0)
+        self.assertEqual(debug["strategyAskTotal"], 20.0)
+        self.assertEqual(debug["sellVolume"], 20.0)
+        self.assertEqual(debug["strategyBidTotal"], 60.0)
+        self.assertAlmostEqual(debug["pressureDiff"], 0.5)
+        self.assertEqual(debug["excludedAskLevels"], 1)
+        self.assertEqual(debug["excludedAskVolume"], 500000.0)
+        self.assertEqual(debug["maxIncludedAsk"], 120.0)
+        self.assertEqual(debug["maxRawAsk"], 1000.0)
+
+    def test_orderbook_scalar_input_keeps_legacy_volume_fallback(self):
+        state = MicrostructureStateBuilder().build_microstructure_state({
+            "buyVolume": 12.0,
+            "sellVolume": 8.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.1,
+            "lastPrice": 1.05,
+        })
+        debug = state["liquidityInstabilityDebug"]
+
+        self.assertEqual(
+            debug["orderbookAggregationMode"],
+            "SCALAR_FALLBACK",
+        )
+        self.assertEqual(debug["buyVolume"], 12.0)
+        self.assertEqual(debug["sellVolume"], 8.0)
+        self.assertEqual(debug["rawFullBidTotal"], 12.0)
+        self.assertEqual(debug["strategyBidTotal"], 12.0)
+        self.assertAlmostEqual(debug["pressureDiff"], 0.2)
 
     def test_liquidity_debug_does_not_change_safe_result(self):
         builder = MicrostructureStateBuilder()
@@ -417,6 +534,80 @@ class RuntimeAIDebugTest(unittest.TestCase):
         self.assertEqual(
             liquidity_debug["triggeredReasons"],
             [],
+        )
+
+    def test_runtime_debug_exposes_liquidity_deterioration_reason(self):
+        state = MicrostructureStateBuilder().build_microstructure_state({
+            "buyVolume": 10000.0,
+            "sellVolume": 10000.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.0001,
+            "lastPrice": 1.00005,
+        })
+
+        runtime_result = TradingRuntime().process_runtime(state)
+        deterioration_debug = runtime_result["runtimeDebug"][
+            "liquidityDeteriorationDebug"
+        ]
+
+        self.assertEqual(
+            runtime_result["strategyOutput"]["strategy"][
+                "suppressionReason"
+            ],
+            "LIQUIDITY_DETERIORATION",
+        )
+        self.assertEqual(
+            deterioration_debug,
+            {
+                "reason": "LIQUIDITY_DETERIORATION",
+                "triggered": True,
+                "checkedFields": [
+                    "spread",
+                    "volatility",
+                    "liquidityQuality",
+                ],
+                "failedFields": ["liquidityQuality"],
+                "liquidityQuality": 0.2,
+                "marketStability": None,
+                "executionQuality": None,
+                "spread": 0.0001,
+                "spreadOk": True,
+                "totalVolume": 20000.0,
+                "totalVolumeOk": False,
+                "pressureDiff": 0.0,
+                "pressureDiffOk": None,
+                "volatility": 0.0,
+                "volatilityOk": True,
+                "orderbookAggregationMode": "SCALAR_FALLBACK",
+                "orderbookAggregationDepth": 20,
+            },
+        )
+
+    def test_liquidity_deterioration_debug_does_not_add_pressure_rule(self):
+        state = MicrostructureStateBuilder().build_microstructure_state({
+            "buyVolume": 27000.0,
+            "sellVolume": 3000.0,
+            "bestBid": 1.0,
+            "bestAsk": 1.0001,
+            "lastPrice": 1.00005,
+        })
+
+        runtime_result = TradingRuntime().process_runtime(state)
+        deterioration_debug = runtime_result["runtimeDebug"][
+            "liquidityDeteriorationDebug"
+        ]
+
+        self.assertTrue(deterioration_debug["triggered"])
+        self.assertAlmostEqual(
+            deterioration_debug["pressureDiff"],
+            0.8,
+        )
+        self.assertIsNone(
+            deterioration_debug["pressureDiffOk"]
+        )
+        self.assertNotIn(
+            "pressureDiff",
+            deterioration_debug["checkedFields"],
         )
 
     def test_momentum_trace_proves_zero_exists_at_source(self):

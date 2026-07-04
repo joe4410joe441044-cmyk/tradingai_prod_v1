@@ -117,13 +117,43 @@ class OrderBookWS:
 
         self.resnapshot_required = False
 
+        self.is_orderbook_synced = False
+
+        self.cached_diffs = []
+
+        self.sequence_gap_count = 0
+
+        self.last_sequence_gap = None
+
+        self.resync_count = 0
+
+        self.cached_diff_count = 0
+
+        self.replayed_diff_count = 0
+
+        self.dropped_old_diff_count = 0
+
+        self._orderbook_lock = threading.RLock()
+
+        self._sync_in_progress = False
+
+        self._sync_generation = 0
+
     # =========================
     # LOAD SNAPSHOT
     # =========================
 
-    def load_snapshot(self):
+    def load_snapshot(self, is_resync=False, generation=None):
 
-        self.snapshot_loaded = False
+        if generation is None:
+            generation = self._sync_generation
+
+        with self._orderbook_lock:
+            if generation != self._sync_generation:
+                return False
+
+            self.snapshot_loaded = False
+            self.is_orderbook_synced = False
 
         try:
 
@@ -149,51 +179,90 @@ class OrderBookWS:
                 data,
             )
 
-            snapshot = (
-                data.get("data", {})
-            )
-
-            bids = snapshot.get(
-                "bids",
-                []
-            )
-
-            asks = snapshot.get(
-                "asks",
-                []
-            )
-
-            self.bids = {
+            snapshot = data.get("data", {})
+            snapshot_sequence = int(snapshot["sequence"])
+            snapshot_bids = {
                 float(price): float(size)
-                for price, size in bids
+                for price, size in snapshot.get("bids", [])
+            }
+            snapshot_asks = {
+                float(price): float(size)
+                for price, size in snapshot.get("asks", [])
             }
 
-            self.asks = {
-                float(price): float(size)
-                for price, size in asks
-            }
+            if not snapshot_bids or not snapshot_asks:
+                raise ValueError("snapshot orderbook is empty")
 
-            self.snapshot_sequence = int(
-                snapshot.get("sequence", 0)
-            )
+            replayed_diff = None
 
-            self.last_sequence_end = self.snapshot_sequence
+            with self._orderbook_lock:
+                if generation != self._sync_generation:
+                    return False
 
-            self.snapshot_loaded = True
+                self.bids = snapshot_bids
+                self.asks = snapshot_asks
+                self.snapshot_sequence = snapshot_sequence
+                self.last_sequence_end = snapshot_sequence
 
-            self.orderbook_initialized = True
+                cached_diffs = sorted(
+                    self.cached_diffs,
+                    key=lambda item: (
+                        item["sequence_start"],
+                        item["sequence_end"],
+                    ),
+                )
+                self.cached_diffs = []
+
+                for diff in cached_diffs:
+                    result = self._apply_sequenced_diff_locked(
+                        diff,
+                        replay=True,
+                    )
+
+                    if result == "gap":
+                        self.bids = {}
+                        self.asks = {}
+                        self.last_sequence_end = None
+                        self.resnapshot_required = True
+                        return False
+
+                    if result == "applied":
+                        replayed_diff = diff
+
+                if not self._refresh_book_metrics_locked():
+                    raise ValueError("snapshot replay produced invalid book")
+
+                self.snapshot_loaded = True
+                self.orderbook_initialized = True
+                self.is_orderbook_synced = True
+                self.resnapshot_required = False
+
+                if is_resync:
+                    self.resync_count += 1
+
+                debug = self._get_orderbook_debug_locked()
 
             add_log(
-                f"📸 SNAPSHOT LOADED "
-                f"bids={len(self.bids)} "
-                f"asks={len(self.asks)}"
+                f"📸 SNAPSHOT SYNCED "
+                f"bids={len(snapshot_bids)} "
+                f"asks={len(snapshot_asks)} "
+                f"snapshotSequence={debug['snapshotSequence']} "
+                f"lastSequenceEnd={debug['lastSequenceEnd']} "
+                f"sequenceGapCount={debug['sequenceGapCount']} "
+                f"resyncCount={debug['resyncCount']}"
             )
 
             ws_debug(
-                "KuCoin snapshot bid_levels=%s ask_levels=%s",
+                "KuCoin snapshot bid_levels=%s ask_levels=%s debug=%s",
                 sorted(self.bids.keys(), reverse=True)[:10],
                 sorted(self.asks.keys())[:10],
+                debug,
             )
+
+            if replayed_diff is not None:
+                self._publish_current_book(replayed_diff)
+
+            return True
 
         except Exception as e:
 
@@ -202,13 +271,250 @@ class OrderBookWS:
                 "error"
             )
 
+            return False
+
+    def _start_snapshot_sync(self, is_resync=False):
+
+        with self._orderbook_lock:
+            if self._sync_in_progress:
+                return
+
+            is_resync = is_resync or self.resnapshot_required
+            self._sync_in_progress = True
+            generation = self._sync_generation
+
+        threading.Thread(
+            target=self._snapshot_sync_worker,
+            args=(generation, is_resync),
+            daemon=True,
+        ).start()
+
+    def _snapshot_sync_worker(self, generation, is_resync):
+
+        try:
+            resync_attempt = is_resync
+
+            for attempt in range(3):
+                if self.load_snapshot(
+                    is_resync=resync_attempt,
+                    generation=generation,
+                ):
+                    return
+
+                with self._orderbook_lock:
+                    if generation != self._sync_generation:
+                        return
+
+                    resync_attempt = (
+                        resync_attempt
+                        or self.resnapshot_required
+                    )
+
+                if attempt < 2:
+                    time.sleep(0.1)
+        finally:
+            with self._orderbook_lock:
+                if generation == self._sync_generation:
+                    self._sync_in_progress = False
+
+    def _parse_diff(self, message_data):
+
+        sequence = message_data.get("sequence")
+        sequence_start = message_data.get(
+            "sequenceStart",
+            sequence,
+        )
+        sequence_end = message_data.get(
+            "sequenceEnd",
+            sequence,
+        )
+
+        if sequence_start is None or sequence_end is None:
+            raise ValueError("delta missing sequence")
+
+        change = message_data.get("change")
+
+        if not change:
+            raise ValueError("delta missing change")
+
+        price, side, size = change.split(",")
+
+        if side not in ("buy", "sell"):
+            raise ValueError(f"unsupported side: {side}")
+
+        return {
+            "sequence_start": int(sequence_start),
+            "sequence_end": int(sequence_end),
+            "price": float(price),
+            "side": side,
+            "size": float(size),
+        }
+
+    def _record_sequence_gap_locked(self, diff):
+
+        previous_sequence = self.last_sequence_end
+        gap_size = (
+            diff["sequence_start"]
+            - previous_sequence
+            - 1
+        )
+
+        self.sequence_gap_count += 1
+        self.last_sequence_gap = {
+            "previousLastSequenceEnd": previous_sequence,
+            "incomingSequenceStart": diff["sequence_start"],
+            "incomingSequenceEnd": diff["sequence_end"],
+            "gapSize": gap_size,
+            "timestamp": time.time(),
+        }
+
+        add_log(
+            f"⚠️ KUCOIN SEQUENCE GAP "
+            f"previous={previous_sequence} "
+            f"incomingStart={diff['sequence_start']} "
+            f"incomingEnd={diff['sequence_end']} "
+            f"gapSize={gap_size}",
+            "warning",
+        )
+
+    def _apply_sequenced_diff_locked(self, diff, replay=False):
+
+        if self.last_sequence_end is None:
+            return "gap"
+
+        if diff["sequence_end"] <= self.last_sequence_end:
+            self.dropped_old_diff_count += 1
+            return "old"
+
+        if diff["sequence_start"] > self.last_sequence_end + 1:
+            self._record_sequence_gap_locked(diff)
+            return "gap"
+
+        book = self.bids if diff["side"] == "buy" else self.asks
+
+        if diff["size"] <= 0:
+            book.pop(diff["price"], None)
+        else:
+            book[diff["price"]] = diff["size"]
+
+        self.last_sequence_end = diff["sequence_end"]
+
+        if replay:
+            self.replayed_diff_count += 1
+
+        return "applied"
+
+    def _refresh_book_metrics_locked(self):
+
+        if not self.bids or not self.asks:
+            return False
+
+        self.best_bid = max(self.bids)
+        self.best_ask = min(self.asks)
+
+        if (
+            self.best_bid <= 0
+            or self.best_ask <= 0
+            or self.best_bid >= self.best_ask
+        ):
+            return False
+
+        self.spread = self.best_ask - self.best_bid
+        self.last_price = (self.best_bid + self.best_ask) / 2
+        return True
+
+    def _get_orderbook_debug_locked(self):
+
+        return {
+            "snapshotSequence": self.snapshot_sequence,
+            "lastSequenceEnd": self.last_sequence_end,
+            "wsUpdateCount": self.ws_update_count,
+            "sequenceGapCount": self.sequence_gap_count,
+            "lastSequenceGap": self.last_sequence_gap,
+            "resyncCount": self.resync_count,
+            "isOrderbookSynced": self.is_orderbook_synced,
+            "cachedDiffCount": self.cached_diff_count,
+            "pendingCachedDiffCount": len(self.cached_diffs),
+            "replayedDiffCount": self.replayed_diff_count,
+            "droppedOldDiffCount": self.dropped_old_diff_count,
+        }
+
+    def get_orderbook_debug(self):
+
+        with self._orderbook_lock:
+            return self._get_orderbook_debug_locked()
+
+    def _publish_current_book(self, diff):
+
+        with self._orderbook_lock:
+            if not self.is_orderbook_synced:
+                return
+
+            if not self._refresh_book_metrics_locked():
+                self.snapshot_loaded = False
+                self.is_orderbook_synced = False
+                self.resnapshot_required = True
+                trigger_resync = True
+            else:
+                trigger_resync = False
+                self.last_price_update = time.time()
+                self.last_valid_bid = self.best_bid
+                self.last_valid_ask = self.best_ask
+                self.last_ws_receive_time = time.time()
+                self.ws_update_count += 1
+                debug = self._get_orderbook_debug_locked()
+                payload = {
+                    "symbol": self.original_symbol,
+                    "best_bid": self.best_bid,
+                    "best_ask": self.best_ask,
+                    "spread": self.spread,
+                    "price": self.last_price,
+                    "bids": dict(self.bids),
+                    "asks": dict(self.asks),
+                    "price_path_debug": {
+                        "lastWsPrice": self.last_price,
+                        "lastWsReceiveTime": self.last_ws_receive_time,
+                        "wsUpdateCount": self.ws_update_count,
+                    },
+                    "orderbook_sync_debug": debug,
+                }
+
+        if trigger_resync:
+            add_log(
+                "🔄 INVALID LOCAL BOOK RESNAPSHOT TRIGGER",
+                "error",
+            )
+            self._start_snapshot_sync(is_resync=True)
+            return
+
+        ws_debug(
+            "KuCoin delta sequenceStart=%s sequenceEnd=%s "
+            "side=%s price=%s size=%s best_bid=%s best_ask=%s "
+            "mid_price=%s spread=%s",
+            diff["sequence_start"],
+            diff["sequence_end"],
+            diff["side"],
+            diff["price"],
+            diff["size"],
+            payload["best_bid"],
+            payload["best_ask"],
+            payload["price"],
+            payload["spread"],
+        )
+
+        self.on_update(
+            self.original_symbol,
+            payload,
+            self.runtime_id,
+        )
+
 
     # =========================
     # MESSAGE
     # =========================
 
     def on_message(self, ws, message):
-        
+
         if not hasattr(self, "_first_msg"):
             ws_debug(
                 "KuCoin first WebSocket message=%s",
@@ -229,287 +535,45 @@ class OrderBookWS:
 
                 return
 
-            # =========================
-            # SNAPSHOT CHECK
-            # =========================
-
-            if not self.snapshot_loaded:
-
-                ws_debug("KuCoin snapshot not loaded; loading now")
-
-                self.load_snapshot()
-
-                if not self.snapshot_loaded:
-                    return
-                
-            # =========================
-            # FUTURES CHANGE
-            # =========================
-
-
-            change = (
-                data.get("data", {})
-                    .get("change")
-            )
-            sequence = (
-                data.get("data", {})
-                    .get("sequence")
-            )
-
-            if sequence is None:
-                ws_debug("KuCoin delta missing sequence")
-                return
-
-            sequence = int(sequence)
-
-            if sequence <= self.last_sequence_end:
-                return
-
-            self.last_sequence_end = sequence
-
-            if not change:
-
-                ws_debug("KuCoin message contained no orderbook change")
-
-                return
-
-
             try:
-
-                price, side, size = (
-                    change.split(",")
-                )
-
-                price = float(price)
-
-                size = float(size)
-            
+                diff = self._parse_diff(data.get("data", {}))
             except Exception as e:
-
                 add_log(
-                    f"❌ CHANGE PARSE ERROR: "
-                    f"{e}",
+                    f"❌ CHANGE PARSE ERROR: {e}",
                     "error"
                 )
-
                 return
 
-            # =========================
-            # APPLY DELTAS
-            # =========================
+            trigger_resync = False
+            trigger_initial_sync = False
 
-            if side == "buy":
-
-                if size <= 0:
-
-                    self.bids.pop(
-                        price,
-                        None
-                    )
-
+            with self._orderbook_lock:
+                if not self.is_orderbook_synced:
+                    self.cached_diffs.append(diff)
+                    self.cached_diff_count += 1
+                    trigger_initial_sync = not self._sync_in_progress
                 else:
+                    result = self._apply_sequenced_diff_locked(diff)
 
-                    self.bids[price] = size
+                    if result == "gap":
+                        self.snapshot_loaded = False
+                        self.is_orderbook_synced = False
+                        self.resnapshot_required = True
+                        self.cached_diffs = []
+                        trigger_resync = True
+                    elif result == "old":
+                        return
 
-            elif side == "sell":
-
-                if size <= 0:
-
-                    self.asks.pop(
-                        price,
-                        None
-                    )
-
-                else:
-
-                    self.asks[price] = size
-
-
-            # =========================
-            # EMPTY LOCAL BOOK
-            # =========================
-
-            if (
-                not self.bids
-                or
-                not self.asks
-            ):
-
-                ws_debug(
-                    "Empty KuCoin local book bids=%d asks=%d",
-                    len(self.bids),
-                    len(self.asks),
-                )
-
+            if trigger_resync:
+                self._start_snapshot_sync(is_resync=True)
                 return
 
-            # =========================
-            # RECONSTRUCT BEST PRICE
-            # =========================
-
-            self.best_bid = max(
-                self.bids.keys()
-            )
-
-            self.best_ask = min(
-                self.asks.keys()
-            )
-
-
-            # =========================
-            # EMPTY CHECK
-            # =========================
-
-            if (
-                self.best_bid
-                >=
-                self.best_ask
-            ):
-
-                add_log(
-                    f"❌ CROSSED BOOK "
-                    f"SEQ={sequence} "
-                    f"BID={self.best_bid} "
-                    f"ASK={self.best_ask}",
-                    "error"
-                )
-
-                common = (
-                    set(self.bids.keys())
-                    &
-                    set(self.asks.keys())
-                )
-
-                ws_debug(
-                    "Crossed KuCoin book details top_bids=%s common_prices=%s",
-                    sorted(self.bids.keys(), reverse=True)[:50],
-                    sorted(list(common))[:20],
-                )
-
-                add_log(
-                    "🔄 RESNAPSHOT TRIGGER",
-                    "error"
-                )
-
-                self.snapshot_loaded = False
-
-                self.bids.clear()
-
-                self.asks.clear()
-
-                self.load_snapshot()
-
+            if trigger_initial_sync:
+                self._start_snapshot_sync()
                 return
 
-            # =========================
-            # SPREAD
-            # =========================
-
-            self.spread = (
-                self.best_ask
-                - self.best_bid
-            )
-
-            # =========================
-            # MID PRICE
-            # =========================
-
-            self.last_price = (
-                self.best_bid
-                + self.best_ask
-            ) / 2
-
-            ws_debug(
-                "KuCoin delta sequence=%s side=%s price=%s size=%s "
-                "best_bid=%s best_ask=%s mid_price=%s spread=%s",
-                sequence,
-                side,
-                price,
-                size,
-                self.best_bid,
-                self.best_ask,
-                self.last_price,
-                self.spread,
-            )
-
-            self.last_price_update = time.time()
-
-            # =========================
-            # INVALID BOOK
-            # =========================
-
-            if (
-                self.best_bid <= 0
-                or
-                self.best_ask <= 0
-            ):
-
-                add_log(
-                    "❌ INVALID BOOK",
-                    "error"
-                )
-
-                return
-
-            # =========================
-            # CROSSED BOOK
-            # =========================
-
-            if (
-                self.best_bid
-                >=
-                self.best_ask
-            ):
-
-                add_log(
-                    f"❌ CROSSED BOOK "
-                    f"BID={self.best_bid} "
-                    f"ASK={self.best_ask}",
-                    "error"
-                )
-
-                return
-
-            # =========================
-            # SAVE VALID BOOK
-            # =========================
-
-            self.last_valid_bid = (
-                self.best_bid
-            )
-
-            self.last_valid_ask = (
-                self.best_ask
-            )
-
-            self.last_ws_receive_time = time.time()
-
-            self.ws_update_count += 1
-
-            # =========================
-            # CALLBACK
-            # =========================
-
-            self.on_update(
-                self.original_symbol,
-                {
-                    "symbol": self.original_symbol,
-                    "best_bid": self.best_bid,
-                    "best_ask": self.best_ask,
-                    "spread": self.spread,
-                    "price": self.last_price,
-                    "bids": self.bids,
-                    "asks": self.asks,
-                    "price_path_debug": {
-                        "lastWsPrice": self.last_price,
-                        "lastWsReceiveTime": (
-                            self.last_ws_receive_time
-                        ),
-                        "wsUpdateCount": self.ws_update_count,
-                    },
-                },
-                self.runtime_id
-            )
+            if self.is_orderbook_synced:
+                self._publish_current_book(diff)
 
         except Exception as e:
 
@@ -530,8 +594,6 @@ class OrderBookWS:
             "🟢 KUCOIN WS CONNECTED",
             "success"
         )
-
-        self.load_snapshot()
 
         subscribe_data = {
 
@@ -562,6 +624,21 @@ class OrderBookWS:
             f"{self.symbol}",
             "info"
         )
+
+        with self._orderbook_lock:
+            self._sync_generation += 1
+            self._sync_in_progress = False
+            self.snapshot_loaded = False
+            self.orderbook_initialized = False
+            self.is_orderbook_synced = False
+            self.resnapshot_required = False
+            self.snapshot_sequence = 0
+            self.last_sequence_end = None
+            self.cached_diffs = []
+            self.bids = {}
+            self.asks = {}
+
+        self._start_snapshot_sync()
 
     # =========================
     # CLOSE

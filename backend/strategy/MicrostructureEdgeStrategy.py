@@ -158,9 +158,109 @@ class MicrostructureEdgeStrategy:
             spread_safe = False
             spread_risk = "LIQUIDITY_DETERIORATION"
 
+        liquidity_instability_debug = dict(
+            microstructure_state.get(
+                "liquidityInstabilityDebug",
+                {},
+            )
+            or {}
+        )
+        total_volume = liquidity_instability_debug.get(
+            "totalVolume"
+        )
+        pressure_diff = liquidity_instability_debug.get(
+            "pressureDiff"
+        )
+
+        if pressure_diff is None:
+            pressure_diff = abs(
+                float(
+                    microstructure_state.get(
+                        "buyPressure",
+                        0.0,
+                    )
+                )
+                - float(
+                    microstructure_state.get(
+                        "sellPressure",
+                        0.0,
+                    )
+                )
+            )
+
+        if spread_risk == "ABNORMAL_SPREAD":
+            checked_fields = ["spread"]
+        elif spread_risk == "SPREAD_VOLATILITY":
+            checked_fields = ["spread", "volatility"]
+        else:
+            checked_fields = [
+                "spread",
+                "volatility",
+                "liquidityQuality",
+            ]
+
+        triggered = (
+            spread_risk == "LIQUIDITY_DETERIORATION"
+        )
+        total_volume_ok = None
+
+        if total_volume is not None:
+            total_volume_liquidity_quality = round(
+                min(float(total_volume) / 100000, 1.0),
+                4,
+            )
+            total_volume_ok = (
+                total_volume_liquidity_quality >= 0.35
+            )
+
+        liquidity_deterioration_debug = {
+            "reason": (
+                "LIQUIDITY_DETERIORATION"
+                if triggered
+                else None
+            ),
+            "triggered": triggered,
+            "checkedFields": checked_fields,
+            "failedFields": (
+                ["liquidityQuality"]
+                if triggered
+                else []
+            ),
+            "liquidityQuality": liquidity_quality,
+            "marketStability": microstructure_state.get(
+                "marketStability"
+            ),
+            "executionQuality": microstructure_state.get(
+                "executionQuality"
+            ),
+            "spread": spread,
+            "spreadOk": spread <= self.MAX_SPREAD,
+            "totalVolume": total_volume,
+            "totalVolumeOk": total_volume_ok,
+            "pressureDiff": pressure_diff,
+            # pressureDiff is diagnostic only; the current spread safety
+            # decision does not apply a pressure threshold.
+            "pressureDiffOk": None,
+            "volatility": spread_volatility,
+            "volatilityOk": spread_volatility <= 0.65,
+            "orderbookAggregationMode": (
+                liquidity_instability_debug.get(
+                    "orderbookAggregationMode"
+                )
+            ),
+            "orderbookAggregationDepth": (
+                liquidity_instability_debug.get(
+                    "orderbookAggregationDepth"
+                )
+            ),
+        }
+
         return {
             "spreadSafe": spread_safe,
             "spreadRisk": spread_risk,
+            "liquidityDeteriorationDebug": (
+                liquidity_deterioration_debug
+            ),
         }
 
     # ============================================================
@@ -500,6 +600,12 @@ class MicrostructureEdgeStrategy:
             "liquidityInstabilityDebug": (
                 liquidity_result[
                     "liquidityInstabilityDebug"
+                ]
+            ),
+
+            "liquidityDeteriorationDebug": (
+                spread_result[
+                    "liquidityDeteriorationDebug"
                 ]
             ),
 

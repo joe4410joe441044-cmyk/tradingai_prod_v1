@@ -41,6 +41,8 @@ from backend.utils.log_buffer import runtime_debug
 
 class MicrostructureStateBuilder:
 
+    ORDERBOOK_AGGREGATION_DEPTH = 20
+
     # ========================================================
     # INIT
     # ========================================================
@@ -823,19 +825,108 @@ class MicrostructureStateBuilder:
         # Market Inputs
         # ----------------------------------------------------
 
-        buy_volume = float(
+        scalar_buy_volume = float(
             market_data.get(
                 "buyVolume",
                 0.0,
             )
         )
 
-        sell_volume = float(
+        scalar_sell_volume = float(
             market_data.get(
                 "sellVolume",
                 0.0,
             )
         )
+
+        orderbook_bids = market_data.get("orderbookBids")
+        orderbook_asks = market_data.get("orderbookAsks")
+
+        has_orderbook = (
+            orderbook_bids is not None
+            and orderbook_asks is not None
+        )
+
+        if has_orderbook:
+            bid_levels = sorted(
+                (
+                    (float(price), float(size))
+                    for price, size in orderbook_bids.items()
+                ),
+                key=lambda level: level[0],
+                reverse=True,
+            )
+            ask_levels = sorted(
+                (
+                    (float(price), float(size))
+                    for price, size in orderbook_asks.items()
+                ),
+                key=lambda level: level[0],
+            )
+
+            strategy_bid_levels = bid_levels[
+                :self.ORDERBOOK_AGGREGATION_DEPTH
+            ]
+            strategy_ask_levels = ask_levels[
+                :self.ORDERBOOK_AGGREGATION_DEPTH
+            ]
+
+            raw_full_bid_total = sum(
+                size for _, size in bid_levels
+            )
+            raw_full_ask_total = sum(
+                size for _, size in ask_levels
+            )
+            strategy_bid_total = sum(
+                size for _, size in strategy_bid_levels
+            )
+            strategy_ask_total = sum(
+                size for _, size in strategy_ask_levels
+            )
+
+            buy_volume = strategy_bid_total
+            sell_volume = strategy_ask_total
+            orderbook_aggregation_mode = "TOP_N"
+            excluded_bid_levels = max(
+                0,
+                len(bid_levels)
+                - self.ORDERBOOK_AGGREGATION_DEPTH,
+            )
+            excluded_ask_levels = max(
+                0,
+                len(ask_levels)
+                - self.ORDERBOOK_AGGREGATION_DEPTH,
+            )
+            min_included_bid = (
+                strategy_bid_levels[-1][0]
+                if strategy_bid_levels
+                else None
+            )
+            max_included_ask = (
+                strategy_ask_levels[-1][0]
+                if strategy_ask_levels
+                else None
+            )
+            min_raw_bid = bid_levels[-1][0] if bid_levels else None
+            max_raw_bid = bid_levels[0][0] if bid_levels else None
+            min_raw_ask = ask_levels[0][0] if ask_levels else None
+            max_raw_ask = ask_levels[-1][0] if ask_levels else None
+        else:
+            buy_volume = scalar_buy_volume
+            sell_volume = scalar_sell_volume
+            raw_full_bid_total = buy_volume
+            raw_full_ask_total = sell_volume
+            strategy_bid_total = buy_volume
+            strategy_ask_total = sell_volume
+            orderbook_aggregation_mode = "SCALAR_FALLBACK"
+            excluded_bid_levels = 0
+            excluded_ask_levels = 0
+            min_included_bid = None
+            max_included_ask = None
+            min_raw_bid = None
+            max_raw_bid = None
+            min_raw_ask = None
+            max_raw_ask = None
 
         best_bid = float(
             market_data.get(
@@ -874,6 +965,24 @@ class MicrostructureStateBuilder:
         total_volume = (
             buy_volume + sell_volume
         )
+
+        raw_full_total_volume = (
+            raw_full_bid_total + raw_full_ask_total
+        )
+
+        if raw_full_total_volume <= 0:
+            raw_full_pressure_diff = 0.0
+        else:
+            raw_full_pressure_diff = abs(
+                (
+                    raw_full_bid_total
+                    / raw_full_total_volume
+                )
+                - (
+                    raw_full_ask_total
+                    / raw_full_total_volume
+                )
+            )
 
         # ----------------------------------------------------
         # Price Delta
@@ -1005,6 +1114,36 @@ class MicrostructureStateBuilder:
             "pressureDiff": abs(
                 buy_pressure - sell_pressure
             ),
+            "orderbookAggregationMode": (
+                orderbook_aggregation_mode
+            ),
+            "orderbookAggregationDepth": (
+                self.ORDERBOOK_AGGREGATION_DEPTH
+            ),
+            "rawFullBidTotal": raw_full_bid_total,
+            "rawFullAskTotal": raw_full_ask_total,
+            "rawFullTotalVolume": raw_full_total_volume,
+            "rawFullPressureDiff": raw_full_pressure_diff,
+            "strategyBidTotal": strategy_bid_total,
+            "strategyAskTotal": strategy_ask_total,
+            "strategyTotalVolume": total_volume,
+            "strategyPressureDiff": abs(
+                buy_pressure - sell_pressure
+            ),
+            "excludedBidLevels": excluded_bid_levels,
+            "excludedAskLevels": excluded_ask_levels,
+            "excludedBidVolume": (
+                raw_full_bid_total - strategy_bid_total
+            ),
+            "excludedAskVolume": (
+                raw_full_ask_total - strategy_ask_total
+            ),
+            "minIncludedBid": min_included_bid,
+            "maxIncludedAsk": max_included_ask,
+            "minRawBid": min_raw_bid,
+            "maxRawBid": max_raw_bid,
+            "minRawAsk": min_raw_ask,
+            "maxRawAsk": max_raw_ask,
             "spread": spread,
             "triggeredReasons": [],
         }
