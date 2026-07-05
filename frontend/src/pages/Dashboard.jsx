@@ -124,6 +124,8 @@ const [tradeSettings, setTradeSettings] = useState({
 
     maxDd: 5,
 
+    risk_percent: 1.0,
+
     trailing: false,
 
     spreadFilter: true,

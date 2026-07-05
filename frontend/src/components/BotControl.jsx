@@ -98,26 +98,13 @@ export default function BotControl({
                                         },
 
                                         body: JSON.stringify({
-
-                                            ...config,
-
-                                            mode:
-                                                String(config.mode)
-                                                    .toLowerCase(),
-
-                                            exchange:
-                                                String(config.exchange || "kucoin")
-                                                    .toLowerCase(),
-
-                                            risk_percent:
-                                                config.risk_percent ?? 1,
-
-                                            sl_percent:
-                                                config.sl_percent ?? config.sl ?? 1,
-
-                                            tp_percent:
-                                                config.tp_percent ?? config.tp ?? 1,
-
+                                            symbol: config.symbol,
+                                            exchange: String(config.exchange || "kucoin").toLowerCase(),
+                                            risk_percent: Number(config.risk_percent ?? 1),
+                                            sl_percent: Number(config.sl_percent ?? config.sl ?? 1),
+                                            leverage: Number(config.leverage ?? 1),
+                                            tp_percent: Number(config.tp_percent ?? config.tp ?? 1),
+                                            mode: String(config.mode || "paper").toLowerCase()
                                         })
 
                                     }
