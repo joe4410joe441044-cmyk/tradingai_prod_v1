@@ -2,6 +2,8 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+import backend.config as backend_config
+from Bot.engine.execution_engine import ExecutionEngine
 from backend.api.bot_api import StartConfig, StatusResponse, start_bot
 from backend.bot_manager.bot_manager import BotManager
 from backend.market.exchange_factory import ExchangeFactory
@@ -12,6 +14,55 @@ from backend.market.exchanges.kucoin_market_ws import (
     OrderBookWS as KuCoinFuturesOrderBookWS,
     normalize_futures_symbol,
 )
+from backend.portfolio.portfolio_manager import PortfolioManager
+from backend.runtime.ExecutionRuntime import ExecutionRuntime
+from backend.runtime.governance_runtime import governance_state
+
+
+class StaticPriceManager:
+
+    def __init__(self, price):
+        self.price = price
+
+    def get_current_price(self):
+        return self.price
+
+
+class FakeLiveExchange:
+
+    def __init__(self, credentials_ready=True):
+        self._credentials_ready = credentials_ready
+        self.place_order_calls = []
+        self.live_order_allowed = False
+        self.live_block_reasons = []
+
+    def credentials_ready(self):
+        return self._credentials_ready
+
+    def set_live_order_gate(self, allowed, reasons=None):
+        self.live_order_allowed = bool(allowed)
+        self.live_block_reasons = list(reasons or [])
+
+    def get_balance(self):
+        return 2500.0
+
+    def get_positions(self, symbol=None):
+        return None
+
+    def get_symbol_rules(self, symbol):
+        return {
+            "multiplier": 0.001,
+            "min_size": 1,
+        }
+
+    def place_order(self, **order):
+        self.place_order_calls.append(order)
+        return {
+            "success": True,
+            "raw": {
+                "mock": True,
+            },
+        }
 
 
 class ExchangeOrderBookSourceTest(unittest.TestCase):
@@ -22,8 +73,12 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
             "symbol": "XRPUSDT",
             "mode": "paper",
             "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
             "sl_percent": 0.5,
             "tp_percent": 1,
+            "timeframe": "5m",
+            "trailing_stop": True,
             "leverage": 5,
         }
         values.update(overrides)
@@ -58,6 +113,47 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         start_config = manager.start.call_args.args[0]
         self.assertEqual(start_config["exchange"], "binance")
         self.assertEqual(start_config["symbol"], "XRPUSDT")
+        self.assertEqual(start_config["position_size"], 100)
+        self.assertEqual(start_config["max_drawdown_pct"], 5)
+        self.assertEqual(start_config["timeframe"], "5m")
+        self.assertTrue(start_config["trailing_stop"])
+
+    def test_bot_manager_start_passes_position_risk_config_to_engine(self):
+        manager = BotManager()
+        ws = Mock()
+        ws.connected = False
+        ws.start = Mock()
+        config = {
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+            "mode": "paper",
+            "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 0.5,
+            "tp_percent": 1,
+            "timeframe": "5m",
+            "trailing_stop": True,
+            "leverage": 5,
+        }
+
+        with patch(
+            "backend.bot_manager.bot_manager.ExchangeFactory.create_market_ws",
+            return_value=ws,
+        ):
+            result = manager.start(config)
+
+        self.assertEqual(result["status"], "started")
+        self.assertEqual(manager.engine.config["position_size"], 100)
+        self.assertEqual(manager.engine.config["max_drawdown_pct"], 5)
+        self.assertEqual(manager.engine.config["tp_percent"], 1)
+        self.assertEqual(manager.engine.config["sl_percent"], 0.5)
+        self.assertEqual(manager.engine.config["timeframe"], "5m")
+        self.assertTrue(manager.engine.config["trailing_stop"])
+        self.assertEqual(
+            manager.engine.get_risk_state()["positionSize"],
+            100,
+        )
 
     def test_factory_selects_kucoin_futures_orderbook(self):
         client = ExchangeFactory.create_market_ws(
@@ -336,6 +432,435 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         self.assertNotIn("kucoin", url.lower())
         self.assertEqual(client.snapshot_sequence, 10)
 
+    def _paper_engine(self, price=2.0, **config):
+        price_manager = StaticPriceManager(price)
+        engine = ExecutionEngine(
+            portfolio=PortfolioManager(1000),
+            price_manager=price_manager,
+        )
+        engine.symbol = "XRPUSDT"
+        engine.set_config({
+            "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 1,
+            "tp_percent": 10,
+            "timeframe": "5m",
+            "leverage": 5,
+            "trailing_stop": False,
+            **config,
+        })
+        engine.start()
+        engine.on_price("XRPUSDT", price)
+        return engine, price_manager
+
+    def _live_status(
+        self,
+        *,
+        allow_live=True,
+        trade_mode="live",
+        dry_run=False,
+        credentials_ready=True,
+        exchange_attached=True,
+        balance_check_ok=True,
+        position_check_ok=True,
+        execution_enabled=True,
+        emergency_stop=False,
+        running=False,
+    ):
+        exchange = (
+            FakeLiveExchange(
+                credentials_ready=credentials_ready
+            )
+            if exchange_attached
+            else None
+        )
+        engine = ExecutionEngine(
+            exchange=exchange,
+            portfolio=PortfolioManager(1000),
+            price_manager=StaticPriceManager(2.0),
+        )
+        config = {
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+            "mode": "live",
+            "dry_run": dry_run,
+            "risk_percent": 1.5,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 1.2,
+            "tp_percent": 2.5,
+            "timeframe": "1m",
+            "leverage": 7,
+            "trailing_stop": False,
+        }
+        engine.symbol = "XRPUSDT"
+        engine.set_config(config)
+        engine.balance_check_ok = balance_check_ok
+        engine.position_check_ok = position_check_ok
+
+        bot = BotManager()
+        bot.symbol = "XRPUSDT"
+        bot.config = dict(config)
+        bot.exchange_name = "kucoin"
+        bot.orderbook_source = "kucoin_futures"
+        bot.orderbook_symbol = "XRPUSDTM"
+        bot.engine = engine
+        bot._running = running
+        bot.latest_runtime_result = {
+            "runtimeDebug": {}
+        }
+
+        execution_enabled_before = (
+            governance_state["execution_enabled"]
+        )
+        emergency_stop_before = (
+            governance_state["emergency_stop"]
+        )
+
+        try:
+            governance_state["execution_enabled"] = (
+                execution_enabled
+            )
+            governance_state["emergency_stop"] = (
+                emergency_stop
+            )
+
+            with patch.object(
+                backend_config,
+                "ALLOW_LIVE",
+                allow_live,
+            ), patch.object(
+                backend_config,
+                "TRADE_MODE",
+                trade_mode,
+            ):
+                return bot.get_status()
+        finally:
+            governance_state["execution_enabled"] = (
+                execution_enabled_before
+            )
+            governance_state["emergency_stop"] = (
+                emergency_stop_before
+            )
+
+    def test_position_size_reaches_paper_qty_and_zero_fallback(self):
+        engine, _ = self._paper_engine(price=2.0)
+
+        preview = engine.get_result()["preview"]
+        self.assertEqual(preview["sizing_mode"], "fixed_position_size")
+        self.assertEqual(preview["position_size"], 100)
+        self.assertEqual(preview["qty"], 50)
+
+        engine.submit_signal({"id": 1001, "side": "BUY"})
+
+        self.assertEqual(engine.actual_position["coin_qty"], 50)
+        self.assertEqual(engine.actual_position["position_size"], 100)
+        self.assertEqual(engine.get_risk_state()["realQty"], 50)
+        self.assertEqual(engine.get_risk_state()["notional"], 100)
+
+        fallback, _ = self._paper_engine(
+            price=2.0,
+            position_size=0,
+            risk_percent=1,
+            leverage=5,
+        )
+
+        fallback_preview = fallback.get_result()["preview"]
+        self.assertEqual(fallback_preview["sizing_mode"], "risk_percent")
+        self.assertEqual(fallback_preview["position_size"], 50)
+        self.assertEqual(fallback_preview["qty"], 25)
+
+    def test_tp_sl_prices_and_paper_close_are_direction_aware(self):
+        long_engine, long_price = self._paper_engine(price=2.0)
+        long_engine.submit_signal({"id": 2001, "side": "BUY"})
+
+        self.assertAlmostEqual(long_engine.actual_position["sl"], 1.98)
+        self.assertAlmostEqual(long_engine.actual_position["tp"], 2.2)
+
+        long_price.price = 2.2
+        long_engine.on_price("XRPUSDT", 2.2)
+
+        self.assertIsNone(long_engine.actual_position)
+        self.assertAlmostEqual(long_engine.pnl, 10)
+
+        short_engine, short_price = self._paper_engine(price=2.0)
+        short_engine.submit_signal({"id": 2002, "side": "SELL"})
+
+        self.assertAlmostEqual(short_engine.actual_position["sl"], 2.02)
+        self.assertAlmostEqual(short_engine.actual_position["tp"], 1.8)
+
+        short_price.price = 1.8
+        short_engine.on_price("XRPUSDT", 1.8)
+
+        self.assertIsNone(short_engine.actual_position)
+        self.assertAlmostEqual(short_engine.pnl, 10)
+
+    def test_trailing_stop_only_moves_in_favorable_direction(self):
+        disabled, disabled_price = self._paper_engine(
+            price=2.0,
+            trailing_stop=False,
+            tp_percent=20,
+        )
+        disabled.submit_signal({"id": 3001, "side": "BUY"})
+        original_sl = disabled.actual_position["sl"]
+
+        disabled_price.price = 2.1
+        disabled.on_price("XRPUSDT", 2.1)
+
+        self.assertEqual(disabled.actual_position["sl"], original_sl)
+
+        long_engine, long_price = self._paper_engine(
+            price=2.0,
+            trailing_stop=True,
+            tp_percent=20,
+        )
+        long_engine.submit_signal({"id": 3002, "side": "BUY"})
+
+        long_price.price = 2.1
+        long_engine.on_price("XRPUSDT", 2.1)
+        trailed_sl = long_engine.actual_position["sl"]
+        self.assertGreater(trailed_sl, 1.98)
+
+        long_price.price = 2.09
+        long_engine.on_price("XRPUSDT", 2.09)
+        self.assertEqual(long_engine.actual_position["sl"], trailed_sl)
+
+        short_engine, short_price = self._paper_engine(
+            price=2.0,
+            trailing_stop=True,
+            tp_percent=20,
+        )
+        short_engine.submit_signal({"id": 3003, "side": "SELL"})
+
+        short_price.price = 1.9
+        short_engine.on_price("XRPUSDT", 1.9)
+        short_trailed_sl = short_engine.actual_position["sl"]
+        self.assertLess(short_trailed_sl, 2.02)
+
+        short_price.price = 1.91
+        short_engine.on_price("XRPUSDT", 1.91)
+        self.assertEqual(short_engine.actual_position["sl"], short_trailed_sl)
+
+    def test_max_drawdown_blocks_runtime_and_surfaces_status_debug(self):
+        engine, _ = self._paper_engine(price=2.0)
+        engine.submit_signal({"id": 4001, "side": "BUY"})
+        engine.update_drawdown_state(940)
+
+        risk_state = engine.get_risk_state()
+        self.assertTrue(risk_state["riskTradingDisabled"])
+        self.assertEqual(risk_state["riskBlockReason"], "MAX_DRAWDOWN")
+
+        execution_enabled_before = governance_state["execution_enabled"]
+        governance_state["execution_enabled"] = True
+
+        try:
+            runtime = ExecutionRuntime()
+            runtime.set_engine(engine)
+
+            permission = runtime.evaluate_execution_permission(
+                {
+                    "executionAllowed": True,
+                    "direction": "LONG",
+                    "edge": 0.9,
+                    "confidence": 0.9,
+                    "risk": 0.1,
+                },
+                {"executionAllowed": True, "reason": None},
+                canonical_direction="LONG",
+            )
+            runtime_state = runtime.build_execution_runtime_state({
+                "executionAllowed": False,
+                "reason": "MAX_DRAWDOWN",
+            })
+        finally:
+            governance_state["execution_enabled"] = execution_enabled_before
+
+        self.assertFalse(permission["executionAllowed"])
+        self.assertEqual(permission["reason"], "MAX_DRAWDOWN")
+        self.assertEqual(
+            runtime_state["tradeSettings"]["timeframe"],
+            "5m",
+        )
+        self.assertEqual(
+            runtime_state["tradeSettings"]["leverage"],
+            5,
+        )
+
+        bot = BotManager()
+        bot.engine = engine
+        bot.symbol = "XRPUSDT"
+        bot.config = dict(engine.config)
+        bot.exchange_name = "kucoin"
+        bot.orderbook_source = "kucoin_futures"
+        bot.orderbook_symbol = "XRPUSDTM"
+        bot._running = True
+        bot.latest_runtime_result = {"runtimeDebug": {}}
+        bot.attach_orderbook_runtime_debug(bot.latest_runtime_result)
+
+        status = bot.get_status()
+        response = StatusResponse(**status)
+        runtime_debug = status["latestRuntimeResult"]["runtimeDebug"]
+
+        self.assertEqual(response.position_size, 100)
+        self.assertEqual(response.max_drawdown_pct, 5)
+        self.assertFalse(response.trailing_stop)
+        self.assertEqual(response.real_qty, 50)
+        self.assertEqual(response.notional, 100)
+        self.assertEqual(response.active_position_qty, 50)
+        self.assertEqual(response.active_position_notional, 100)
+        self.assertEqual(response.risk_block_reason, "MAX_DRAWDOWN")
+        self.assertEqual(status["risk_state"]["riskBlockReason"], "MAX_DRAWDOWN")
+        self.assertEqual(status["risk_state"]["realQty"], 50)
+        self.assertEqual(status["risk_state"]["notional"], 100)
+        self.assertEqual(
+            runtime_debug["riskState"]["riskBlockReason"],
+            "MAX_DRAWDOWN",
+        )
+        self.assertEqual(runtime_debug["riskState"]["realQty"], 50)
+        self.assertEqual(runtime_debug["riskState"]["notional"], 100)
+        self.assertIn("riskConfig", runtime_debug)
+        self.assertIn("riskState", runtime_debug)
+
+    def test_live_readiness_blocks_until_all_gates_are_ready(self):
+        cases = [
+            (
+                "allow_live_false",
+                {"allow_live": False},
+                "LIVE_NOT_ENABLED",
+            ),
+            (
+                "dry_run_true",
+                {"dry_run": True},
+                "DRY_RUN_ACTIVE",
+            ),
+            (
+                "credentials_missing",
+                {"credentials_ready": False},
+                "KUCOIN_CREDENTIALS_MISSING",
+            ),
+            (
+                "execution_disabled",
+                {"execution_enabled": False},
+                "EXECUTION_DISABLED",
+            ),
+            (
+                "emergency_stop",
+                {"emergency_stop": True},
+                "EMERGENCY_STOP_ACTIVE",
+            ),
+        ]
+
+        for name, overrides, expected_reason in cases:
+            with self.subTest(name=name):
+                status = self._live_status(**overrides)
+
+                self.assertFalse(status["realOrderAllowed"])
+                self.assertFalse(status["real_order_allowed"])
+                self.assertFalse(status["liveReadiness"]["ready"])
+                self.assertIn(
+                    expected_reason,
+                    status["liveBlockReasons"],
+                )
+
+        ready_status = self._live_status()
+        response = StatusResponse(**ready_status)
+
+        self.assertTrue(response.realOrderAllowed)
+        self.assertTrue(ready_status["real_order_allowed"])
+        self.assertEqual(response.executionMode, "LIVE")
+        self.assertEqual(ready_status["liveBlockReasons"], [])
+        self.assertTrue(ready_status["liveReadiness"]["ready"])
+
+    def test_live_readiness_surfaces_in_status_and_runtime_debug(self):
+        status = self._live_status(
+            allow_live=False,
+            running=True,
+        )
+        runtime_debug = (
+            status["latestRuntimeResult"]["runtimeDebug"]
+        )
+
+        self.assertIn("liveReadiness", status)
+        self.assertIn("liveBlockReasons", status)
+        self.assertIn("liveReadiness", runtime_debug)
+        self.assertIn("liveBlockReasons", runtime_debug)
+        self.assertFalse(status["exchangeClientReady"] is None)
+        self.assertTrue(status["exchangeAuthReady"])
+        self.assertTrue(status["balanceCheckOk"])
+        self.assertTrue(status["positionCheckOk"])
+        self.assertFalse(status["realOrderAllowed"])
+        self.assertIn(
+            "LIVE_NOT_ENABLED",
+            runtime_debug["liveBlockReasons"],
+        )
+
+    def test_live_order_submit_is_not_called_when_not_ready(self):
+        exchange = FakeLiveExchange()
+        engine = ExecutionEngine(
+            exchange=exchange,
+            portfolio=PortfolioManager(1000),
+            price_manager=StaticPriceManager(2.0),
+        )
+        engine.symbol = "XRPUSDT"
+        engine.set_config({
+            "symbol": "XRPUSDT",
+            "mode": "live",
+            "dry_run": False,
+            "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 1,
+            "tp_percent": 2,
+            "timeframe": "1m",
+            "leverage": 5,
+            "trailing_stop": False,
+        })
+        engine.start()
+        engine.on_price("XRPUSDT", 2.0)
+
+        execution_enabled_before = (
+            governance_state["execution_enabled"]
+        )
+        emergency_stop_before = (
+            governance_state["emergency_stop"]
+        )
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+
+            with patch.object(
+                backend_config,
+                "ALLOW_LIVE",
+                False,
+            ), patch.object(
+                backend_config,
+                "TRADE_MODE",
+                "live",
+            ):
+                engine.submit_signal({
+                    "id": 5001,
+                    "side": "BUY",
+                })
+        finally:
+            governance_state["execution_enabled"] = (
+                execution_enabled_before
+            )
+            governance_state["emergency_stop"] = (
+                emergency_stop_before
+            )
+
+        self.assertEqual(exchange.place_order_calls, [])
+        self.assertEqual(
+            engine.last_order_blocked_reason,
+            "LIVE_NOT_READY",
+        )
+        self.assertIn(
+            "LIVE_NOT_ENABLED",
+            engine.last_live_block_reasons,
+        )
+
     def test_status_and_runtime_debug_expose_orderbook_context(self):
         bot = BotManager()
         context = ExchangeFactory.describe_orderbook(
@@ -343,6 +868,16 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
             "XRPUSDT",
         )
         bot.symbol = "XRPUSDT"
+        bot.config = {
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+            "mode": "paper",
+            "risk_percent": 1.25,
+            "sl_percent": 0.75,
+            "tp_percent": 1.5,
+            "leverage": 3,
+            "timeframe": "5m",
+        }
         bot.exchange_name = context["exchange"]
         bot.orderbook_source = context["orderbookSource"]
         bot.orderbook_symbol = context["orderbookSymbol"]
@@ -369,14 +904,50 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         self.assertEqual(response.exchange, "kucoin")
         self.assertEqual(response.orderbookSource, "kucoin_futures")
         self.assertEqual(response.orderbookSymbol, "XRPUSDTM")
+        self.assertEqual(response.risk_percent, 1.25)
+        self.assertEqual(response.leverage, 3)
+        self.assertEqual(response.timeframe, "5m")
         self.assertEqual(
-            running_status["latestRuntimeResult"]["runtimeDebug"],
-            {
-                "momentumTrace": {"sourceValue": 0.25},
-                "exchange": "kucoin",
-                "orderbookSource": "kucoin_futures",
-                "orderbookSymbol": "XRPUSDTM",
-            },
+            response.tradeSettings["symbol"],
+            "XRPUSDT",
+        )
+        self.assertEqual(
+            response.tradeSettings["timeframe"],
+            "5m",
+        )
+        self.assertEqual(
+            response.tradeSettings["sl_percent"],
+            0.75,
+        )
+        self.assertEqual(
+            running_status["trade_settings"]["tp_percent"],
+            1.5,
+        )
+        runtime_debug = (
+            running_status["latestRuntimeResult"]["runtimeDebug"]
+        )
+        self.assertEqual(
+            runtime_debug["momentumTrace"],
+            {"sourceValue": 0.25},
+        )
+        self.assertEqual(runtime_debug["exchange"], "kucoin")
+        self.assertEqual(
+            runtime_debug["orderbookSource"],
+            "kucoin_futures",
+        )
+        self.assertEqual(
+            runtime_debug["orderbookSymbol"],
+            "XRPUSDTM",
+        )
+        self.assertIn("riskConfig", runtime_debug)
+        self.assertIn("riskState", runtime_debug)
+        self.assertEqual(
+            runtime_debug["tradeSettings"]["risk_percent"],
+            1.25,
+        )
+        self.assertEqual(
+            runtime_debug["tradeSettings"]["timeframe"],
+            "5m",
         )
 
 

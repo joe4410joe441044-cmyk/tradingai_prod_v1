@@ -23,6 +23,19 @@ load_dotenv()
 
 class KucoinTradeClient(BaseClient):
 
+    @staticmethod
+    def credentials_present(
+        api_key=None,
+        api_secret=None,
+        passphrase=None
+    ):
+
+        return bool(
+            (api_key or os.getenv("KUCOIN_API_KEY"))
+            and (api_secret or os.getenv("KUCOIN_API_SECRET"))
+            and (passphrase or os.getenv("KUCOIN_API_PASSPHRASE"))
+        )
+
     # =====================================
     # INIT
     # =====================================
@@ -55,6 +68,12 @@ class KucoinTradeClient(BaseClient):
             os.getenv("KUCOIN_API_PASSPHRASE")
         )
 
+        self.live_order_allowed = False
+
+        self.live_block_reasons = [
+            "LIVE_NOT_READY"
+        ]
+
         runtime_debug(
             "KuCoin credentials configured key=%s secret=%s passphrase=%s",
             bool(self.api_key),
@@ -74,6 +93,30 @@ class KucoinTradeClient(BaseClient):
 
         self.base_url = (
             "https://api-futures.kucoin.com"
+        )
+
+    def credentials_ready(self):
+
+        return bool(
+            self.api_key
+            and self.api_secret
+            and self.passphrase
+        )
+
+    def set_live_order_gate(
+        self,
+        allowed,
+        reasons=None
+    ):
+
+        self.live_order_allowed = bool(allowed)
+        self.live_block_reasons = list(
+            reasons
+            or (
+                []
+                if allowed
+                else ["LIVE_NOT_READY"]
+            )
         )
 
     # =========================
@@ -470,6 +513,27 @@ class KucoinTradeClient(BaseClient):
         qty,
         price=None
     ):
+
+        if not self.live_order_allowed:
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "blockedReason": "LIVE_NOT_READY",
+                "liveBlockReasons": list(
+                    self.live_block_reasons
+                    or ["LIVE_NOT_READY"]
+                ),
+                "error": "LIVE_NOT_READY",
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin order blocked result=%s", result)
+
+            return result
 
         runtime_debug(
             "KuCoin create order symbol=%s side=%s qty=%s price=%s",

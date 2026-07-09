@@ -373,6 +373,8 @@ useEffect(() => {
                             true,
                         ) !== false}
                         safetyReason={botStatus?.safetyReason}
+                        allowLive={botStatus?.allowLive}
+                        tradeMode={botStatus?.tradeMode}
                         accountSource={firstAvailable(
                             botStatus?.accountSource,
                             "NOT_CONNECTED",

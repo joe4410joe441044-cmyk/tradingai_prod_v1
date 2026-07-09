@@ -154,6 +154,16 @@ class BotManager:
 
         self.latest_runtime_result = None
 
+        self.exchange_client_ready = False
+
+        self.exchange_auth_ready = False
+
+        self.exchange_auth_error = None
+
+        self.balance_check_ok = False
+
+        self.position_check_ok = False
+
         # Keep the latest account values independently from the execution
         # engine.  stop() intentionally tears the engine down, but account
         # telemetry must remain readable by the dashboard afterwards.
@@ -364,6 +374,167 @@ class BotManager:
                 f"[TRACE_UPDATE_ERROR] {e}"
             )
 
+    def _effective_engine_config(self):
+
+        return (
+            getattr(self.engine, "config", None)
+            if self.engine
+            else None
+        ) or self.config or {}
+
+    def _build_trade_settings_snapshot(
+        self,
+        engine_config,
+        selected_mode,
+        dry_run,
+        execution_mode,
+        real_order_allowed,
+    ):
+
+        return {
+            "symbol": (
+                self.symbol
+                or self.config.get("symbol")
+            ),
+            "exchange": self.exchange_name,
+            "orderbookSource": self.orderbook_source,
+            "orderbookSymbol": self.orderbook_symbol,
+            "mode": selected_mode,
+            "dryRun": dry_run,
+            "executionMode": execution_mode,
+            "realOrderAllowed": real_order_allowed,
+            "risk_percent": engine_config.get("risk_percent"),
+            "leverage": engine_config.get("leverage"),
+            "timeframe": engine_config.get(
+                "timeframe",
+                self.config.get("timeframe", "1m"),
+            ),
+            "sl_percent": engine_config.get("sl_percent"),
+            "tp_percent": engine_config.get("tp_percent"),
+        }
+
+    def _build_live_readiness_snapshot(
+        self,
+        selected_mode,
+        dry_run,
+    ):
+
+        if (
+            self.engine
+            and hasattr(self.engine, "build_live_readiness")
+        ):
+            readiness = self.engine.build_live_readiness()
+        else:
+            exchange_client_ready = bool(
+                self.exchange_client_ready
+            )
+            exchange_auth_ready = bool(
+                self.exchange_auth_ready
+            )
+            balance_check_ok = bool(
+                self.balance_check_ok
+            )
+            position_check_ok = bool(
+                self.position_check_ok
+            )
+            execution_enabled = bool(
+                governance_state.get(
+                    "execution_enabled",
+                    False,
+                )
+            )
+            emergency_stop = bool(
+                governance_state.get(
+                    "emergency_stop",
+                    False,
+                )
+            )
+
+            checks = {
+                "selectedModeLive": selected_mode == "LIVE",
+                "dryRunDisabled": dry_run is False,
+                "allowLive": backend_config.ALLOW_LIVE is True,
+                "tradeModeLive": backend_config.TRADE_MODE == "live",
+                "exchangeClientReady": exchange_client_ready,
+                "exchangeAuthReady": exchange_auth_ready,
+                "balanceCheckOk": balance_check_ok,
+                "positionCheckOk": position_check_ok,
+                "executionEnabled": execution_enabled,
+                "emergencyStopClear": not emergency_stop,
+            }
+
+            block_reasons = []
+
+            if not checks["selectedModeLive"]:
+                block_reasons.append("SELECTED_MODE_NOT_LIVE")
+            if not checks["dryRunDisabled"]:
+                block_reasons.append("DRY_RUN_ACTIVE")
+            if not checks["allowLive"]:
+                block_reasons.append("LIVE_NOT_ENABLED")
+            if not checks["tradeModeLive"]:
+                block_reasons.append("TRADE_MODE_NOT_LIVE")
+            if not checks["exchangeAuthReady"]:
+                block_reasons.append("KUCOIN_CREDENTIALS_MISSING")
+            if not checks["exchangeClientReady"]:
+                block_reasons.append("EXCHANGE_CLIENT_NOT_READY")
+            if not checks["balanceCheckOk"]:
+                block_reasons.append("BALANCE_CHECK_FAILED")
+            if not checks["positionCheckOk"]:
+                block_reasons.append("POSITION_CHECK_FAILED")
+            if not checks["executionEnabled"]:
+                block_reasons.append("EXECUTION_DISABLED")
+            if not checks["emergencyStopClear"]:
+                block_reasons.append("EMERGENCY_STOP_ACTIVE")
+
+            readiness = {
+                "ready": not block_reasons,
+                "realOrderAllowed": not block_reasons,
+                "checks": checks,
+                "blockReasons": block_reasons,
+                "selectedMode": selected_mode,
+                "dryRun": dry_run,
+                "tradeMode": backend_config.TRADE_MODE,
+                "allowLive": backend_config.ALLOW_LIVE,
+                "exchangeClientReady": exchange_client_ready,
+                "exchangeAuthReady": exchange_auth_ready,
+                "balanceCheckOk": balance_check_ok,
+                "positionCheckOk": position_check_ok,
+                "executionEnabled": execution_enabled,
+                "emergencyStop": emergency_stop,
+                "authError": self.exchange_auth_error,
+            }
+
+        readiness = dict(readiness)
+        block_reasons = list(
+            readiness.get("blockReasons") or []
+        )
+
+        account_source = (
+            "KUCOIN_FUTURES_READ_ONLY"
+            if (
+                readiness.get("balanceCheckOk")
+                or readiness.get("positionCheckOk")
+            )
+            else "PAPER_SIMULATION"
+        )
+
+        readiness.update({
+            "blockReasons": block_reasons,
+            "accountSource": account_source,
+            "balanceSource": (
+                "KUCOIN_FUTURES_READ_ONLY"
+                if readiness.get("balanceCheckOk")
+                else "PAPER_SIMULATION"
+            ),
+            "positionSource": (
+                "KUCOIN_FUTURES_READ_ONLY"
+                if readiness.get("positionCheckOk")
+                else "PAPER_SIMULATION"
+            ),
+        })
+
+        return readiness
+
     def attach_orderbook_runtime_debug(self, runtime_result):
 
         if not isinstance(runtime_result, dict):
@@ -377,10 +548,127 @@ class BotManager:
             runtime_debug_result = {}
             runtime_result["runtimeDebug"] = runtime_debug_result
 
+        # Calculate safety state variables
+        dry_run = bool(
+            self.config.get("dry_run", True)
+        )
+        selected_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().upper()
+        live_readiness = self._build_live_readiness_snapshot(
+            selected_mode,
+            dry_run,
+        )
+
+        real_order_allowed = bool(
+            live_readiness.get("realOrderAllowed", False)
+        )
+        execution_mode = (
+            "LIVE"
+            if real_order_allowed
+            else "SIMULATION"
+        )
+
+        safety_reasons = []
+        if selected_mode == "LIVE" and not real_order_allowed:
+            safety_reasons.append("LIVE_NOT_ENABLED")
+        if dry_run:
+            safety_reasons.append("DRY_RUN_ACTIVE")
+        if not safety_reasons and not real_order_allowed:
+            safety_reasons.append("LIVE_NOT_ENABLED")
+        safety_reason = " / ".join(safety_reasons) or "NONE"
+
+        engine_config = self._effective_engine_config()
+
+        risk_config = {
+            "risk_percent": engine_config.get("risk_percent"),
+            "position_size": engine_config.get("position_size"),
+            "max_drawdown_pct": engine_config.get(
+                "max_drawdown_pct"
+            ),
+            "tp_percent": engine_config.get("tp_percent"),
+            "sl_percent": engine_config.get("sl_percent"),
+            "trailing_stop": engine_config.get("trailing_stop"),
+            "trailing_stop_distance_percent": engine_config.get(
+                "trailing_stop_distance_percent"
+            ),
+        }
+
+        risk_state = (
+            self.engine.get_risk_state()
+            if self.engine
+            and hasattr(self.engine, "get_risk_state")
+            else {}
+        )
+
+        trade_settings = self._build_trade_settings_snapshot(
+            engine_config,
+            selected_mode,
+            dry_run,
+            execution_mode,
+            real_order_allowed,
+        )
+
         runtime_debug_result.update({
+            "symbol": (
+                self.symbol
+                or self.config.get("symbol")
+            ),
             "exchange": self.exchange_name,
             "orderbookSource": self.orderbook_source,
             "orderbookSymbol": self.orderbook_symbol,
+            "allowLive": backend_config.ALLOW_LIVE,
+            "tradeMode": backend_config.TRADE_MODE,
+            "dryRun": dry_run,
+            "realOrderAllowed": real_order_allowed,
+            "selectedMode": selected_mode,
+            "executionMode": execution_mode,
+            "safetyReason": safety_reason,
+            "liveReadiness": live_readiness,
+            "liveBlockReasons": live_readiness.get(
+                "blockReasons",
+                [],
+            ),
+            "exchangeClientReady": live_readiness.get(
+                "exchangeClientReady",
+                False,
+            ),
+            "exchangeAuthReady": live_readiness.get(
+                "exchangeAuthReady",
+                False,
+            ),
+            "balanceCheckOk": live_readiness.get(
+                "balanceCheckOk",
+                False,
+            ),
+            "positionCheckOk": live_readiness.get(
+                "positionCheckOk",
+                False,
+            ),
+            "executionEnabled": live_readiness.get(
+                "executionEnabled",
+                False,
+            ),
+            "emergencyStop": live_readiness.get(
+                "emergencyStop",
+                False,
+            ),
+            "accountSource": live_readiness.get(
+                "accountSource",
+                "PAPER_SIMULATION",
+            ),
+            "balanceSource": live_readiness.get(
+                "balanceSource",
+                "PAPER_SIMULATION",
+            ),
+            "positionSource": live_readiness.get(
+                "positionSource",
+                "PAPER_SIMULATION",
+            ),
+            "trade_settings": trade_settings,
+            "tradeSettings": trade_settings,
+            "riskConfig": risk_config,
+            "riskState": risk_state,
         })
 
         return runtime_result
@@ -446,6 +734,16 @@ class BotManager:
 
             self.provider_update_count = 0
 
+            self.exchange_client_ready = False
+
+            self.exchange_auth_ready = False
+
+            self.exchange_auth_error = None
+
+            self.balance_check_ok = False
+
+            self.position_check_ok = False
+
             self.symbol = config["symbol"].upper()
 
             orderbook_context = (
@@ -504,7 +802,37 @@ class BotManager:
                     "🟢 LIVE EXCHANGE ENABLED"
                 )
 
-                exchange = KucoinTradeClient()
+                if KucoinTradeClient.credentials_present():
+
+                    self.exchange_auth_ready = True
+
+                    try:
+
+                        exchange = KucoinTradeClient()
+
+                        self.exchange_client_ready = True
+
+                    except Exception as e:
+
+                        self.exchange_auth_ready = False
+                        self.exchange_auth_error = str(e)
+                        self.exchange_client_ready = False
+
+                        logger.warning(
+                            "KuCoin client init failed: %s",
+                            e,
+                        )
+
+                else:
+
+                    self.exchange_auth_ready = False
+                    self.exchange_auth_error = (
+                        "KUCOIN_CREDENTIALS_MISSING"
+                    )
+
+                    logger.warning(
+                        "KuCoin credentials missing; live orders disabled"
+                    )
 
             portfolio = PortfolioManager(
                 initial_balance=1000
@@ -540,6 +868,22 @@ class BotManager:
             self.engine.symbol = self.symbol
 
             self.engine.start()
+
+            self.balance_check_ok = bool(
+                getattr(
+                    self.engine,
+                    "balance_check_ok",
+                    False,
+                )
+            )
+
+            self.position_check_ok = bool(
+                getattr(
+                    self.engine,
+                    "position_check_ok",
+                    False,
+                )
+            )
 
             runtime_metrics = (
                 self.state.runtime_metrics
@@ -1126,6 +1470,12 @@ class BotManager:
 
             self.pending_order = False
 
+            self.exchange_client_ready = False
+
+            self.balance_check_ok = False
+
+            self.position_check_ok = False
+
             add_log(
                 "🛑 BOT STOPPED"
             )
@@ -1193,6 +1543,14 @@ class BotManager:
         completed_runtime_result = deepcopy(
             self.latest_runtime_result
         )
+
+        if self._running and isinstance(
+            completed_runtime_result,
+            dict,
+        ):
+            self.attach_orderbook_runtime_debug(
+                completed_runtime_result
+            )
 
         latest_runtime_trace = (
             completed_runtime_result
@@ -1289,10 +1647,13 @@ class BotManager:
             self.config.get("mode", "paper")
         ).strip().upper()
 
+        live_readiness = self._build_live_readiness_snapshot(
+            selected_mode,
+            dry_run,
+        )
+
         real_order_allowed = bool(
-            not dry_run
-            and backend_config.ALLOW_LIVE is True
-            and backend_config.TRADE_MODE == "live"
+            live_readiness.get("realOrderAllowed", False)
         )
 
         execution_mode = (
@@ -1314,6 +1675,37 @@ class BotManager:
 
         safety_reason = " / ".join(safety_reasons) or "NONE"
 
+        engine_config = self._effective_engine_config()
+
+        risk_config = {
+            "risk_percent": engine_config.get("risk_percent"),
+            "position_size": engine_config.get("position_size"),
+            "max_drawdown_pct": engine_config.get(
+                "max_drawdown_pct"
+            ),
+            "tp_percent": engine_config.get("tp_percent"),
+            "sl_percent": engine_config.get("sl_percent"),
+            "trailing_stop": engine_config.get("trailing_stop"),
+            "trailing_stop_distance_percent": engine_config.get(
+                "trailing_stop_distance_percent"
+            ),
+        }
+
+        risk_state = (
+            self.engine.get_risk_state()
+            if self.engine
+            and hasattr(self.engine, "get_risk_state")
+            else {}
+        )
+
+        trade_settings = self._build_trade_settings_snapshot(
+            engine_config,
+            selected_mode,
+            dry_run,
+            execution_mode,
+            real_order_allowed,
+        )
+
         return {
 
             "timestamp": time.time(),
@@ -1333,6 +1725,127 @@ class BotManager:
             "balance": balance,
 
             "equity": equity,
+
+            "risk_percent": risk_config.get(
+                "risk_percent"
+            ),
+
+            "leverage": trade_settings.get(
+                "leverage"
+            ),
+
+            "timeframe": trade_settings.get(
+                "timeframe"
+            ),
+
+            "position_size": risk_config.get(
+                "position_size"
+            ),
+
+            "positionSize": risk_config.get(
+                "position_size"
+            ),
+
+            "max_drawdown_pct": risk_config.get(
+                "max_drawdown_pct"
+            ),
+
+            "maxDd": risk_config.get(
+                "max_drawdown_pct"
+            ),
+
+            "tp_percent": risk_config.get(
+                "tp_percent"
+            ),
+
+            "sl_percent": risk_config.get(
+                "sl_percent"
+            ),
+
+            "trailing_stop": risk_config.get(
+                "trailing_stop"
+            ),
+
+            "trailingStop": risk_config.get(
+                "trailing_stop"
+            ),
+
+            "current_drawdown_pct": risk_state.get(
+                "currentDrawdownPct"
+            ),
+
+            "risk_block_reason": risk_state.get(
+                "riskBlockReason"
+            ),
+
+            "risk_config": risk_config,
+
+            "risk_state": risk_state,
+
+            "trade_settings": trade_settings,
+
+            "tradeSettings": trade_settings,
+
+            "liveReadiness": live_readiness,
+
+            "liveBlockReasons": live_readiness.get(
+                "blockReasons",
+                [],
+            ),
+
+            "exchangeClientReady": live_readiness.get(
+                "exchangeClientReady",
+                False,
+            ),
+
+            "exchangeAuthReady": live_readiness.get(
+                "exchangeAuthReady",
+                False,
+            ),
+
+            "balanceCheckOk": live_readiness.get(
+                "balanceCheckOk",
+                False,
+            ),
+
+            "positionCheckOk": live_readiness.get(
+                "positionCheckOk",
+                False,
+            ),
+
+            "executionEnabled": live_readiness.get(
+                "executionEnabled",
+                False,
+            ),
+
+            "emergencyStop": live_readiness.get(
+                "emergencyStop",
+                False,
+            ),
+
+            "real_qty": risk_state.get(
+                "realQty"
+            ),
+
+            "notional": risk_state.get(
+                "notional"
+            ),
+
+            "active_position_qty": risk_state.get(
+                "activePositionQty"
+            ),
+
+            "active_position_contract_qty": risk_state.get(
+                "activePositionContractQty"
+            ),
+
+            "active_position_notional": risk_state.get(
+                "activePositionNotional"
+            ),
+
+            "active_position_entry_notional": risk_state.get(
+                "activePositionEntryNotional"
+            ),
 
             "position": actual_position,
 
@@ -1400,14 +1913,22 @@ class BotManager:
                 websocket_connected
             ),
 
-            # Account values in this snapshot are owned by the paper
-            # portfolio.  Real account fields remain explicitly disconnected
-            # until authenticated exchange telemetry is implemented.
-            "accountSource": "PAPER_SIMULATION",
+            # Real account fields are populated only after read-only KuCoin
+            # checks succeed.  Secrets are never included in this snapshot.
+            "accountSource": live_readiness.get(
+                "accountSource",
+                "PAPER_SIMULATION",
+            ),
 
-            "balanceSource": "PAPER_SIMULATION",
+            "balanceSource": live_readiness.get(
+                "balanceSource",
+                "PAPER_SIMULATION",
+            ),
 
-            "positionSource": "PAPER_SIMULATION",
+            "positionSource": live_readiness.get(
+                "positionSource",
+                "PAPER_SIMULATION",
+            ),
 
             "realOrderAllowed": real_order_allowed,
 
@@ -1419,13 +1940,32 @@ class BotManager:
 
             "safetyReason": safety_reason,
 
-            "exchangeAuth": "NOT_VERIFIED",
+            "exchangeAuth": (
+                "VERIFIED"
+                if live_readiness.get("exchangeAuthReady")
+                else "NOT_VERIFIED"
+            ),
 
-            "realAccountConnected": False,
+            "realAccountConnected": bool(
+                live_readiness.get("balanceCheckOk")
+                or live_readiness.get("positionCheckOk")
+            ),
 
-            "realBalance": None,
+            "realBalance": (
+                balance
+                if live_readiness.get("balanceCheckOk")
+                else None
+            ),
 
-            "realPosition": None,
+            "realPosition": (
+                actual_position
+                if live_readiness.get("positionCheckOk")
+                else None
+            ),
+
+            "allowLive": backend_config.ALLOW_LIVE,
+
+            "tradeMode": backend_config.TRADE_MODE,
 
             # Keep legacy names aligned for existing API consumers.
             "execution_mode": execution_mode,

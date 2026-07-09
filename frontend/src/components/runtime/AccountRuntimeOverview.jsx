@@ -90,6 +90,8 @@ export default function AccountRuntimeOverview({
     realOrderAllowed,
     dryRun,
     safetyReason,
+    allowLive,
+    tradeMode,
     accountSource,
     balanceSource,
     positionSource,
@@ -269,6 +271,18 @@ export default function AccountRuntimeOverview({
                             label="Execution Mode:（実行モード）"
                             value={displayValue(executionMode)}
                             testId="execution-mode"
+                            tone="execution"
+                        />
+                        <StatusMetric
+                            label="Allow Live:（本番許可）"
+                            value={String(allowLive === true)}
+                            testId="allow-live"
+                            tone={allowLive ? "safe" : "danger"}
+                        />
+                        <StatusMetric
+                            label="Trade Mode:（取引モード）"
+                            value={displayValue(tradeMode)}
+                            testId="trade-mode"
                             tone="execution"
                         />
                         <StatusMetric

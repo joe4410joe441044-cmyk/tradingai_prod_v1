@@ -101,9 +101,13 @@ export default function BotControl({
                                             symbol: config.symbol,
                                             exchange: String(config.exchange || "kucoin").toLowerCase(),
                                             risk_percent: Number(config.risk_percent ?? 1),
+                                            position_size: Number(config.position_size ?? config.positionSize ?? 0),
+                                            max_drawdown_pct: Number(config.max_drawdown_pct ?? config.maxDd ?? 5),
                                             sl_percent: Number(config.sl_percent ?? config.sl ?? 1),
                                             leverage: Number(config.leverage ?? 1),
+                                            timeframe: String(config.timeframe || "1m"),
                                             tp_percent: Number(config.tp_percent ?? config.tp ?? 1),
+                                            trailing_stop: Boolean(config.trailing_stop ?? config.trailing ?? false),
                                             mode: String(config.mode || "paper").toLowerCase()
                                         })
 

@@ -68,18 +68,19 @@ export default function TradeSettings({
                     >
 
                         <option value="PAPER">
-                            PAPER（模擬）
-                        </option>
-
-                        <option value="SAFE">
-                            SAFE（安全）
+                            PAPER（模擬） - 標準・推奨
                         </option>
 
                         <option value="LIVE">
-                            LIVE（本番）
+                            LIVE（本番） - 危険・要設定確認
                         </option>
 
                     </select>
+                    {values.mode === "LIVE" && (
+                        <div className="config-warning">
+                            ⚠️ LIVE選択中ですが、Backendの本番注文は無効です。 実注文はブロックされています。
+                        </div>
+                    )}
 
                 </div>
 
@@ -114,11 +115,11 @@ export default function TradeSettings({
                     >
 
                         <option value="KUCOIN">
-                            KUCOIN
+                            KUCOIN - 動作保証
                         </option>
 
                         <option value="BINANCE">
-                            BINANCE
+                            BINANCE - 未検証・運用保証なし
                         </option>
 
                     </select>
@@ -156,18 +157,54 @@ export default function TradeSettings({
                     >
 
                         <option value="XRPUSDT">
-                            XRPUSDT
+                            XRPUSDT - 運用検証済み
                         </option>
 
                         <option value="BTCUSDT">
-                            BTCUSDT
+                            BTCUSDT - 運用保証なし
                         </option>
 
                         <option value="ETHUSDT">
-                            ETHUSDT
+                            ETHUSDT - 運用保証なし
                         </option>
 
                     </select>
+
+                </div>
+
+            </div>
+
+            {/* =============================================
+               RISK PERCENT
+            ============================================= */}
+
+            <div className="config-row">
+
+                <div className="config-label">
+
+                    RISK %（リスク率）
+
+                </div>
+
+                <div className="config-control">
+
+                    <input
+                        className="config-select"
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={
+                            values.risk_percent ?? 1
+                        }
+                        onChange={(e) =>
+                            handle(
+                                "risk_percent",
+                                Number(
+                                    e.target.value
+                                )
+                            )
+                        }
+                    />
 
                 </div>
 

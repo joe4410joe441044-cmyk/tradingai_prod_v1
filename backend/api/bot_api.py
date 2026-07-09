@@ -5,7 +5,7 @@ from backend.bot_manager import get_bot_manager
 
 from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, List, Optional
 from backend.utils.log_buffer import runtime_debug
 
 router = APIRouter()
@@ -31,9 +31,14 @@ class StartConfig(BaseModel):
     symbol: str = Field(..., example="BTCUSDT")
     exchange: Exchange = Exchange.kucoin
     risk_percent: float = Field(..., gt=0)
+    position_size: float = Field(0.0, ge=0)
+    max_drawdown_pct: float = Field(5.0, gt=0)
     sl_percent: float = Field(..., gt=0)
     leverage: float = Field(..., gt=0)
+    timeframe: str = Field("1m")
     tp_percent: float = Field(2.0, gt=0)
+    trailing_stop: bool = False
+    dry_run: bool = True
     mode: Mode
 
 
@@ -74,6 +79,10 @@ class StatusResponse(BaseModel):
 
     safetyReason: str = "DRY_RUN_ACTIVE"
 
+    allowLive: bool = False
+
+    tradeMode: str = "paper"
+
     exchangeAuth: str = "NOT_VERIFIED"
 
     realAccountConnected: bool = False
@@ -93,6 +102,68 @@ class StatusResponse(BaseModel):
     equity: float
 
     pnl: float
+
+    position_size: Optional[float] = None
+
+    positionSize: Optional[float] = None
+
+    risk_percent: Optional[float] = None
+
+    leverage: Optional[float] = None
+
+    timeframe: Optional[str] = None
+
+    max_drawdown_pct: Optional[float] = None
+
+    maxDd: Optional[float] = None
+
+    tp_percent: Optional[float] = None
+
+    sl_percent: Optional[float] = None
+
+    trailing_stop: Optional[bool] = None
+
+    trailingStop: Optional[bool] = None
+
+    current_drawdown_pct: Optional[float] = None
+
+    risk_block_reason: Optional[str] = None
+
+    risk_config: dict = Field(default_factory=dict)
+
+    risk_state: dict = Field(default_factory=dict)
+
+    trade_settings: dict = Field(default_factory=dict)
+
+    tradeSettings: dict = Field(default_factory=dict)
+
+    liveReadiness: dict = Field(default_factory=dict)
+
+    liveBlockReasons: List[str] = Field(default_factory=list)
+
+    exchangeClientReady: bool = False
+
+    exchangeAuthReady: bool = False
+
+    balanceCheckOk: bool = False
+
+    positionCheckOk: bool = False
+
+    executionEnabled: bool = False
+
+    emergencyStop: bool = False
+
+    real_qty: Optional[float] = None
+
+    notional: Optional[float] = None
+
+    active_position_qty: Optional[float] = None
+
+    active_position_contract_qty: Optional[float] = None
+
+    active_position_notional: Optional[float] = None
+
+    active_position_entry_notional: Optional[float] = None
 
     executionAuthorityScore: int
 
@@ -206,4 +277,15 @@ def stop_bot():
 def get_status():
 
     bot_manager = get_bot_manager()
-    return bot_manager.get_status()
+    status = bot_manager.get_status()
+
+    if isinstance(status, dict):
+        trade_settings = (
+            status.get("tradeSettings")
+            or status.get("trade_settings")
+            or {}
+        )
+        status["tradeSettings"] = trade_settings
+        status["trade_settings"] = trade_settings
+
+    return status

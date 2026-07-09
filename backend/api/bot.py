@@ -21,9 +21,21 @@ class StartConfig(BaseModel):
 
     risk_percent: float
 
+    position_size: float = 0.0
+
+    max_drawdown_pct: float = 5.0
+
     sl_percent: float
 
     leverage: float
+
+    timeframe: str = "1m"
+
+    tp_percent: float = 2.0
+
+    trailing_stop: bool = False
+
+    dry_run: bool = True
 
     mode: str
 

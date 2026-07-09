@@ -81,6 +81,7 @@ class ExecutionRuntime:
         self.handoff_executed = False
         self.handoff_blocked_reason = None
         self.handoff_signal = None
+        self.handoff_live_block_reasons = []
         self.execution_governance_reached = False
 
     # ========================================================
@@ -119,6 +120,7 @@ class ExecutionRuntime:
             "handoffAttempted": self.handoff_attempted,
             "handoffExecuted": self.handoff_executed,
             "handoffBlockedReason": self.handoff_blocked_reason,
+            "handoffLiveBlockReasons": self.handoff_live_block_reasons,
             "handoffSignal": self.handoff_signal,
         }
 
@@ -155,9 +157,53 @@ class ExecutionRuntime:
 
         if getattr(self.engine, "mode", None) == "live":
 
-            self.handoff_blocked_reason = (
-                "ENGINE_MODE_LIVE"
+            live_readiness = (
+                self.engine.build_live_readiness()
+                if hasattr(self.engine, "build_live_readiness")
+                else {
+                    "realOrderAllowed": False,
+                    "blockReasons": [
+                        "LIVE_READINESS_UNAVAILABLE"
+                    ],
+                }
             )
+
+            if not live_readiness.get(
+                "realOrderAllowed",
+                False,
+            ):
+
+                self.handoff_blocked_reason = (
+                    "LIVE_NOT_READY"
+                )
+                self.handoff_live_block_reasons = list(
+                    live_readiness.get("blockReasons")
+                    or ["LIVE_NOT_READY"]
+                )
+                return
+
+            self.handoff_live_block_reasons = []
+
+            try:
+
+                self.engine.submit_signal(
+                    adapter_output
+                )
+
+                self.handoff_executed = True
+                self.handoff_blocked_reason = None
+
+            except Exception as e:
+
+                self.handoff_blocked_reason = (
+                    "ENGINE_SUBMIT_EXCEPTION"
+                )
+
+                runtime_debug(
+                    "ExecutionEngine live handoff failed error=%s",
+                    e,
+                )
+
             return
 
         engine_config = getattr(
@@ -332,6 +378,36 @@ class ExecutionRuntime:
             }
 
         # ----------------------------------------------------
+        # Engine Risk Halt
+        # ----------------------------------------------------
+
+        engine_risk_state = {}
+
+        if self.engine is not None and hasattr(
+            self.engine,
+            "get_risk_state",
+        ):
+
+            engine_risk_state = (
+                self.engine.get_risk_state()
+            )
+
+        if engine_risk_state.get(
+            "riskTradingDisabled",
+            False,
+        ):
+
+            return {
+                "executionAllowed": False,
+                "reason": (
+                    engine_risk_state.get(
+                        "riskBlockReason",
+                        "MAX_DRAWDOWN",
+                    )
+                ),
+            }
+
+        # ----------------------------------------------------
         # Low Confidence
         # ----------------------------------------------------
 
@@ -480,6 +556,25 @@ class ExecutionRuntime:
         governance_result,
     ):
 
+        engine_config = (
+            getattr(self.engine, "config", {})
+            if self.engine is not None
+            else {}
+        )
+
+        trade_settings = {
+            "symbol": (
+                getattr(self.engine, "symbol", None)
+                if self.engine is not None
+                else None
+            ),
+            "risk_percent": engine_config.get("risk_percent"),
+            "leverage": engine_config.get("leverage"),
+            "timeframe": engine_config.get("timeframe"),
+            "sl_percent": engine_config.get("sl_percent"),
+            "tp_percent": engine_config.get("tp_percent"),
+        }
+
         cooldown_result = (
             self.governance
             .evaluate_cooldown_control()
@@ -488,6 +583,13 @@ class ExecutionRuntime:
         emergency_result = (
             self.governance
             .evaluate_emergency_halt()
+        )
+
+        live_readiness = (
+            self.engine.build_live_readiness()
+            if self.engine is not None
+            and hasattr(self.engine, "build_live_readiness")
+            else {}
         )
 
         runtime_state = {
@@ -525,6 +627,51 @@ class ExecutionRuntime:
                 ]
             ),
 
+            "riskState": (
+                self.engine.get_risk_state()
+                if self.engine is not None
+                and hasattr(self.engine, "get_risk_state")
+                else {}
+            ),
+
+            "tradeSettings": trade_settings,
+
+            "trade_settings": trade_settings,
+
+            "liveReadiness": live_readiness,
+
+            "liveBlockReasons": (
+                live_readiness.get("blockReasons", [])
+            ),
+
+            "realOrderAllowed": (
+                live_readiness.get("realOrderAllowed", False)
+            ),
+
+            "exchangeClientReady": (
+                live_readiness.get("exchangeClientReady", False)
+            ),
+
+            "exchangeAuthReady": (
+                live_readiness.get("exchangeAuthReady", False)
+            ),
+
+            "balanceCheckOk": (
+                live_readiness.get("balanceCheckOk", False)
+            ),
+
+            "positionCheckOk": (
+                live_readiness.get("positionCheckOk", False)
+            ),
+
+            "executionEnabled": (
+                live_readiness.get("executionEnabled", False)
+            ),
+
+            "emergencyStop": (
+                live_readiness.get("emergencyStop", False)
+            ),
+
             "timestamp": (
                 datetime.utcnow().isoformat()
             ),
@@ -548,6 +695,7 @@ class ExecutionRuntime:
         self.handoff_executed = False
         self.handoff_blocked_reason = None
         self.handoff_signal = None
+        self.handoff_live_block_reasons = []
         self.execution_governance_reached = False
 
         if governance_decision is not None:

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from backend.utils.order import place_order_safe
+from backend.runtime.governance_runtime import governance_state
 from backend.utils.log_buffer import (
     add_log,
     logger as app_logger,
@@ -8,6 +9,7 @@ from backend.utils.log_buffer import (
     ws_debug,
 )
 
+import backend.config as backend_config
 import math
 import time
 
@@ -87,11 +89,30 @@ class ExecutionEngine:
 
         self.config = {
             "risk_percent": 1,
+            "position_size": 0.0,
             "leverage": 10,
+            "timeframe": "1m",
             "sl_percent": 1,
             "tp_percent": 2,
+            "max_drawdown_pct": 5.0,
+            "trailing_stop": False,
+            "trailing_stop_distance_percent": None,
             "dry_run": True
         }
+
+        self.initial_equity = self.balance
+        self.peak_equity = self.balance
+        self.current_drawdown_pct = 0.0
+        self.risk_trading_disabled = False
+        self.risk_block_reason = None
+
+        self.exchange_auth_ready = False
+        self.balance_check_ok = False
+        self.position_check_ok = False
+        self.balance_check_error = None
+        self.position_check_error = None
+        self.last_order_blocked_reason = None
+        self.last_live_block_reasons = []
 
     # =====================================
     # START
@@ -101,13 +122,26 @@ class ExecutionEngine:
 
         add_log("🚀 ENGINE START CALLED")
 
-        if self.mode == "live" and self.exchange:
+        selected_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().upper()
+
+        self.exchange_auth_ready = (
+            self._exchange_credentials_ready()
+            if self.exchange
+            else False
+        )
+
+        if selected_mode == "LIVE" and self.exchange:
 
             try:
 
                 balance = self.exchange.get_balance()
 
                 runtime_debug("ExecutionEngine live balance=%s", balance)
+
+                self.balance_check_ok = True
+                self.balance_check_error = None
 
                 if balance > 0:
 
@@ -116,7 +150,10 @@ class ExecutionEngine:
                     if self.portfolio:
                         self.portfolio.balance = balance
 
-            except Exception:
+            except Exception as e:
+
+                self.balance_check_ok = False
+                self.balance_check_error = str(e)
 
                 self.logger.exception("BALANCE FETCH ERROR")
 
@@ -124,7 +161,11 @@ class ExecutionEngine:
         # POSITION SYNC
         # =====================================
 
-        if self.exchange and self.symbol:
+        if (
+            selected_mode == "LIVE"
+            and self.exchange
+            and self.symbol
+        ):
 
             try:
 
@@ -136,7 +177,13 @@ class ExecutionEngine:
 
                 runtime_debug("ExecutionEngine synced position=%s", pos)
 
-            except Exception:
+                self.position_check_ok = True
+                self.position_check_error = None
+
+            except Exception as e:
+
+                self.position_check_ok = False
+                self.position_check_error = str(e)
 
                 self.logger.exception("POSITION SYNC ERROR")
 
@@ -206,8 +253,311 @@ class ExecutionEngine:
         }
 
     # =====================================
+    # RISK STATE
+    # =====================================
+
+    def _current_balance(self):
+
+        return float(
+            self.portfolio.balance
+            if self.portfolio
+            else self.balance
+        )
+
+    def _current_equity(self):
+
+        return (
+            self._current_balance()
+            + float(self.unrealized_pnl or 0)
+        )
+
+    def _reset_risk_state(self):
+
+        equity = self._current_equity()
+
+        self.initial_equity = equity
+        self.peak_equity = equity
+        self.current_drawdown_pct = 0.0
+        self.risk_trading_disabled = False
+        self.risk_block_reason = None
+
+    def update_drawdown_state(self, equity=None):
+
+        if equity is None:
+            equity = self._current_equity()
+
+        equity = float(equity)
+
+        if self.initial_equity is None:
+            self.initial_equity = equity
+
+        if self.peak_equity is None or equity > self.peak_equity:
+            self.peak_equity = equity
+
+        if not self.peak_equity:
+            self.current_drawdown_pct = 0.0
+        else:
+            self.current_drawdown_pct = max(
+                0.0,
+                (
+                    (self.peak_equity - equity)
+                    / self.peak_equity
+                    * 100
+                ),
+            )
+
+        if (
+            self.current_drawdown_pct
+            >= self.config["max_drawdown_pct"]
+        ):
+            self.risk_trading_disabled = True
+            self.risk_block_reason = "MAX_DRAWDOWN"
+
+            runtime_debug(
+                "ExecutionEngine risk halted drawdown=%s max=%s",
+                self.current_drawdown_pct,
+                self.config["max_drawdown_pct"],
+            )
+
+        return self.get_risk_state()
+
+    def _active_position_metrics(self):
+
+        position = self.actual_position
+
+        if isinstance(position, list):
+
+            position = (
+                position[0]
+                if position
+                else None
+            )
+
+        if not isinstance(position, dict):
+
+            return {
+                "activePositionQty": None,
+                "activePositionContractQty": None,
+                "activePositionNotional": None,
+                "activePositionEntryNotional": None,
+            }
+
+        try:
+
+            contracts = float(
+                position.get("qty", 0) or 0
+            )
+
+            multiplier = float(
+                position.get("multiplier", 1) or 1
+            )
+
+            real_qty = float(
+                position.get(
+                    "coin_qty",
+                    contracts * multiplier,
+                )
+                or 0
+            )
+
+            entry_price = float(
+                position.get("entry_price", 0) or 0
+            )
+
+            mark_price = float(
+                self.latest_price
+                or entry_price
+                or 0
+            )
+
+            notional = (
+                real_qty * mark_price
+                if mark_price > 0
+                else None
+            )
+
+            entry_notional = (
+                real_qty * entry_price
+                if entry_price > 0
+                else None
+            )
+
+            return {
+                "activePositionQty": real_qty,
+                "activePositionContractQty": contracts,
+                "activePositionNotional": notional,
+                "activePositionEntryNotional": entry_notional,
+            }
+
+        except Exception:
+
+            return {
+                "activePositionQty": None,
+                "activePositionContractQty": None,
+                "activePositionNotional": None,
+                "activePositionEntryNotional": None,
+            }
+
+    def get_risk_state(self):
+
+        position_metrics = self._active_position_metrics()
+
+        return {
+            "initialEquity": self.initial_equity,
+            "peakEquity": self.peak_equity,
+            "currentEquity": self._current_equity(),
+            "currentDrawdownPct": self.current_drawdown_pct,
+            "maxDrawdownPct": self.config["max_drawdown_pct"],
+            "riskTradingDisabled": self.risk_trading_disabled,
+            "riskBlockReason": self.risk_block_reason,
+            "positionSize": self.config["position_size"],
+            "tpPercent": self.config["tp_percent"],
+            "slPercent": self.config["sl_percent"],
+            "trailingStop": self.config["trailing_stop"],
+            "trailingStopDistancePercent": (
+                self.config.get("trailing_stop_distance_percent")
+                or self.config["sl_percent"]
+            ),
+            "realQty": position_metrics["activePositionQty"],
+            "notional": position_metrics["activePositionNotional"],
+            **position_metrics,
+        }
+
+    # =====================================
     # CONFIG
     # =====================================
+
+    @staticmethod
+    def _as_bool(value):
+
+        if isinstance(value, str):
+            return (
+                value.strip().lower()
+                in ["1", "true", "yes", "on"]
+            )
+
+        return bool(value)
+
+    def _exchange_credentials_ready(self):
+
+        if not self.exchange:
+            return False
+
+        credentials_ready = getattr(
+            self.exchange,
+            "credentials_ready",
+            None,
+        )
+
+        if callable(credentials_ready):
+            return bool(credentials_ready())
+
+        return bool(
+            getattr(self.exchange, "api_key", None)
+            and getattr(self.exchange, "api_secret", None)
+            and getattr(self.exchange, "passphrase", None)
+        )
+
+    def build_live_readiness(self):
+
+        selected_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().upper()
+        dry_run = bool(
+            self.config.get("dry_run", True)
+        )
+        trade_mode_live = (
+            backend_config.TRADE_MODE == "live"
+        )
+        allow_live = (
+            backend_config.ALLOW_LIVE is True
+        )
+        exchange_client_ready = self.exchange is not None
+        exchange_auth_ready = (
+            self._exchange_credentials_ready()
+            if exchange_client_ready
+            else False
+        )
+        balance_check_ok = bool(self.balance_check_ok)
+        position_check_ok = bool(self.position_check_ok)
+        execution_enabled = bool(
+            governance_state.get("execution_enabled", False)
+        )
+        emergency_stop = bool(
+            governance_state.get("emergency_stop", False)
+        )
+
+        checks = {
+            "selectedModeLive": selected_mode == "LIVE",
+            "dryRunDisabled": dry_run is False,
+            "allowLive": allow_live,
+            "tradeModeLive": trade_mode_live,
+            "exchangeClientReady": exchange_client_ready,
+            "exchangeAuthReady": exchange_auth_ready,
+            "balanceCheckOk": balance_check_ok,
+            "positionCheckOk": position_check_ok,
+            "executionEnabled": execution_enabled,
+            "emergencyStopClear": not emergency_stop,
+        }
+
+        block_reasons = []
+
+        if not checks["selectedModeLive"]:
+            block_reasons.append("SELECTED_MODE_NOT_LIVE")
+        if not checks["dryRunDisabled"]:
+            block_reasons.append("DRY_RUN_ACTIVE")
+        if not checks["allowLive"]:
+            block_reasons.append("LIVE_NOT_ENABLED")
+        if not checks["tradeModeLive"]:
+            block_reasons.append("TRADE_MODE_NOT_LIVE")
+        if not checks["exchangeAuthReady"]:
+            block_reasons.append("KUCOIN_CREDENTIALS_MISSING")
+        if not checks["exchangeClientReady"]:
+            block_reasons.append("EXCHANGE_CLIENT_NOT_READY")
+        if not checks["balanceCheckOk"]:
+            block_reasons.append("BALANCE_CHECK_FAILED")
+        if not checks["positionCheckOk"]:
+            block_reasons.append("POSITION_CHECK_FAILED")
+        if not checks["executionEnabled"]:
+            block_reasons.append("EXECUTION_DISABLED")
+        if not checks["emergencyStopClear"]:
+            block_reasons.append("EMERGENCY_STOP_ACTIVE")
+
+        real_order_allowed = not block_reasons
+
+        return {
+            "ready": real_order_allowed,
+            "realOrderAllowed": real_order_allowed,
+            "checks": checks,
+            "blockReasons": block_reasons,
+            "selectedMode": selected_mode,
+            "dryRun": dry_run,
+            "tradeMode": backend_config.TRADE_MODE,
+            "allowLive": backend_config.ALLOW_LIVE,
+            "exchangeClientReady": exchange_client_ready,
+            "exchangeAuthReady": exchange_auth_ready,
+            "balanceCheckOk": balance_check_ok,
+            "positionCheckOk": position_check_ok,
+            "executionEnabled": execution_enabled,
+            "emergencyStop": emergency_stop,
+            "balanceCheckError": self.balance_check_error,
+            "positionCheckError": self.position_check_error,
+        }
+
+    def _live_order_allowed(self):
+
+        readiness = self.build_live_readiness()
+        self.last_live_block_reasons = list(
+            readiness["blockReasons"]
+        )
+
+        if readiness["realOrderAllowed"]:
+            self.last_order_blocked_reason = None
+            return True
+
+        self.last_order_blocked_reason = "LIVE_NOT_READY"
+
+        return False
 
     def set_config(self, config: dict):
 
@@ -220,11 +570,29 @@ class ExecutionEngine:
 
             safe_config.pop("symbol", None)
 
+            self.config["mode"] = str(
+                safe_config.get(
+                    "mode",
+                    self.config.get("mode", "paper")
+                )
+                or "paper"
+            ).strip().lower()
+
             self.config["risk_percent"] = float(
                 safe_config.get(
                     "risk_percent",
                     self.config["risk_percent"]
                 )
+            )
+
+            self.config["position_size"] = float(
+                safe_config.get(
+                    "position_size",
+                    safe_config.get(
+                        "positionSize",
+                        self.config["position_size"]
+                    )
+                ) or 0
             )
 
             self.config["leverage"] = int(
@@ -242,6 +610,14 @@ class ExecutionEngine:
                 type(self.config["leverage"]).__name__,
             )
 
+            self.config["timeframe"] = str(
+                safe_config.get(
+                    "timeframe",
+                    self.config["timeframe"]
+                )
+                or "1m"
+            )
+
             self.config["sl_percent"] = float(
                 safe_config.get(
                     "sl_percent",
@@ -256,7 +632,49 @@ class ExecutionEngine:
                 )
             )
 
-            self.config["dry_run"] = bool(
+            self.config["max_drawdown_pct"] = float(
+                safe_config.get(
+                    "max_drawdown_pct",
+                    safe_config.get(
+                        "maxDd",
+                        self.config["max_drawdown_pct"]
+                    )
+                )
+            )
+
+            trailing_value = safe_config.get(
+                "trailing_stop",
+                safe_config.get(
+                    "trailing",
+                    self.config["trailing_stop"]
+                )
+            )
+
+            if isinstance(trailing_value, str):
+
+                trailing_value = (
+                    trailing_value.strip().upper()
+                    in ["ON", "TRUE", "1", "YES"]
+                )
+
+            self.config["trailing_stop"] = bool(
+                trailing_value
+            )
+
+            trailing_distance = safe_config.get(
+                "trailing_stop_distance_percent",
+                self.config["trailing_stop_distance_percent"]
+            )
+
+            self.config[
+                "trailing_stop_distance_percent"
+            ] = (
+                None
+                if trailing_distance in [None, ""]
+                else float(trailing_distance)
+            )
+
+            self.config["dry_run"] = self._as_bool(
                 safe_config.get(
                     "dry_run",
                     self.config["dry_run"]
@@ -284,9 +702,118 @@ class ExecutionEngine:
                 f"{self.config['dry_run']}"
             )
 
+            self._reset_risk_state()
+
         except Exception:
 
             self.logger.exception("ExecutionEngine config error")
+
+    # =====================================
+    # POSITION RISK HELPERS
+    # =====================================
+
+    @staticmethod
+    def _is_short(side):
+
+        return str(side).upper() in [
+            "SELL",
+            "SHORT",
+        ]
+
+    def _target_prices(self, side, price):
+
+        sl_distance = (
+            self.config["sl_percent"] / 100
+        )
+
+        tp_distance = (
+            self.config["tp_percent"] / 100
+        )
+
+        if self._is_short(side):
+
+            return {
+                "sl": price * (1 + sl_distance),
+                "tp": price * (1 - tp_distance),
+            }
+
+        return {
+            "sl": price * (1 - sl_distance),
+            "tp": price * (1 + tp_distance),
+        }
+
+    def _trailing_distance_percent(self):
+
+        return float(
+            self.config.get(
+                "trailing_stop_distance_percent"
+            )
+            or self.config["sl_percent"]
+        )
+
+    def _update_trailing_stop(self, price):
+
+        if not self.actual_position:
+            return
+
+        if not self.actual_position.get(
+            "trailing",
+            False,
+        ):
+            return
+
+        side = self.actual_position.get("side")
+
+        distance = (
+            float(
+                self.actual_position.get(
+                    "trailing_distance_percent",
+                    self._trailing_distance_percent(),
+                )
+            )
+            / 100
+        )
+
+        reference = self.actual_position.get(
+            "trailing_reference_price",
+            self.actual_position.get("entry_price", price),
+        )
+
+        current_sl = self.actual_position.get("sl")
+
+        if self._is_short(side):
+
+            if price < reference:
+
+                new_sl = price * (1 + distance)
+
+                if current_sl is None or new_sl < current_sl:
+
+                    self.actual_position["sl"] = new_sl
+                    self.actual_position[
+                        "trailing_stop_price"
+                    ] = new_sl
+
+                self.actual_position[
+                    "trailing_reference_price"
+                ] = price
+
+        else:
+
+            if price > reference:
+
+                new_sl = price * (1 - distance)
+
+                if current_sl is None or new_sl > current_sl:
+
+                    self.actual_position["sl"] = new_sl
+                    self.actual_position[
+                        "trailing_stop_price"
+                    ] = new_sl
+
+                self.actual_position[
+                    "trailing_reference_price"
+                ] = price
 
     # =====================================
     # PRICE EVENT
@@ -328,6 +855,8 @@ class ExecutionEngine:
 
                 self.price_ready = True
 
+            self.update_drawdown_state()
+
             # =====================================
             # POSITION MANAGEMENT
             # =====================================
@@ -353,20 +882,60 @@ class ExecutionEngine:
                     contracts * multiplier
                 )
 
-                self.unrealized_pnl = (
-                    (price - entry)
-                    * coin_qty
+                side = self.actual_position.get(
+                    "side"
                 )
 
+                if self._is_short(side):
+
+                    self.unrealized_pnl = (
+                        (entry - price)
+                        * coin_qty
+                    )
+
+                else:
+
+                    self.unrealized_pnl = (
+                        (price - entry)
+                        * coin_qty
+                    )
+
+                self.update_drawdown_state()
+
+                self._update_trailing_stop(price)
+
                 runtime_debug(
-                    "Position tick price=%s entry=%s qty=%s upnl=%s",
+                    "Position tick price=%s entry=%s side=%s qty=%s upnl=%s",
                     price,
                     entry,
+                    side,
                     contracts,
                     self.unrealized_pnl,
                 )
 
-                if price <= self.actual_position.get("sl", 0):
+                stop_loss = self.actual_position.get(
+                    "sl",
+                    0,
+                )
+
+                take_profit = self.actual_position.get(
+                    "tp",
+                    0,
+                )
+
+                if self._is_short(side):
+
+                    sl_hit = price >= stop_loss
+
+                    tp_hit = price <= take_profit
+
+                else:
+
+                    sl_hit = price <= stop_loss
+
+                    tp_hit = price >= take_profit
+
+                if sl_hit:
 
                     add_log("🔴 SL HIT")
 
@@ -374,7 +943,7 @@ class ExecutionEngine:
 
                     return
 
-                if price >= self.actual_position.get("tp", 0):
+                if tp_hit:
 
                     add_log("🟢 TP HIT")
 
@@ -628,6 +1197,17 @@ class ExecutionEngine:
 
             return
 
+        risk_state = self.update_drawdown_state()
+
+        if risk_state.get("riskTradingDisabled"):
+
+            runtime_debug(
+                "ExecutionEngine blocked by risk state=%s",
+                risk_state,
+            )
+
+            return
+
         # =====================================
         # PREVIEW
         # =====================================
@@ -672,7 +1252,7 @@ class ExecutionEngine:
 
         order = {
             "symbol": self.symbol,
-            "side": signal.get("side"),
+            "side": str(signal.get("side")).upper(),
             "qty": qty,
             "price": price
         }
@@ -726,6 +1306,38 @@ class ExecutionEngine:
                     )
 
                     return
+
+                if not self._live_order_allowed():
+
+                    add_log(
+                        "🛑 LIVE ORDER BLOCKED: LIVE_NOT_READY",
+                        "warning",
+                    )
+
+                    runtime_debug(
+                        "Live order blocked reasons=%s",
+                        self.last_live_block_reasons,
+                    )
+
+                    if hasattr(
+                        self.exchange,
+                        "set_live_order_gate",
+                    ):
+                        self.exchange.set_live_order_gate(
+                            False,
+                            self.last_live_block_reasons,
+                        )
+
+                    return
+
+                if hasattr(
+                    self.exchange,
+                    "set_live_order_gate",
+                ):
+                    self.exchange.set_live_order_gate(
+                        True,
+                        [],
+                    )
 
                 raw_res = self.exchange.place_order(
                     symbol=order["symbol"],
@@ -814,10 +1426,23 @@ class ExecutionEngine:
 
                 contracts = qty / multiplier
 
+                target_prices = self._target_prices(
+                    order["side"],
+                    price,
+                )
+
+                trailing_enabled = bool(
+                    self.config["trailing_stop"]
+                )
+
+                trailing_distance = (
+                    self._trailing_distance_percent()
+                )
+
                 self.actual_position = {
                     "state": "OPEN",
 
-                    "side": signal.get("side"),
+                    "side": order["side"],
 
                     "entry_price": price,
 
@@ -834,13 +1459,33 @@ class ExecutionEngine:
 
                     "signal_id": signal.get("id"),
 
-                    "sl": price * (
-                        1 - self.config["sl_percent"] / 100
+                    "sl": target_prices["sl"],
+
+                    "tp": target_prices["tp"],
+
+                    "tp_percent": self.config["tp_percent"],
+
+                    "sl_percent": self.config["sl_percent"],
+
+                    "position_size": (
+                        preview.get("position_size")
                     ),
 
-                    "tp": price * (
-                        1 + self.config["tp_percent"] / 100
-                    )
+                    "trailing": trailing_enabled,
+
+                    "trailing_distance_percent": (
+                        trailing_distance
+                    ),
+
+                    "trailing_reference_price": (
+                        price
+                    ),
+
+                    "trailing_stop_price": (
+                        target_prices["sl"]
+                        if trailing_enabled
+                        else None
+                    ),
                 }
 
                 add_log(
@@ -919,10 +1564,23 @@ class ExecutionEngine:
             contracts * multiplier
         )
 
-        pnl = (
-            (price - entry)
-            * coin_qty
+        side = self.actual_position.get(
+            "side"
         )
+
+        if self._is_short(side):
+
+            pnl = (
+                (entry - price)
+                * coin_qty
+            )
+
+        else:
+
+            pnl = (
+                (price - entry)
+                * coin_qty
+            )
 
         self.pnl += pnl
 
@@ -938,6 +1596,10 @@ class ExecutionEngine:
 
         if self.portfolio:
             self.portfolio.balance = self.balance
+
+        self.update_drawdown_state(
+            self._current_equity()
+        )
 
         add_log(f"💰 PnL: {pnl:.4f}")
 
@@ -980,9 +1642,27 @@ class ExecutionEngine:
                 self.config["risk_percent"] / 100
             )
 
-            pos_size = (
-                risk * self.config["leverage"]
+            configured_position_size = float(
+                self.config.get("position_size", 0) or 0
             )
+
+            if configured_position_size > 0:
+
+                base_position_size = (
+                    configured_position_size
+                )
+
+                sizing_mode = "fixed_position_size"
+
+            else:
+
+                base_position_size = (
+                    risk * self.config["leverage"]
+                )
+
+                sizing_mode = "risk_percent"
+
+            pos_size = base_position_size
 
             # =====================================
             # CONTRACT-AWARE MIN SIZE
@@ -1029,7 +1709,7 @@ class ExecutionEngine:
             # =====================================
 
             required_margin = (
-                min_position_value
+                pos_size
                 / self.config["leverage"]
             )
 
@@ -1044,7 +1724,9 @@ class ExecutionEngine:
                 preview = {
                     "valid": False,
                     "reason": (
-                        "insufficient_balance_for_min_contract"
+                        "insufficient_balance_for_position_size"
+                        if configured_position_size > 0
+                        else "insufficient_balance_for_min_contract"
                     )
                 }
 
@@ -1054,14 +1736,24 @@ class ExecutionEngine:
 
                 preview = {
                     "qty": round(qty, 6),
-                    "valid": True
+                    "valid": True,
+                    "position_size": round(pos_size, 6),
+                    "configured_position_size": (
+                        configured_position_size
+                    ),
+                    "sizing_mode": sizing_mode,
+                    "required_margin": round(
+                        required_margin,
+                        6,
+                    ),
                 }
 
 
 
             runtime_debug(
                 "Execution preview balance=%s price=%s risk_percent=%s "
-                "leverage=%s risk=%s position_size=%s multiplier=%s "
+                "leverage=%s risk=%s sizing_mode=%s configured_position_size=%s "
+                "position_size=%s multiplier=%s "
                 "min_contracts=%s coin_qty=%s min_position_value=%s "
                 "required_margin=%s safe_limit=%s raw_qty=%s",
                 balance,
@@ -1069,6 +1761,8 @@ class ExecutionEngine:
                 self.config["risk_percent"],
                 self.config["leverage"],
                 risk,
+                sizing_mode,
+                configured_position_size,
                 pos_size,
                 multiplier,
                 min_contracts,
@@ -1081,6 +1775,8 @@ class ExecutionEngine:
 
 
 
+        risk_state = self.update_drawdown_state()
+
         return {
             "status": self.status,
             "price": price,
@@ -1089,6 +1785,29 @@ class ExecutionEngine:
             "equity": equity,
             "preview": preview,
             "symbol": self.symbol,
+            "risk_percent": self.config["risk_percent"],
+            "leverage": self.config["leverage"],
+            "timeframe": self.config["timeframe"],
+            "position_size": self.config["position_size"],
+            "max_drawdown_pct": self.config["max_drawdown_pct"],
+            "current_drawdown_pct": self.current_drawdown_pct,
+            "tp_percent": self.config["tp_percent"],
+            "sl_percent": self.config["sl_percent"],
+            "trailing_stop": self.config["trailing_stop"],
+            "risk_config": {
+                "risk_percent": self.config["risk_percent"],
+                "leverage": self.config["leverage"],
+                "timeframe": self.config["timeframe"],
+                "position_size": self.config["position_size"],
+                "max_drawdown_pct": self.config["max_drawdown_pct"],
+                "tp_percent": self.config["tp_percent"],
+                "sl_percent": self.config["sl_percent"],
+                "trailing_stop": self.config["trailing_stop"],
+                "trailing_stop_distance_percent": (
+                    self._trailing_distance_percent()
+                ),
+            },
+            "risk_state": risk_state,
             "engine_id": self.engine_id,
             "pending_order": self.pending_order,
             "actual_position": self.actual_position
