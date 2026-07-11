@@ -349,6 +349,7 @@ useEffect(() => {
                 <div className="panel-card center-terminal-panel">
 
                     <AccountRuntimeOverview
+                        accountRuntime={botStatus?.accountRuntime}
                         exchange={firstAvailable(
                             botStatus?.exchange,
                             tradeSettings.exchange,
@@ -391,11 +392,44 @@ useEffect(() => {
                             botStatus?.exchangeAuth,
                             "NOT_VERIFIED",
                         )}
+                        exchangeConnection={firstAvailable(
+                            botStatus?.exchangeConnection,
+                            "NOT_CONNECTED",
+                        )}
+                        apiKeyStatus={firstAvailable(
+                            botStatus?.apiKeyStatus,
+                            "MISSING",
+                        )}
+                        permission={firstAvailable(
+                            botStatus?.permission,
+                            "NOT_VERIFIED",
+                        )}
+                        accountType={firstAvailable(
+                            botStatus?.accountType,
+                            "UNKNOWN",
+                        )}
+                        exchangeAuthReason={botStatus?.exchangeAuthReason}
+                        exchangeConnectionReason={
+                            botStatus?.exchangeConnectionReason
+                        }
+                        accountReason={botStatus?.accountReason}
+                        balanceReason={botStatus?.balanceReason}
+                        positionReason={botStatus?.positionReason}
+                        accountSourceReason={botStatus?.accountSourceReason}
+                        balanceSourceReason={botStatus?.balanceSourceReason}
+                        positionSourceReason={botStatus?.positionSourceReason}
                         realAccountConnected={
                             botStatus?.realAccountConnected === true
                         }
                         realBalance={botStatus?.realBalance}
+                        realEquity={botStatus?.realEquity}
+                        realAvailableBalance={
+                            botStatus?.realAvailableBalance
+                        }
                         realPosition={botStatus?.realPosition}
+                        realPositionState={botStatus?.realPositionState}
+                        realAccountLastSync={botStatus?.realAccountLastSync}
+                        realLastSync={botStatus?.realLastSync}
                         balance={firstAvailable(
                             botStatus?.balance,
                             wsMarketData?.balance,

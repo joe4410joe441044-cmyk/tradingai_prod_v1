@@ -111,6 +111,13 @@ class ExecutionEngine:
         self.position_check_ok = False
         self.balance_check_error = None
         self.position_check_error = None
+        self.real_balance = None
+        self.real_equity = None
+        self.real_available_balance = None
+        self.real_account_snapshot = {}
+        self.real_account_last_sync = None
+        self.real_position = None
+        self.real_position_state = "NOT_SYNCED"
         self.last_order_blocked_reason = None
         self.last_live_block_reasons = []
 
@@ -136,12 +143,52 @@ class ExecutionEngine:
 
             try:
 
-                balance = self.exchange.get_balance()
+                account_overview = {}
+
+                if hasattr(self.exchange, "get_account_overview"):
+                    account_overview = (
+                        self.exchange.get_account_overview()
+                        or {}
+                    )
+                    balance = float(
+                        account_overview.get(
+                            "balance",
+                            account_overview.get("equity", 0.0),
+                        )
+                        or 0.0
+                    )
+                else:
+                    balance = self.exchange.get_balance()
+                    account_overview = {
+                        "source": "KUCOIN_FUTURES_READ_ONLY",
+                        "accountType": "KUCOIN_FUTURES",
+                        "balance": balance,
+                        "equity": balance,
+                        "availableBalance": None,
+                        "exchangeAuth": "VERIFIED",
+                        "exchangeConnection": "CONNECTED",
+                        "apiKeyStatus": "VERIFIED",
+                        "permission": "READ_ONLY",
+                        "lastSync": time.time(),
+                    }
 
                 runtime_debug("ExecutionEngine live balance=%s", balance)
 
                 self.balance_check_ok = True
                 self.balance_check_error = None
+                self.real_account_snapshot = dict(account_overview)
+                self.real_balance = balance
+                self.real_equity = account_overview.get(
+                    "equity",
+                    balance,
+                )
+                self.real_available_balance = account_overview.get(
+                    "availableBalance"
+                )
+                self.real_account_last_sync = account_overview.get(
+                    "lastSync",
+                    time.time(),
+                )
 
                 if balance > 0:
 
@@ -174,6 +221,12 @@ class ExecutionEngine:
                 )
 
                 self.actual_position = pos
+                self.real_position = pos
+                self.real_position_state = (
+                    "OPEN"
+                    if pos
+                    else "NO_OPEN_POSITION"
+                )
 
                 runtime_debug("ExecutionEngine synced position=%s", pos)
 
@@ -184,6 +237,7 @@ class ExecutionEngine:
 
                 self.position_check_ok = False
                 self.position_check_error = str(e)
+                self.real_position_state = "SYNC_FAILED"
 
                 self.logger.exception("POSITION SYNC ERROR")
 
@@ -524,6 +578,56 @@ class ExecutionEngine:
             block_reasons.append("EMERGENCY_STOP_ACTIVE")
 
         real_order_allowed = not block_reasons
+        account_snapshot = dict(self.real_account_snapshot or {})
+        account_type = account_snapshot.get(
+            "accountType",
+            "KUCOIN_FUTURES" if exchange_auth_ready else "UNKNOWN",
+        )
+        exchange_connection = (
+            "CONNECTED"
+            if exchange_client_ready
+            else "NOT_CONNECTED"
+        )
+        api_key_status = (
+            "VERIFIED"
+            if exchange_auth_ready
+            else "MISSING"
+        )
+        permission = (
+            account_snapshot.get("permission")
+            or ("READ_ONLY" if exchange_auth_ready else "NOT_VERIFIED")
+        )
+        auth_reason = (
+            "KUCOIN_CREDENTIALS_VERIFIED"
+            if exchange_auth_ready
+            else "KUCOIN_CREDENTIALS_MISSING"
+        )
+        connection_reason = (
+            "KUCOIN_CLIENT_READY"
+            if exchange_client_ready
+            else "EXCHANGE_CLIENT_NOT_READY"
+        )
+        balance_reason = (
+            "KUCOIN_BALANCE_SYNC_OK"
+            if balance_check_ok
+            else (
+                self.balance_check_error
+                or "BALANCE_NOT_SYNCED"
+            )
+        )
+        position_reason = (
+            "KUCOIN_POSITION_SYNC_OK"
+            if position_check_ok
+            else (
+                self.position_check_error
+                or "POSITION_NOT_SYNCED"
+            )
+        )
+        account_reason = (
+            "KUCOIN_READ_ONLY_SYNC_OK"
+            if balance_check_ok or position_check_ok
+            else "KUCOIN_READ_ONLY_NOT_CONNECTED"
+        )
 
         return {
             "ready": real_order_allowed,
@@ -542,6 +646,22 @@ class ExecutionEngine:
             "emergencyStop": emergency_stop,
             "balanceCheckError": self.balance_check_error,
             "positionCheckError": self.position_check_error,
+            "realBalance": self.real_balance,
+            "realEquity": self.real_equity,
+            "realAvailableBalance": self.real_available_balance,
+            "realPosition": self.real_position,
+            "realPositionState": self.real_position_state,
+            "realAccountLastSync": self.real_account_last_sync,
+            "exchangeConnection": exchange_connection,
+            "apiKeyStatus": api_key_status,
+            "permission": permission,
+            "accountType": account_type,
+            "exchangeAuthReason": auth_reason,
+            "exchangeConnectionReason": connection_reason,
+            "accountReason": account_reason,
+            "balanceReason": balance_reason,
+            "positionReason": position_reason,
+            "accountSnapshot": account_snapshot,
         }
 
     def _live_order_allowed(self):

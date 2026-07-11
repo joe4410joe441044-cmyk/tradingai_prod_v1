@@ -168,12 +168,31 @@ class BotManager:
         # engine.  stop() intentionally tears the engine down, but account
         # telemetry must remain readable by the dashboard afterwards.
         self.account_snapshot = {
-            "balance": 0.0,
-            "equity": 0.0,
-            "pnl": 0.0,
+            "balance": None,
+            "equity": None,
+            "availableBalance": None,
+            "pnl": None,
             "position": None,
-            "last_update": time.time(),
+            "positions": None,
+            "realizedPnl": None,
+            "unrealizedPnl": None,
+            "last_update": None,
+            "available": False,
         }
+
+        self.account_snapshot_generation = 0
+        self.account_refresh_interval = 30
+        self.account_stale_after = 90
+        self.account_read_client = None
+        self.account_read_client_exchange = None
+        self.real_account_snapshot = (
+            self._empty_real_account_snapshot(
+                self.exchange_name,
+                self.account_snapshot_generation,
+                loading=False,
+                reason="ACCOUNT_NOT_SYNCED",
+            )
+        )
 
         # =========================
         # POSITION
@@ -413,6 +432,650 @@ class BotManager:
             "tp_percent": engine_config.get("tp_percent"),
         }
 
+    def _normalize_account_exchange(self, exchange=None):
+
+        return str(
+            exchange
+            or self.exchange_name
+            or self.config.get("exchange")
+            or "kucoin"
+        ).strip().lower()
+
+    def _empty_real_account_snapshot(
+        self,
+        exchange=None,
+        generation=None,
+        loading=False,
+        reason="ACCOUNT_NOT_SYNCED",
+    ):
+
+        normalized_exchange = self._normalize_account_exchange(
+            exchange
+        )
+
+        return {
+            "exchange": normalized_exchange,
+            "accountType": "UNKNOWN",
+            "connected": False,
+            "authenticated": False,
+            "apiKeyPresent": False,
+            "permission": "NOT_VERIFIED",
+            "balance": None,
+            "equity": None,
+            "availableBalance": None,
+            "positions": None,
+            "positionSummary": None,
+            "lastSync": None,
+            "lastAttempt": None,
+            "stale": False,
+            "loading": bool(loading),
+            "authReason": reason,
+            "connectionReason": reason,
+            "accountReason": reason,
+            "balanceReason": reason,
+            "positionReason": reason,
+            "lastError": reason if reason != "ACCOUNT_NOT_SYNCED" else None,
+            "accountSource": None,
+            "balanceSource": None,
+            "positionSource": None,
+            "generation": (
+                self.account_snapshot_generation
+                if generation is None
+                else generation
+            ),
+        }
+
+    def _prepare_real_account_snapshot_for_exchange(
+        self,
+        exchange=None,
+        loading=True,
+    ):
+
+        normalized_exchange = self._normalize_account_exchange(
+            exchange
+        )
+        current_exchange = (
+            self.real_account_snapshot or {}
+        ).get("exchange")
+
+        if current_exchange == normalized_exchange:
+            return self.real_account_snapshot
+
+        self.account_snapshot_generation += 1
+        self.account_read_client = None
+        self.account_read_client_exchange = None
+        self.real_account_snapshot = (
+            self._empty_real_account_snapshot(
+                normalized_exchange,
+                self.account_snapshot_generation,
+                loading=loading,
+                reason="ACCOUNT_EXCHANGE_CHANGED",
+            )
+        )
+
+        return self.real_account_snapshot
+
+    @staticmethod
+    def _classify_account_error(error, default_reason):
+
+        text = str(error or "").upper()
+
+        if "TIMEOUT" in text or "TIMED OUT" in text:
+            return "REQUEST_TIMEOUT"
+        if "PERMISSION" in text or "FORBIDDEN" in text or "403" in text:
+            return "PERMISSION_DENIED"
+        if "AUTH" in text or "UNAUTHORIZED" in text or "401" in text:
+            return "AUTH_FAILED"
+        if "FUTURES" in text and "UNAVAILABLE" in text:
+            return "FUTURES_ACCOUNT_UNAVAILABLE"
+        if "CREDENTIAL" in text or "API KEY" in text:
+            return "CREDENTIALS_MISSING"
+
+        return default_reason
+
+    @staticmethod
+    def _normalize_positions_for_account(value):
+
+        if value is None:
+            return []
+
+        if isinstance(value, list):
+            return deepcopy(value)
+
+        return [deepcopy(value)]
+
+    @staticmethod
+    def _position_summary(positions):
+
+        if positions is None:
+            return None
+
+        if isinstance(positions, list):
+            return (
+                "NO_OPEN_POSITION"
+                if not positions
+                else "OPEN"
+            )
+
+        return "OPEN"
+
+    @staticmethod
+    def _legacy_real_position_value(positions):
+
+        if isinstance(positions, list):
+            if not positions:
+                return []
+            if len(positions) == 1:
+                return deepcopy(positions[0])
+
+        return deepcopy(positions)
+
+    def _mark_real_account_stale_if_needed(self, snapshot):
+
+        snapshot = dict(snapshot or {})
+        last_sync = snapshot.get("lastSync")
+
+        if (
+            last_sync
+            and time.time() - float(last_sync) > self.account_stale_after
+        ):
+            snapshot["stale"] = True
+            snapshot["lastError"] = (
+                snapshot.get("lastError")
+                or "STALE_ACCOUNT_DATA"
+            )
+
+        self.real_account_snapshot = snapshot
+
+        return snapshot
+
+    def _get_real_account_snapshot(self, force=False):
+
+        exchange = self._normalize_account_exchange()
+        snapshot = self._prepare_real_account_snapshot_for_exchange(
+            exchange,
+            loading=False,
+        )
+
+        if (
+            not self.config
+            and self.engine is None
+            and not force
+        ):
+            return snapshot
+
+        if (
+            not force
+            and self.engine is None
+            and not self.symbol
+            and not self.config.get("symbol")
+        ):
+            return snapshot
+
+        now = time.time()
+        last_attempt = snapshot.get("lastAttempt")
+
+        if (
+            not force
+            and last_attempt
+            and now - float(last_attempt) < self.account_refresh_interval
+            and not snapshot.get("loading")
+        ):
+            return self._mark_real_account_stale_if_needed(snapshot)
+
+        return self._refresh_real_account_snapshot(exchange)
+
+    def _refresh_real_account_snapshot(self, exchange=None):
+
+        exchange = self._normalize_account_exchange(exchange)
+        snapshot = self._prepare_real_account_snapshot_for_exchange(
+            exchange,
+            loading=True,
+        )
+        generation = snapshot.get("generation")
+        previous = dict(snapshot or {})
+        now = time.time()
+
+        loading_snapshot = dict(previous)
+        loading_snapshot.update({
+            "loading": True,
+            "lastAttempt": now,
+        })
+        self.real_account_snapshot = loading_snapshot
+
+        def commit(next_snapshot):
+            current_exchange = self._normalize_account_exchange()
+            if (
+                generation == self.account_snapshot_generation
+                and exchange == current_exchange
+            ):
+                self.real_account_snapshot = next_snapshot
+                return next_snapshot
+
+            stale_snapshot = dict(next_snapshot)
+            stale_snapshot.update({
+                "stale": True,
+                "loading": False,
+                "lastError": "ACCOUNT_EXCHANGE_MISMATCH",
+                "connectionReason": "ACCOUNT_EXCHANGE_MISMATCH",
+                "accountReason": "ACCOUNT_EXCHANGE_MISMATCH",
+                "balanceReason": "ACCOUNT_EXCHANGE_MISMATCH",
+                "positionReason": "ACCOUNT_EXCHANGE_MISMATCH",
+            })
+            return stale_snapshot
+
+        if exchange != "kucoin":
+            unavailable = self._empty_real_account_snapshot(
+                exchange,
+                generation,
+                loading=False,
+                reason="EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE",
+            )
+            unavailable.update({
+                "lastAttempt": now,
+                "lastError": "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE",
+            })
+            return commit(unavailable)
+
+        api_key_present = KucoinTradeClient.credentials_present()
+
+        if not api_key_present:
+            missing = self._empty_real_account_snapshot(
+                exchange,
+                generation,
+                loading=False,
+                reason="CREDENTIALS_MISSING",
+            )
+            missing.update({
+                "accountType": "KUCOIN_FUTURES",
+                "lastAttempt": now,
+                "lastError": "CREDENTIALS_MISSING",
+            })
+            return commit(missing)
+
+        client = None
+        connection_reason = "KUCOIN_CLIENT_READY"
+        auth_reason = "KUCOIN_CREDENTIALS_PRESENT"
+
+        try:
+            if (
+                self.account_read_client
+                and self.account_read_client_exchange == exchange
+            ):
+                client = self.account_read_client
+            else:
+                client = KucoinTradeClient()
+                self.account_read_client = client
+                self.account_read_client_exchange = exchange
+        except Exception as e:
+            reason = self._classify_account_error(
+                e,
+                "AUTH_FAILED",
+            )
+            failed = self._empty_real_account_snapshot(
+                exchange,
+                generation,
+                loading=False,
+                reason=reason,
+            )
+            failed.update({
+                "accountType": "KUCOIN_FUTURES",
+                "apiKeyPresent": True,
+                "lastAttempt": now,
+                "lastError": reason,
+            })
+            return commit(failed)
+
+        overview = {}
+        balance_ok = False
+        balance_reason = "BALANCE_FETCH_FAILED"
+
+        try:
+            overview = client.get_account_overview() or {}
+            has_balance_value = any(
+                overview.get(key) is not None
+                for key in [
+                    "balance",
+                    "equity",
+                    "availableBalance",
+                ]
+            )
+            balance_ok = bool(has_balance_value)
+            balance_reason = (
+                "KUCOIN_BALANCE_SYNC_OK"
+                if balance_ok
+                else "BALANCE_FETCH_FAILED"
+            )
+        except Exception as e:
+            balance_reason = self._classify_account_error(
+                e,
+                "BALANCE_FETCH_FAILED",
+            )
+
+        positions = None
+        position_ok = False
+        position_reason = "POSITION_FETCH_FAILED"
+
+        try:
+            positions = self._normalize_positions_for_account(
+                client.get_positions(
+                    self.orderbook_symbol
+                    or self.symbol
+                )
+            )
+            position_ok = True
+            position_reason = "KUCOIN_POSITION_SYNC_OK"
+        except Exception as e:
+            position_reason = self._classify_account_error(
+                e,
+                "POSITION_FETCH_FAILED",
+            )
+
+        authenticated = balance_ok or position_ok
+        successful_sync = authenticated
+        last_sync = (
+            now
+            if successful_sync
+            else previous.get("lastSync")
+        )
+        stale = (
+            (not balance_ok or not position_ok)
+            and previous.get("lastSync") is not None
+        )
+        last_error = None
+
+        if not balance_ok:
+            last_error = balance_reason
+        if not position_ok and last_error is None:
+            last_error = position_reason
+
+        balance = (
+            overview.get("balance")
+            if balance_ok
+            else previous.get("balance")
+            if stale
+            else None
+        )
+        equity = (
+            overview.get("equity")
+            if balance_ok
+            else previous.get("equity")
+            if stale
+            else None
+        )
+        available_balance = (
+            overview.get("availableBalance")
+            if balance_ok
+            else previous.get("availableBalance")
+            if stale
+            else None
+        )
+        positions_value = (
+            positions
+            if position_ok
+            else previous.get("positions")
+            if stale
+            else None
+        )
+        account_reason = (
+            "KUCOIN_READ_ONLY_SYNC_OK"
+            if authenticated
+            else last_error
+            or "AUTH_FAILED"
+        )
+        auth_reason = (
+            "KUCOIN_CREDENTIALS_VERIFIED"
+            if authenticated
+            else last_error
+            or auth_reason
+        )
+
+        refreshed = {
+            "exchange": exchange,
+            "accountType": overview.get(
+                "accountType",
+                "KUCOIN_FUTURES",
+            ),
+            "connected": client is not None,
+            "authenticated": authenticated,
+            "apiKeyPresent": True,
+            "permission": (
+                overview.get("permission")
+                or ("READ_ONLY" if authenticated else "NOT_VERIFIED")
+            ),
+            "balance": balance,
+            "equity": equity,
+            "availableBalance": available_balance,
+            "positions": positions_value,
+            "positionSummary": self._position_summary(
+                positions_value
+            ),
+            "lastSync": last_sync,
+            "lastAttempt": now,
+            "stale": stale,
+            "loading": False,
+            "authReason": auth_reason,
+            "connectionReason": connection_reason,
+            "accountReason": account_reason,
+            "balanceReason": balance_reason,
+            "positionReason": position_reason,
+            "lastError": last_error,
+            "accountSource": (
+                "KUCOIN_FUTURES_READ_ONLY"
+                if authenticated
+                else None
+            ),
+            "balanceSource": (
+                "KUCOIN_FUTURES_READ_ONLY"
+                if balance_ok
+                else None
+            ),
+            "positionSource": (
+                "KUCOIN_FUTURES_READ_ONLY"
+                if position_ok
+                else None
+            ),
+            "generation": generation,
+        }
+
+        return commit(refreshed)
+
+    def _build_paper_account_runtime(self, snapshot):
+
+        snapshot = dict(snapshot or {})
+        available = bool(snapshot.get("available"))
+        position = deepcopy(snapshot.get("position"))
+        positions = (
+            []
+            if available and position is None
+            else [deepcopy(position)]
+            if available
+            else None
+        )
+
+        return {
+            "balance": snapshot.get("balance") if available else None,
+            "equity": snapshot.get("equity") if available else None,
+            "availableBalance": (
+                snapshot.get("availableBalance")
+                if available
+                else None
+            ),
+            "position": position if available else None,
+            "positions": positions,
+            "realizedPnl": (
+                snapshot.get("realizedPnl")
+                if available
+                else None
+            ),
+            "unrealizedPnl": (
+                snapshot.get("unrealizedPnl")
+                if available
+                else None
+            ),
+            "totalPnl": snapshot.get("pnl") if available else None,
+            "source": "PAPER_SIMULATION",
+            "lastUpdate": snapshot.get("last_update") if available else None,
+            "available": available,
+        }
+
+    def _build_account_runtime(
+        self,
+        account_snapshot,
+        live_readiness,
+        selected_mode,
+        dry_run,
+        execution_mode,
+        real_order_allowed,
+    ):
+
+        real_account = dict(
+            live_readiness.get("realAccount") or
+            self._get_real_account_snapshot()
+        )
+
+        return {
+            "paperAccount": self._build_paper_account_runtime(
+                account_snapshot
+            ),
+            "realAccount": real_account,
+            "execution": {
+                "selectedMode": selected_mode,
+                "executionMode": execution_mode,
+                "realOrderAllowed": real_order_allowed,
+                "dryRun": dry_run,
+                "allowLive": backend_config.ALLOW_LIVE,
+                "tradeMode": backend_config.TRADE_MODE,
+                "liveBlockReasons": live_readiness.get(
+                    "blockReasons",
+                    [],
+                ),
+            },
+            "connection": {
+                "exchange": real_account.get("exchange"),
+                "connected": real_account.get("connected"),
+                "authenticated": real_account.get("authenticated"),
+                "apiKeyPresent": real_account.get("apiKeyPresent"),
+                "apiKeyStatus": (
+                    "VERIFIED"
+                    if real_account.get("authenticated")
+                    else (
+                        "PRESENT"
+                        if real_account.get("apiKeyPresent")
+                        else "MISSING"
+                    )
+                ),
+                "permission": real_account.get(
+                    "permission",
+                    "NOT_VERIFIED",
+                ),
+                "accountType": real_account.get(
+                    "accountType",
+                    "UNKNOWN",
+                ),
+                "authReason": real_account.get("authReason"),
+                "connectionReason": real_account.get(
+                    "connectionReason"
+                ),
+                "generation": real_account.get("generation"),
+            },
+        }
+
+    def _flatten_account_runtime_fields(
+        self,
+        account_runtime,
+        live_readiness,
+    ):
+
+        real_account = dict(
+            account_runtime.get("realAccount") or {}
+        )
+        account_source = (
+            real_account.get("accountSource")
+            or "PAPER_SIMULATION"
+        )
+        balance_source = (
+            real_account.get("balanceSource")
+            or "PAPER_SIMULATION"
+        )
+        position_source = (
+            real_account.get("positionSource")
+            or "PAPER_SIMULATION"
+        )
+        real_connected = bool(
+            real_account.get("authenticated")
+            or real_account.get("balanceSource")
+            or real_account.get("positionSource")
+        )
+        api_key_status = (
+            "VERIFIED"
+            if real_account.get("authenticated")
+            else (
+                "PRESENT"
+                if real_account.get("apiKeyPresent")
+                else "MISSING"
+            )
+        )
+
+        return {
+            "accountRuntime": account_runtime,
+            "accountSource": account_source,
+            "balanceSource": balance_source,
+            "positionSource": position_source,
+            "accountSourceReason": (
+                real_account.get("accountReason")
+                or live_readiness.get("accountSourceReason")
+            ),
+            "balanceSourceReason": (
+                real_account.get("balanceReason")
+                or live_readiness.get("balanceSourceReason")
+            ),
+            "positionSourceReason": (
+                real_account.get("positionReason")
+                or live_readiness.get("positionSourceReason")
+            ),
+            "exchangeAuth": (
+                "VERIFIED"
+                if real_account.get("authenticated")
+                else "NOT_VERIFIED"
+            ),
+            "exchangeConnection": (
+                "CONNECTED"
+                if real_account.get("connected")
+                else "NOT_CONNECTED"
+            ),
+            "apiKeyStatus": api_key_status,
+            "permission": real_account.get(
+                "permission",
+                "NOT_VERIFIED",
+            ),
+            "accountType": real_account.get(
+                "accountType",
+                "UNKNOWN",
+            ),
+            "realAccountConnected": real_connected,
+            "realBalance": real_account.get("balance"),
+            "realEquity": real_account.get("equity"),
+            "realAvailableBalance": real_account.get(
+                "availableBalance"
+            ),
+            "realPosition": self._legacy_real_position_value(
+                real_account.get("positions")
+            ),
+            "realPositionState": real_account.get(
+                "positionSummary"
+            ),
+            "realAccountLastSync": real_account.get("lastSync"),
+            "realLastSync": real_account.get("lastSync"),
+            "exchangeAuthReason": real_account.get("authReason"),
+            "exchangeConnectionReason": real_account.get(
+                "connectionReason"
+            ),
+            "accountReason": real_account.get("accountReason"),
+            "balanceReason": real_account.get("balanceReason"),
+            "positionReason": real_account.get("positionReason"),
+        }
+
     def _build_live_readiness_snapshot(
         self,
         selected_mode,
@@ -502,6 +1165,49 @@ class BotManager:
                 "executionEnabled": execution_enabled,
                 "emergencyStop": emergency_stop,
                 "authError": self.exchange_auth_error,
+                "realBalance": None,
+                "realEquity": None,
+                "realAvailableBalance": None,
+                "realPosition": None,
+                "realPositionState": "NOT_SYNCED",
+                "realAccountLastSync": None,
+                "exchangeConnection": (
+                    "CONNECTED"
+                    if exchange_client_ready
+                    else "NOT_CONNECTED"
+                ),
+                "apiKeyStatus": (
+                    "VERIFIED"
+                    if exchange_auth_ready
+                    else "MISSING"
+                ),
+                "permission": (
+                    "READ_ONLY"
+                    if exchange_auth_ready
+                    else "NOT_VERIFIED"
+                ),
+                "accountType": (
+                    "KUCOIN_FUTURES"
+                    if exchange_auth_ready
+                    else "UNKNOWN"
+                ),
+                "exchangeAuthReason": (
+                    "KUCOIN_CREDENTIALS_VERIFIED"
+                    if exchange_auth_ready
+                    else (
+                        self.exchange_auth_error
+                        or "KUCOIN_CREDENTIALS_MISSING"
+                    )
+                ),
+                "exchangeConnectionReason": (
+                    "KUCOIN_CLIENT_READY"
+                    if exchange_client_ready
+                    else "EXCHANGE_CLIENT_NOT_READY"
+                ),
+                "accountReason": "KUCOIN_READ_ONLY_NOT_CONNECTED",
+                "balanceReason": "BALANCE_NOT_SYNCED",
+                "positionReason": "POSITION_NOT_SYNCED",
+                "accountSnapshot": {},
             }
 
         readiness = dict(readiness)
@@ -509,29 +1215,208 @@ class BotManager:
             readiness.get("blockReasons") or []
         )
 
-        account_source = (
-            "KUCOIN_FUTURES_READ_ONLY"
-            if (
-                readiness.get("balanceCheckOk")
+        readiness_account_available = (
+            readiness.get("realBalance") is not None
+            or readiness.get("realEquity") is not None
+            or readiness.get("realPosition") is not None
+            or readiness.get("balanceCheckOk")
+            or readiness.get("positionCheckOk")
+        )
+        real_account = (
+            {}
+            if readiness_account_available
+            else self._get_real_account_snapshot()
+        )
+
+        if (
+            not real_account.get("authenticated")
+            and (
+                readiness.get("realBalance") is not None
+                or readiness.get("balanceCheckOk")
                 or readiness.get("positionCheckOk")
             )
-            else "PAPER_SIMULATION"
+        ):
+            readiness_positions = (
+                self._normalize_positions_for_account(
+                    readiness.get("realPosition")
+                )
+                if readiness.get("positionCheckOk")
+                else None
+            )
+            readiness_authenticated = bool(
+                readiness.get("exchangeAuthReady")
+                or readiness.get("balanceCheckOk")
+                or readiness.get("positionCheckOk")
+            )
+            real_account = {
+                "exchange": self._normalize_account_exchange(),
+                "accountType": readiness.get(
+                    "accountType",
+                    "KUCOIN_FUTURES",
+                ),
+                "connected": bool(
+                    readiness.get("exchangeClientReady")
+                    or readiness.get("exchangeConnection")
+                    == "CONNECTED"
+                ),
+                "authenticated": readiness_authenticated,
+                "apiKeyPresent": readiness_authenticated,
+                "permission": readiness.get(
+                    "permission",
+                    "READ_ONLY"
+                    if readiness_authenticated
+                    else "NOT_VERIFIED",
+                ),
+                "balance": readiness.get("realBalance"),
+                "equity": readiness.get("realEquity"),
+                "availableBalance": readiness.get(
+                    "realAvailableBalance"
+                ),
+                "positions": readiness_positions,
+                "positionSummary": (
+                    readiness.get("realPositionState")
+                    or self._position_summary(readiness_positions)
+                ),
+                "lastSync": readiness.get("realAccountLastSync"),
+                "lastAttempt": readiness.get("realAccountLastSync"),
+                "stale": False,
+                "loading": False,
+                "authReason": readiness.get("exchangeAuthReason"),
+                "connectionReason": readiness.get(
+                    "exchangeConnectionReason"
+                ),
+                "accountReason": readiness.get("accountReason"),
+                "balanceReason": readiness.get("balanceReason"),
+                "positionReason": readiness.get("positionReason"),
+                "lastError": None,
+                "accountSource": (
+                    "KUCOIN_FUTURES_READ_ONLY"
+                    if readiness_authenticated
+                    else None
+                ),
+                "balanceSource": (
+                    "KUCOIN_FUTURES_READ_ONLY"
+                    if readiness.get("balanceCheckOk")
+                    else None
+                ),
+                "positionSource": (
+                    "KUCOIN_FUTURES_READ_ONLY"
+                    if readiness.get("positionCheckOk")
+                    else None
+                ),
+                "generation": self.account_snapshot_generation,
+            }
+
+        read_balance_ok = (
+            real_account.get("balanceSource")
+            == "KUCOIN_FUTURES_READ_ONLY"
+        )
+        read_position_ok = (
+            real_account.get("positionSource")
+            == "KUCOIN_FUTURES_READ_ONLY"
+        )
+        read_authenticated = bool(
+            real_account.get("authenticated")
+        )
+        account_source = (
+            real_account.get("accountSource")
+            or "PAPER_SIMULATION"
+        )
+        balance_source = (
+            real_account.get("balanceSource")
+            or "PAPER_SIMULATION"
+        )
+        position_source = (
+            real_account.get("positionSource")
+            or "PAPER_SIMULATION"
         )
 
         readiness.update({
             "blockReasons": block_reasons,
+            "realAccount": real_account,
             "accountSource": account_source,
-            "balanceSource": (
-                "KUCOIN_FUTURES_READ_ONLY"
-                if readiness.get("balanceCheckOk")
-                else "PAPER_SIMULATION"
+            "balanceSource": balance_source,
+            "positionSource": position_source,
+            "accountSourceReason": real_account.get(
+                "accountReason"
             ),
-            "positionSource": (
-                "KUCOIN_FUTURES_READ_ONLY"
-                if readiness.get("positionCheckOk")
-                else "PAPER_SIMULATION"
+            "balanceSourceReason": real_account.get(
+                "balanceReason"
+            ),
+            "positionSourceReason": real_account.get(
+                "positionReason"
+            ),
+            "balanceCheckOk": bool(
+                readiness.get("balanceCheckOk")
+                or read_balance_ok
+            ),
+            "positionCheckOk": bool(
+                readiness.get("positionCheckOk")
+                or read_position_ok
+            ),
+            "exchangeAuthReady": bool(
+                readiness.get("exchangeAuthReady")
+                or read_authenticated
+            ),
+            "realBalance": real_account.get("balance"),
+            "realEquity": real_account.get("equity"),
+            "realAvailableBalance": real_account.get(
+                "availableBalance"
+            ),
+            "realPosition": real_account.get("positions"),
+            "realPositionState": real_account.get(
+                "positionSummary"
+            ),
+            "realAccountLastSync": real_account.get("lastSync"),
+            "exchangeConnection": (
+                "CONNECTED"
+                if real_account.get("connected")
+                else "NOT_CONNECTED"
+            ),
+            "apiKeyStatus": (
+                "VERIFIED"
+                if real_account.get("authenticated")
+                else (
+                    "PRESENT"
+                    if real_account.get("apiKeyPresent")
+                    else "MISSING"
+                )
+            ),
+            "permission": real_account.get(
+                "permission",
+                "NOT_VERIFIED",
+            ),
+            "accountType": real_account.get(
+                "accountType",
+                "UNKNOWN",
+            ),
+            "exchangeAuthReason": real_account.get(
+                "authReason"
+            ),
+            "exchangeConnectionReason": real_account.get(
+                "connectionReason"
+            ),
+            "accountReason": real_account.get("accountReason"),
+            "balanceReason": real_account.get("balanceReason"),
+            "positionReason": real_account.get("positionReason"),
+        })
+
+        checks = dict(readiness.get("checks") or {})
+        checks.update({
+            "exchangeAuthReady": readiness.get(
+                "exchangeAuthReady",
+                False,
+            ),
+            "balanceCheckOk": readiness.get(
+                "balanceCheckOk",
+                False,
+            ),
+            "positionCheckOk": readiness.get(
+                "positionCheckOk",
+                False,
             ),
         })
+        readiness["checks"] = checks
 
         return readiness
 
@@ -608,6 +1493,21 @@ class BotManager:
             execution_mode,
             real_order_allowed,
         )
+        account_snapshot = self._capture_account_snapshot()
+        account_runtime = self._build_account_runtime(
+            account_snapshot,
+            live_readiness,
+            selected_mode,
+            dry_run,
+            execution_mode,
+            real_order_allowed,
+        )
+        account_status_fields = (
+            self._flatten_account_runtime_fields(
+                account_runtime,
+                live_readiness,
+            )
+        )
 
         runtime_debug_result.update({
             "symbol": (
@@ -665,11 +1565,78 @@ class BotManager:
                 "positionSource",
                 "PAPER_SIMULATION",
             ),
+            "accountSourceReason": live_readiness.get(
+                "accountSourceReason"
+            ),
+            "balanceSourceReason": live_readiness.get(
+                "balanceSourceReason"
+            ),
+            "positionSourceReason": live_readiness.get(
+                "positionSourceReason"
+            ),
+            "balance": account_snapshot.get("balance"),
+            "equity": account_snapshot.get("equity"),
+            "availableBalance": account_snapshot.get(
+                "availableBalance",
+                account_snapshot.get("balance"),
+            ),
+            "pnl": account_snapshot.get("pnl"),
+            "position": account_snapshot.get("position"),
+            "exchangeAuth": (
+                "VERIFIED"
+                if live_readiness.get("exchangeAuthReady")
+                else "NOT_VERIFIED"
+            ),
+            "exchangeConnection": live_readiness.get(
+                "exchangeConnection",
+                "NOT_CONNECTED",
+            ),
+            "apiKeyStatus": live_readiness.get(
+                "apiKeyStatus",
+                "MISSING",
+            ),
+            "permission": live_readiness.get(
+                "permission",
+                "NOT_VERIFIED",
+            ),
+            "accountType": live_readiness.get(
+                "accountType",
+                "UNKNOWN",
+            ),
+            "realAccountConnected": bool(
+                live_readiness.get("balanceCheckOk")
+                or live_readiness.get("positionCheckOk")
+            ),
+            "realBalance": live_readiness.get("realBalance"),
+            "realEquity": live_readiness.get("realEquity"),
+            "realAvailableBalance": live_readiness.get(
+                "realAvailableBalance"
+            ),
+            "realPosition": live_readiness.get("realPosition"),
+            "realPositionState": live_readiness.get(
+                "realPositionState"
+            ),
+            "realAccountLastSync": live_readiness.get(
+                "realAccountLastSync"
+            ),
+            "realLastSync": live_readiness.get(
+                "realAccountLastSync"
+            ),
+            "exchangeAuthReason": live_readiness.get(
+                "exchangeAuthReason"
+            ),
+            "exchangeConnectionReason": live_readiness.get(
+                "exchangeConnectionReason"
+            ),
+            "accountReason": live_readiness.get("accountReason"),
+            "balanceReason": live_readiness.get("balanceReason"),
+            "positionReason": live_readiness.get("positionReason"),
             "trade_settings": trade_settings,
             "tradeSettings": trade_settings,
             "riskConfig": risk_config,
             "riskState": risk_state,
         })
+        runtime_debug_result.update(account_status_fields)
 
         return runtime_result
 
@@ -762,6 +1729,11 @@ class BotManager:
             self.orderbook_symbol = orderbook_context[
                 "orderbookSymbol"
             ]
+
+            self._prepare_real_account_snapshot_for_exchange(
+                self.exchange_name,
+                loading=True,
+            )
 
             self.config = dict(config)
 
@@ -1364,15 +2336,26 @@ class BotManager:
             unrealized_pnl = float(
                 getattr(self.engine, "unrealized_pnl", 0.0)
             )
+            actual_position = deepcopy(
+                getattr(self.engine, "actual_position", None)
+            )
+            positions = (
+                []
+                if actual_position is None
+                else [deepcopy(actual_position)]
+            )
 
             self.account_snapshot = {
                 "balance": balance,
                 "equity": balance + unrealized_pnl,
+                "availableBalance": balance,
                 "pnl": realized_pnl + unrealized_pnl,
-                "position": deepcopy(
-                    getattr(self.engine, "actual_position", None)
-                ),
+                "position": actual_position,
+                "positions": positions,
+                "realizedPnl": realized_pnl,
+                "unrealizedPnl": unrealized_pnl,
                 "last_update": time.time(),
+                "available": True,
             }
 
         except Exception as e:
@@ -1534,11 +2517,15 @@ class BotManager:
 
         pending_order = False
 
-        pnl = float(snapshot.get("pnl", 0.0))
+        pnl = float(snapshot.get("pnl") or 0.0)
 
-        balance = float(snapshot.get("balance", 0.0))
+        balance = float(snapshot.get("balance") or 0.0)
 
-        equity = float(snapshot.get("equity", balance))
+        equity = float(snapshot.get("equity") or balance)
+
+        available_balance = float(
+            snapshot.get("availableBalance") or balance
+        )
 
         completed_runtime_result = deepcopy(
             self.latest_runtime_result
@@ -1705,12 +2692,26 @@ class BotManager:
             execution_mode,
             real_order_allowed,
         )
+        account_runtime = self._build_account_runtime(
+            snapshot,
+            live_readiness,
+            selected_mode,
+            dry_run,
+            execution_mode,
+            real_order_allowed,
+        )
+        account_status_fields = (
+            self._flatten_account_runtime_fields(
+                account_runtime,
+                live_readiness,
+            )
+        )
 
-        return {
+        status_payload = {
 
             "timestamp": time.time(),
 
-            "last_update": snapshot.get("last_update"),
+            "last_update": snapshot.get("last_update") or 0.0,
 
             "price": safe_price,
 
@@ -1725,6 +2726,10 @@ class BotManager:
             "balance": balance,
 
             "equity": equity,
+
+            "availableBalance": available_balance,
+
+            "available_balance": available_balance,
 
             "risk_percent": risk_config.get(
                 "risk_percent"
@@ -1930,6 +2935,18 @@ class BotManager:
                 "PAPER_SIMULATION",
             ),
 
+            "accountSourceReason": live_readiness.get(
+                "accountSourceReason"
+            ),
+
+            "balanceSourceReason": live_readiness.get(
+                "balanceSourceReason"
+            ),
+
+            "positionSourceReason": live_readiness.get(
+                "positionSourceReason"
+            ),
+
             "realOrderAllowed": real_order_allowed,
 
             "executionMode": execution_mode,
@@ -1946,21 +2963,118 @@ class BotManager:
                 else "NOT_VERIFIED"
             ),
 
+            "exchangeConnection": live_readiness.get(
+                "exchangeConnection",
+                "NOT_CONNECTED",
+            ),
+
+            "apiKeyStatus": live_readiness.get(
+                "apiKeyStatus",
+                "MISSING",
+            ),
+
+            "permission": live_readiness.get(
+                "permission",
+                "NOT_VERIFIED",
+            ),
+
+            "accountType": live_readiness.get(
+                "accountType",
+                "UNKNOWN",
+            ),
+
+            "exchangeAuthReason": live_readiness.get(
+                "exchangeAuthReason"
+            ),
+
+            "exchangeConnectionReason": live_readiness.get(
+                "exchangeConnectionReason"
+            ),
+
+            "accountReason": live_readiness.get(
+                "accountReason"
+            ),
+
+            "balanceReason": live_readiness.get(
+                "balanceReason"
+            ),
+
+            "positionReason": live_readiness.get(
+                "positionReason"
+            ),
+
             "realAccountConnected": bool(
                 live_readiness.get("balanceCheckOk")
                 or live_readiness.get("positionCheckOk")
             ),
 
             "realBalance": (
-                balance
+                live_readiness.get("realBalance")
+                if live_readiness.get("realBalance") is not None
+                else balance
+                if live_readiness.get("balanceCheckOk")
+                else None
+            ),
+
+            "realEquity": (
+                live_readiness.get("realEquity")
+                if live_readiness.get("realEquity") is not None
+                else equity
+                if live_readiness.get("balanceCheckOk")
+                else None
+            ),
+
+            "realAvailableBalance": (
+                live_readiness.get("realAvailableBalance")
+                if live_readiness.get("realAvailableBalance") is not None
+                else available_balance
                 if live_readiness.get("balanceCheckOk")
                 else None
             ),
 
             "realPosition": (
-                actual_position
+                live_readiness.get("realPosition")
+                if live_readiness.get("realPosition") is not None
+                else actual_position
                 if live_readiness.get("positionCheckOk")
                 else None
+            ),
+
+            "realPositionState": (
+                live_readiness.get("realPositionState")
+                or (
+                    "OPEN"
+                    if actual_position
+                    else (
+                        "NO_OPEN_POSITION"
+                        if live_readiness.get("positionCheckOk")
+                        else "NOT_SYNCED"
+                    )
+                )
+            ),
+
+            "realAccountLastSync": (
+                live_readiness.get("realAccountLastSync")
+                or (
+                    snapshot.get("last_update")
+                    if (
+                        live_readiness.get("balanceCheckOk")
+                        or live_readiness.get("positionCheckOk")
+                    )
+                    else None
+                )
+            ),
+
+            "realLastSync": (
+                live_readiness.get("realAccountLastSync")
+                or (
+                    snapshot.get("last_update")
+                    if (
+                        live_readiness.get("balanceCheckOk")
+                        or live_readiness.get("positionCheckOk")
+                    )
+                    else None
+                )
             ),
 
             "allowLive": backend_config.ALLOW_LIVE,
@@ -2012,6 +3126,10 @@ class BotManager:
                 )
             ),
         }
+
+        status_payload.update(account_status_fields)
+
+        return status_payload
 
     # =========================
     # STATUS

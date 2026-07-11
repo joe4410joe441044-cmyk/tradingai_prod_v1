@@ -26,6 +26,34 @@ const displayValue = (value, formatter) => {
     return formatter ? formatter(value) : String(value);
 };
 
+const displayRuntimeValue = (
+    value,
+    {
+        formatter,
+        loading = false,
+        stale = false,
+        emptyLabel = "NOT FETCHED",
+    } = {},
+) => {
+    if (loading) {
+        return "REFRESHING";
+    }
+
+    if (stale) {
+        return "STALE";
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+        return "NO OPEN POSITION";
+    }
+
+    if (!isAvailable(value)) {
+        return emptyLabel;
+    }
+
+    return formatter ? formatter(value) : String(value);
+};
+
 const formatAmount = (value) => {
     const numericValue = Number(value);
 
@@ -50,7 +78,12 @@ const formatPnl = (value) => {
 };
 
 const formatLastUpdate = (value) => {
-    const date = new Date(value);
+    const numericValue = Number(value);
+    const date = new Date(
+        Number.isFinite(numericValue) && numericValue < 1000000000000
+            ? numericValue * 1000
+            : value,
+    );
 
     if (Number.isNaN(date.getTime())) {
         return "--";
@@ -62,6 +95,52 @@ const formatLastUpdate = (value) => {
         second: "2-digit",
         hour12: false,
     });
+};
+
+const formatPositionValue = (
+    value,
+    state,
+    {
+        loading = false,
+        stale = false,
+        emptyLabel = "NOT FETCHED",
+    } = {},
+) => {
+    if (loading) {
+        return "REFRESHING";
+    }
+
+    if (stale) {
+        return "STALE";
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            return "NO OPEN POSITION";
+        }
+
+        return formatPositionValue(value[0], state);
+    }
+
+    if (value && typeof value === "object") {
+        const symbol = value.symbol ?? value.pair ?? "--";
+        const side = value.side ?? value.position_side ?? value.state ?? "--";
+        const qty = value.qty ?? value.size ?? value.coin_qty;
+
+        return qty !== null && qty !== undefined && qty !== ""
+            ? `${symbol} ${side} ${qty}`
+            : `${symbol} ${side}`;
+    }
+
+    if (isAvailable(value)) {
+        return String(value);
+    }
+
+    if (state === "NO_OPEN_POSITION") {
+        return "NO OPEN POSITION";
+    }
+
+    return displayRuntimeValue(state, { emptyLabel });
 };
 
 function StatusMetric({
@@ -84,6 +163,7 @@ function StatusMetric({
 }
 
 export default function AccountRuntimeOverview({
+    accountRuntime,
     exchange,
     selectedMode,
     executionMode,
@@ -96,9 +176,26 @@ export default function AccountRuntimeOverview({
     balanceSource,
     positionSource,
     exchangeAuth,
+    exchangeConnection,
+    apiKeyStatus,
+    permission,
+    accountType,
+    exchangeAuthReason,
+    exchangeConnectionReason,
+    accountReason,
+    balanceReason,
+    positionReason,
+    accountSourceReason,
+    balanceSourceReason,
+    positionSourceReason,
     realAccountConnected,
     realBalance,
+    realEquity,
+    realAvailableBalance,
     realPosition,
+    realPositionState,
+    realAccountLastSync,
+    realLastSync,
     balance,
     equity,
     availableBalance,
@@ -106,29 +203,132 @@ export default function AccountRuntimeOverview({
     pnl,
     lastUpdate,
 }) {
-    const paperBalance = balanceSource === "PAPER_SIMULATION"
-        ? balance
-        : undefined;
-    const paperEquity = balanceSource === "PAPER_SIMULATION"
-        ? equity
-        : undefined;
-    const paperAvailableBalance = balanceSource === "PAPER_SIMULATION"
-        ? availableBalance
-        : undefined;
-    const paperPosition = positionSource === "PAPER_SIMULATION"
-        ? position
-        : undefined;
-    const paperPnl = accountSource === "PAPER_SIMULATION"
-        ? pnl
-        : undefined;
+    const runtime = accountRuntime && typeof accountRuntime === "object"
+        ? accountRuntime
+        : {};
+    const paperAccount = runtime.paperAccount || {};
+    const realAccount = runtime.realAccount || {};
+    const connection = runtime.connection || {};
+    const hasAccountRuntime = Boolean(runtime.paperAccount || runtime.realAccount);
+    const paperAvailable = hasAccountRuntime
+        ? paperAccount.available !== false
+        : true;
+    const paperBalance = paperAvailable
+        ? paperAccount.balance ?? balance
+        : null;
+    const paperEquity = paperAvailable
+        ? paperAccount.equity ?? equity
+        : null;
+    const paperAvailableBalance = paperAvailable
+        ? paperAccount.availableBalance ?? availableBalance
+        : null;
+    const paperPosition = paperAvailable
+        ? paperAccount.positions ?? paperAccount.position ?? position
+        : null;
+    const paperPnl = paperAvailable
+        ? paperAccount.totalPnl ?? pnl
+        : null;
+    const selectedExchange = String(exchange ?? "").trim().toUpperCase();
+    const realExchange = String(realAccount.exchange ?? "").trim().toUpperCase();
+    const realExchangeMatches = !realExchange || realExchange === selectedExchange;
+    const realLoading = realExchangeMatches && realAccount.loading === true;
+    const realStale = realExchangeMatches && realAccount.stale === true;
+    const realAuthenticated = realExchangeMatches
+        && (
+            realAccount.authenticated === true
+            || Boolean(realAccount.balanceSource)
+            || Boolean(realAccount.positionSource)
+        );
+    const resolvedExchangeAuth = realAuthenticated
+        ? "VERIFIED"
+        : exchangeAuth;
+    const resolvedExchangeConnection = realExchangeMatches
+        ? connection.apiKeyStatus
+            ? realAccount.connected === true
+                ? "CONNECTED"
+                : "NOT_CONNECTED"
+            : exchangeConnection
+        : "NOT_CONNECTED";
+    const resolvedApiKeyStatus = connection.apiKeyStatus || apiKeyStatus;
+    const resolvedPermission = realAccount.permission || permission;
+    const resolvedAccountType = realAccount.accountType || accountType;
+    const resolvedAuthReason = realAccount.authReason || exchangeAuthReason;
+    const resolvedConnectionReason = realExchangeMatches
+        ? realAccount.connectionReason || exchangeConnectionReason
+        : "ACCOUNT_EXCHANGE_MISMATCH";
+    const resolvedAccountReason = realExchangeMatches
+        ? realAccount.accountReason || accountReason
+        : "ACCOUNT_EXCHANGE_MISMATCH";
+    const resolvedBalanceReason = realExchangeMatches
+        ? realAccount.balanceReason || balanceReason
+        : "ACCOUNT_EXCHANGE_MISMATCH";
+    const resolvedPositionReason = realExchangeMatches
+        ? realAccount.positionReason || positionReason
+        : "ACCOUNT_EXCHANGE_MISMATCH";
+    const realPositions = realExchangeMatches
+        ? realAccount.positions ?? realPosition
+        : null;
+    const realBalanceRaw = realExchangeMatches
+        ? realAccount.balance ?? realBalance
+        : null;
+    const realEquityRaw = realExchangeMatches
+        ? realAccount.equity ?? realEquity
+        : null;
+    const realAvailableRaw = realExchangeMatches
+        ? realAccount.availableBalance ?? realAvailableBalance
+        : null;
+    const realPositionSummary = realExchangeMatches
+        ? realAccount.positionSummary ?? realPositionState
+        : "ACCOUNT_EXCHANGE_MISMATCH";
+    const realConnected = realExchangeMatches
+        && (
+            realAccountConnected
+            || realAuthenticated
+            || realAccount.connected === true
+        );
     const normalizedSelectedMode = String(selectedMode ?? "PAPER").toUpperCase();
-    const normalizedAuth = String(exchangeAuth ?? "NOT_VERIFIED").toUpperCase();
+    const normalizedAuth = String(resolvedExchangeAuth ?? "NOT_VERIFIED").toUpperCase();
     const authVerified = normalizedAuth === "VERIFIED";
     const displayedReason = normalizedSelectedMode === "LIVE" && !realOrderAllowed
         && !String(safetyReason ?? "").includes("LIVE_NOT_ENABLED")
         ? "LIVE_NOT_ENABLED / DRY_RUN_ACTIVE"
         : displayValue(safetyReason);
-    const realUnavailable = realAccountConnected ? "--" : "NOT CONNECTED";
+    const accountLastSync = realAccount.lastSync
+        ?? realLastSync
+        ?? realAccountLastSync
+        ?? lastUpdate;
+    const realUnavailable = displayValue(
+        resolvedAccountReason
+        || resolvedBalanceReason
+        || "NOT_CONNECTED",
+    );
+    const realBalanceValue = realConnected || realLoading || realStale
+        ? displayRuntimeValue(realBalanceRaw, {
+            formatter: formatAmount,
+            loading: realLoading,
+            stale: realStale,
+        })
+        : realUnavailable;
+    const realEquityValue = realConnected || realLoading || realStale
+        ? displayRuntimeValue(realEquityRaw, {
+            formatter: formatAmount,
+            loading: realLoading,
+            stale: realStale,
+        })
+        : realUnavailable;
+    const realAvailableValue = realConnected || realLoading || realStale
+        ? displayRuntimeValue(realAvailableRaw, {
+            formatter: formatAmount,
+            loading: realLoading,
+            stale: realStale,
+        })
+        : realUnavailable;
+    const realPositionValue = realConnected || realLoading || realStale
+        ? formatPositionValue(realPositions, realPositionSummary, {
+            loading: realLoading,
+            stale: realStale,
+        })
+        : displayValue(resolvedPositionReason || resolvedAccountReason || "NOT_CONNECTED");
 
     return (
         <section
@@ -148,36 +348,47 @@ export default function AccountRuntimeOverview({
                     <div className="semantic-metric-grid three-columns">
                         <StatusMetric
                             label="Paper Balance:（模擬残高）"
-                            value={displayValue(paperBalance, formatAmount)}
+                            value={displayRuntimeValue(paperBalance, {
+                                formatter: formatAmount,
+                            })}
                             testId="paper-balance"
                             tone="paper"
                         />
                         <StatusMetric
                             label="Paper Equity:（模擬純資産）"
-                            value={displayValue(paperEquity, formatAmount)}
+                            value={displayRuntimeValue(paperEquity, {
+                                formatter: formatAmount,
+                            })}
                             testId="paper-equity"
                             tone="paper"
                         />
                         <StatusMetric
                             label="Paper Available:（模擬利用可能額）"
-                            value={displayValue(paperAvailableBalance, formatAmount)}
+                            value={displayRuntimeValue(paperAvailableBalance, {
+                                formatter: formatAmount,
+                            })}
                             tone="paper"
                         />
                         <StatusMetric
                             label="Paper Position:（模擬ポジション）"
-                            value={displayValue(paperPosition)}
+                            value={formatPositionValue(
+                                paperPosition,
+                                paperAvailable ? "NO_OPEN_POSITION" : undefined,
+                            )}
                             testId="paper-position"
                             tone="paper"
                         />
                         <StatusMetric
                             label="Paper PnL:（模擬損益）"
-                            value={displayValue(paperPnl, formatPnl)}
+                            value={displayRuntimeValue(paperPnl, {
+                                formatter: formatPnl,
+                            })}
                             testId="paper-pnl"
                             tone="paper"
                         />
                         <StatusMetric
                             label="Source:（データソース）"
-                            value={displayValue(accountSource)}
+                            value={paperAccount.source || "PAPER_SIMULATION"}
                             testId="account-source"
                             tone="paper"
                         />
@@ -195,57 +406,73 @@ export default function AccountRuntimeOverview({
                             <h2>Real / Live Account</h2>
                         </div>
                         <span className="semantic-badge">
-                            {realAccountConnected ? "CONNECTED" : "NOT_CONNECTED"}
+                            {realLoading
+                                ? "REFRESHING"
+                                : realStale
+                                    ? "STALE"
+                                    : realConnected
+                                        ? "CONNECTED"
+                                        : "NOT_CONNECTED"
+                            }
                         </span>
                     </header>
 
                     <div className="semantic-metric-grid three-columns">
                         <StatusMetric
                             label="Real Balance:（実残高）"
-                            value={realAccountConnected
-                                ? displayValue(realBalance, formatAmount)
-                                : realUnavailable
-                            }
+                            value={realBalanceValue}
                             testId="real-balance"
                             tone="real"
                         />
                         <StatusMetric
                             label="Real Equity:（実純資産）"
-                            value={realUnavailable}
+                            value={realEquityValue}
                             tone="real"
                         />
                         <StatusMetric
                             label="Available Balance:（実利用可能額）"
-                            value={realUnavailable}
+                            value={realAvailableValue}
                             tone="real"
                         />
                         <StatusMetric
                             label="Real Position:（実ポジション）"
-                            value={realAccountConnected
-                                ? displayValue(realPosition)
-                                : realUnavailable
-                            }
+                            value={realPositionValue}
                             testId="real-position"
                             tone="real"
                         />
                         <StatusMetric
                             label="Exchange Auth:（取引所認証）"
-                            value={displayValue(exchangeAuth)}
+                            value={displayValue(resolvedExchangeAuth)}
                             testId="exchange-auth"
                             tone={authVerified ? "safe" : "real"}
                         />
                         <StatusMetric
                             label="Last Sync:（最終同期）"
-                            value={realAccountConnected
-                                ? displayValue(lastUpdate, formatLastUpdate)
+                            value={realConnected
+                                ? displayValue(accountLastSync, formatLastUpdate)
                                 : "--"
                             }
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="accountSource"
+                            value={displayValue(accountSource)}
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="balanceSource"
+                            value={displayValue(balanceSource)}
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="positionSource"
+                            value={displayValue(positionSource)}
                             tone="real"
                         />
                     </div>
 
                     <p className="semantic-card-note">
-                        Real account data is unavailable until exchange authentication is verified.
+                        {displayValue(accountSourceReason || resolvedAccountReason)}
                     </p>
                 </article>
             </div>
@@ -337,36 +564,54 @@ export default function AccountRuntimeOverview({
                         />
                         <StatusMetric
                             label="Exchange Connection:（口座接続）"
-                            value={realAccountConnected ? "CONNECTED" : "NOT CONNECTED"}
-                            tone={realAccountConnected ? "safe" : "connection"}
+                            value={displayValue(
+                                resolvedExchangeConnection
+                                || (realConnected ? "CONNECTED" : "NOT_CONNECTED"),
+                            )}
+                            tone={realConnected ? "safe" : "connection"}
                         />
                         <StatusMetric
                             label="API Key:（APIキー状態）"
-                            value={authVerified ? "VERIFIED" : "NOT VERIFIED"}
+                            value={displayValue(resolvedApiKeyStatus)}
                             tone={authVerified ? "safe" : "connection"}
                         />
                         <StatusMetric
                             label="Permission:（権限）"
-                            value={authVerified ? "VERIFIED" : "--"}
+                            value={displayValue(resolvedPermission)}
                             tone="connection"
                         />
                         <StatusMetric
                             label="Account Type:（口座種別）"
-                            value={authVerified ? "VERIFIED" : "NOT VERIFIED"}
+                            value={displayValue(resolvedAccountType)}
                             tone="connection"
                         />
                         <StatusMetric
                             label="Last Sync:（口座同期）"
-                            value={realAccountConnected
-                                ? displayValue(lastUpdate, formatLastUpdate)
+                            value={realConnected
+                                ? displayValue(accountLastSync, formatLastUpdate)
                                 : "--"
                             }
+                            tone="connection"
+                        />
+                        <StatusMetric
+                            label="Auth Reason"
+                            value={displayValue(resolvedAuthReason)}
+                            tone="connection"
+                        />
+                        <StatusMetric
+                            label="Balance Reason"
+                            value={displayValue(balanceSourceReason || resolvedBalanceReason)}
+                            tone="connection"
+                        />
+                        <StatusMetric
+                            label="Position Reason"
+                            value={displayValue(positionSourceReason || resolvedPositionReason)}
                             tone="connection"
                         />
                     </div>
 
                     <p className="semantic-card-note">
-                        Connection status never implies real-order permission.
+                        {displayValue(resolvedConnectionReason)}
                     </p>
                 </article>
             </div>

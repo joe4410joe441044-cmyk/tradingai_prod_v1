@@ -205,9 +205,23 @@ class KucoinTradeClient(BaseClient):
 
     def get_balance(self):
 
+        overview = self.get_account_overview()
+
+        balance = overview.get("balance")
+
+        runtime_debug("KuCoin parsed balance=%s", balance)
+
+        return float(balance or 0.0)
+
+    def get_account_overview(
+        self,
+        currency="USDT",
+        timeout=10,
+    ):
+
         endpoint = (
             "/api/v1/account-overview"
-            "?currency=USDT"
+            f"?currency={currency}"
         )
 
         headers = self._headers(
@@ -218,7 +232,8 @@ class KucoinTradeClient(BaseClient):
 
         res = requests.get(
             self.base_url + endpoint,
-            headers=headers
+            headers=headers,
+            timeout=timeout,
         )
 
         data = res.json()
@@ -236,50 +251,99 @@ class KucoinTradeClient(BaseClient):
             {}
         )
 
-        balance = 0.0
+        def as_float(*keys):
+            for key in keys:
+                if key in d and d.get(key) not in [None, ""]:
+                    return float(d.get(key, 0) or 0)
+            return None
 
         # =====================================
         # FUTURES ACCOUNT EQUITY
         # =====================================
 
-        if "accountEquity" in d:
-
-            balance = float(
-                d.get(
-                    "accountEquity",
-                    0
-                )
-            )
+        equity = as_float(
+            "accountEquity",
+            "marginBalance",
+            "balance",
+        )
 
         # =====================================
         # AVAILABLE BALANCE
         # =====================================
 
-        elif "availableBalance" in d:
-
-            balance = float(
-                d.get(
-                    "availableBalance",
-                    0
-                )
-            )
+        available_balance = as_float(
+            "availableBalance",
+            "available_balance",
+        )
 
         # =====================================
         # MARGIN BALANCE FALLBACK
         # =====================================
 
-        elif "marginBalance" in d:
-
-            balance = float(
-                d.get(
-                    "marginBalance",
-                    0
-                )
+        margin_balance = as_float(
+            "marginBalance",
+            "balance",
+            "accountEquity",
+        )
+        unrealized_pnl = as_float(
+            "unrealisedPNL",
+            "unrealizedPnl",
+            "unrealisedPnl",
+            "unrealizedPNL",
+        )
+        balance = (
+            equity
+            if equity is not None
+            else (
+                margin_balance
+                if margin_balance is not None
+                else available_balance
             )
+        )
 
-        runtime_debug("KuCoin parsed balance=%s", balance)
+        overview = {
+            "source": "KUCOIN_FUTURES_READ_ONLY",
+            "accountType": "KUCOIN_FUTURES",
+            "currency": d.get("currency", currency),
+            "balance": (
+                float(balance)
+                if balance is not None
+                else None
+            ),
+            "equity": (
+                float(equity)
+                if equity is not None
+                else (
+                    float(balance)
+                    if balance is not None
+                    else None
+                )
+            ),
+            "availableBalance": (
+                float(available_balance)
+                if available_balance is not None
+                else None
+            ),
+            "marginBalance": (
+                float(margin_balance)
+                if margin_balance is not None
+                else None
+            ),
+            "unrealizedPnl": (
+                float(unrealized_pnl)
+                if unrealized_pnl is not None
+                else None
+            ),
+            "exchangeAuth": "VERIFIED",
+            "exchangeConnection": "CONNECTED",
+            "apiKeyStatus": "VERIFIED",
+            "permission": "READ_ONLY",
+            "lastSync": time.time(),
+        }
 
-        return balance
+        runtime_debug("KuCoin parsed account overview=%s", overview)
+
+        return overview
 
     # =========================
     # POSITIONS
@@ -287,7 +351,8 @@ class KucoinTradeClient(BaseClient):
 
     def get_positions(
         self,
-        symbol=None
+        symbol=None,
+        timeout=10,
     ):
 
         endpoint = "/api/v1/positions"
@@ -299,7 +364,8 @@ class KucoinTradeClient(BaseClient):
 
         res = requests.get(
             self.base_url + endpoint,
-            headers=headers
+            headers=headers,
+            timeout=timeout,
         )
 
         data = res.json()

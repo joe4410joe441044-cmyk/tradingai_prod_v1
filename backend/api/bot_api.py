@@ -89,7 +89,44 @@ class StatusResponse(BaseModel):
 
     realBalance: Optional[float] = None
 
+    realEquity: Optional[float] = None
+
+    realAvailableBalance: Optional[float] = None
+
     realPosition: Optional[Any] = None
+
+    realPositionState: Optional[str] = None
+
+    realAccountLastSync: Optional[float] = None
+
+    realLastSync: Optional[float] = None
+
+    exchangeConnection: str = "NOT_CONNECTED"
+
+    apiKeyStatus: str = "MISSING"
+
+    permission: str = "NOT_VERIFIED"
+
+    accountType: str = "UNKNOWN"
+
+    exchangeAuthReason: Optional[str] = None
+
+    exchangeConnectionReason: Optional[str] = None
+
+    accountReason: Optional[str] = None
+
+    balanceReason: Optional[str] = None
+
+    positionReason: Optional[str] = None
+
+    accountSourceReason: Optional[str] = None
+
+    balanceSourceReason: Optional[str] = None
+
+    positionSourceReason: Optional[str] = None
+
+    accountRuntime: dict = Field(default_factory=dict)
+
 
     ws_connected: bool
 
@@ -100,6 +137,10 @@ class StatusResponse(BaseModel):
     balance: float
 
     equity: float
+
+    availableBalance: Optional[float] = None
+
+    available_balance: Optional[float] = None
 
     pnl: float
 
