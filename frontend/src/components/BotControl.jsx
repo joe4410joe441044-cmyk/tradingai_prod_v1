@@ -54,7 +54,7 @@ export default function BotControl({
 
             <div className="section-number-title">
 
-                1. MAIN OPERATION（メイン操作）
+                OPERATION（操作）
 
             </div>
 
@@ -277,6 +277,19 @@ export default function BotControl({
                         ? "DISABLE ORDERS（注文停止）"
                         : "ENABLE ORDERS（注文許可）"
                     }
+                </button>
+
+            </div>
+
+            <div className="config-row emergency-stop-row operation-emergency-row">
+
+                <button
+                    className="emergency-stop-button operation-emergency-button"
+                    type="button"
+                >
+
+                    EMERGENCY STOP（緊急停止）
+
                 </button>
 
             </div>

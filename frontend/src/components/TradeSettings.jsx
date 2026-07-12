@@ -8,6 +8,8 @@ export default function TradeSettings({
 
     onChange = () => {},
 
+    embedded = false,
+
 }) {
 
     const handle = (
@@ -23,21 +25,37 @@ export default function TradeSettings({
 
     return (
 
-        <div className="terminal-panel">
+        <div
+            className={
+                embedded
+                    ? "terminal-panel embedded-settings-section trade-settings-section"
+                    : "terminal-panel"
+            }
+        >
 
             {/* =============================================
                HEADER
             ============================================= */}
 
-            <div className="panel-header">
+            {embedded ? (
 
-                <div className="panel-title">
+                <div className="embedded-section-label">
+                    TRADE
+                </div>
 
-                    TRADE SETTINGS（取引設定）
+            ) : (
+
+                <div className="panel-header">
+
+                    <div className="panel-title">
+
+                        TRADE SETTINGS（取引設定）
+
+                    </div>
 
                 </div>
 
-            </div>
+            )}
 
             {/* =============================================
                MODE

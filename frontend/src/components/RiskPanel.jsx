@@ -10,6 +10,8 @@ export default function RiskPanel({
 
     onChange = () => {},
 
+    embedded = false,
+
 }) {
 
     const handle = (
@@ -25,15 +27,30 @@ export default function RiskPanel({
 
     return (
 
-        <div className="terminal-panel">
+        <div
+            className={
+                embedded
+                    ? "terminal-panel embedded-settings-section risk-settings-section"
+                    : "terminal-panel"
+            }
+        >
 
             {/* ============================================= */}
             {/* TITLE */}
             {/* ============================================= */}
 
-            <div className="panel-title">
+            <div
+                className={
+                    embedded
+                        ? "embedded-section-label"
+                        : "panel-title"
+                }
+            >
 
-                POSITION / RISK（ポジション・リスク設定）
+                {embedded
+                    ? "RISK"
+                    : "POSITION / RISK（ポジション・リスク設定）"
+                }
 
             </div>
 

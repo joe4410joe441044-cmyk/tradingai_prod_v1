@@ -15,10 +15,6 @@ import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel
 import StageInspectorPanel from "../components/runtime/StageInspectorPanel";
 import Header from "../components/header";
 
-import FilterSettings from "../components/FilterSettings";
-import SafetySettings from "../components/SafetySettings";
-import QuickActions from "../components/QuickActions";
-
 import { deriveRuntimeHealth } from "../utils/runtimeHealth";
 
 import {
@@ -264,77 +260,51 @@ useEffect(() => {
 
                 </div>
 
-                <div className="panel-card">
+                <div className="panel-card trade-risk-card">
 
-                <TradeSettings
-                    values={tradeSettings}
-                    onChange={(update) =>
-                        setTradeSettings(prev => ({
+                    <div className="trade-risk-card-header">
 
-                            ...prev,
+                        <div className="trade-risk-title">
+                            TRADE &amp; RISK SETTINGS
+                        </div>
 
-                            ...update,
+                        <div className="trade-risk-subtitle">
+                            APPLIES ON NEXT LOOP START
+                        </div>
 
-                        }))
-                    }
-                />
+                    </div>
 
-                </div>
+                    <div className="trade-risk-sections">
 
-                <div className="panel-card">
+                        <TradeSettings
+                            embedded
+                            values={tradeSettings}
+                            onChange={(update) =>
+                                setTradeSettings(prev => ({
 
-                    <RiskPanel
-                        values={tradeSettings}
-                        onChange={(update) =>
-                            setTradeSettings(prev => ({
+                                    ...prev,
 
-                                ...prev,
+                                    ...update,
 
-                                ...update,
+                                }))
+                            }
+                        />
 
-                            }))
-                        }
-                    />
+                        <RiskPanel
+                            embedded
+                            values={tradeSettings}
+                            onChange={(update) =>
+                                setTradeSettings(prev => ({
 
-                </div>
+                                    ...prev,
 
-                <div className="panel-card">
+                                    ...update,
 
-                    <FilterSettings
-                        values={tradeSettings}
-                        onChange={(update) =>
-                            setTradeSettings(prev => ({
+                                }))
+                            }
+                        />
 
-                                ...prev,
-
-                                ...update,
-
-                            }))
-                        }
-                    />
-
-                </div>
-
-                <div className="panel-card">
-
-                    <SafetySettings
-                        values={tradeSettings}
-                        onChange={(update) =>
-                            setTradeSettings(prev => ({
-
-                                ...prev,
-
-                                ...update,
-
-                            }))
-                        }
-                    />
-
-                </div>
-
-                <div className="panel-card">
-
-                    <QuickActions />
+                    </div>
 
                 </div>
 
