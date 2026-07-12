@@ -1829,8 +1829,7 @@ replace the legacy scaled three-column layout.
 }
 
 .left-column {
-    color: #e7edf7;
-    font-family:
+    --operation-font-ui:
         "Inter",
         "Noto Sans CJK JP",
         "Noto Sans JP",
@@ -1839,6 +1838,13 @@ replace the legacy scaled three-column layout.
         "Segoe UI",
         system-ui,
         sans-serif;
+    --operation-font-mono:
+        "JetBrains Mono",
+        "Cascadia Code",
+        Consolas,
+        monospace;
+    color: #e7edf7;
+    font-family: var(--operation-font-ui);
 }
 
 .left-column > .panel-card {
@@ -1984,21 +1990,13 @@ replace the legacy scaled three-column layout.
     border-radius: 8px;
     background: #0b101a;
     color: #e7edf7;
-    font-family:
-        "Inter",
-        "Noto Sans CJK JP",
-        "Noto Sans JP",
-        "Yu Gothic",
-        "Meiryo",
-        "Segoe UI",
-        system-ui,
-        sans-serif;
+    font-family: var(--operation-font-ui);
     font-size: 9px;
     font-weight: 650;
 }
 
 .left-column input[type="number"].config-select {
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    font-family: var(--operation-font-mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -2009,12 +2007,12 @@ replace the legacy scaled three-column layout.
 .left-column .operation-section {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 6px;
     min-width: 0;
 }
 
 .left-column .operation-section + .operation-section {
-    padding-top: 12px;
+    padding-top: 10px;
     border-top: 1px solid rgba(36, 49, 73, 0.78);
 }
 
@@ -2033,22 +2031,14 @@ replace the legacy scaled three-column layout.
 }
 
 .left-column .operation-emergency-section {
-    gap: 8px;
+    gap: 7px;
 }
 
 .left-column .start-button-large,
 .left-column .stop-button-large {
     height: 40px;
     border-radius: 8px;
-    font-family:
-        "Inter",
-        "Noto Sans CJK JP",
-        "Noto Sans JP",
-        "Yu Gothic",
-        "Meiryo",
-        "Segoe UI",
-        system-ui,
-        sans-serif;
+    font-family: var(--operation-font-ui);
     font-size: 10px;
     letter-spacing: 0.35px;
 }
@@ -2097,7 +2087,7 @@ replace the legacy scaled three-column layout.
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 7px 8px;
+    padding: 6px 8px;
     border: 1px solid #243149;
     border-radius: 8px;
     background: #0b101a;
@@ -2116,8 +2106,8 @@ replace the legacy scaled three-column layout.
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
-    color: #b8c3d5;
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    color: #aebbd0;
+    font-family: var(--operation-font-mono);
     font-size: 11px;
     font-weight: 800;
     line-height: 1.1;
@@ -2133,16 +2123,16 @@ replace the legacy scaled three-column layout.
 
 .left-column .operation-state-value--running,
 .left-column .operation-state-value--enabled {
-    color: #59c37a;
+    color: #65c987;
 }
 
 .left-column .operation-state-value--pending {
-    color: #ffb84d;
+    color: #e8b45f;
 }
 
 .left-column .operation-state-value--stopped,
 .left-column .operation-state-value--disabled {
-    color: #9badc6;
+    color: #a8b5c9;
 }
 
 .left-column .operation-state-value--stopped::before,
@@ -2153,7 +2143,7 @@ replace the legacy scaled three-column layout.
 .left-column .operation-state-reason {
     width: 100%;
     color: #9badc6;
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    font-family: var(--operation-font-mono);
     font-size: 8px;
     font-weight: 650;
     line-height: 1.45;
@@ -2162,7 +2152,7 @@ replace the legacy scaled three-column layout.
 
 .left-column .operation-state-reason--pending,
 .left-column .operation-state-reason--warning {
-    color: #ffd28a;
+    color: #e8b45f;
 }
 
 .left-column .execution-status-label {
@@ -2177,7 +2167,7 @@ replace the legacy scaled three-column layout.
     border-radius: 8px;
     background: #0b101a;
     color: #e7edf7;
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    font-family: var(--operation-font-mono);
     font-size: 11px;
     letter-spacing: 0.2px;
     line-height: 1.2;
@@ -2202,7 +2192,7 @@ replace the legacy scaled three-column layout.
 
 .left-column .operation-auto-trade-reason {
     width: 100%;
-    color: #b8c3d5;
+    color: #9badc6;
     font-size: 8px;
     font-weight: 650;
     line-height: 1.45;
@@ -2215,8 +2205,8 @@ replace the legacy scaled three-column layout.
     border: 1px solid rgba(255, 184, 77, 0.46);
     border-radius: 8px;
     background: rgba(255, 184, 77, 0.09);
-    color: #ffd28a;
-    padding: 7px 8px;
+    color: #ffd5d5;
+    padding: 6px 8px;
     font-size: 9px;
     font-weight: 650;
     line-height: 1.45;
@@ -2226,15 +2216,7 @@ replace the legacy scaled three-column layout.
 .left-column .operation-emergency-button {
     height: 44px;
     border-radius: 8px;
-    font-family:
-        "Inter",
-        "Noto Sans CJK JP",
-        "Noto Sans JP",
-        "Yu Gothic",
-        "Meiryo",
-        "Segoe UI",
-        system-ui,
-        sans-serif;
+    font-family: var(--operation-font-ui);
     font-size: 10px;
     letter-spacing: 0.35px;
 }
@@ -2245,7 +2227,7 @@ replace the legacy scaled three-column layout.
 }
 
 .left-column .operation-emergency-note {
-    color: #ffd28a;
+    color: #e8b45f;
     font-size: 8px;
     font-weight: 650;
     line-height: 1.45;
@@ -2255,8 +2237,8 @@ replace the legacy scaled three-column layout.
 .left-column .operation-emergency-confirm {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 9px;
+    gap: 7px;
+    padding: 8px;
     border: 1px solid rgba(255, 184, 77, 0.5);
     border-radius: 8px;
     background: rgba(255, 184, 77, 0.08);
@@ -2271,6 +2253,7 @@ replace the legacy scaled three-column layout.
 
 .left-column .operation-emergency-confirm__body {
     color: #e7edf7;
+    font-family: var(--operation-font-ui);
     font-size: 9px;
     font-weight: 600;
     line-height: 1.45;
@@ -2280,7 +2263,7 @@ replace the legacy scaled three-column layout.
 .left-column .operation-emergency-confirm__actions {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-    gap: 7px;
+    gap: 6px;
 }
 
 .left-column .operation-emergency-confirm__cancel,
@@ -2292,6 +2275,7 @@ replace the legacy scaled three-column layout.
     border-radius: 8px;
     background: #0b101a;
     color: #e7edf7;
+    font-family: var(--operation-font-ui);
     font-size: 8px;
     font-weight: 800;
     line-height: 1.15;
@@ -2316,7 +2300,7 @@ replace the legacy scaled three-column layout.
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 7px 8px;
+    padding: 6px 8px;
     border: 1px solid #243149;
     border-radius: 8px;
     background: #0b101a;
@@ -2330,7 +2314,7 @@ replace the legacy scaled three-column layout.
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    font-family: var(--operation-font-mono);
     font-size: 11px;
     line-height: 1.1;
     letter-spacing: 0;
@@ -2344,15 +2328,15 @@ replace the legacy scaled three-column layout.
 }
 
 .left-column .operation-emergency-lock strong.locked {
-    color: #ff7b7b;
+    color: #ff7272;
 }
 
 .left-column .operation-emergency-lock strong.unlocked {
-    color: #9badc6;
+    color: #a8b5c9;
 }
 
 .left-column .operation-emergency-lock strong.unknown {
-    color: #ffb84d;
+    color: #e8b45f;
 }
 
 .left-column .operation-emergency-result,
@@ -2361,7 +2345,7 @@ replace the legacy scaled three-column layout.
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 7px 8px;
+    padding: 6px 8px;
     border-radius: 8px;
     font-size: 9px;
     font-weight: 650;
@@ -2372,13 +2356,13 @@ replace the legacy scaled three-column layout.
 .left-column .operation-emergency-result--safe {
     border: 1px solid rgba(89, 195, 122, 0.5);
     background: rgba(89, 195, 122, 0.09);
-    color: #a8efbf;
+    color: #9be5b3;
 }
 
 .left-column .operation-emergency-result--warning {
     border: 1px solid rgba(255, 184, 77, 0.5);
     background: rgba(255, 184, 77, 0.09);
-    color: #ffd28a;
+    color: #e8b45f;
 }
 
 .left-column .operation-emergency-result--danger,
@@ -2393,8 +2377,8 @@ replace the legacy scaled three-column layout.
     border: 1px solid rgba(255, 184, 77, 0.46);
     border-radius: 8px;
     background: rgba(255, 184, 77, 0.09);
-    color: #ffd28a;
-    padding: 7px 8px;
+    color: #ffd5d5;
+    padding: 6px 8px;
     font-size: 9px;
     font-weight: 650;
     line-height: 1.45;
@@ -2408,15 +2392,7 @@ replace the legacy scaled three-column layout.
     width: 100%;
     gap: 10px;
     color: #e7edf7;
-    font-family:
-        "Inter",
-        "Noto Sans CJK JP",
-        "Noto Sans JP",
-        "Yu Gothic",
-        "Meiryo",
-        "Segoe UI",
-        system-ui,
-        sans-serif;
+    font-family: var(--operation-font-ui);
 }
 
 .left-column .operation-toggle {
@@ -2454,10 +2430,10 @@ replace the legacy scaled three-column layout.
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 7px;
+    gap: 9px;
     border: 1px solid #243149;
     border-radius: 8px;
-    background: #0b101a;
+    background: #080e18;
     color: #9badc6;
     cursor: pointer;
     font-family: inherit;
@@ -2475,15 +2451,15 @@ replace the legacy scaled three-column layout.
 
 .operation-toggle__state,
 .operation-toggle__loading-text {
-    font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    font-family: var(--operation-font-mono);
     font-size: 10px;
     font-weight: 800;
     line-height: 1;
 }
 
 .operation-toggle__track {
-    width: 54px;
-    height: 28px;
+    width: 48px;
+    height: 22px;
     display: inline-flex;
     align-items: center;
     border: 1px solid #243149;
@@ -2496,11 +2472,10 @@ replace the legacy scaled three-column layout.
 }
 
 .operation-toggle__thumb {
-    width: 22px;
-    height: 22px;
-    border-radius: 7px;
-    background: #9badc6;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: #7f8da3;
     transform: translateX(0);
     transition:
         background-color 140ms ease,
@@ -2508,29 +2483,29 @@ replace the legacy scaled three-column layout.
 }
 
 .operation-toggle--checked .operation-toggle__control {
-    border-color: rgba(32, 207, 180, 0.58);
-    background: rgba(32, 207, 180, 0.09);
+    border-color: rgba(101, 201, 135, 0.5);
+    background: rgba(101, 201, 135, 0.08);
     color: #e7edf7;
 }
 
 .operation-toggle--checked .operation-toggle__track {
-    border-color: rgba(32, 207, 180, 0.68);
-    background: rgba(32, 207, 180, 0.16);
+    border-color: rgba(101, 201, 135, 0.52);
+    background: rgba(101, 201, 135, 0.12);
 }
 
 .operation-toggle--checked .operation-toggle__thumb {
-    background: #20cfb4;
+    background: #65c987;
     transform: translateX(26px);
 }
 
 .operation-toggle--checked .operation-toggle__state--on,
 .operation-toggle--unchecked .operation-toggle__state--off {
-    color: #e7edf7;
+    color: #d7e0ee;
 }
 
 .operation-toggle--checked .operation-toggle__state--off,
 .operation-toggle--unchecked .operation-toggle__state--on {
-    color: #6f819c;
+    color: #596a83;
 }
 
 .operation-toggle--disabled .operation-toggle__control,
@@ -2540,27 +2515,19 @@ replace the legacy scaled three-column layout.
 }
 
 .operation-toggle--loading .operation-toggle__control {
-    border-color: rgba(255, 184, 77, 0.58);
-    background: rgba(255, 184, 77, 0.09);
+    border-color: rgba(232, 180, 95, 0.58);
+    background: rgba(232, 180, 95, 0.09);
 }
 
 .operation-toggle__loading-text {
-    color: #ffd28a;
+    color: #e8b45f;
 }
 
 .left-column .emergency-stop-button,
 .left-column .quick-action-button {
     height: 36px;
     border-radius: 8px;
-    font-family:
-        "Inter",
-        "Noto Sans CJK JP",
-        "Noto Sans JP",
-        "Yu Gothic",
-        "Meiryo",
-        "Segoe UI",
-        system-ui,
-        sans-serif;
+    font-family: var(--operation-font-ui);
     font-size: 9px;
     letter-spacing: 0.35px;
 }
