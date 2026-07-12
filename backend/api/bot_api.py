@@ -192,7 +192,17 @@ class StatusResponse(BaseModel):
 
     executionEnabled: bool = False
 
+    loopEnabled: bool = False
+
+    loopState: str = "STOPPED"
+
+    autoTradeEnabled: bool = False
+
     emergencyStop: bool = False
+
+    emergencyLocked: bool = False
+
+    emergencyState: str = "UNLOCKED"
 
     real_qty: Optional[float] = None
 

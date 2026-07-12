@@ -8,7 +8,9 @@ import base64
 import hmac
 import hashlib
 import json
+import math
 import os
+from urllib.parse import quote, urlencode
 
 from dotenv import load_dotenv
 from backend.utils.log_buffer import logger, runtime_debug
@@ -418,9 +420,1204 @@ class KucoinTradeClient(BaseClient):
             else None
         )
 
+    def get_current_position(
+        self,
+        symbol,
+        timeout=10,
+    ):
+
+        raw_symbol = (
+            str(symbol).strip()
+            if symbol is not None
+            else ""
+        )
+        normalized_symbol = (
+            self.normalize_symbol(raw_symbol)
+            if raw_symbol
+            else None
+        )
+
+        def response(
+            success,
+            found=False,
+            error_code=None,
+            error=None,
+            raw=None,
+            raw_quantity=None,
+            side=None,
+            quantity=0.0,
+            signed_quantity=0.0,
+            entry_price=None,
+        ):
+            result = {
+                "success": success,
+                "exchange": "kucoin",
+                "source": "kucoin",
+                "found": found,
+                "symbol": normalized_symbol,
+                "exchange_symbol": normalized_symbol,
+                "side": side,
+                "quantity": quantity,
+                "signed_quantity": signed_quantity,
+                "raw_quantity": raw_quantity,
+                "entry_price": entry_price,
+                "raw": raw,
+                "error_code": error_code,
+                "error": error,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin current position result=%s", result)
+
+            return result
+
+        if not normalized_symbol:
+            return response(
+                False,
+                error_code="INVALID_SYMBOL",
+                error="symbol is required",
+            )
+
+        endpoint = "/api/v1/positions"
+
+        try:
+            headers = self._headers(
+                "GET",
+                endpoint
+            )
+
+            res = requests.get(
+                self.base_url + endpoint,
+                headers=headers,
+                timeout=timeout,
+            )
+        except requests.exceptions.Timeout as e:
+            return response(
+                False,
+                error_code="TIMEOUT",
+                error=str(e),
+            )
+        except requests.exceptions.RequestException as e:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(e),
+            )
+        except Exception as e:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(e),
+            )
+
+        status_code = getattr(
+            res,
+            "status_code",
+            None
+        )
+
+        try:
+            status_code = (
+                int(status_code)
+                if status_code is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            status_code = None
+
+        if status_code in [401, 403]:
+            return response(
+                False,
+                error_code="AUTH_ERROR",
+                error=f"HTTP {status_code}",
+            )
+
+        if status_code is not None and status_code >= 400:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=f"HTTP {status_code}",
+            )
+
+        try:
+            data = res.json()
+        except Exception as e:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error=str(e),
+            )
+
+        if not isinstance(data, dict):
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="response is not a dict",
+                raw=data,
+            )
+
+        if "code" not in data:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="missing code",
+                raw=data,
+            )
+
+        if data.get("code") != "200000":
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(data),
+                raw=data,
+            )
+
+        if "data" not in data:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="missing data",
+                raw=data,
+            )
+
+        positions = data.get("data")
+
+        if not isinstance(positions, list):
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="data is not a list",
+                raw=data,
+            )
+
+        if not positions:
+            return response(
+                True,
+                found=False,
+            )
+
+        matches = []
+
+        for item in positions:
+            if not isinstance(item, dict):
+                return response(
+                    False,
+                    error_code="MALFORMED_RESPONSE",
+                    error="position item is not a dict",
+                    raw=item,
+                )
+
+            if "symbol" not in item:
+                return response(
+                    False,
+                    error_code="MALFORMED_RESPONSE",
+                    error="missing symbol",
+                    raw=item,
+                )
+
+            raw_item_symbol = item.get("symbol")
+
+            if raw_item_symbol is None:
+                return response(
+                    False,
+                    error_code="MALFORMED_RESPONSE",
+                    error="invalid symbol",
+                    raw=item,
+                )
+
+            item_symbol = str(
+                raw_item_symbol
+            ).strip().upper()
+
+            if not item_symbol:
+                return response(
+                    False,
+                    error_code="MALFORMED_RESPONSE",
+                    error="invalid symbol",
+                    raw=item,
+                )
+
+            if item_symbol == normalized_symbol:
+                matches.append(item)
+
+        if not matches:
+            return response(
+                True,
+                found=False,
+            )
+
+        if len(matches) > 1:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="multiple positions for symbol",
+                raw=matches,
+            )
+
+        position = matches[0]
+
+        if "currentQty" not in position:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="missing currentQty",
+                raw=position,
+            )
+
+        raw_quantity = position.get("currentQty")
+
+        if isinstance(raw_quantity, bool):
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid currentQty",
+                raw=position,
+                raw_quantity=raw_quantity,
+            )
+
+        if raw_quantity is None:
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid currentQty",
+                raw=position,
+                raw_quantity=raw_quantity,
+            )
+
+        if isinstance(raw_quantity, str) and not raw_quantity.strip():
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid currentQty",
+                raw=position,
+                raw_quantity=raw_quantity,
+            )
+
+        try:
+            signed_quantity = float(raw_quantity)
+        except (TypeError, ValueError):
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid currentQty",
+                raw=position,
+                raw_quantity=raw_quantity,
+            )
+
+        if not math.isfinite(signed_quantity):
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid currentQty",
+                raw=position,
+                raw_quantity=raw_quantity,
+            )
+
+        if signed_quantity == 0:
+            return response(
+                True,
+                found=False,
+                raw=position,
+                raw_quantity=raw_quantity,
+                signed_quantity=0.0,
+                quantity=0.0,
+            )
+
+        entry_price = None
+
+        if position.get("avgEntryPrice") not in [None, ""]:
+            try:
+                parsed_entry = float(
+                    position.get("avgEntryPrice")
+                )
+
+                if math.isfinite(parsed_entry):
+                    entry_price = parsed_entry
+            except (TypeError, ValueError):
+                entry_price = None
+
+        side = (
+            "long"
+            if signed_quantity > 0
+            else "short"
+        )
+
+        return response(
+            True,
+            found=True,
+            raw=position,
+            raw_quantity=raw_quantity,
+            side=side,
+            quantity=abs(signed_quantity),
+            signed_quantity=signed_quantity,
+            entry_price=entry_price,
+        )
+
+    def flatten_current_position(
+        self,
+        symbol,
+        timeout=10,
+    ):
+
+        def response(
+            success,
+            skipped=False,
+            accepted=False,
+            confirmed=False,
+            closed=False,
+            error_code=None,
+            error=None,
+            normalized_symbol=None,
+            side=None,
+            size=0,
+            order_id=None,
+            initial_position=None,
+            final_position=None,
+            raw_order=None,
+        ):
+            result = {
+                "success": success,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "skipped": skipped,
+                "accepted": accepted,
+                "confirmed": confirmed,
+                "closed": closed,
+                "side": side,
+                "size": size,
+                "order_id": order_id,
+                "initial_position": initial_position,
+                "final_position": final_position,
+                "raw_order": raw_order,
+                "error_code": error_code,
+                "error": error,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin flatten current position result=%s", result)
+
+            return result
+
+        initial = self.get_current_position(
+            symbol,
+            timeout=timeout,
+        )
+
+        normalized_symbol = (
+            initial.get("exchange_symbol")
+            or initial.get("symbol")
+            if isinstance(initial, dict)
+            else None
+        )
+
+        if not isinstance(initial, dict) or not initial.get("success"):
+            return response(
+                False,
+                error_code=(
+                    initial.get("error_code")
+                    if isinstance(initial, dict)
+                    else "POSITION_CHECK_FAILED"
+                ),
+                error=(
+                    initial.get("error")
+                    if isinstance(initial, dict)
+                    else "position check failed"
+                ),
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+            )
+
+        if not initial.get("found"):
+            return response(
+                True,
+                skipped=True,
+                confirmed=True,
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+                final_position=initial,
+            )
+
+        position_side = initial.get("side")
+
+        if position_side == "long":
+            close_side = "sell"
+        elif position_side == "short":
+            close_side = "buy"
+        else:
+            return response(
+                False,
+                error_code="MALFORMED_POSITION",
+                error="invalid position side",
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+            )
+
+        raw_size = initial.get("quantity")
+
+        if isinstance(raw_size, bool) or raw_size in [None, ""]:
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid position quantity",
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+                side=close_side,
+            )
+
+        try:
+            size_value = float(raw_size)
+        except (TypeError, ValueError):
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid position quantity",
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+                side=close_side,
+            )
+
+        if (
+            not math.isfinite(size_value)
+            or size_value <= 0
+            or not size_value.is_integer()
+        ):
+            return response(
+                False,
+                error_code="INVALID_QUANTITY",
+                error="invalid position quantity",
+                normalized_symbol=normalized_symbol,
+                initial_position=initial,
+                side=close_side,
+            )
+
+        size = int(size_value)
+        endpoint = "/api/v1/orders"
+        body_dict = {
+            "clientOid": str(
+                int(time.time() * 1000)
+            ),
+            "symbol": normalized_symbol,
+            "side": close_side,
+            "type": "market",
+            "size": str(size),
+            "reduceOnly": True,
+            "leverage": "10",
+            "marginMode": "ISOLATED",
+        }
+        body = json.dumps(body_dict)
+
+        try:
+            headers = self._headers(
+                "POST",
+                endpoint,
+                body,
+            )
+
+            res = requests.post(
+                self.base_url + endpoint,
+                headers=headers,
+                data=body,
+                timeout=timeout,
+            )
+        except requests.exceptions.Timeout as e:
+            return response(
+                False,
+                error_code="TIMEOUT",
+                error=str(e),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+        except requests.exceptions.RequestException as e:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(e),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+        except Exception as e:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(e),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+
+        status_code = getattr(
+            res,
+            "status_code",
+            None,
+        )
+
+        try:
+            status_code = (
+                int(status_code)
+                if status_code is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            status_code = None
+
+        if status_code in [401, 403]:
+            return response(
+                False,
+                error_code="AUTH_ERROR",
+                error=f"HTTP {status_code}",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+
+        if status_code is not None and status_code >= 400:
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=f"HTTP {status_code}",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+
+        try:
+            raw_order = res.json()
+        except Exception as e:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error=str(e),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+
+        if not isinstance(raw_order, dict):
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="order response is not a dict",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+                raw_order=raw_order,
+            )
+
+        if raw_order.get("code") != "200000":
+            return response(
+                False,
+                error_code="API_ERROR",
+                error=str(raw_order),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+                raw_order=raw_order,
+            )
+
+        order_data = raw_order.get("data")
+
+        if not isinstance(order_data, dict):
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="missing order data",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+                raw_order=raw_order,
+            )
+
+        order_id = order_data.get("orderId")
+        order_id = (
+            str(order_id).strip()
+            if order_id is not None
+            else ""
+        )
+
+        if not order_id:
+            return response(
+                False,
+                error_code="MALFORMED_RESPONSE",
+                error="missing orderId",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+                raw_order=raw_order,
+            )
+
+        final = self.get_current_position(
+            normalized_symbol,
+            timeout=timeout,
+        )
+
+        if not isinstance(final, dict) or not final.get("success"):
+            post_error_code = (
+                final.get("error_code")
+                if isinstance(final, dict)
+                else "FAILED"
+            )
+
+            return response(
+                False,
+                accepted=True,
+                confirmed=False,
+                error_code=f"POST_CHECK_{post_error_code or 'FAILED'}",
+                error=(
+                    final.get("error")
+                    if isinstance(final, dict)
+                    else "post-check failed"
+                ),
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                order_id=order_id,
+                initial_position=initial,
+                final_position=final,
+                raw_order=raw_order,
+            )
+
+        if final.get("found"):
+            return response(
+                False,
+                accepted=True,
+                confirmed=False,
+                error_code="POSITION_REMAINS",
+                error="position remains after flatten order",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                order_id=order_id,
+                initial_position=initial,
+                final_position=final,
+                raw_order=raw_order,
+            )
+
+        return response(
+            True,
+            accepted=True,
+            confirmed=True,
+            closed=True,
+            normalized_symbol=normalized_symbol,
+            side=close_side,
+            size=size,
+            order_id=order_id,
+            initial_position=initial,
+            final_position=final,
+            raw_order=raw_order,
+        )
+
     # =========================
     # PRICE
     # =========================
+
+    def get_open_orders(
+        self,
+        symbol=None
+    ):
+
+        normalized_symbol = (
+            self.normalize_symbol(symbol)
+            if symbol
+            else None
+        )
+        orders = []
+        raw_pages = []
+        current_page = 1
+        total_page = 1
+        page_size = 100
+
+        try:
+
+            while current_page <= total_page:
+
+                params = {
+                    "status": "active",
+                    "currentPage": current_page,
+                    "pageSize": page_size,
+                }
+
+                if normalized_symbol:
+                    params["symbol"] = normalized_symbol
+
+                endpoint = (
+                    "/api/v1/orders?"
+                    + urlencode(params)
+                )
+
+                headers = self._headers(
+                    "GET",
+                    endpoint
+                )
+
+                res = requests.get(
+                    self.base_url + endpoint,
+                    headers=headers,
+                    timeout=10,
+                )
+
+                data = res.json()
+                raw_pages.append(data)
+
+                if data.get("code") != "200000":
+                    return {
+                        "success": False,
+                        "exchange": "kucoin",
+                        "symbol": normalized_symbol,
+                        "orders": [],
+                        "count": 0,
+                        "error": str(data),
+                        "raw": data,
+                        "timestamp": time.time(),
+                    }
+
+                payload = data.get(
+                    "data",
+                    {}
+                )
+                items = (
+                    payload
+                    if isinstance(payload, list)
+                    else payload.get("items", [])
+                )
+
+                for item in items or []:
+                    orders.append(
+                        self._normalize_open_order(
+                            item
+                        )
+                    )
+
+                if not isinstance(payload, dict):
+                    break
+
+                total_page = int(
+                    payload.get("totalPage")
+                    or payload.get("total_page")
+                    or current_page
+                    or 1
+                )
+                current_page = int(
+                    payload.get("currentPage")
+                    or payload.get("current_page")
+                    or current_page
+                    or 1
+                )
+
+                if current_page >= total_page:
+                    break
+
+                current_page += 1
+
+            result = {
+                "success": True,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "orders": orders,
+                "count": len(orders),
+                "raw": (
+                    raw_pages[0]
+                    if len(raw_pages) == 1
+                    else {"pages": raw_pages}
+                ),
+                "pagination": {
+                    "pagesFetched": len(raw_pages),
+                    "pageSize": page_size,
+                    "totalPage": total_page,
+                },
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin open orders result=%s", result)
+
+            return result
+
+        except Exception as e:
+
+            self.logger.exception("KUCOIN OPEN ORDERS EXCEPTION")
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "orders": [],
+                "count": 0,
+                "error": str(e),
+                "raw": (
+                    raw_pages[-1]
+                    if raw_pages
+                    else None
+                ),
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin open orders result=%s", result)
+
+            return result
+
+    @staticmethod
+    def _normalize_open_order(order):
+
+        def as_float(value):
+            if value in [None, ""]:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        side = order.get("side")
+
+        return {
+            "order_id": (
+                order.get("id")
+                or order.get("orderId")
+            ),
+            "symbol": order.get("symbol"),
+            "side": (
+                str(side).upper()
+                if side
+                else None
+            ),
+            "type": (
+                order.get("type")
+                or order.get("orderType")
+            ),
+            "price": as_float(order.get("price")),
+            "size": as_float(
+                order.get("size")
+                or order.get("qty")
+            ),
+            "status": order.get("status"),
+            "raw": order,
+        }
+
+    def cancel_order(
+        self,
+        order_id,
+        symbol=None
+    ):
+
+        normalized_symbol = (
+            self.normalize_symbol(symbol)
+            if symbol
+            else None
+        )
+        normalized_order_id = (
+            str(order_id).strip()
+            if order_id is not None
+            else ""
+        )
+
+        if not normalized_order_id:
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "order_id": None,
+                "symbol": normalized_symbol,
+                "cancelled": False,
+                "error": "INVALID_ORDER_ID",
+                "raw": None,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel order result=%s", result)
+
+            return result
+
+        endpoint = (
+            "/api/v1/orders/"
+            + quote(normalized_order_id, safe="")
+        )
+        raw = None
+
+        try:
+
+            headers = self._headers(
+                "DELETE",
+                endpoint
+            )
+
+            res = requests.delete(
+                self.base_url + endpoint,
+                headers=headers,
+                timeout=10,
+            )
+
+            raw = res.json()
+
+            if raw.get("code") != "200000":
+                result = {
+                    "success": False,
+                    "exchange": "kucoin",
+                    "order_id": normalized_order_id,
+                    "symbol": normalized_symbol,
+                    "cancelled": False,
+                    "error": str(raw),
+                    "raw": raw,
+                    "timestamp": time.time(),
+                }
+
+                runtime_debug("KuCoin cancel order result=%s", result)
+
+                return result
+
+            result = {
+                "success": True,
+                "exchange": "kucoin",
+                "order_id": normalized_order_id,
+                "symbol": normalized_symbol,
+                "cancelled": True,
+                "raw": raw,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel order result=%s", result)
+
+            return result
+
+        except Exception as e:
+
+            self.logger.exception("KUCOIN CANCEL ORDER EXCEPTION")
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "order_id": normalized_order_id,
+                "symbol": normalized_symbol,
+                "cancelled": False,
+                "error": str(e),
+                "raw": raw,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel order result=%s", result)
+
+            return result
+
+    def cancel_all_orders(
+        self,
+        symbol
+    ):
+
+        raw_symbol = (
+            str(symbol).strip()
+            if symbol is not None
+            else ""
+        )
+
+        if not raw_symbol:
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": None,
+                "requested": 0,
+                "cancelled": 0,
+                "failed": 0,
+                "skipped": False,
+                "results": [],
+                "error": "INVALID_SYMBOL",
+                "open_orders_raw": None,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel all orders result=%s", result)
+
+            return result
+
+        normalized_symbol = self.normalize_symbol(raw_symbol)
+
+        try:
+            open_result = self.get_open_orders(normalized_symbol)
+        except Exception as e:
+            self.logger.exception("KUCOIN CANCEL ALL OPEN ORDERS EXCEPTION")
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "requested": 0,
+                "cancelled": 0,
+                "failed": 0,
+                "skipped": False,
+                "results": [],
+                "error": str(e),
+                "open_orders_raw": None,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel all orders result=%s", result)
+
+            return result
+
+        open_orders_raw = (
+            open_result.get("raw")
+            if isinstance(open_result, dict)
+            else open_result
+        )
+
+        if not isinstance(open_result, dict) or not open_result.get("success"):
+
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "requested": 0,
+                "cancelled": 0,
+                "failed": 0,
+                "skipped": False,
+                "results": [],
+                "error": (
+                    open_result.get("error")
+                    if isinstance(open_result, dict)
+                    else "OPEN_ORDERS_FAILED"
+                ),
+                "open_orders_raw": open_orders_raw,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel all orders result=%s", result)
+
+            return result
+
+        orders = (
+            open_result.get("orders")
+            or []
+        )
+
+        if not orders:
+
+            result = {
+                "success": True,
+                "exchange": "kucoin",
+                "symbol": normalized_symbol,
+                "requested": 0,
+                "cancelled": 0,
+                "failed": 0,
+                "skipped": True,
+                "results": [],
+                "error": None,
+                "open_orders_raw": open_orders_raw,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("KuCoin cancel all orders result=%s", result)
+
+            return result
+
+        results = []
+        cancelled = 0
+        failed = 0
+
+        for order in orders:
+
+            order_id = None
+
+            try:
+                if isinstance(order, dict):
+                    order_id = (
+                        order.get("order_id")
+                        or order.get("id")
+                        or order.get("orderId")
+                    )
+
+                order_id = (
+                    str(order_id).strip()
+                    if order_id is not None
+                    else ""
+                )
+
+                if not order_id:
+                    failed += 1
+                    results.append({
+                        "order_id": None,
+                        "success": False,
+                        "cancelled": False,
+                        "error": "MISSING_ORDER_ID",
+                        "raw": order,
+                    })
+                    continue
+
+                try:
+                    cancel_result = self.cancel_order(
+                        order_id,
+                        normalized_symbol
+                    )
+                except Exception as e:
+                    self.logger.exception("KUCOIN CANCEL ALL ITEM EXCEPTION")
+                    cancel_result = {
+                        "success": False,
+                        "order_id": order_id,
+                        "cancelled": False,
+                        "error": str(e),
+                        "raw": None,
+                    }
+
+                item_cancelled = bool(
+                    cancel_result.get("success")
+                    and cancel_result.get("cancelled")
+                )
+
+                if item_cancelled:
+                    cancelled += 1
+                else:
+                    failed += 1
+
+                results.append({
+                    "order_id": (
+                        cancel_result.get("order_id")
+                        or order_id
+                    ),
+                    "success": bool(cancel_result.get("success")),
+                    "cancelled": bool(cancel_result.get("cancelled")),
+                    "error": cancel_result.get("error"),
+                    "raw": cancel_result.get("raw"),
+                })
+
+            except Exception as e:
+                failed += 1
+                results.append({
+                    "order_id": order_id,
+                    "success": False,
+                    "cancelled": False,
+                    "error": str(e),
+                    "raw": order,
+                })
+
+        result = {
+            "success": failed == 0,
+            "exchange": "kucoin",
+            "symbol": normalized_symbol,
+            "requested": len(orders),
+            "cancelled": cancelled,
+            "failed": failed,
+            "skipped": False,
+            "results": results,
+            "error": (
+                None
+                if failed == 0
+                else "CANCEL_ALL_PARTIAL_FAILURE"
+            ),
+            "open_orders_raw": open_orders_raw,
+            "timestamp": time.time(),
+        }
+
+        runtime_debug("KuCoin cancel all orders result=%s", result)
+
+        return result
 
     def get_price(
         self,

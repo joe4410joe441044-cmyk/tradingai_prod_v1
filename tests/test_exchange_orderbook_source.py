@@ -454,6 +454,37 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         engine.on_price("XRPUSDT", price)
         return engine, price_manager
 
+    @staticmethod
+    def _paper_engine_with_position(
+        latest_price=0.0,
+        fallback_price=0.0,
+        side="BUY",
+    ):
+        portfolio = PortfolioManager(1000)
+        price_manager = StaticPriceManager(fallback_price)
+        engine = ExecutionEngine(
+            portfolio=portfolio,
+            price_manager=price_manager,
+        )
+        engine.symbol = "XRPUSDT"
+        engine.mode = "paper"
+        engine.balance = 1000
+        engine.initial_equity = 1000
+        engine.peak_equity = 1000
+        engine.latest_price = latest_price
+        engine.unrealized_pnl = 3
+        engine.actual_position = {
+            "state": "OPEN",
+            "side": side,
+            "entry_price": 2.0,
+            "qty": 10,
+            "coin_qty": 10,
+            "multiplier": 1.0,
+        }
+        portfolio.open_position("XRPUSDT", 2.0, 10, side)
+        portfolio.open_position("ETHUSDT", 100.0, 1, "BUY")
+        return engine, portfolio, price_manager
+
     def _live_status(
         self,
         *,
@@ -543,6 +574,150 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
             governance_state["emergency_stop"] = (
                 emergency_stop_before
             )
+
+    def test_flatten_paper_position_closes_with_argument_price(self):
+        engine, portfolio, _ = self._paper_engine_with_position()
+
+        with patch.object(
+            engine,
+            "close_position",
+            wraps=engine.close_position,
+        ) as close_position:
+            result = engine.flatten_paper_position(price=2.5)
+
+        close_position.assert_called_once_with(2.5, "EMERGENCY_FLATTEN")
+        self.assertTrue(result["success"])
+        self.assertEqual(result["mode"], "paper")
+        self.assertEqual(result["symbol"], "XRPUSDT")
+        self.assertEqual(result["requested"], 1)
+        self.assertEqual(result["flattened"], 1)
+        self.assertEqual(result["failed"], 0)
+        self.assertFalse(result["skipped"])
+        self.assertEqual(result["results"][0]["price"], 2.5)
+        self.assertIsNone(engine.actual_position)
+        self.assertAlmostEqual(engine.pnl, 5.0)
+        self.assertAlmostEqual(engine.balance, 1005.0)
+        self.assertAlmostEqual(portfolio.balance, 1005.0)
+        self.assertEqual(engine.unrealized_pnl, 0)
+        self.assertNotIn("XRPUSDT", portfolio.positions)
+        self.assertIn("ETHUSDT", portfolio.positions)
+        self.assertEqual(portfolio.realized_pnl, 0)
+
+    def test_flatten_paper_position_skips_without_position(self):
+        engine, _, _ = self._paper_engine_with_position()
+        engine.actual_position = None
+
+        with patch.object(engine, "close_position") as close_position:
+            result = engine.flatten_paper_position(price=2.5)
+
+        close_position.assert_not_called()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["requested"], 0)
+        self.assertEqual(result["flattened"], 0)
+        self.assertEqual(result["failed"], 0)
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["results"], [])
+
+    def test_flatten_paper_position_uses_latest_price(self):
+        engine, _, _ = self._paper_engine_with_position(
+            latest_price=2.4,
+            fallback_price=2.8,
+        )
+
+        with patch.object(
+            engine,
+            "close_position",
+            wraps=engine.close_position,
+        ) as close_position:
+            with patch.object(
+                engine,
+                "get_price",
+                wraps=engine.get_price,
+            ) as get_price:
+                result = engine.flatten_paper_position()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["results"][0]["price"], 2.4)
+        close_position.assert_called_once_with(2.4, "EMERGENCY_FLATTEN")
+        get_price.assert_not_called()
+
+    def test_flatten_paper_position_falls_back_to_get_price(self):
+        engine, _, _ = self._paper_engine_with_position(
+            latest_price=0,
+            fallback_price=2.6,
+        )
+
+        with patch.object(
+            engine,
+            "close_position",
+            wraps=engine.close_position,
+        ) as close_position:
+            with patch.object(
+                engine,
+                "get_price",
+                wraps=engine.get_price,
+            ) as get_price:
+                result = engine.flatten_paper_position()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["results"][0]["price"], 2.6)
+        close_position.assert_called_once_with(2.6, "EMERGENCY_FLATTEN")
+        get_price.assert_called_once()
+
+    def test_flatten_paper_position_fails_without_valid_price(self):
+        for invalid_price in [None, 0, -1, float("nan"), float("inf")]:
+            with self.subTest(price=invalid_price):
+                engine, _, _ = self._paper_engine_with_position(
+                    latest_price=0,
+                    fallback_price=0,
+                )
+                position_before = dict(engine.actual_position)
+
+                result = engine.flatten_paper_position(price=invalid_price)
+
+                self.assertFalse(result["success"])
+                self.assertEqual(result["requested"], 1)
+                self.assertEqual(result["flattened"], 0)
+                self.assertEqual(result["failed"], 1)
+                self.assertFalse(result["skipped"])
+                self.assertEqual(result["error"], "INVALID_FLATTEN_PRICE")
+                self.assertEqual(engine.actual_position, position_before)
+
+    def test_flatten_paper_position_returns_failure_on_close_exception(self):
+        engine, _, _ = self._paper_engine_with_position()
+
+        with patch.object(
+            engine,
+            "close_position",
+            side_effect=RuntimeError("close failed"),
+        ) as close_position:
+            result = engine.flatten_paper_position(price=2.5)
+
+        close_position.assert_called_once_with(2.5, "EMERGENCY_FLATTEN")
+        self.assertFalse(result["success"])
+        self.assertEqual(result["requested"], 1)
+        self.assertEqual(result["flattened"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertIn("close failed", result["error"])
+        self.assertIsNotNone(result["position_after"])
+        self.assertIsNotNone(engine.actual_position)
+
+    def test_flatten_paper_position_is_idempotent(self):
+        engine, _, _ = self._paper_engine_with_position()
+
+        first = engine.flatten_paper_position(price=2.5)
+        balance_after_first = engine.balance
+        pnl_after_first = engine.pnl
+        second = engine.flatten_paper_position(price=3.0)
+
+        self.assertTrue(first["success"])
+        self.assertEqual(first["flattened"], 1)
+        self.assertTrue(second["success"])
+        self.assertEqual(second["requested"], 0)
+        self.assertEqual(second["flattened"], 0)
+        self.assertTrue(second["skipped"])
+        self.assertEqual(engine.balance, balance_after_first)
+        self.assertEqual(engine.pnl, pnl_after_first)
 
     def test_position_size_reaches_paper_qty_and_zero_fallback(self):
         engine, _ = self._paper_engine(price=2.0)

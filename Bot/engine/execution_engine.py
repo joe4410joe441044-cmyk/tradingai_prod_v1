@@ -10,6 +10,7 @@ from backend.utils.log_buffer import (
 )
 
 import backend.config as backend_config
+import copy
 import math
 import time
 
@@ -1148,6 +1149,215 @@ class ExecutionEngine:
             self.logger.exception("GET_PRICE EXCEPTION")
 
             return 0.0
+
+    def flatten_paper_position(
+        self,
+        price=None,
+        reason="EMERGENCY_FLATTEN"
+    ):
+
+        symbol = self.symbol
+
+        if not self.actual_position:
+
+            result = {
+                "success": True,
+                "mode": "paper",
+                "symbol": symbol,
+                "requested": 0,
+                "flattened": 0,
+                "failed": 0,
+                "skipped": True,
+                "results": [],
+                "error": None,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("Paper flatten result=%s", result)
+
+            return result
+
+        position_before = copy.deepcopy(
+            self.actual_position
+        )
+
+        def valid_price(value):
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+
+            if not math.isfinite(value) or value <= 0:
+                return None
+
+            return value
+
+        flatten_price = valid_price(price)
+
+        if flatten_price is None:
+            flatten_price = valid_price(self.latest_price)
+
+        if flatten_price is None:
+            try:
+                flatten_price = valid_price(self.get_price())
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "mode": "paper",
+                    "symbol": symbol,
+                    "requested": 1,
+                    "flattened": 0,
+                    "failed": 1,
+                    "skipped": False,
+                    "results": [],
+                    "error": str(e),
+                    "position_after": copy.deepcopy(
+                        self.actual_position
+                    ),
+                    "timestamp": time.time(),
+                }
+
+                runtime_debug("Paper flatten result=%s", result)
+
+                return result
+
+        if flatten_price is None:
+
+            result = {
+                "success": False,
+                "mode": "paper",
+                "symbol": symbol,
+                "requested": 1,
+                "flattened": 0,
+                "failed": 1,
+                "skipped": False,
+                "results": [],
+                "error": "INVALID_FLATTEN_PRICE",
+                "position_after": copy.deepcopy(
+                    self.actual_position
+                ),
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("Paper flatten result=%s", result)
+
+            return result
+
+        try:
+            self.close_position(flatten_price, reason)
+        except Exception as e:
+            self.logger.exception("PAPER FLATTEN CLOSE EXCEPTION")
+
+            result = {
+                "success": False,
+                "mode": "paper",
+                "symbol": symbol,
+                "requested": 1,
+                "flattened": 0,
+                "failed": 1,
+                "skipped": False,
+                "results": [],
+                "error": str(e),
+                "position_before": position_before,
+                "position_after": copy.deepcopy(
+                    self.actual_position
+                ),
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("Paper flatten result=%s", result)
+
+            return result
+
+        if self.actual_position is not None:
+
+            result = {
+                "success": False,
+                "mode": "paper",
+                "symbol": symbol,
+                "requested": 1,
+                "flattened": 0,
+                "failed": 1,
+                "skipped": False,
+                "results": [],
+                "error": "POSITION_NOT_CLOSED",
+                "position_before": position_before,
+                "position_after": copy.deepcopy(
+                    self.actual_position
+                ),
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("Paper flatten result=%s", result)
+
+            return result
+
+        try:
+            if (
+                self.portfolio
+                and symbol
+                and hasattr(self.portfolio, "positions")
+            ):
+                if hasattr(self.portfolio, "lock"):
+                    with self.portfolio.lock:
+                        self.portfolio.positions.pop(
+                            symbol,
+                            None
+                        )
+                else:
+                    self.portfolio.positions.pop(
+                        symbol,
+                        None
+                    )
+        except Exception as e:
+            self.logger.exception("PAPER FLATTEN PORTFOLIO SYNC EXCEPTION")
+
+            result = {
+                "success": False,
+                "mode": "paper",
+                "symbol": symbol,
+                "requested": 1,
+                "flattened": 1,
+                "failed": 1,
+                "skipped": False,
+                "results": [{
+                    "symbol": symbol,
+                    "success": True,
+                    "reason": reason,
+                    "price": flatten_price,
+                    "position_before": position_before,
+                }],
+                "error": str(e),
+                "position_after": None,
+                "timestamp": time.time(),
+            }
+
+            runtime_debug("Paper flatten result=%s", result)
+
+            return result
+
+        result = {
+            "success": True,
+            "mode": "paper",
+            "symbol": symbol,
+            "requested": 1,
+            "flattened": 1,
+            "failed": 0,
+            "skipped": False,
+            "results": [{
+                "symbol": symbol,
+                "success": True,
+                "reason": reason,
+                "price": flatten_price,
+                "position_before": position_before,
+            }],
+            "error": None,
+            "timestamp": time.time(),
+        }
+
+        runtime_debug("Paper flatten result=%s", result)
+
+        return result
 
 
     # =====================================

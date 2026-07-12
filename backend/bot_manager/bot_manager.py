@@ -15,6 +15,7 @@ from backend.runtime.runtime_health_snapshot import (
 from backend import config as backend_config
 import traceback
 import os
+import threading
 import time
 import uuid
 from copy import deepcopy
@@ -76,6 +77,8 @@ class BotManager:
         # ============================================
 
         self.pending_order = False
+
+        self.emergency_orchestrator_lock = threading.Lock()
 
         # ============================================
         # COOLDOWN
@@ -2366,6 +2369,449 @@ class BotManager:
 
         return self.account_snapshot
 
+    def _emergency_response(
+        self,
+        success=False,
+        completed=False,
+        partial=False,
+        state_unknown=False,
+        execution_path=None,
+        symbol=None,
+        cancel=None,
+        flatten=None,
+        position_remaining=None,
+        retryable=True,
+        error_code=None,
+    ):
+
+        return {
+            "success": success,
+            "completed": completed,
+            "partial": partial,
+            "state_unknown": state_unknown,
+            "emergency_locked": bool(
+                governance_state.get(
+                    "emergency_stop",
+                    False,
+                )
+            ),
+            "auto_trade_disabled": not bool(
+                governance_state.get(
+                    "execution_enabled",
+                    False,
+                )
+            ),
+            "execution_path": execution_path,
+            "symbol": symbol,
+            "cancel": cancel,
+            "flatten": flatten,
+            "position_remaining": position_remaining,
+            "retryable": retryable,
+            "error_code": error_code,
+        }
+
+    def _emergency_symbol(self, engine):
+
+        symbol = (
+            self.orderbook_symbol
+            or self.symbol
+            or (
+                self.config.get("symbol")
+                if isinstance(self.config, dict)
+                else None
+            )
+            or (
+                getattr(engine, "symbol", None)
+                if engine is not None
+                else None
+            )
+        )
+
+        symbol = (
+            str(symbol).strip()
+            if symbol is not None
+            else ""
+        )
+
+        return (
+            symbol.upper()
+            if symbol
+            else None
+        )
+
+    @staticmethod
+    def _emergency_error_code(result, fallback):
+
+        if isinstance(result, dict):
+            return (
+                result.get("error_code")
+                or result.get("error")
+                or fallback
+            )
+
+        return fallback
+
+    @staticmethod
+    def _emergency_position_remaining(flatten_result):
+
+        if not isinstance(flatten_result, dict):
+            return None
+
+        explicit_remaining = flatten_result.get("position_remaining")
+
+        if explicit_remaining is True:
+            return True
+
+        if explicit_remaining is False:
+            return False
+
+        if flatten_result.get("error_code") == "POSITION_REMAINS":
+            return True
+
+        final_position = flatten_result.get("final_position")
+
+        if (
+            isinstance(final_position, dict)
+            and final_position.get("success") is True
+        ):
+            if final_position.get("found") is True:
+                return True
+            if final_position.get("found") is False:
+                return False
+
+        if (
+            flatten_result.get("success") is True
+            and (
+                flatten_result.get("confirmed") is True
+                or flatten_result.get("closed") is True
+                or flatten_result.get("skipped") is True
+            )
+        ):
+            return False
+
+        position_after = flatten_result.get("position_after")
+
+        if position_after is not None:
+            return True
+
+        return None
+
+    @staticmethod
+    def _emergency_flatten_unconfirmed(flatten_result):
+
+        return (
+            isinstance(flatten_result, dict)
+            and flatten_result.get("accepted") is True
+            and flatten_result.get("confirmed") is not True
+        )
+
+    def _classify_live_emergency_result(
+        self,
+        symbol,
+        cancel_result,
+        flatten_result,
+    ):
+
+        cancel_completed = (
+            isinstance(cancel_result, dict)
+            and cancel_result.get("success") is True
+        )
+        flatten_completed = (
+            isinstance(flatten_result, dict)
+            and flatten_result.get("success") is True
+        )
+        position_remaining = self._emergency_position_remaining(
+            flatten_result
+        )
+        flatten_unconfirmed = self._emergency_flatten_unconfirmed(
+            flatten_result
+        )
+
+        position_unknown = position_remaining is None
+
+        if (
+            cancel_completed
+            and flatten_completed
+            and position_remaining is False
+        ):
+            return self._emergency_response(
+                success=True,
+                completed=True,
+                partial=False,
+                state_unknown=False,
+                execution_path="live",
+                symbol=symbol,
+                cancel=cancel_result,
+                flatten=flatten_result,
+                position_remaining=False,
+                retryable=False,
+            )
+
+        if (
+            not cancel_completed
+            and flatten_completed
+            and position_remaining is False
+        ):
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=False,
+                execution_path="live",
+                symbol=symbol,
+                cancel=cancel_result,
+                flatten=flatten_result,
+                position_remaining=False,
+                retryable=True,
+                error_code="CANCEL_FAILED_FLATTEN_COMPLETED",
+            )
+
+        if position_remaining is True:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=False,
+                execution_path="live",
+                symbol=symbol,
+                cancel=cancel_result,
+                flatten=flatten_result,
+                position_remaining=True,
+                retryable=True,
+                error_code="POSITION_REMAINS",
+            )
+
+        if (
+            position_unknown
+            or flatten_unconfirmed
+        ):
+            error_code = (
+                "CANCEL_AND_FLATTEN_FAILED"
+                if not cancel_completed
+                and not flatten_completed
+                else self._emergency_error_code(
+                    flatten_result,
+                    "FLATTEN_FAILED",
+                )
+            )
+
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=True,
+                execution_path="live",
+                symbol=symbol,
+                cancel=cancel_result,
+                flatten=flatten_result,
+                position_remaining=position_remaining,
+                retryable=True,
+                error_code=error_code,
+            )
+
+        error_code = (
+            "CANCEL_AND_FLATTEN_FAILED"
+            if not cancel_completed
+            else self._emergency_error_code(
+                flatten_result,
+                "FLATTEN_FAILED",
+            )
+        )
+
+        return self._emergency_response(
+            success=False,
+            completed=False,
+            partial=True,
+            state_unknown=False,
+            execution_path="live",
+            symbol=symbol,
+            cancel=cancel_result,
+            flatten=flatten_result,
+            position_remaining=position_remaining,
+            retryable=True,
+            error_code=error_code,
+        )
+
+    def run_emergency_orchestrator(self):
+
+        acquired = self.emergency_orchestrator_lock.acquire(
+            blocking=False
+        )
+
+        if not acquired:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=False,
+                state_unknown=False,
+                execution_path=None,
+                symbol=None,
+                cancel=None,
+                flatten=None,
+                position_remaining=None,
+                retryable=True,
+                error_code="EMERGENCY_ALREADY_RUNNING",
+            )
+
+        try:
+            engine = self.engine
+            engine_mode = (
+                str(getattr(engine, "mode", "") or "")
+                .strip()
+                .lower()
+                if engine is not None
+                else None
+            )
+            exchange = (
+                getattr(engine, "exchange", None)
+                if engine is not None
+                else None
+            )
+            symbol = self._emergency_symbol(engine)
+            live_readiness = {}
+
+            if (
+                engine is not None
+                and hasattr(engine, "build_live_readiness")
+            ):
+                try:
+                    readiness = engine.build_live_readiness()
+                    if isinstance(readiness, dict):
+                        live_readiness = readiness
+                except Exception:
+                    live_readiness = {}
+
+            live_allowed_before_lock = (
+                live_readiness.get("realOrderAllowed") is True
+            )
+
+            governance_state["emergency_stop"] = True
+            governance_state["execution_enabled"] = False
+
+            if governance_state.get("execution_enabled") is not False:
+                return self._emergency_response(
+                    success=False,
+                    completed=False,
+                    partial=False,
+                    state_unknown=True,
+                    execution_path=None,
+                    symbol=symbol,
+                    retryable=True,
+                    error_code="AUTO_TRADE_DISABLE_FAILED",
+                )
+
+            if engine is None:
+                return self._emergency_response(
+                    success=False,
+                    completed=False,
+                    partial=False,
+                    state_unknown=True,
+                    execution_path=None,
+                    symbol=None,
+                    retryable=True,
+                    error_code="ENGINE_UNAVAILABLE",
+                )
+
+            if engine_mode == "paper":
+                try:
+                    flatten_result = engine.flatten_paper_position(
+                        reason="EMERGENCY_FLATTEN"
+                    )
+                except Exception as e:
+                    flatten_result = {
+                        "success": False,
+                        "error": str(e),
+                    }
+
+                flatten_completed = (
+                    isinstance(flatten_result, dict)
+                    and flatten_result.get("success") is True
+                )
+                position_remaining = self._emergency_position_remaining(
+                    flatten_result
+                )
+
+                if flatten_completed:
+                    return self._emergency_response(
+                        success=True,
+                        completed=True,
+                        partial=False,
+                        state_unknown=False,
+                        execution_path="paper",
+                        symbol=symbol,
+                        flatten=flatten_result,
+                        position_remaining=False,
+                        retryable=False,
+                    )
+
+                return self._emergency_response(
+                    success=False,
+                    completed=False,
+                    partial=True,
+                    state_unknown=position_remaining is None,
+                    execution_path="paper",
+                    symbol=symbol,
+                    flatten=flatten_result,
+                    position_remaining=position_remaining,
+                    retryable=True,
+                    error_code=self._emergency_error_code(
+                        flatten_result,
+                        "PAPER_FLATTEN_FAILED",
+                    ),
+                )
+
+            if live_allowed_before_lock and exchange is not None:
+                try:
+                    cancel_result = exchange.cancel_all_orders(
+                        symbol
+                    )
+                except Exception as e:
+                    cancel_result = {
+                        "success": False,
+                        "error": str(e),
+                    }
+
+                try:
+                    flatten_result = exchange.flatten_current_position(
+                        symbol
+                    )
+                except Exception as e:
+                    flatten_result = {
+                        "success": False,
+                        "error_code": "FLATTEN_EXCEPTION",
+                        "error": str(e),
+                    }
+
+                return self._classify_live_emergency_result(
+                    symbol,
+                    cancel_result,
+                    flatten_result,
+                )
+
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=False,
+                state_unknown=True,
+                execution_path=None,
+                symbol=symbol,
+                retryable=True,
+                error_code="EXECUTION_PATH_UNAVAILABLE",
+            )
+
+        except Exception:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=False,
+                state_unknown=True,
+                execution_path=None,
+                retryable=True,
+                error_code="ORCHESTRATOR_EXCEPTION",
+            )
+        finally:
+            self.emergency_orchestrator_lock.release()
+
     def stop(self):
 
         self._set_lifecycle_state(
@@ -2377,6 +2823,8 @@ class BotManager:
         )
 
         self._running = False
+
+        governance_state["execution_enabled"] = False
 
         # Invalidate callbacks from the old exchange WebSocket immediately.
         self.active_runtime_id = None
@@ -2569,6 +3017,27 @@ class BotManager:
         websocket_connected = bool(
             self.ws is not None
             and getattr(self.ws, "connected", False)
+        )
+        loop_enabled = bool(
+            self._running
+            and self.lifecycle_state == "RUNNING"
+        )
+        auto_trade_enabled = bool(
+            governance_state.get(
+                "execution_enabled",
+                False,
+            )
+        )
+        emergency_locked = bool(
+            governance_state.get(
+                "emergency_stop",
+                False,
+            )
+        )
+        emergency_state = (
+            "LOCKED"
+            if emergency_locked
+            else "UNLOCKED"
         )
 
         runtime_health = build_runtime_health_snapshot(
@@ -2823,10 +3292,20 @@ class BotManager:
                 False,
             ),
 
+            "loopEnabled": loop_enabled,
+
+            "loopState": self.lifecycle_state,
+
+            "autoTradeEnabled": auto_trade_enabled,
+
             "emergencyStop": live_readiness.get(
                 "emergencyStop",
                 False,
             ),
+
+            "emergencyLocked": emergency_locked,
+
+            "emergencyState": emergency_state,
 
             "real_qty": risk_state.get(
                 "realQty"
