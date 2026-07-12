@@ -252,6 +252,27 @@ useEffect(() => {
 
                         botRunning={runtimeHealth.running}
 
+                        loopEnabled={
+                            typeof botStatus?.loopEnabled === "boolean"
+                                ? botStatus.loopEnabled
+                                : runtimeHealth.running
+                        }
+
+                        loopState={
+                            botStatus?.loopState
+                            || runtimeHealth.lifecycle?.state
+                        }
+
+                        emergencyLocked={
+                            typeof botStatus?.emergencyLocked === "boolean"
+                                ? botStatus.emergencyLocked
+                                : undefined
+                        }
+
+                        emergencyState={
+                            botStatus?.emergencyState
+                        }
+
                         setExecutionEnabledState={
                             setExecutionEnabled
                         }

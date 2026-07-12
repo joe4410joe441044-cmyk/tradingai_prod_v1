@@ -52,14 +52,23 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expectMonitorValue(page, "trading-action", "NONE_BY_BOT_STOP");
         await expectMonitorValue(page, "action-reason", "BOT_STOPPED");
 
+        const loopToggle = page.getByRole(
+            "switch",
+            {
+                name: "Toggle trading loop",
+            },
+        );
+        await expect(loopToggle).toHaveAttribute("aria-checked", "false");
+
         const startResponsePromise = page.waitForResponse((response) => (
             response.url().endsWith("/api/bot/start")
             && response.request().method() === "POST"
         ));
-        await page.getByTestId("bot-start-button").click();
+        await loopToggle.click();
         expect((await startResponsePromise).ok()).toBeTruthy();
 
         await expectMonitorValue(page, "bot-state", "RUNNING");
+        await expect(loopToggle).toHaveAttribute("aria-checked", "true");
         await expectMonitorValue(page, "exchange-ws", "LIVE");
         await expectMonitorValue(page, "trading-runtime", "ACTIVE");
         await expectMonitorValue(page, "pipeline-status", "OK");
@@ -68,10 +77,11 @@ test.describe("Runtime Health Monitor lifecycle", () => {
             response.url().endsWith("/api/bot/stop")
             && response.request().method() === "POST"
         ));
-        await page.getByTestId("bot-stop-button").click();
+        await loopToggle.click();
         expect((await stopResponsePromise).ok()).toBeTruthy();
 
         await expectMonitorValue(page, "bot-state", "STOPPED");
+        await expect(loopToggle).toHaveAttribute("aria-checked", "false");
         await expectMonitorValue(page, "exchange-ws", "DISCONNECTED_BY_BOT_STOP");
         await expectMonitorValue(page, "trading-runtime", "STOPPED");
         await expectMonitorValue(page, "current-decision", "N/A");
