@@ -604,9 +604,13 @@ export default function BotControl({
                SECTION TITLE
             ======================================================= */}
 
-            <div className="section-number-title">
+            <div className="left-card-header operation-card-header">
 
-                OPERATION（操作）
+                <div className="left-card-title section-number-title">
+
+                    OPERATION（操作）
+
+                </div>
 
             </div>
 

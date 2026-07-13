@@ -283,13 +283,13 @@ useEffect(() => {
 
                 <div className="panel-card trade-risk-card">
 
-                    <div className="trade-risk-card-header">
+                    <div className="left-card-header trade-risk-card-header">
 
-                        <div className="trade-risk-title">
+                        <div className="left-card-title trade-risk-title">
                             TRADE &amp; RISK SETTINGS
                         </div>
 
-                        <div className="trade-risk-subtitle">
+                        <div className="left-card-subtitle trade-risk-subtitle">
                             APPLIES ON NEXT LOOP START
                         </div>
 

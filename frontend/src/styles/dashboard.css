@@ -1895,25 +1895,50 @@ replace the legacy scaled three-column layout.
     gap: 10px;
 }
 
-.left-column .trade-risk-card-header {
+.left-column .left-card-header {
+    position: relative;
+    min-height: 34px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 8px 8px 2px;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 8px 7px;
+    border-bottom: 1px solid rgba(36, 49, 73, 0.75);
 }
 
-.left-column .trade-risk-title {
+.left-column .operation-card-header {
+    margin-right: -8px;
+    margin-left: -8px;
+}
+
+.left-column .left-card-header::before {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 0;
+    width: 2px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.7);
+    content: "";
+}
+
+.left-column .left-card-title {
+    margin: 0;
+    padding: 0;
     color: #e7edf7;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 800;
+    letter-spacing: 0.1px;
     line-height: 1.25;
 }
 
-.left-column .trade-risk-subtitle {
+.left-column .left-card-subtitle {
     color: #9badc6;
     font-size: 8px;
     font-weight: 700;
-    letter-spacing: 0.15px;
+    letter-spacing: 0.1px;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .left-column .trade-risk-sections {
@@ -1954,6 +1979,10 @@ replace the legacy scaled three-column layout.
 
 .left-column .section-number-title {
     padding-bottom: 2px;
+}
+
+.left-column .left-card-title.section-number-title {
+    padding-bottom: 0;
 }
 
 .left-column .panel-title {
@@ -2547,14 +2576,21 @@ replace the legacy scaled three-column layout.
 }
 
 .account-runtime-overview {
-    --paper-color: #2f9dff;
-    --paper-soft: rgba(47, 157, 255, 0.12);
-    --real-color: #ff565f;
-    --real-soft: rgba(255, 86, 95, 0.1);
-    --execution-color: #20cf72;
-    --execution-soft: rgba(32, 207, 114, 0.1);
-    --connection-color: #b65cff;
-    --connection-soft: rgba(182, 92, 255, 0.1);
+    --semantic-card-bg: #0d1320;
+    --semantic-card-border: #243149;
+    --semantic-card-separator: rgba(36, 49, 73, 0.75);
+    --semantic-grid-line: rgba(36, 49, 73, 0.42);
+    --paper-color: #57b8ff;
+    --paper-soft: rgba(87, 184, 255, 0.11);
+    --real-color: #c58d82;
+    --real-soft: rgba(197, 141, 130, 0.1);
+    --execution-color: #65c987;
+    --execution-soft: rgba(101, 201, 135, 0.1);
+    --connection-color: #b98cff;
+    --connection-soft: rgba(185, 140, 255, 0.1);
+    --semantic-success: #65c987;
+    --semantic-warning: #e8b45f;
+    --semantic-danger: #ff737a;
     display: flex;
     flex-direction: column;
     gap: 7px;
@@ -2573,88 +2609,131 @@ replace the legacy scaled three-column layout.
     grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
 }
 
-.semantic-card {
+.account-runtime-overview .semantic-card {
+    position: relative;
     min-width: 0;
     overflow: hidden;
-    border: 1px solid currentColor;
-    border-radius: 6px;
-    background: #09111a;
+    border: 1px solid var(--semantic-card-border);
+    border-radius: 8px;
+    background: var(--semantic-card-bg);
+    box-shadow: none;
+    color: #e7edf7;
 }
 
-.semantic-card-paper {
-    color: var(--paper-color);
-    background: linear-gradient(135deg, var(--paper-soft), transparent 62%), #09111a;
+.account-runtime-overview .semantic-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: var(--semantic-accent);
 }
 
-.semantic-card-real {
-    color: var(--real-color);
-    background: linear-gradient(135deg, var(--real-soft), transparent 62%), #120c11;
+.account-runtime-overview .semantic-card-paper {
+    --semantic-accent: var(--paper-color);
+    --semantic-accent-soft: var(--paper-soft);
 }
 
-.semantic-card-execution {
-    color: var(--execution-color);
-    background: linear-gradient(135deg, var(--execution-soft), transparent 62%), #08120e;
+.account-runtime-overview .semantic-card-real {
+    --semantic-accent: var(--real-color);
+    --semantic-accent-soft: var(--real-soft);
 }
 
-.semantic-card-connection {
-    color: var(--connection-color);
-    background: linear-gradient(135deg, var(--connection-soft), transparent 62%), #100b16;
+.account-runtime-overview .semantic-card-execution {
+    --semantic-accent: var(--execution-color);
+    --semantic-accent-soft: var(--execution-soft);
 }
 
-.semantic-card-header {
-    min-height: 45px;
+.account-runtime-overview .semantic-card-connection {
+    --semantic-accent: var(--connection-color);
+    --semantic-accent-soft: var(--connection-soft);
+}
+
+.account-runtime-overview .semantic-card-header {
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 7px 10px;
-    border-bottom: 1px solid color-mix(in srgb, currentColor 34%, transparent);
+    padding: 8px 10px 7px;
+    border-bottom: 1px solid var(--semantic-card-separator);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
 }
 
-.semantic-card-header.compact {
-    min-height: 42px;
+.account-runtime-overview .semantic-card-header.compact {
+    min-height: 44px;
 }
 
-.semantic-card-kicker {
+.account-runtime-overview .semantic-card-header > div {
+    min-width: 0;
+}
+
+.account-runtime-overview .semantic-card-kicker {
     display: block;
     margin-bottom: 2px;
-    color: #687689;
+    color: #93a2b8;
     font-size: 7px;
     font-weight: 700;
     letter-spacing: 1px;
     text-transform: uppercase;
 }
 
-.semantic-card h2 {
+.account-runtime-overview .semantic-card h2 {
+    overflow: hidden;
     margin: 0;
-    color: currentColor;
-    font-size: 12px;
+    color: #e7edf7;
+    font-size: 11px;
     line-height: 1.15;
     letter-spacing: 0.4px;
+    text-overflow: ellipsis;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
-.semantic-badge {
+.account-runtime-overview .semantic-badge {
     flex: 0 0 auto;
-    padding: 4px 6px;
-    border: 1px solid currentColor;
-    border-radius: 4px;
-    background: color-mix(in srgb, currentColor 18%, transparent);
-    color: currentColor;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid color-mix(in srgb, var(--semantic-accent) 45%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--semantic-accent) 12%, transparent);
+    color: var(--semantic-accent);
     font-size: 7px;
     font-weight: 700;
     letter-spacing: 0.5px;
+    line-height: 1;
+    white-space: nowrap;
 }
 
-.semantic-metric-grid {
+.account-runtime-overview .semantic-card-real .semantic-badge-connected {
+    border-color: rgba(101, 201, 135, 0.45);
+    background: rgba(101, 201, 135, 0.08);
+    color: var(--semantic-success);
+}
+
+.account-runtime-overview .semantic-card-real .semantic-badge-refreshing,
+.account-runtime-overview .semantic-card-real .semantic-badge-stale {
+    border-color: rgba(232, 180, 95, 0.42);
+    background: rgba(232, 180, 95, 0.08);
+    color: var(--semantic-warning);
+}
+
+.account-runtime-overview .semantic-card-real .semantic-badge-not-connected {
+    border-color: rgba(142, 160, 184, 0.38);
+    background: rgba(142, 160, 184, 0.08);
+    color: #9badc6;
+}
+
+.account-runtime-overview .semantic-metric-grid {
     display: grid;
 }
 
-.semantic-metric-grid.three-columns {
+.account-runtime-overview .semantic-metric-grid.three-columns {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.semantic-metric {
+.account-runtime-overview .semantic-metric {
     min-width: 0;
     min-height: 51px;
     display: flex;
@@ -2662,22 +2741,22 @@ replace the legacy scaled three-column layout.
     justify-content: center;
     gap: 5px;
     padding: 6px 8px;
-    border-right: 1px solid rgba(105, 125, 151, 0.18);
-    border-bottom: 1px solid rgba(105, 125, 151, 0.18);
-    background: rgba(5, 11, 17, 0.38);
+    border-right: 1px solid var(--semantic-grid-line);
+    border-bottom: 1px solid var(--semantic-grid-line);
+    background: rgba(7, 11, 20, 0.22);
 }
 
-.semantic-metric:nth-child(3n) {
+.account-runtime-overview .semantic-metric:nth-child(3n) {
     border-right: 0;
 }
 
-.semantic-metric:nth-last-child(-n + 3) {
+.account-runtime-overview .semantic-metric:nth-last-child(-n + 3) {
     border-bottom: 0;
 }
 
-.semantic-metric-label {
+.account-runtime-overview .semantic-metric-label {
     overflow: hidden;
-    color: #8390a2;
+    color: #8ea0b8;
     font-size: 7px;
     font-weight: 700;
     letter-spacing: 0.5px;
@@ -2686,50 +2765,55 @@ replace the legacy scaled three-column layout.
     white-space: nowrap;
 }
 
-.semantic-metric-value {
-    overflow: hidden;
+.account-runtime-overview .semantic-metric-value {
+    overflow: visible;
     color: #e8eef7;
-    font-size: 10px;
+    font-size: 8.5px;
     font-weight: 700;
-    letter-spacing: 0.35px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    letter-spacing: 0.15px;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
 }
 
-.tone-paper {
+.account-runtime-overview .tone-paper {
     color: #75bdff;
 }
 
-.tone-real,
-.tone-danger {
-    color: #ff737a;
+.account-runtime-overview .tone-real {
+    color: #c7d2e4;
 }
 
-.tone-execution {
-    color: #36e783;
+.account-runtime-overview .tone-danger {
+    color: var(--semantic-danger);
 }
 
-.tone-connection {
-    color: #ce91ff;
+.account-runtime-overview .tone-execution {
+    color: #7fe09b;
 }
 
-.tone-warning {
-    color: #ffc640;
+.account-runtime-overview .tone-connection {
+    color: #d0afff;
 }
 
-.tone-safe {
-    color: #35db7e;
+.account-runtime-overview .tone-warning {
+    color: var(--semantic-warning);
 }
 
-.semantic-card-note {
+.account-runtime-overview .tone-safe {
+    color: var(--semantic-success);
+}
+
+.account-runtime-overview .semantic-card-note {
     min-height: 25px;
     display: flex;
     align-items: center;
     margin: 0;
     padding: 5px 9px;
-    border-top: 1px solid color-mix(in srgb, currentColor 28%, transparent);
-    background: color-mix(in srgb, currentColor 7%, transparent);
-    color: currentColor;
+    border-top: 1px solid var(--semantic-grid-line);
+    background: rgba(7, 11, 20, 0.22);
+    color: #9badc6;
     font-size: 7px;
     line-height: 1.25;
 }
@@ -2784,16 +2868,60 @@ replace the legacy scaled three-column layout.
     font-size: 9px;
 }
 
-.runtime-health-grid {
+.runtime-health-panel {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0d1320;
+    box-shadow: none;
+}
+
+.runtime-health-panel::before {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 2px;
+    height: 16px;
+    border-radius: 999px;
+    background: #57b8ff;
+    content: "";
+}
+
+.runtime-health-panel .terminal-section-header {
+    height: 34px;
+    padding: 0 12px 0 18px;
+    border-bottom: 1px solid rgba(36, 49, 73, 0.75);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
+}
+
+.runtime-health-panel .runtime-health-grid {
+    gap: 4px;
+    padding: 2px 1px;
     grid-template-columns: minmax(0, 1.35fr) minmax(230px, 1fr);
+    background: #0d1320;
+    box-sizing: border-box;
 }
 
-.runtime-health-group {
-    padding: 8px 10px;
+.runtime-health-panel .runtime-health-group {
+    overflow: hidden;
+    padding: 4px;
+    border: 1px solid rgba(36, 49, 73, 0.48);
+    border-radius: 6px;
+    background: rgba(7, 11, 20, 0.22);
+    box-sizing: border-box;
 }
 
-.runtime-health-group-title {
-    min-height: 25px;
+.runtime-health-panel .runtime-health-group:last-child {
+    border-right: 1px solid rgba(36, 49, 73, 0.48);
+}
+
+.runtime-health-panel .runtime-health-group-title {
+    min-height: 24px;
+    align-items: center;
+    margin-bottom: 3px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(36, 49, 73, 0.42);
     font-size: 9px;
 }
 
@@ -2842,6 +2970,38 @@ replace the legacy scaled three-column layout.
     min-height: 27px;
 }
 
+.execution-runtime-panel {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0d1320;
+    box-shadow: none;
+}
+
+.execution-runtime-panel::before {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 2px;
+    height: 16px;
+    border-radius: 999px;
+    background: #57b8ff;
+    content: "";
+}
+
+.execution-runtime-panel .terminal-section-header {
+    height: 34px;
+    padding: 0 12px 0 18px;
+    border-bottom: 1px solid rgba(36, 49, 73, 0.75);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
+}
+
+.execution-runtime-panel .execution-runtime-grid {
+    background: #0d1320;
+    box-sizing: border-box;
+}
+
 .execution-timeline .log-stream {
     min-height: 55px;
     padding: 8px 10px;
@@ -2851,6 +3011,13 @@ replace the legacy scaled three-column layout.
     min-height: 42px;
     gap: 5px;
     padding: 6px 10px;
+    border-right: 1px solid rgba(36, 49, 73, 0.42);
+    border-bottom: 0;
+    background: rgba(7, 11, 20, 0.18);
+}
+
+.execution-runtime-panel .runtime-metric:nth-child(4n) {
+    border-right: 0;
 }
 
 .log-stream-line.timeline-row {

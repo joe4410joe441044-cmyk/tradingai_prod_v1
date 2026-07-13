@@ -405,7 +405,17 @@ export default function AccountRuntimeOverview({
                             <span className="semantic-card-kicker">Authenticated account only</span>
                             <h2>Real / Live Account</h2>
                         </div>
-                        <span className="semantic-badge">
+                        <span
+                            className={`semantic-badge semantic-badge-${
+                                realLoading
+                                    ? "refreshing"
+                                    : realStale
+                                        ? "stale"
+                                        : realConnected
+                                            ? "connected"
+                                            : "not-connected"
+                            }`}
+                        >
                             {realLoading
                                 ? "REFRESHING"
                                 : realStale
