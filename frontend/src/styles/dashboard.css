@@ -2,6 +2,7 @@
 ROOT
 ========================================================= */
 
+:root,
 .dashboard {
 
     width: 100%;
@@ -1779,7 +1780,7 @@ replace the legacy scaled three-column layout.
 .dashboard {
     height: calc(100vh - 43px);
     min-height: 0;
-    padding: 8px;
+    padding: 12px;
     overflow: hidden;
     background: #070b14;
 }
@@ -1791,7 +1792,7 @@ replace the legacy scaled three-column layout.
         minmax(640px, 1fr)
         minmax(300px, 350px);
     grid-template-areas: "left center right";
-    gap: 8px;
+    gap: 12px;
     align-items: stretch;
     height: 100%;
 }
@@ -1820,7 +1821,7 @@ replace the legacy scaled three-column layout.
 
 .left-column,
 .right-governance-column {
-    gap: 8px;
+    gap: 12px;
     padding-right: 2px;
     overflow-x: hidden;
     overflow-y: auto;
@@ -1870,6 +1871,9 @@ replace the legacy scaled three-column layout.
 
 .center-terminal-panel {
     height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     padding: 6px;
     overflow-x: hidden;
     overflow-y: auto;
@@ -2593,8 +2597,8 @@ replace the legacy scaled three-column layout.
     --semantic-danger: #ff737a;
     display: flex;
     flex-direction: column;
-    gap: 7px;
-    padding-bottom: 6px;
+    gap: 8px;
+    padding-bottom: 0;
     font-family: "Consolas", monospace;
 }
 
@@ -2602,7 +2606,7 @@ replace the legacy scaled three-column layout.
 .operational-separation-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
+    gap: 8px;
 }
 
 .operational-separation-grid {
@@ -2896,8 +2900,8 @@ replace the legacy scaled three-column layout.
 }
 
 .runtime-health-panel .runtime-health-grid {
-    gap: 4px;
-    padding: 2px 1px;
+    gap: 8px;
+    padding: 10px 12px;
     grid-template-columns: minmax(0, 1.35fr) minmax(230px, 1fr);
     background: #0d1320;
     box-sizing: border-box;
@@ -2905,7 +2909,7 @@ replace the legacy scaled three-column layout.
 
 .runtime-health-panel .runtime-health-group {
     overflow: hidden;
-    padding: 4px;
+    padding: 8px;
     border: 1px solid rgba(36, 49, 73, 0.48);
     border-radius: 6px;
     background: rgba(7, 11, 20, 0.22);
@@ -2998,13 +3002,15 @@ replace the legacy scaled three-column layout.
 }
 
 .execution-runtime-panel .execution-runtime-grid {
+    padding: 10px 12px;
     background: #0d1320;
     box-sizing: border-box;
 }
 
 .execution-timeline .log-stream {
     min-height: 55px;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 10px 12px;
 }
 
 .execution-runtime-panel .runtime-metric {
@@ -3027,9 +3033,9 @@ replace the legacy scaled three-column layout.
 
 .execution-monitoring-card,
 .stage-inspector-card {
-    gap: 8px;
-    padding: 10px;
-    border-radius: 6px;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
 }
 
 .execution-state-grid .monitoring-row {
@@ -3048,9 +3054,59 @@ replace the legacy scaled three-column layout.
     text-overflow: ellipsis;
 }
 
-.governance-card-title {
-    padding-bottom: 6px;
-    font-size: 9px;
+.right-governance-column .execution-monitoring-card,
+.right-governance-column .human-governance-card,
+.right-governance-column .stage-inspector-card {
+    position: relative;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0d1320;
+    box-shadow: none;
+}
+
+.right-governance-column .governance-card-title {
+    position: relative;
+    flex: 0 0 34px;
+    height: 34px;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    margin: -12px -12px 0;
+    padding: 0 12px 0 18px;
+    overflow: hidden;
+    border-bottom: 1px solid rgba(36, 49, 73, 0.75);
+    background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.018),
+        rgba(255, 255, 255, 0)
+    );
+    color: #e7edf7;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.right-governance-column .monitoring-grid {
+    gap: 6px;
+}
+
+.right-governance-column .governance-card-title::before {
+    position: absolute;
+    top: 9px;
+    left: 10px;
+    width: 2px;
+    height: 16px;
+    border-radius: 999px;
+    background: #57b8ff;
+    content: "";
 }
 
 .stage-inspector-card {
@@ -3089,6 +3145,316 @@ replace the legacy scaled three-column layout.
 
 .stage-inspector-field code {
     font-size: 7px;
+}
+
+/* =========================================================
+PHASE5 C4 - STATUS COLOR / TYPOGRAPHY SYSTEM
+========================================================= */
+
+:root,
+.dashboard {
+    --status-color-green: #65c987;
+    --status-color-yellow: #e8b45f;
+    --status-color-gray: #a8b5c9;
+    --status-color-red: #ff737a;
+    --status-color-paper: #57b8ff;
+    --status-color-live: #ff737a;
+    --status-color-info: #66e3ff;
+    --status-label-color: #9badc6;
+    --status-value-color: #e7edf7;
+    --status-font-ui:
+        "Inter",
+        "Noto Sans CJK JP",
+        "Noto Sans JP",
+        "Yu Gothic",
+        "Meiryo",
+        "Segoe UI",
+        system-ui,
+        sans-serif;
+    --status-font-mono:
+        "JetBrains Mono",
+        "Cascadia Code",
+        Consolas,
+        monospace;
+}
+
+.terminal-green,
+.status-safe,
+.status-value.online,
+.account-runtime-overview .tone-safe {
+    color: var(--status-color-green);
+}
+
+.terminal-yellow,
+.status-warning,
+.status-value.warning,
+.account-runtime-overview .tone-warning {
+    color: var(--status-color-yellow);
+}
+
+.terminal-red,
+.status-danger,
+.status-value.danger,
+.account-runtime-overview .tone-danger {
+    color: var(--status-color-red);
+}
+
+.status-strip .status-label,
+.left-column .operation-state-label,
+.execution-runtime-panel .runtime-metric-label,
+.account-runtime-overview .semantic-metric-label,
+.right-governance-column .monitoring-row span:first-child,
+.right-governance-column .stage-inspector-summary span,
+.right-governance-column .stage-inspector-field > span {
+    color: var(--status-label-color);
+    font-family: var(--status-font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.status-strip .status-value,
+.left-column .operation-state-value,
+.execution-status-box,
+.runtime-status,
+.execution-runtime-panel .runtime-metric-value,
+.account-runtime-overview .semantic-metric-value,
+.right-governance-column .monitoring-row span:last-child,
+.right-governance-column .stage-inspector-summary strong {
+    font-family: var(--status-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.execution-runtime-panel .runtime-metric-value {
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.runtime-health-panel .runtime-status,
+.right-governance-column .runtime-status {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+    text-align: right;
+    white-space: normal;
+}
+
+.account-runtime-overview .semantic-metric-label,
+.right-governance-column .monitoring-row span:first-child {
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.right-governance-column .monitoring-row span:last-child {
+    overflow-wrap: anywhere;
+    text-align: right;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.status-strip .status-item:nth-child(1) .status-value.warning,
+.status-strip .status-item:nth-child(3) .status-value.warning,
+.left-column .operation-state-value--stopped,
+.left-column .operation-state-value--disabled,
+.runtime-status-idle,
+.runtime-status-stopped {
+    color: var(--status-color-gray);
+}
+
+.left-column .operation-state-value--running,
+.left-column .operation-state-value--enabled,
+.runtime-status-active,
+.runtime-status-running,
+.runtime-status-ok,
+.execution-runtime-panel .runtime-metric-value.terminal-green {
+    color: var(--status-color-green);
+}
+
+.left-column .operation-state-value--pending,
+.left-column .operation-state-reason--pending,
+.left-column .operation-state-reason--warning,
+.runtime-status-wait,
+.runtime-status-blocked,
+.runtime-status-suspended_by_bot_stop {
+    color: var(--status-color-yellow);
+}
+
+.runtime-status-error,
+.execution-runtime-panel .runtime-metric-value.terminal-red {
+    color: var(--status-color-red);
+}
+
+.account-runtime-overview .tone-paper {
+    color: var(--status-color-paper);
+}
+
+.account-runtime-overview .tone-real {
+    color: var(--status-color-gray);
+}
+
+.account-runtime-overview .tone-execution {
+    color: var(--status-color-green);
+}
+
+.account-runtime-overview .tone-connection {
+    color: var(--status-color-info);
+}
+
+.account-runtime-overview .semantic-badge {
+    color: var(--semantic-accent);
+    font-family: var(--status-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.account-runtime-overview .semantic-card-real .semantic-badge-connected {
+    border-color: rgba(101, 201, 135, 0.45);
+    background: rgba(101, 201, 135, 0.08);
+    color: var(--status-color-green);
+}
+
+.account-runtime-overview .semantic-card-real .semantic-badge-refreshing,
+.account-runtime-overview .semantic-card-real .semantic-badge-stale {
+    border-color: rgba(232, 180, 95, 0.42);
+    background: rgba(232, 180, 95, 0.08);
+    color: var(--status-color-yellow);
+}
+
+.account-runtime-overview .semantic-card-real .semantic-badge-not-connected {
+    border-color: rgba(168, 181, 201, 0.38);
+    background: rgba(168, 181, 201, 0.08);
+    color: var(--status-color-gray);
+}
+
+.right-governance-column .status-safe,
+.right-governance-column .monitoring-row .status-safe {
+    color: var(--status-color-green);
+}
+
+.right-governance-column .status-warning,
+.right-governance-column .monitoring-row .status-warning {
+    color: var(--status-color-yellow);
+}
+
+.right-governance-column .status-danger,
+.right-governance-column .monitoring-row .status-danger {
+    color: var(--status-color-red);
+}
+
+.right-governance-column .runtime-status-idle,
+.right-governance-column .runtime-status-stopped {
+    color: var(--status-color-gray);
+}
+
+.execution-timeline .timeline-row > div:nth-child(3) {
+    color: var(--status-color-yellow);
+    font-family: var(--status-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.execution-timeline .timeline-row:first-child > div {
+    color: var(--status-label-color);
+    font-family: var(--status-font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+}
+
+/* =========================================================
+PHASE5 C5 - DASHBOARD VISUAL POLISH
+========================================================= */
+
+:root,
+.dashboard {
+    --visual-polish-transition: 140ms ease;
+    --visual-polish-hover-bg: rgba(255, 255, 255, 0.025);
+    --visual-polish-hover-border: rgba(87, 184, 255, 0.38);
+    --visual-polish-focus: rgba(102, 227, 255, 0.58);
+}
+
+.operation-toggle__control,
+.left-column .config-select,
+.left-column .quick-action-button,
+.left-column .operation-emergency-button,
+.left-column .operation-emergency-confirm__cancel,
+.left-column .operation-emergency-confirm__confirm,
+.governance-button,
+.pipeline-stage-button {
+    transition:
+        background-color var(--visual-polish-transition),
+        border-color var(--visual-polish-transition),
+        color var(--visual-polish-transition),
+        opacity var(--visual-polish-transition),
+        transform var(--visual-polish-transition);
+}
+
+.left-column select.config-select {
+    cursor: pointer;
+}
+
+.left-column input[type="number"].config-select {
+    cursor: text;
+}
+
+.operation-toggle__control:hover:not(:disabled),
+.left-column .config-select:hover:not(:disabled),
+.left-column .operation-emergency-confirm__cancel:hover:not(:disabled),
+.governance-button:hover:not(:disabled),
+.pipeline-stage-button:hover {
+    border-color: var(--visual-polish-hover-border);
+    background-color: var(--visual-polish-hover-bg);
+}
+
+.pipeline-stage-button.selected:hover {
+    background-color: #18212c;
+}
+
+.operation-toggle__control:focus-visible,
+.left-column .config-select:focus-visible,
+.left-column .quick-action-button:focus-visible,
+.left-column .operation-emergency-button:focus-visible,
+.left-column .operation-emergency-confirm__cancel:focus-visible,
+.left-column .operation-emergency-confirm__confirm:focus-visible,
+.governance-button:focus-visible,
+.pipeline-stage-button:focus-visible {
+    outline: 1px solid var(--visual-polish-focus);
+    outline-offset: 2px;
+}
+
+.operation-toggle__control:active:not(:disabled),
+.left-column .config-select:active:not(:disabled),
+.left-column .quick-action-button:active:not(:disabled),
+.left-column .operation-emergency-button:active:not(:disabled),
+.left-column .operation-emergency-confirm__cancel:active:not(:disabled),
+.left-column .operation-emergency-confirm__confirm:active:not(:disabled),
+.governance-button:active:not(:disabled),
+.pipeline-stage-button:active {
+    transform: translateY(1px);
+}
+
+.operation-toggle--disabled .operation-toggle__control,
+.operation-toggle--loading .operation-toggle__control,
+.left-column .config-select:disabled,
+.left-column .quick-action-button:disabled,
+.left-column .operation-emergency-button:disabled,
+.left-column .operation-emergency-confirm__cancel:disabled,
+.left-column .operation-emergency-confirm__confirm:disabled,
+.governance-button:disabled {
+    cursor: not-allowed;
 }
 
 @media (max-width: 1279px) {

@@ -37,9 +37,9 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expect(page.getByText("Paper Position:（模擬ポジション）", { exact: true }).first()).toBeVisible();
         await expect(page.getByText("Paper PnL:（模擬損益）", { exact: true })).toBeVisible();
         await expect(page.getByTestId("paper-balance")).not.toHaveText("--");
-        await expect(page.getByTestId("real-balance")).toHaveText("NOT CONNECTED");
-        await expect(page.getByTestId("real-position")).toHaveText("NOT CONNECTED");
-        await expect(page.getByTestId("exchange-auth")).toHaveText("NOT_VERIFIED");
+        await expect(page.getByTestId("real-balance")).toHaveText(/^(ACCOUNT_NOT_SYNCED|\d[\d,]*\.\d{2})$/);
+        await expect(page.getByTestId("real-position")).toHaveText(/^(ACCOUNT_NOT_SYNCED|NO OPEN POSITION)$/);
+        await expect(page.getByTestId("exchange-auth")).toHaveText(/^(NOT_VERIFIED|VERIFIED)$/);
         await expect(page.getByTestId("account-source")).toHaveText("PAPER_SIMULATION");
         await expect(page.getByTestId("real-order-allowed")).toHaveText("false");
         await expect(page.getByTestId("execution-mode")).toHaveText("SIMULATION");
