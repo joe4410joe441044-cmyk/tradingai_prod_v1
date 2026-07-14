@@ -8,7 +8,12 @@ from backend.aggregation.MicrostructureStateBuilder import (
 )
 
 from backend.runtime import runtime_registry
-from backend.runtime.governance_runtime import governance_state
+from backend.runtime.governance_runtime import (
+    begin_emergency_operation,
+    build_emergency_status,
+    complete_emergency_operation,
+    governance_state,
+)
 from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
 )
@@ -2402,6 +2407,7 @@ class BotManager:
                 )
             ),
             "execution_path": execution_path,
+            "path": execution_path,
             "symbol": symbol,
             "cancel": cancel,
             "flatten": flatten,
@@ -2653,6 +2659,18 @@ class BotManager:
                 error_code="EMERGENCY_ALREADY_RUNNING",
             )
 
+        operation = None
+
+        def finalize(response):
+            if operation is not None:
+                complete_emergency_operation(
+                    response,
+                    operation,
+                )
+                self.stop()
+
+            return response
+
         try:
             engine = self.engine
             engine_mode = (
@@ -2687,9 +2705,10 @@ class BotManager:
 
             governance_state["emergency_stop"] = True
             governance_state["execution_enabled"] = False
+            operation = begin_emergency_operation()
 
             if governance_state.get("execution_enabled") is not False:
-                return self._emergency_response(
+                return finalize(self._emergency_response(
                     success=False,
                     completed=False,
                     partial=False,
@@ -2698,10 +2717,10 @@ class BotManager:
                     symbol=symbol,
                     retryable=True,
                     error_code="AUTO_TRADE_DISABLE_FAILED",
-                )
+                ))
 
             if engine is None:
-                return self._emergency_response(
+                return finalize(self._emergency_response(
                     success=False,
                     completed=False,
                     partial=False,
@@ -2710,7 +2729,7 @@ class BotManager:
                     symbol=None,
                     retryable=True,
                     error_code="ENGINE_UNAVAILABLE",
-                )
+                ))
 
             if engine_mode == "paper":
                 try:
@@ -2732,7 +2751,7 @@ class BotManager:
                 )
 
                 if flatten_completed:
-                    return self._emergency_response(
+                    return finalize(self._emergency_response(
                         success=True,
                         completed=True,
                         partial=False,
@@ -2742,9 +2761,9 @@ class BotManager:
                         flatten=flatten_result,
                         position_remaining=False,
                         retryable=False,
-                    )
+                    ))
 
-                return self._emergency_response(
+                return finalize(self._emergency_response(
                     success=False,
                     completed=False,
                     partial=True,
@@ -2758,7 +2777,7 @@ class BotManager:
                         flatten_result,
                         "PAPER_FLATTEN_FAILED",
                     ),
-                )
+                ))
 
             if live_allowed_before_lock and exchange is not None:
                 try:
@@ -2782,13 +2801,13 @@ class BotManager:
                         "error": str(e),
                     }
 
-                return self._classify_live_emergency_result(
+                return finalize(self._classify_live_emergency_result(
                     symbol,
                     cancel_result,
                     flatten_result,
-                )
+                ))
 
-            return self._emergency_response(
+            return finalize(self._emergency_response(
                 success=False,
                 completed=False,
                 partial=False,
@@ -2797,10 +2816,10 @@ class BotManager:
                 symbol=symbol,
                 retryable=True,
                 error_code="EXECUTION_PATH_UNAVAILABLE",
-            )
+            ))
 
         except Exception:
-            return self._emergency_response(
+            return finalize(self._emergency_response(
                 success=False,
                 completed=False,
                 partial=False,
@@ -2808,7 +2827,7 @@ class BotManager:
                 execution_path=None,
                 retryable=True,
                 error_code="ORCHESTRATOR_EXCEPTION",
-            )
+            ))
         finally:
             self.emergency_orchestrator_lock.release()
 
@@ -3039,6 +3058,7 @@ class BotManager:
             if emergency_locked
             else "UNLOCKED"
         )
+        emergency_status = build_emergency_status()
 
         runtime_health = build_runtime_health_snapshot(
             running=self._running,
@@ -3306,6 +3326,8 @@ class BotManager:
             "emergencyLocked": emergency_locked,
 
             "emergencyState": emergency_state,
+
+            "emergency": emergency_status,
 
             "real_qty": risk_state.get(
                 "realQty"

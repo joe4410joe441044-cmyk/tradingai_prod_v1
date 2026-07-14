@@ -195,39 +195,44 @@ def _stage(
     }
 
 
-def _timeline(runtime_result, stages, running):
+def _timeline(runtime_result, stages, running, emergency_events=None):
     """Return only events actually recorded by the backend runtime trace."""
 
-    if not running:
-        return []
-
-    trace = runtime_result.get("runtimeStageTrace")
-    if not isinstance(trace, dict):
-        return []
-
     events = []
-    for stage_id, event in trace.items():
-        if not isinstance(event, dict) or not event.get("reached"):
-            continue
-        timestamp = event.get("timestamp")
-        if isinstance(timestamp, (int, float)):
-            time_value = datetime.fromtimestamp(
-                timestamp,
-                tz=timezone.utc,
-            ).isoformat()
-        else:
-            time_value = timestamp
-        stage = stages.get(stage_id, {})
-        events.append({
-            "timestamp": time_value,
-            "timestampEpoch": timestamp,
-            "stageId": stage_id,
-            "source": stage.get("name", stage_id),
-            "state": stage.get("status", event.get("status", "OK")),
-            "reason": stage.get("reason") or event.get("reason"),
-        })
 
-    return sorted(events, key=lambda event: event.get("timestampEpoch") or 0)
+    if running:
+        trace = runtime_result.get("runtimeStageTrace")
+        if isinstance(trace, dict):
+            for stage_id, event in trace.items():
+                if not isinstance(event, dict) or not event.get("reached"):
+                    continue
+                timestamp = event.get("timestamp")
+                if isinstance(timestamp, (int, float)):
+                    time_value = datetime.fromtimestamp(
+                        timestamp,
+                        tz=timezone.utc,
+                    ).isoformat()
+                else:
+                    time_value = timestamp
+                stage = stages.get(stage_id, {})
+                events.append({
+                    "timestamp": time_value,
+                    "timestampEpoch": timestamp,
+                    "stageId": stage_id,
+                    "source": stage.get("name", stage_id),
+                    "state": stage.get("status", event.get("status", "OK")),
+                    "reason": stage.get("reason") or event.get("reason"),
+                })
+
+    if isinstance(emergency_events, list):
+        for event in emergency_events:
+            if isinstance(event, dict):
+                events.append(deepcopy(event))
+
+    return sorted(
+        events,
+        key=lambda event: event.get("timestampEpoch") or 0,
+    )[-120:]
 
 
 def _fingerprint(payload):
@@ -693,7 +698,12 @@ def build_runtime_health_snapshot(
         "executionReason": current_reason,
         "stages": stages,
         "loops": loops,
-        "timeline": _timeline(result, stages, active),
+        "timeline": _timeline(
+            result,
+            stages,
+            active,
+            (governance_state or {}).get("emergency_timeline"),
+        ),
         "states": {
             "strategy": strategy,
             "ai": _ai_state(result),

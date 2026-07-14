@@ -1,4 +1,5 @@
 import {
+    useCallback,
     useEffect,
     useMemo,
     useState,
@@ -142,19 +143,46 @@ const [tradeSettings, setTradeSettings] = useState({
 const [, forceUpdate] = useState(0);
 const [executionEnabled, setExecutionEnabled] = useState(false);
 const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
+const [manualBotStatusSnapshot, setManualBotStatusSnapshot] = useState(null);
+
+const refreshBotStatus = useCallback(async () => {
+    const snapshot = await fetchBotStatus();
+
+    setManualBotStatusSnapshot(snapshot);
+
+    return snapshot.data;
+}, []);
 
 const governance = telemetryState.governance;
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
 
-const statusReceivedAt = botStatusSnapshot?.receivedAt;
+const apiBotStatusSnapshot = (
+    manualBotStatusSnapshot?.receivedAt
+        > (botStatusSnapshot?.receivedAt || 0)
+        ? manualBotStatusSnapshot
+        : botStatusSnapshot
+);
+
+const statusReceivedAt = apiBotStatusSnapshot?.receivedAt;
 const websocketStatusReceivedAt = runtime?.botStatusLastUpdate;
 const botStatus = runtime?.botStatus && (
     !statusReceivedAt
     || websocketStatusReceivedAt >= statusReceivedAt
 )
     ? runtime.botStatus
-    : botStatusSnapshot?.data;
+    : apiBotStatusSnapshot?.data;
+const statusEmergency = (
+    apiBotStatusSnapshot?.data?.emergency
+    && typeof apiBotStatusSnapshot.data.emergency === "object"
+        ? apiBotStatusSnapshot.data.emergency
+        : (
+            botStatus?.emergency
+            && typeof botStatus.emergency === "object"
+                ? botStatus.emergency
+                : undefined
+        )
+);
 const wsMarketData = marketData?.lastUpdate
     ? marketData
     : undefined;
@@ -179,7 +207,7 @@ const runtimeHealth = useMemo(() => deriveRuntimeHealth({
 ]);
 
 const browserWsConnected = runtimeHealth.browserWebSocket.connected === true;
-const apiHealth = botStatusSnapshot?.data?.runtime_health;
+const apiHealth = apiBotStatusSnapshot?.data?.runtime_health;
 const wsHealth = runtime?.botStatus?.runtime_health;
 const apiWsMismatch = Boolean(
     apiHealth?.statusFingerprint
@@ -271,6 +299,14 @@ useEffect(() => {
 
                         emergencyState={
                             botStatus?.emergencyState
+                        }
+
+                        emergency={
+                            statusEmergency
+                        }
+
+                        onStatusRefresh={
+                            refreshBotStatus
                         }
 
                         setExecutionEnabledState={

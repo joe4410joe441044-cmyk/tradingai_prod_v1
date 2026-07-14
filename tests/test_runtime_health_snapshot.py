@@ -121,6 +121,61 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["timeline"][-1]["state"], "IDLE")
         self.assertEqual(snapshot["timeline"][-1]["reason"], "AI_HOLD")
 
+    def test_emergency_timeline_merges_with_runtime_stage_events(self):
+        emergency_event = {
+            "timestamp": "2026-07-14T12:35:00.000Z",
+            "timestampEpoch": 1_700_000_000.15,
+            "source": "Emergency",
+            "type": "EMERGENCY",
+            "event": "EMERGENCY_COMPLETED",
+            "state": "LOCKED",
+            "label": "EMERGENCY STOPPED SAFELY",
+            "reason": "緊急停止が正常に完了しました",
+        }
+        snapshot = self._active_snapshot(
+            governance_state={
+                "execution_enabled": False,
+                "emergency_stop": True,
+                "emergency_timeline": [emergency_event],
+            },
+        )
+
+        self.assertEqual(len(snapshot["timeline"]), 4)
+        self.assertEqual(
+            snapshot["timeline"][2]["event"],
+            "EMERGENCY_COMPLETED",
+        )
+        self.assertEqual(
+            snapshot["timeline"][2]["label"],
+            "EMERGENCY STOPPED SAFELY",
+        )
+        self.assertEqual(
+            snapshot["timeline"][-1]["stageId"],
+            "execution-runtime",
+        )
+
+    def test_stopped_runtime_keeps_emergency_timeline_events(self):
+        emergency_event = {
+            "timestamp": "2026-07-14T12:40:00.000Z",
+            "timestampEpoch": 1_700_000_001.0,
+            "source": "Emergency",
+            "type": "EMERGENCY",
+            "event": "EMERGENCY_UNLOCKED",
+            "state": "READY",
+            "label": "EMERGENCY UNLOCKED",
+            "reason": "緊急状態を解除しました",
+        }
+        snapshot = self._active_snapshot(
+            running=False,
+            governance_state={
+                "execution_enabled": False,
+                "emergency_stop": False,
+                "emergency_timeline": [emergency_event],
+            },
+        )
+
+        self.assertEqual(snapshot["timeline"], [emergency_event])
+
     def test_runtime_exception_is_critical(self):
         snapshot = self._active_snapshot(runtime_healthy=False)
 

@@ -8,9 +8,9 @@ import {
 } from "../store/telemetryStore";
 
 import {
-    classifyEmergencyResult,
     runEmergencyOrchestrator,
     setExecutionEnabled,
+    unlockEmergency,
 } from "../runtime/governanceRuntime";
 import {
     API,
@@ -164,6 +164,138 @@ const formatEmergencyError = (
     );
 };
 
+const formatUnlockError = (
+    error
+) => {
+    const code = (
+        error?.code
+        || error?.data?.detail?.reason
+        || error?.data?.reason
+        || (
+            error?.status
+                ? `HTTP_${error.status}`
+                : null
+        )
+        || "EMERGENCY_UNLOCK_FAILED"
+    );
+
+    const messages = {
+        PROCESSING: "緊急停止処理中のため解除できません",
+        POSITION_REMAINING: "ポジションが残っているため解除できません",
+        STATE_UNKNOWN: "取引状態を確認できないため解除できません",
+        ACTION_REQUIRED: "手動確認が必要なため解除できません",
+        EXECUTION_ENABLED: "自動取引が有効なため解除できません",
+        NOT_LOCKED: "緊急ロック状態ではありません",
+        NETWORK_ERROR: "サーバーへ接続できません",
+        MALFORMED_RESPONSE: "解除応答を確認できません",
+    };
+
+    return (
+        messages[code]
+        || "緊急状態を解除できません"
+    ) + ` [${code}]`;
+};
+
+const pickEmergencyValue = (
+    value,
+    ...keys
+) => {
+    if (
+        !value
+        || typeof value !== "object"
+        || Array.isArray(value)
+    ) {
+        return undefined;
+    }
+
+    for (const key of keys) {
+        if (
+            Object.prototype.hasOwnProperty.call(
+                value,
+                key,
+            )
+        ) {
+            return value[key];
+        }
+    }
+
+    return undefined;
+};
+
+const normalizeEmergencyState = (
+    emergency,
+    emergencyLocked,
+    emergencyState
+) => {
+    const state = (
+        typeof emergency?.state === "string"
+            && emergency.state.trim()
+            ? emergency.state.trim().toUpperCase()
+            : (
+                typeof emergencyState === "string"
+                    && emergencyState.trim()
+                    ? emergencyState.trim().toUpperCase()
+                    : null
+            )
+    );
+
+    if (
+        state === "READY"
+        || state === "PROCESSING"
+        || state === "LOCKED"
+        || state === "ACTION_REQUIRED"
+    ) {
+        return state;
+    }
+
+    if (emergencyLocked === true || emergency?.locked === true) {
+        return "LOCKED";
+    }
+
+    if (
+        emergencyLocked === false
+        || emergency?.locked === false
+        || state === "UNLOCKED"
+    ) {
+        return "READY";
+    }
+
+    return "READY";
+};
+
+const formatEmergencyTimestamp = (
+    value
+) => {
+    if (!value) {
+        return null;
+    }
+
+    return String(value).replace("T", " ").replace("Z", " UTC");
+};
+
+const emergencyStateCopy = {
+    READY: {
+        label: "READY",
+        text: "緊急停止は作動していません",
+        tone: "ready",
+    },
+    PROCESSING: {
+        label: "PROCESSING",
+        text: "緊急停止処理を実行中です",
+        tone: "processing",
+    },
+    LOCKED: {
+        label: "STOPPED SAFELY",
+        text: "緊急停止が正常に完了しました",
+        tone: "locked",
+    },
+    ACTION_REQUIRED: {
+        label: "ACTION REQUIRED",
+        text: "緊急停止は一部完了、失敗、または確認不能です",
+        tone: "action",
+    },
+};
+
 export default function BotControl({
 
     config,
@@ -179,6 +311,10 @@ export default function BotControl({
     emergencyLocked,
 
     emergencyState,
+
+    emergency,
+
+    onStatusRefresh,
 
     setExecutionEnabledState,
 
@@ -215,18 +351,32 @@ export default function BotControl({
         setEmergencyError,
     ] = useState(null);
     const [
-        emergencyResult,
-        setEmergencyResult,
-    ] = useState(null);
-    const [
         emergencyConfirmOpen,
         setEmergencyConfirmOpen,
+    ] = useState(false);
+    const [
+        unlockPending,
+        setUnlockPending,
+    ] = useState(false);
+    const [
+        unlockError,
+        setUnlockError,
+    ] = useState(null);
+    const [
+        unlockNotice,
+        setUnlockNotice,
+    ] = useState(null);
+    const [
+        unlockConfirmOpen,
+        setUnlockConfirmOpen,
     ] = useState(false);
     const loopPendingRef =
         useRef(false);
     const autoTradePendingRef =
         useRef(false);
     const emergencyPendingRef =
+        useRef(false);
+    const unlockPendingRef =
         useRef(false);
 
     /* =======================================================
@@ -273,12 +423,200 @@ export default function BotControl({
             ? `${loopPendingAction}...（処理中）`
             : loopStateDisplay
     );
-    const autoTradeDisabledReason = (
-        !autoTradeChecked && emergencyLocked === true
+    const emergencyStatus = (
+        emergency
+        && typeof emergency === "object"
+        && !Array.isArray(emergency)
+            ? emergency
+            : null
+    );
+    const emergencyStateCode = normalizeEmergencyState(
+        emergencyStatus,
+        emergencyLocked,
+        emergencyState,
+    );
+    const lastEmergencyResult = (
+        emergencyStatus?.lastResult
+        && typeof emergencyStatus.lastResult === "object"
+            ? emergencyStatus.lastResult
+            : null
+    );
+    const emergencyIsLocked = (
+        typeof emergencyStatus?.locked === "boolean"
+            ? emergencyStatus.locked
+            : emergencyStateCode === "LOCKED"
+    );
+    const emergencyBlocksOperations = (
+        emergencyStateCode === "PROCESSING"
+        || emergencyStateCode === "LOCKED"
+        || emergencyStateCode === "ACTION_REQUIRED"
+    );
+    const emergencyStateDetails = (
+        emergencyStateCopy[emergencyStateCode]
+        || emergencyStateCopy.READY
+    );
+    const positionRemaining = pickEmergencyValue(
+        lastEmergencyResult,
+        "positionRemaining",
+        "position_remaining",
+    );
+    const stateUnknown = pickEmergencyValue(
+        lastEmergencyResult,
+        "stateUnknown",
+        "state_unknown",
+    );
+    const cancelResult = pickEmergencyValue(
+        lastEmergencyResult,
+        "cancelResult",
+        "cancel_result",
+        "cancel",
+    );
+    const flattenResult = pickEmergencyValue(
+        lastEmergencyResult,
+        "flattenResult",
+        "flatten_result",
+        "flatten",
+    );
+    const completedAt = formatEmergencyTimestamp(
+        pickEmergencyValue(
+            lastEmergencyResult,
+            "completedAt",
+            "completed_at",
+        )
+    );
+    const emergencyPath = pickEmergencyValue(
+        lastEmergencyResult,
+        "path",
+        "execution_path",
+    );
+    const emergencyResultCode = String(
+        pickEmergencyValue(
+            lastEmergencyResult,
+            "result",
+        ) || ""
+    ).toUpperCase();
+    const cancelCompleted = (
+        cancelResult
+        && typeof cancelResult === "object"
+        && (
+            cancelResult.completed === true
+            || cancelResult.success === true
+            || cancelResult.status === "COMPLETED"
+        )
+    );
+    const cancelFailed = (
+        cancelResult
+        && typeof cancelResult === "object"
+        && (
+            cancelResult.success === false
+            || cancelResult.completed === false
+            || cancelResult.status === "FAILED"
+        )
+    );
+    const rawOrdersCancelled = pickEmergencyValue(
+        cancelResult,
+        "orders_cancelled",
+        "ordersCancelled",
+    );
+    const ordersCancelled = (
+        rawOrdersCancelled !== null
+        && rawOrdersCancelled !== undefined
+            ? Number(rawOrdersCancelled)
+            : NaN
+    );
+    const flattenCompleted = (
+        flattenResult
+        && typeof flattenResult === "object"
+        && (
+            flattenResult.completed === true
+            || flattenResult.success === true
+            || flattenResult.status === "COMPLETED"
+        )
+    );
+    const flattenFailed = (
+        flattenResult
+        && typeof flattenResult === "object"
+        && (
+            flattenResult.success === false
+            || flattenResult.completed === false
+            || flattenResult.status === "FAILED"
+        )
+    );
+    const positionClosed = (
+        flattenResult
+        && typeof flattenResult === "object"
+        && (
+            flattenResult.position_closed === true
+            || flattenResult.positionClosed === true
+        )
+    );
+    const lockedFacts = [];
+
+    if (loopChecked === false || loopStateText === "STOPPED") {
+        lockedFacts.push("BOT STOPPED");
+    }
+
+    if (autoTradeChecked === false) {
+        lockedFacts.push("EXECUTION DISABLED");
+    }
+
+    if (cancelCompleted && Number.isFinite(ordersCancelled)) {
+        lockedFacts.push(
+            ordersCancelled > 0
+                ? "OPEN ORDERS CANCELLED"
+                : "OPEN ORDERS NONE"
+        );
+    }
+
+    if (flattenCompleted && positionClosed) {
+        lockedFacts.push("POSITION CLOSED");
+    }
+
+    if (completedAt) {
+        lockedFacts.push(`COMPLETED AT ${completedAt}`);
+    }
+
+    const actionWarnings = [];
+
+    if (positionRemaining === true) {
+        actionWarnings.push("POSITION REMAINING");
+    }
+
+    if (stateUnknown === true) {
+        actionWarnings.push("STATE UNKNOWN");
+    }
+
+    if (cancelFailed) {
+        actionWarnings.push("CANCEL FAILED");
+    }
+
+    if (flattenFailed) {
+        actionWarnings.push("FLATTEN FAILED");
+    }
+
+    if (
+        actionWarnings.length === 0
+        && emergencyResultCode
+        && emergencyResultCode !== "SUCCESS"
+    ) {
+        actionWarnings.push(emergencyResultCode);
+    }
+
+    const lastResultMessage = pickEmergencyValue(
+        lastEmergencyResult,
+        "message",
+    );
+    const emergencyOperationGuardReason = (
+        emergencyBlocksOperations
             ? (
-                "Auto Trade cannot be enabled while Emergency Lock is active."
-                + "（Emergency Lock中はAUTO TRADEを有効にできません）"
+                "Emergency state blocks this operation."
+                + "（Emergency状態のため操作できません）"
             )
+            : null
+    );
+    const autoTradeDisabledReason = (
+        emergencyOperationGuardReason
+            ? emergencyOperationGuardReason
             : !autoTradeChecked && loopEnabled === false
                 ? (
                     "Loop must be running before Auto Trade can be enabled."
@@ -287,42 +625,55 @@ export default function BotControl({
                 : null
     );
     const autoTradeDisabled =
-        autoTradePending || Boolean(autoTradeDisabledReason);
-    const emergencyStateText = (
-        typeof emergencyState === "string"
-            && emergencyState.trim()
-            ? emergencyState.trim().toUpperCase()
-            : null
+        autoTradePending
+        || emergencyBlocksOperations
+        || Boolean(autoTradeDisabledReason);
+    const loopDisabled = (
+        loopPending
+        || emergencyBlocksOperations
     );
-    const emergencyLockValue = (
-        emergencyLocked === true
-            ? "LOCKED"
-            : emergencyLocked === false
-                ? "UNLOCKED"
-                : emergencyStateText === "LOCKED"
-                    ? "LOCKED"
-                    : emergencyStateText === "UNLOCKED"
-                        ? "UNLOCKED"
-                        : "UNKNOWN"
-    );
-    const emergencyLockClass = (
-        emergencyLockValue === "LOCKED"
-            ? "locked"
-            : emergencyLockValue === "UNLOCKED"
-                ? "unlocked"
-                : "unknown"
+    const unlockAllowed = (
+        emergencyStateCode === "LOCKED"
+        && emergencyIsLocked
+        && autoTradeChecked === false
+        && positionRemaining !== true
+        && stateUnknown !== true
+        && unlockPending !== true
     );
     const emergencyButtonDisabled = (
         emergencyPending
         || emergencyConfirmOpen
+        || unlockPending
+        || emergencyStateCode !== "READY"
     );
-    const emergencyResultClassification = (
-        emergencyError
-            ? classifyEmergencyResult(null)
-            : emergencyResult
-                ? classifyEmergencyResult(emergencyResult)
-                : null
+    const emergencyLockValue = (
+        emergencyIsLocked
+            ? (
+                emergencyStateCode === "ACTION_REQUIRED"
+                    ? "ACTION REQUIRED"
+                    : "LOCKED"
+            )
+            : "UNLOCKED"
     );
+    const emergencyLockClass = (
+        emergencyStateCode === "LOCKED"
+            ? "locked"
+            : emergencyStateCode === "READY"
+                ? "unlocked"
+                : "unknown"
+    );
+
+    const refreshStatusSafely = async () => {
+        if (typeof onStatusRefresh !== "function") {
+            return;
+        }
+
+        try {
+            await onStatusRefresh();
+        } catch (error) {
+            console.error("BOT STATUS REFRESH ERROR", error);
+        }
+    };
 
     const startLoop = async () => {
         console.log(
@@ -457,7 +808,10 @@ export default function BotControl({
     const handleLoopChange = async (
         nextEnabled
     ) => {
-        if (loopPendingRef.current) {
+        if (
+            loopPendingRef.current
+            || emergencyBlocksOperations
+        ) {
             return;
         }
 
@@ -499,7 +853,10 @@ export default function BotControl({
     const handleAutoTradeChange = async (
         nextEnabled
     ) => {
-        if (autoTradePendingRef.current) {
+        if (
+            autoTradePendingRef.current
+            || emergencyBlocksOperations
+        ) {
             return;
         }
 
@@ -550,6 +907,7 @@ export default function BotControl({
         if (
             emergencyPendingRef.current
             || emergencyConfirmOpen
+            || emergencyStateCode !== "READY"
         ) {
             return;
         }
@@ -573,12 +931,12 @@ export default function BotControl({
         emergencyPendingRef.current = true;
         setEmergencyPending(true);
         setEmergencyError(null);
-        setEmergencyResult(null);
+        setUnlockError(null);
+        setUnlockNotice(null);
 
         try {
-            const result = await runEmergencyOrchestrator();
+            await runEmergencyOrchestrator();
 
-            setEmergencyResult(result);
             setEmergencyConfirmOpen(false);
         } catch (error) {
             console.error("EMERGENCY ORCHESTRATOR ERROR", error);
@@ -587,8 +945,64 @@ export default function BotControl({
             );
             setEmergencyConfirmOpen(false);
         } finally {
+            await refreshStatusSafely();
             emergencyPendingRef.current = false;
             setEmergencyPending(false);
+        }
+    };
+
+    const openUnlockConfirm = () => {
+        if (
+            unlockPendingRef.current
+            || unlockConfirmOpen
+            || !unlockAllowed
+        ) {
+            return;
+        }
+
+        setUnlockError(null);
+        setUnlockConfirmOpen(true);
+    };
+
+    const cancelUnlockConfirm = () => {
+        if (unlockPendingRef.current) {
+            return;
+        }
+
+        setUnlockConfirmOpen(false);
+    };
+
+    const confirmUnlock = async () => {
+        if (
+            unlockPendingRef.current
+            || !unlockAllowed
+        ) {
+            return;
+        }
+
+        unlockPendingRef.current = true;
+        setUnlockPending(true);
+        setUnlockError(null);
+        setEmergencyError(null);
+        setUnlockNotice(null);
+
+        try {
+            await unlockEmergency();
+
+            setUnlockNotice(
+                "緊急状態は解除されました。BOTは停止中です。"
+            );
+            setUnlockConfirmOpen(false);
+        } catch (error) {
+            console.error("EMERGENCY UNLOCK ERROR", error);
+            setUnlockError(
+                formatUnlockError(error)
+            );
+            setUnlockConfirmOpen(false);
+        } finally {
+            await refreshStatusSafely();
+            unlockPendingRef.current = false;
+            setUnlockPending(false);
         }
     };
 
@@ -623,7 +1037,7 @@ export default function BotControl({
                 <OperationToggle
                     ariaLabel="Toggle trading loop"
                     checked={loopChecked}
-                    disabled={loopPending}
+                    disabled={loopDisabled}
                     label="LOOP"
                     loading={loopPending}
                     offText="OFF"
@@ -650,6 +1064,12 @@ export default function BotControl({
                 {loopPending && loopPendingAction && (
                     <div className="operation-state-reason operation-state-reason--pending">
                         Operation: {loopStatusText}
+                    </div>
+                )}
+
+                {emergencyOperationGuardReason && (
+                    <div className="operation-state-reason operation-state-reason--warning">
+                        {emergencyOperationGuardReason}
                     </div>
                 )}
 
@@ -732,6 +1152,64 @@ export default function BotControl({
                     EMERGENCY
                 </div>
 
+                <div
+                    className={
+                        "operation-emergency-status "
+                        + `operation-emergency-status--${emergencyStateDetails.tone}`
+                    }
+                >
+                    <span className="operation-emergency-status__eyebrow">
+                        EMERGENCY STATUS
+                    </span>
+
+                    <strong className="operation-emergency-status__state">
+                        {emergencyStateDetails.label}
+                    </strong>
+
+                    <span className="operation-emergency-status__message">
+                        {emergencyStateDetails.text}
+                    </span>
+
+                    {emergencyStateCode === "PROCESSING" && (
+                        <span className="operation-emergency-status__pending">
+                            PROCESSING
+                        </span>
+                    )}
+
+                    {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
+                        <div className="operation-emergency-facts">
+                            {lockedFacts.map((fact) => (
+                                <span key={fact}>
+                                    {fact}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    {emergencyStateCode === "ACTION_REQUIRED"
+                        && actionWarnings.length > 0 && (
+                        <div className="operation-emergency-warnings">
+                            {actionWarnings.map((warning) => (
+                                <span key={warning}>
+                                    {warning}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    {lastResultMessage && emergencyStateCode !== "READY" && (
+                        <span className="operation-emergency-status__message">
+                            {lastResultMessage}
+                        </span>
+                    )}
+
+                    {unlockNotice && emergencyStateCode === "READY" && (
+                        <span className="operation-emergency-status__message operation-emergency-status__message--safe">
+                            {unlockNotice}
+                        </span>
+                    )}
+                </div>
+
                 <button
                     className="emergency-stop-button operation-emergency-button"
                     disabled={emergencyButtonDisabled}
@@ -747,7 +1225,7 @@ export default function BotControl({
 
                 </button>
 
-                {emergencyLockValue === "LOCKED" && (
+                {emergencyStateCode === "LOCKED" && (
                     <div className="operation-emergency-note">
                         Emergency Lock is active.（Emergency Lockが有効です）
                     </div>
@@ -757,7 +1235,7 @@ export default function BotControl({
                     <div
                         className="operation-emergency-confirm"
                         role="dialog"
-                        aria-modal="false"
+                        aria-modal="true"
                         aria-label="Confirm emergency stop"
                     >
                         <div className="operation-emergency-confirm__title">
@@ -791,6 +1269,63 @@ export default function BotControl({
                     </div>
                 )}
 
+                {emergencyStateCode === "LOCKED" && (
+                    <button
+                        className="operation-emergency-unlock"
+                        disabled={!unlockAllowed || unlockPending}
+                        onClick={openUnlockConfirm}
+                        aria-busy={unlockPending ? "true" : undefined}
+                        type="button"
+                    >
+                        {unlockPending
+                            ? "解除中..."
+                            : "緊急状態を解除"
+                        }
+                    </button>
+                )}
+
+                {unlockConfirmOpen && (
+                    <div
+                        className="operation-emergency-confirm"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="emergency-unlock-title"
+                    >
+                        <div
+                            className="operation-emergency-confirm__title"
+                            id="emergency-unlock-title"
+                        >
+                            緊急状態を解除しますか？
+                        </div>
+
+                        <div className="operation-emergency-confirm__body">
+                            解除後もBOTは起動しません。
+                            <br />
+                            LOOPとAUTO TRADEもOFFのままです。
+                        </div>
+
+                        <div className="operation-emergency-confirm__actions">
+                            <button
+                                className="operation-emergency-confirm__cancel"
+                                disabled={unlockPending}
+                                onClick={cancelUnlockConfirm}
+                                type="button"
+                            >
+                                キャンセル
+                            </button>
+
+                            <button
+                                className="operation-emergency-confirm__confirm"
+                                disabled={unlockPending}
+                                onClick={confirmUnlock}
+                                type="button"
+                            >
+                                緊急状態を解除
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div className="operation-emergency-lock">
                     <span className="operation-state-label">
                         EMERGENCY LOCK（緊急ロック）
@@ -801,31 +1336,9 @@ export default function BotControl({
                     </strong>
                 </div>
 
-                {emergencyResultClassification && (
-                    <div
-                        className={
-                            "operation-emergency-result "
-                            + `operation-emergency-result--${emergencyResultClassification.severity}`
-                        }
-                        data-testid="emergency-result"
-                    >
-                        <strong>
-                            {emergencyResultClassification.text}
-                        </strong>
-
-                        {emergencyResult?.error_code && (
-                            <span>
-                                Code: {emergencyResult.error_code}
-                            </span>
-                        )}
-
-                        {emergencyResult && (
-                            <span>
-                                Path: {emergencyResult.execution_path || "UNKNOWN"}
-                                {" / "}
-                                Retryable: {emergencyResult.retryable ? "true" : "false"}
-                            </span>
-                        )}
+                {emergencyPath && emergencyStateCode !== "READY" && (
+                    <div className="operation-emergency-detail">
+                        Execution path: {String(emergencyPath).toUpperCase()}
                     </div>
                 )}
 
@@ -836,6 +1349,16 @@ export default function BotControl({
                         role="alert"
                     >
                         {emergencyError}
+                    </div>
+                )}
+
+                {unlockError && (
+                    <div
+                        className="operation-emergency-error"
+                        data-testid="emergency-unlock-error"
+                        role="alert"
+                    >
+                        {unlockError}
                     </div>
                 )}
 

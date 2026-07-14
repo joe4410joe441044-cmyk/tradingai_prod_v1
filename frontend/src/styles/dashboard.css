@@ -2259,6 +2259,90 @@ replace the legacy scaled three-column layout.
     opacity: 0.66;
 }
 
+.left-column .operation-emergency-status {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0b101a;
+}
+
+.left-column .operation-emergency-status--ready {
+    border-color: #243149;
+}
+
+.left-column .operation-emergency-status--processing,
+.left-column .operation-emergency-status--action {
+    border-color: rgba(181, 137, 0, 0.62);
+    background: rgba(181, 137, 0, 0.08);
+}
+
+.left-column .operation-emergency-status--locked {
+    border-color: rgba(89, 195, 122, 0.52);
+    background: rgba(89, 195, 122, 0.08);
+}
+
+.left-column .operation-emergency-status__eyebrow {
+    color: #9badc6;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.left-column .operation-emergency-status__state {
+    color: #e7edf7;
+    font-family: var(--operation-font-mono);
+    font-size: 13px;
+    font-weight: 850;
+    line-height: 1.15;
+}
+
+.left-column .operation-emergency-status__message,
+.left-column .operation-emergency-detail {
+    color: #c8d4e6;
+    font-size: 9px;
+    font-weight: 650;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.left-column .operation-emergency-status__message--safe {
+    color: #9be5b3;
+}
+
+.left-column .operation-emergency-status__pending,
+.left-column .operation-emergency-facts span,
+.left-column .operation-emergency-warnings span {
+    display: inline-flex;
+    width: fit-content;
+    max-width: 100%;
+    padding: 3px 6px;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0d1320;
+    color: #e7edf7;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.left-column .operation-emergency-status__pending,
+.left-column .operation-emergency-warnings span {
+    border-color: rgba(181, 137, 0, 0.62);
+    color: #e8b45f;
+}
+
+.left-column .operation-emergency-facts,
+.left-column .operation-emergency-warnings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
 .left-column .operation-emergency-note {
     color: #e8b45f;
     font-size: 8px;
@@ -2323,6 +2407,24 @@ replace the legacy scaled three-column layout.
 
 .left-column .operation-emergency-confirm__cancel:disabled,
 .left-column .operation-emergency-confirm__confirm:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+}
+
+.left-column .operation-emergency-unlock {
+    min-height: 36px;
+    border: 1px solid rgba(89, 195, 122, 0.58);
+    border-radius: 8px;
+    background: rgba(89, 195, 122, 0.1);
+    color: #9be5b3;
+    font-family: var(--operation-font-ui);
+    font-size: 9px;
+    font-weight: 850;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.left-column .operation-emergency-unlock:disabled {
     cursor: not-allowed;
     opacity: 0.62;
 }
@@ -3390,6 +3492,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 .left-column .config-select,
 .left-column .quick-action-button,
 .left-column .operation-emergency-button,
+.left-column .operation-emergency-unlock,
 .left-column .operation-emergency-confirm__cancel,
 .left-column .operation-emergency-confirm__confirm,
 .governance-button,
@@ -3412,6 +3515,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 
 .operation-toggle__control:hover:not(:disabled),
 .left-column .config-select:hover:not(:disabled),
+.left-column .operation-emergency-unlock:hover:not(:disabled),
 .left-column .operation-emergency-confirm__cancel:hover:not(:disabled),
 .governance-button:hover:not(:disabled),
 .pipeline-stage-button:hover {
@@ -3427,6 +3531,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 .left-column .config-select:focus-visible,
 .left-column .quick-action-button:focus-visible,
 .left-column .operation-emergency-button:focus-visible,
+.left-column .operation-emergency-unlock:focus-visible,
 .left-column .operation-emergency-confirm__cancel:focus-visible,
 .left-column .operation-emergency-confirm__confirm:focus-visible,
 .governance-button:focus-visible,
@@ -3439,6 +3544,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 .left-column .config-select:active:not(:disabled),
 .left-column .quick-action-button:active:not(:disabled),
 .left-column .operation-emergency-button:active:not(:disabled),
+.left-column .operation-emergency-unlock:active:not(:disabled),
 .left-column .operation-emergency-confirm__cancel:active:not(:disabled),
 .left-column .operation-emergency-confirm__confirm:active:not(:disabled),
 .governance-button:active:not(:disabled),
@@ -3451,6 +3557,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 .left-column .config-select:disabled,
 .left-column .quick-action-button:disabled,
 .left-column .operation-emergency-button:disabled,
+.left-column .operation-emergency-unlock:disabled,
 .left-column .operation-emergency-confirm__cancel:disabled,
 .left-column .operation-emergency-confirm__confirm:disabled,
 .governance-button:disabled {

@@ -249,8 +249,14 @@ export default function LogsPanel({
                                 {event.level ?? "INFO"}
                             </div>
                         )}
-                        <div>{event.state ?? "UNKNOWN"}</div>
-                        {!showLevel && <div>{event.reason ?? "--"}</div>}
+                        <div>
+                            {event.label ?? event.event ?? event.state ?? "UNKNOWN"}
+                        </div>
+                        {!showLevel && (
+                            <div>
+                                {event.message ?? event.reason ?? "--"}
+                            </div>
+                        )}
                     </div>
                 ))}
 

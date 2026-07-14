@@ -10,13 +10,26 @@ from fastapi import HTTPException
 from backend.api.governance import (
     emergency_orchestrate,
     emergency_stop,
+    emergency_unlock,
     router as governance_router,
     set_execution,
 )
 from backend.api.bot_api import StatusResponse
 from backend.bot_manager.bot_manager import BotManager
 from backend.execution.kucoin_trade import KucoinTradeClient
-from backend.runtime.governance_runtime import governance_state
+from backend.runtime.governance_runtime import (
+    EMERGENCY_ACTION_REQUIRED,
+    EMERGENCY_LOCKED,
+    EMERGENCY_PROCESSING,
+    EMERGENCY_READY,
+    EMERGENCY_RESULT_FAILED,
+    EMERGENCY_RESULT_NONE,
+    EMERGENCY_RESULT_PARTIAL,
+    EMERGENCY_RESULT_SUCCESS,
+    begin_emergency_operation,
+    complete_emergency_operation,
+    governance_state,
+)
 
 
 class FakeEngine:
@@ -617,6 +630,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             ),
             routes,
         )
+        self.assertIn(
+            (
+                "/api/governance/emergency/unlock",
+                ("POST",),
+            ),
+            routes,
+        )
 
     def test_emergency_stop_remains_lock_only_primitive(self):
         state_before = dict(governance_state)
@@ -631,6 +651,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertTrue(result["emergency_stop"])
             self.assertTrue(governance_state["emergency_stop"])
             self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
         finally:
             governance_state.clear()
             governance_state.update(state_before)
@@ -927,12 +951,64 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         state_before = dict(governance_state)
         governance_state["execution_enabled"] = execution_enabled
         governance_state["emergency_stop"] = emergency_stop
+        governance_state["emergency_state"] = (
+            EMERGENCY_ACTION_REQUIRED
+            if emergency_stop
+            else EMERGENCY_READY
+        )
+        governance_state["last_emergency_result"] = None
+        governance_state["emergency_timeline"] = []
         return state_before
 
     @staticmethod
     def _restore_governance(state_before):
         governance_state.clear()
         governance_state.update(state_before)
+
+    @staticmethod
+    def _saved_emergency_result(
+        state=EMERGENCY_LOCKED,
+        result=EMERGENCY_RESULT_SUCCESS,
+        position_remaining=False,
+        state_unknown=False,
+        success=True,
+        completed=True,
+        partial=False,
+        retryable=False,
+    ):
+        return {
+            "operationId": "emg_20260714T123456Z_unlock",
+            "state": state,
+            "result": result,
+            "startedAt": "2026-07-14T12:34:56.000Z",
+            "completedAt": "2026-07-14T12:35:01.000Z",
+            "path": "paper",
+            "success": success,
+            "completed": completed,
+            "partial": partial,
+            "retryable": retryable,
+            "positionRemaining": position_remaining,
+            "stateUnknown": state_unknown,
+            "cancelResult": None,
+            "flattenResult": {
+                "status": "COMPLETED",
+                "success": True,
+                "completed": True,
+                "reason": None,
+                "position_closed": True,
+                "position_remaining": position_remaining,
+                "state_unknown": state_unknown,
+            },
+            "message": "Emergency completed.",
+        }
+
+    @staticmethod
+    def _emergency_timeline_events():
+        return [
+            event
+            for event in governance_state.get("emergency_timeline", [])
+            if isinstance(event, dict)
+        ]
 
     @staticmethod
     def _emergency_bot_with_engine(engine):
@@ -997,6 +1073,798 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "selectedMode": "LIVE",
         }
         return self._emergency_bot_with_engine(engine), engine, exchange
+
+    def test_emergency_state_model_initial_status_ready(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+
+            bot = BotManager()
+            status = bot.get_status()
+            response = StatusResponse(**status)
+            emergency = status["emergency"]
+
+            self.assertFalse(emergency["active"])
+            self.assertFalse(emergency["locked"])
+            self.assertEqual(emergency["state"], EMERGENCY_READY)
+            self.assertIsNone(emergency["lastResult"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_state_model_start_sets_processing_and_lock(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+
+            operation = begin_emergency_operation()
+            last_result = governance_state["last_emergency_result"]
+
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_PROCESSING,
+            )
+            self.assertEqual(
+                last_result["operationId"],
+                operation["operation_id"],
+            )
+            self.assertEqual(last_result["state"], EMERGENCY_PROCESSING)
+            self.assertEqual(last_result["result"], EMERGENCY_RESULT_NONE)
+            self.assertIsNone(last_result["completedAt"])
+            self.assertTrue(last_result["retryable"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_state_model_success_status_and_polling_retention(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            def flatten_side_effect(**_kwargs):
+                processing = governance_state["last_emergency_result"]
+
+                self.assertTrue(governance_state["emergency_stop"])
+                self.assertFalse(governance_state["execution_enabled"])
+                self.assertEqual(
+                    governance_state["emergency_state"],
+                    EMERGENCY_PROCESSING,
+                )
+                self.assertEqual(
+                    processing["result"],
+                    EMERGENCY_RESULT_NONE,
+                )
+                self.assertIsNone(processing["completedAt"])
+
+                return {
+                    "success": True,
+                    "requested": 1,
+                    "flattened": 1,
+                    "failed": 0,
+                    "skipped": False,
+                    "api_key": "SHOULD_NOT_LEAK",
+                }
+
+            bot, engine = self._paper_emergency_bot({})
+            engine.flatten_paper_position.side_effect = flatten_side_effect
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertEqual(result["path"], "paper")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+
+            first_status = bot.get_status()["emergency"]
+            first_result = first_status["lastResult"]
+
+            self.assertTrue(first_status["active"])
+            self.assertTrue(first_status["locked"])
+            self.assertEqual(first_status["state"], EMERGENCY_LOCKED)
+            self.assertRegex(
+                first_result["operationId"],
+                r"^emg_\d{8}T\d{6}Z_[0-9a-f]{6}$",
+            )
+            self.assertTrue(first_result["startedAt"].endswith("Z"))
+            self.assertTrue(first_result["completedAt"].endswith("Z"))
+            self.assertEqual(first_result["result"], EMERGENCY_RESULT_SUCCESS)
+            self.assertEqual(first_result["path"], "paper")
+            self.assertTrue(first_result["success"])
+            self.assertTrue(first_result["completed"])
+            self.assertFalse(first_result["partial"])
+            self.assertFalse(first_result["retryable"])
+            self.assertFalse(first_result["positionRemaining"])
+            self.assertFalse(first_result["stateUnknown"])
+            self.assertIsNone(first_result["cancelResult"])
+            self.assertEqual(
+                first_result["flattenResult"]["status"],
+                "COMPLETED",
+            )
+            self.assertTrue(
+                first_result["flattenResult"]["position_closed"]
+            )
+
+            second_status = bot.get_status()["emergency"]
+            self.assertEqual(
+                second_status["lastResult"]["operationId"],
+                first_result["operationId"],
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_success_stops_bot_loop_and_keeps_execution_disabled(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            bot, _ = self._paper_emergency_bot({
+                "success": True,
+                "requested": 0,
+                "flattened": 0,
+                "failed": 0,
+                "skipped": True,
+            })
+            bot._running = True
+            bot.lifecycle_state = "RUNNING"
+
+            result = bot.run_emergency_orchestrator()
+            status = bot.get_status()
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertFalse(status["loopEnabled"])
+            self.assertEqual(status["loopState"], "STOPPED")
+            self.assertFalse(status["autoTradeEnabled"])
+            self.assertFalse(status["executionEnabled"])
+            self.assertTrue(status["emergency"]["locked"])
+            self.assertEqual(status["emergency"]["state"], EMERGENCY_LOCKED)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_state_model_partial_is_action_required(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            flatten_result = {
+                "success": False,
+                "error": "INVALID_FLATTEN_PRICE",
+                "position_after": {
+                    "side": "BUY",
+                },
+            }
+            bot, _ = self._paper_emergency_bot(flatten_result)
+
+            result = bot.run_emergency_orchestrator()
+            emergency = bot.get_status()["emergency"]
+            last_result = emergency["lastResult"]
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["partial"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertTrue(emergency["locked"])
+            self.assertEqual(emergency["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertEqual(last_result["result"], EMERGENCY_RESULT_PARTIAL)
+            self.assertEqual(last_result["path"], "paper")
+            self.assertTrue(last_result["positionRemaining"])
+            self.assertFalse(last_result["stateUnknown"])
+            self.assertTrue(last_result["retryable"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_state_model_failed_is_action_required(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+
+            operation = begin_emergency_operation()
+            saved = complete_emergency_operation(
+                {
+                    "success": False,
+                    "completed": False,
+                    "partial": False,
+                    "state_unknown": False,
+                    "execution_path": "paper",
+                    "position_remaining": False,
+                    "retryable": True,
+                    "error_code": "FAILED_FOR_TEST",
+                    "cancel": {
+                        "success": False,
+                        "api_key": "SHOULD_NOT_LEAK",
+                    },
+                    "flatten": {
+                        "success": False,
+                        "secret": "SHOULD_NOT_LEAK",
+                    },
+                },
+                operation,
+            )
+
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(saved["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertEqual(saved["result"], EMERGENCY_RESULT_FAILED)
+            self.assertTrue(saved["retryable"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_state_model_does_not_expose_secrets(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            bot, _, _ = self._live_emergency_bot(
+                cancel_result={
+                    "success": True,
+                    "requested": 1,
+                    "cancelled": 1,
+                    "failed": 0,
+                    "api_key": "SHOULD_NOT_LEAK",
+                    "headers": {
+                        "KC-API-KEY": "SHOULD_NOT_LEAK",
+                    },
+                },
+                flatten_result={
+                    "success": True,
+                    "skipped": False,
+                    "accepted": True,
+                    "confirmed": True,
+                    "closed": True,
+                    "api_secret": "SHOULD_NOT_LEAK",
+                    "raw_order": {
+                        "secret": "SHOULD_NOT_LEAK",
+                    },
+                },
+            )
+
+            bot.run_emergency_orchestrator()
+            emergency = bot.get_status()["emergency"]
+            serialized = json.dumps(
+                emergency["lastResult"],
+                sort_keys=True,
+            )
+
+            self.assertNotIn("SHOULD_NOT_LEAK", serialized)
+            self.assertNotIn("api_key", serialized)
+            self.assertNotIn("api_secret", serialized)
+            self.assertNotIn("headers", serialized)
+            self.assertNotIn("KC-API-KEY", serialized)
+            self.assertNotIn("raw_order", serialized)
+            self.assertEqual(
+                emergency["lastResult"]["cancelResult"]["orders_cancelled"],
+                1,
+            )
+            self.assertTrue(
+                emergency["lastResult"]["flattenResult"][
+                    "position_closed"
+                ]
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_succeeds_only_from_locked_safe_state(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result()
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+            bot = BotManager()
+            bot._running = False
+            bot.lifecycle_state = "STOPPED"
+
+            result = asyncio.run(emergency_unlock())
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["unlocked"])
+            self.assertFalse(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+
+            status = bot.get_status()
+            response = StatusResponse(**status)
+            emergency = status["emergency"]
+
+            self.assertFalse(response.loopEnabled)
+            self.assertEqual(response.loopState, "STOPPED")
+            self.assertFalse(response.autoTradeEnabled)
+            self.assertFalse(response.executionEnabled)
+            self.assertFalse(emergency["active"])
+            self.assertFalse(emergency["locked"])
+            self.assertEqual(emergency["state"], EMERGENCY_READY)
+            self.assertIs(emergency["lastResult"], last_result)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_ready_state(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "NOT_LOCKED",
+            )
+            self.assertFalse(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+            self.assertIsNone(governance_state["last_emergency_result"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_processing_state(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result(
+                state=EMERGENCY_PROCESSING,
+                result=EMERGENCY_RESULT_NONE,
+                success=False,
+                completed=False,
+                partial=False,
+                retryable=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_PROCESSING
+            governance_state["last_emergency_result"] = last_result
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "PROCESSING",
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_PROCESSING,
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_action_required_state(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = last_result
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "ACTION_REQUIRED",
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_position_remaining(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result(
+                position_remaining=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "POSITION_REMAINING",
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_state_unknown(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result(
+                state_unknown=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "STATE_UNKNOWN",
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_execution_enabled_without_changing_it(
+        self,
+    ):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result()
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "EXECUTION_ENABLED",
+            )
+            self.assertTrue(governance_state["execution_enabled"])
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_records_started_once(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+            governance_state["emergency_timeline"] = []
+
+            operation = begin_emergency_operation()
+            events = self._emergency_timeline_events()
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["type"], "EMERGENCY")
+            self.assertEqual(events[0]["event"], "EMERGENCY_STARTED")
+            self.assertEqual(events[0]["state"], EMERGENCY_PROCESSING)
+            self.assertEqual(
+                events[0]["operationId"],
+                operation["operation_id"],
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_records_success_and_status_timeline(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            bot, _ = self._paper_emergency_bot({
+                "success": True,
+                "requested": 1,
+                "flattened": 1,
+                "failed": 0,
+                "skipped": False,
+            })
+
+            result = bot.run_emergency_orchestrator()
+            events = self._emergency_timeline_events()
+            status_events = bot.get_status()["runtime_health"]["timeline"]
+
+            self.assertTrue(result["completed"])
+            self.assertEqual(
+                [event["event"] for event in events],
+                ["EMERGENCY_STARTED", "EMERGENCY_COMPLETED"],
+            )
+            self.assertEqual(events[-1]["state"], EMERGENCY_LOCKED)
+            self.assertEqual(events[-1]["result"], EMERGENCY_RESULT_SUCCESS)
+            self.assertEqual(events[-1]["path"], "paper")
+            self.assertEqual(
+                status_events[-1]["event"],
+                "EMERGENCY_COMPLETED",
+            )
+            self.assertEqual(
+                status_events[-1]["label"],
+                "EMERGENCY STOPPED SAFELY",
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_records_partial_action_required(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            bot, _ = self._paper_emergency_bot({
+                "success": False,
+                "error": "INVALID_FLATTEN_PRICE",
+                "position_after": {
+                    "side": "BUY",
+                },
+            })
+
+            result = bot.run_emergency_orchestrator()
+            events = self._emergency_timeline_events()
+
+            self.assertTrue(result["partial"])
+            self.assertEqual(events[-1]["event"], "EMERGENCY_ACTION_REQUIRED")
+            self.assertEqual(events[-1]["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertEqual(events[-1]["result"], EMERGENCY_RESULT_PARTIAL)
+            self.assertTrue(
+                events[-1]["details"]["positionRemaining"]
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_records_failed_action_required(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+            governance_state["emergency_timeline"] = []
+
+            operation = begin_emergency_operation()
+            saved = complete_emergency_operation(
+                {
+                    "success": False,
+                    "completed": False,
+                    "partial": False,
+                    "state_unknown": False,
+                    "execution_path": "paper",
+                    "position_remaining": False,
+                    "retryable": True,
+                    "error_code": "FAILED_FOR_TIMELINE_TEST",
+                },
+                operation,
+            )
+            events = self._emergency_timeline_events()
+
+            self.assertEqual(saved["result"], EMERGENCY_RESULT_FAILED)
+            self.assertEqual(events[-1]["event"], "EMERGENCY_ACTION_REQUIRED")
+            self.assertEqual(events[-1]["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertEqual(events[-1]["result"], EMERGENCY_RESULT_FAILED)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_records_unlock_success(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result()
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+            governance_state["emergency_timeline"] = []
+
+            result = asyncio.run(emergency_unlock())
+            events = self._emergency_timeline_events()
+
+            self.assertTrue(result["unlocked"])
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "EMERGENCY_UNLOCKED")
+            self.assertEqual(events[0]["state"], EMERGENCY_READY)
+            self.assertEqual(
+                events[0]["operationId"],
+                last_result["operationId"],
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_does_not_record_unlock_rejection(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result(
+                position_remaining=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+            governance_state["emergency_timeline"] = []
+
+            with self.assertRaises(HTTPException):
+                asyncio.run(emergency_unlock())
+
+            self.assertEqual(self._emergency_timeline_events(), [])
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_deduplicates_completion_event(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = False
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["last_emergency_result"] = None
+            governance_state["emergency_timeline"] = []
+            operation = begin_emergency_operation()
+            response = {
+                "success": True,
+                "completed": True,
+                "partial": False,
+                "state_unknown": False,
+                "execution_path": "paper",
+                "position_remaining": False,
+                "retryable": False,
+                "flatten": {
+                    "success": True,
+                    "skipped": True,
+                },
+            }
+
+            complete_emergency_operation(response, operation)
+            complete_emergency_operation(response, operation)
+            completion_events = [
+                event
+                for event in self._emergency_timeline_events()
+                if event["event"] == "EMERGENCY_COMPLETED"
+            ]
+
+            self.assertEqual(len(completion_events), 1)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_timeline_preserves_emergency_events_after_stop(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+
+        try:
+            bot, _ = self._paper_emergency_bot({
+                "success": True,
+                "skipped": True,
+            })
+            bot._running = True
+            bot.lifecycle_state = "RUNNING"
+            bot.latest_runtime_result = {
+                "runtimeStageTrace": {
+                    "trading-runtime": {
+                        "reached": True,
+                        "status": "ACTIVE",
+                        "timestamp": 1_700_000_000.0,
+                    },
+                },
+            }
+
+            bot.run_emergency_orchestrator()
+            timeline = bot.get_status()["runtime_health"]["timeline"]
+
+            emergency_events = [
+                event
+                for event in timeline
+                if event.get("type") == "EMERGENCY"
+            ]
+
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertEqual(
+                [event.get("event") for event in emergency_events],
+                ["EMERGENCY_STARTED", "EMERGENCY_COMPLETED"],
+            )
+        finally:
+            self._restore_governance(state_before)
 
     def test_emergency_orchestrator_paper_completed_and_skip(self):
         cases = [
@@ -1684,6 +2552,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "success": True,
                 "skipped": True,
             }
+            bot.engine = engine
 
             second = bot.run_emergency_orchestrator()
 

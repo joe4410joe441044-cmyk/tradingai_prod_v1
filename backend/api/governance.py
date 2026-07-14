@@ -7,7 +7,9 @@ from backend.bot_manager import (
 )
 
 from backend.runtime.governance_runtime import (
+    EMERGENCY_ACTION_REQUIRED,
     governance_state,
+    unlock_emergency_lock,
 )
 
 router = APIRouter(
@@ -117,6 +119,8 @@ async def emergency_stop():
 
     governance_state["execution_enabled"] = False
 
+    governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+
     return {
         "success": True,
         "emergency_stop": True,
@@ -129,6 +133,20 @@ async def emergency_orchestrate():
     bot_manager = get_bot_manager()
 
     return bot_manager.run_emergency_orchestrator()
+
+
+@router.post("/emergency/unlock")
+async def emergency_unlock():
+
+    result = unlock_emergency_lock()
+
+    if not result.get("success", False):
+        raise HTTPException(
+            status_code=409,
+            detail=result,
+        )
+
+    return result
 
 
 # ============================================================

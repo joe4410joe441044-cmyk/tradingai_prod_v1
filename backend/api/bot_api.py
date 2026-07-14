@@ -204,6 +204,8 @@ class StatusResponse(BaseModel):
 
     emergencyState: str = "UNLOCKED"
 
+    emergency: dict = Field(default_factory=dict)
+
     real_qty: Optional[float] = None
 
     notional: Optional[float] = None

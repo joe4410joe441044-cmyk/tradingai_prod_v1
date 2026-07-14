@@ -6,6 +6,7 @@ import {
     GovernanceApiError,
     runEmergencyOrchestrator,
     setExecutionEnabled,
+    unlockEmergency,
 } from "./governanceRuntime.js";
 
 const jsonResponse = ({
@@ -411,6 +412,80 @@ test("runEmergencyOrchestrator rejects malformed success schema", async () => {
                 assert.ok(error instanceof GovernanceApiError);
                 assert.equal(error.status, 200);
                 assert.equal(error.code, "MALFORMED_RESPONSE");
+                return true;
+            },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("unlockEmergency posts without body and returns confirmed unlock", async () => {
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async (
+        url,
+        options
+    ) => {
+        requests.push({
+            url,
+            options,
+        });
+
+        return jsonResponse({
+            body: {
+                success: true,
+                unlocked: true,
+                emergency_stop: false,
+                emergency_state: "READY",
+            },
+        });
+    };
+
+    try {
+        const result = await unlockEmergency();
+
+        assert.equal(requests.length, 1);
+        assert.equal(
+            requests[0].url,
+            "/api/governance/emergency/unlock",
+        );
+        assert.equal(requests[0].options.method, "POST");
+        assert.equal(
+            Object.prototype.hasOwnProperty.call(
+                requests[0].options,
+                "body",
+            ),
+            false,
+        );
+        assert.equal(result.success, true);
+        assert.equal(result.unlocked, true);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("unlockEmergency keeps 409 reason metadata", async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async () => jsonResponse({
+        ok: false,
+        status: 409,
+        body: {
+            detail: {
+                reason: "POSITION_REMAINING",
+            },
+        },
+    });
+
+    try {
+        await assert.rejects(
+            () => unlockEmergency(),
+            (error) => {
+                assert.ok(error instanceof GovernanceApiError);
+                assert.equal(error.status, 409);
+                assert.equal(error.code, "POSITION_REMAINING");
                 return true;
             },
         );

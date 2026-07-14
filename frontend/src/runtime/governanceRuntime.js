@@ -390,6 +390,68 @@ export async function runEmergencyOrchestrator() {
 
 }
 
+export async function unlockEmergency() {
+
+    let response;
+
+    try {
+        response = await fetch(
+            `${API_BASE}/emergency/unlock`,
+            {
+                method: "POST",
+            }
+        );
+    } catch (error) {
+        throw new GovernanceApiError({
+            status: null,
+            code: "NETWORK_ERROR",
+            message: "Unable to reach the server.",
+            data: {
+                error: error?.message || String(error),
+            },
+        });
+    }
+
+    const data = await readJsonSafely(
+        response
+    );
+
+    if (!response.ok) {
+        throw new GovernanceApiError({
+            status: response.status,
+            code: extractGovernanceErrorCode(
+                data
+            ),
+            message: extractGovernanceErrorMessage(
+                data,
+                "Emergency unlock failed."
+            ),
+            data,
+        });
+    }
+
+    if (
+        !data
+        || data.success !== true
+        || data.unlocked !== true
+    ) {
+        throw new GovernanceApiError({
+            status: response.status,
+            code: extractGovernanceErrorCode(
+                data
+            ),
+            message: extractGovernanceErrorMessage(
+                data,
+                "Emergency unlock response could not be verified."
+            ),
+            data,
+        });
+    }
+
+    return data;
+
+}
+
 /* =================================================
    RISK PROFILE
 ================================================= */
