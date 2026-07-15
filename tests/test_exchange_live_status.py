@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 import unittest
 from unittest.mock import Mock, call, patch
 from urllib.parse import parse_qs, urlparse
@@ -30,6 +31,7 @@ from backend.runtime.governance_runtime import (
     EMERGENCY_RESULT_SUCCESS,
     begin_emergency_operation,
     complete_emergency_operation,
+    emergency_pending_order_block_reason,
     emergency_unlock_block_reason,
     governance_state,
 )
@@ -1112,7 +1114,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "positions": [],
             "realizedPnl": None,
             "unrealizedPnl": None,
-            "last_update": 1_700_000_000.0,
+            "last_update": time.time(),
             "available": True,
         }
         return bot
@@ -1372,6 +1374,227 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
+    def test_stopped_paper_pending_order_state_is_authoritative_safe(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+
+            pending_state = bot.get_authoritative_pending_order_state()
+            status = bot.get_status()
+            response = StatusResponse(**status)
+            emergency_response = bot._stopped_paper_emergency_response(
+                "XRPUSDTM"
+            )
+
+            self.assertFalse(status["pendingOrder"])
+            self.assertFalse(response.pendingOrder)
+            self.assertTrue(pending_state["known"])
+            self.assertFalse(pending_state["pending"])
+            self.assertTrue(pending_state["safe"])
+            self.assertEqual(
+                pending_state["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+            self.assertEqual(
+                pending_state["source"],
+                "stopped_paper_authoritative",
+            )
+            self.assertFalse(pending_state["engine_available"])
+            self.assertIsNone(pending_state["engine_pending_order"])
+            self.assertFalse(pending_state["mismatch"])
+
+            status_state = status["pendingOrderState"]
+            self.assertTrue(status_state["known"])
+            self.assertFalse(status_state["pending"])
+            self.assertTrue(status_state["safe"])
+            self.assertEqual(
+                status_state["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+            self.assertEqual(
+                status_state["source"],
+                "stopped_paper_authoritative",
+            )
+            self.assertFalse(status_state["engineAvailable"])
+            self.assertIsNone(status_state["enginePendingOrder"])
+            self.assertFalse(status_state["mismatch"])
+            self.assertIsNone(
+                emergency_pending_order_block_reason(pending_state)
+            )
+            self.assertTrue(emergency_response["success"])
+            self.assertFalse(emergency_response["state_unknown"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_snapshot_freshness_fail_closed(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_800_000_000.0
+        threshold = 90.0
+
+        def set_last_update(bot, value):
+            if value == "missing":
+                bot.account_snapshot.pop("last_update", None)
+            else:
+                bot.account_snapshot["last_update"] = value
+
+        def assert_status_consistency(status):
+            camel = status["pendingOrderState"]
+            snake = status["pending_order_state"]
+            self.assertEqual(camel["known"], snake["known"])
+            self.assertEqual(camel["pending"], snake["pending"])
+            self.assertEqual(camel["safe"], snake["safe"])
+            self.assertEqual(camel["reason"], snake["reason"])
+            self.assertEqual(camel["source"], snake["source"])
+            self.assertEqual(
+                camel["managerPendingOrder"],
+                snake["manager_pending_order"],
+            )
+            self.assertEqual(
+                camel["engineAvailable"],
+                snake["engine_available"],
+            )
+            self.assertEqual(
+                camel["enginePendingOrder"],
+                snake["engine_pending_order"],
+            )
+            self.assertEqual(camel["mismatch"], snake["mismatch"])
+
+        def assert_fresh(bot):
+            pending_state = bot.get_authoritative_pending_order_state()
+            status = bot.get_status()
+            emergency_response = bot._stopped_paper_emergency_response(
+                "XRPUSDTM"
+            )
+
+            self.assertFalse(status["pendingOrder"])
+            self.assertTrue(pending_state["known"])
+            self.assertFalse(pending_state["pending"])
+            self.assertTrue(pending_state["safe"])
+            self.assertEqual(
+                pending_state["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+            self.assertTrue(status["pendingOrderState"]["known"])
+            self.assertFalse(status["pendingOrderState"]["pending"])
+            self.assertTrue(status["pendingOrderState"]["safe"])
+            self.assertEqual(
+                status["pendingOrderState"]["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+            assert_status_consistency(status)
+            self.assertTrue(emergency_response["success"])
+            self.assertFalse(emergency_response["state_unknown"])
+
+        def assert_fail_closed(bot, reason):
+            pending_state = bot.get_authoritative_pending_order_state()
+            status = bot.get_status()
+            emergency_response = bot._stopped_paper_emergency_response(
+                "XRPUSDTM"
+            )
+
+            self.assertTrue(status["pendingOrder"])
+            self.assertFalse(pending_state["known"])
+            self.assertIsNone(pending_state["pending"])
+            self.assertFalse(pending_state["safe"])
+            self.assertEqual(pending_state["reason"], reason)
+            self.assertEqual(
+                pending_state["source"],
+                "stopped_paper_authoritative",
+            )
+            self.assertFalse(pending_state["engine_available"])
+            self.assertFalse(status["pendingOrderState"]["known"])
+            self.assertIsNone(status["pendingOrderState"]["pending"])
+            self.assertFalse(status["pendingOrderState"]["safe"])
+            self.assertEqual(
+                status["pendingOrderState"]["reason"],
+                reason,
+            )
+            assert_status_consistency(status)
+            self.assertFalse(emergency_response["success"])
+            self.assertTrue(emergency_response["state_unknown"])
+            self.assertEqual(emergency_response["error_code"], reason)
+
+        fresh_cases = [
+            ("fresh-now", now),
+            ("boundary-age-equals-threshold", now - threshold),
+        ]
+
+        fail_cases = [
+            (
+                "stale",
+                now - threshold - 0.001,
+                "SNAPSHOT_STALE",
+            ),
+            (
+                "future",
+                now + 0.001,
+                "SNAPSHOT_TIMESTAMP_FUTURE",
+            ),
+            ("zero", 0, "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("negative", -1, "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("string-number", "123", "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("string-invalid", "invalid", "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("bool-true", True, "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("bool-false", False, "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("dict", {}, "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("list", [], "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("none", None, "SNAPSHOT_TIMESTAMP_MISSING"),
+            ("missing", "missing", "SNAPSHOT_TIMESTAMP_MISSING"),
+            ("nan", float("nan"), "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("inf", float("inf"), "SNAPSHOT_TIMESTAMP_INVALID"),
+            ("neg-inf", float("-inf"), "SNAPSHOT_TIMESTAMP_INVALID"),
+        ]
+
+        invalid_thresholds = [
+            ("threshold-none", None),
+            ("threshold-zero", 0),
+            ("threshold-negative", -1),
+            ("threshold-string", "90"),
+            ("threshold-nan", float("nan")),
+        ]
+
+        with patch(
+            "backend.bot_manager.bot_manager.time.time",
+            return_value=now,
+        ):
+            try:
+                for name, last_update in fresh_cases:
+                    with self.subTest(name=name):
+                        bot = self._stopped_paper_bot()
+                        bot.account_stale_after = threshold
+                        set_last_update(bot, last_update)
+                        assert_fresh(bot)
+
+                for name, last_update, reason in fail_cases:
+                    with self.subTest(name=name):
+                        bot = self._stopped_paper_bot()
+                        bot.account_stale_after = threshold
+                        set_last_update(bot, last_update)
+                        assert_fail_closed(bot, reason)
+
+                for name, stale_after in invalid_thresholds:
+                    with self.subTest(name=name):
+                        bot = self._stopped_paper_bot()
+                        bot.account_stale_after = stale_after
+                        set_last_update(bot, now)
+                        assert_fail_closed(
+                            bot,
+                            "SNAPSHOT_STALE_THRESHOLD_INVALID",
+                        )
+            finally:
+                self._restore_governance(state_before)
+
     def test_emergency_stopped_paper_requires_authoritative_safety(self):
         cases = [
             (
@@ -1396,7 +1619,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 lambda bot: bot.account_snapshot.update({
                     "last_update": None,
                 }),
-                "SNAPSHOT_NOT_SYNCED",
+                "SNAPSHOT_TIMESTAMP_MISSING",
             ),
             (
                 "snapshot-none",
@@ -2143,6 +2366,229 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     )
                 finally:
                     self._restore_governance(state_before)
+
+    def test_pending_order_state_normalizes_manager_and_engine(
+        self,
+    ):
+        cases = [
+            {
+                "name": "manager-false-engine-false",
+                "manager_pending": False,
+                "engine_pending": False,
+                "known": True,
+                "pending": False,
+                "safe": True,
+                "reason": "NO_PENDING_ORDER",
+                "source": "manager_and_engine",
+                "mismatch": False,
+                "legacy": False,
+            },
+            {
+                "name": "manager-true-engine-true",
+                "manager_pending": True,
+                "engine_pending": True,
+                "known": True,
+                "pending": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_REMAINING",
+                "source": "manager_and_engine",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "manager-true-engine-false",
+                "manager_pending": True,
+                "engine_pending": False,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MISMATCH",
+                "source": "manager_and_engine",
+                "mismatch": True,
+                "legacy": True,
+            },
+            {
+                "name": "manager-false-engine-true",
+                "manager_pending": False,
+                "engine_pending": True,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MISMATCH",
+                "source": "manager_and_engine",
+                "mismatch": True,
+                "legacy": True,
+            },
+            {
+                "name": "engine-unavailable",
+                "manager_pending": False,
+                "engine_pending": "engine-none",
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "ENGINE_UNAVAILABLE",
+                "source": "unknown",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "manager-malformed-string",
+                "manager_pending": "false",
+                "engine_pending": False,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+                "source": "unknown",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "manager-malformed-int",
+                "manager_pending": 1,
+                "engine_pending": False,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+                "source": "unknown",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "manager-malformed-dict",
+                "manager_pending": {},
+                "engine_pending": False,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+                "source": "unknown",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "manager-malformed-list",
+                "manager_pending": [],
+                "engine_pending": False,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+                "source": "unknown",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "engine-malformed-string",
+                "manager_pending": False,
+                "engine_pending": "false",
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": "engine",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "engine-malformed-int",
+                "manager_pending": False,
+                "engine_pending": 1,
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": "engine",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "engine-malformed-dict",
+                "manager_pending": False,
+                "engine_pending": {},
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": "engine",
+                "mismatch": False,
+                "legacy": True,
+            },
+            {
+                "name": "engine-malformed-list",
+                "manager_pending": False,
+                "engine_pending": [],
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": "engine",
+                "mismatch": False,
+                "legacy": True,
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(name=case["name"]):
+                bot = BotManager()
+                bot.pending_order = case["manager_pending"]
+                bot.engine = (
+                    None
+                    if case["engine_pending"] == "engine-none"
+                    else self._pending_order_engine(
+                        case["engine_pending"]
+                    )
+                )
+
+                state = bot.get_authoritative_pending_order_state()
+                status = bot.get_status()
+                response = StatusResponse(**status)
+                status_state = status["pendingOrderState"]
+
+                self.assertEqual(state["known"], case["known"])
+                self.assertEqual(state["pending"], case["pending"])
+                self.assertEqual(state["safe"], case["safe"])
+                self.assertEqual(state["reason"], case["reason"])
+                self.assertEqual(state["source"], case["source"])
+                self.assertEqual(state["mismatch"], case["mismatch"])
+                self.assertEqual(
+                    state["pending_order"],
+                    case["legacy"],
+                )
+                self.assertEqual(
+                    status["pendingOrder"],
+                    case["legacy"],
+                )
+                self.assertEqual(
+                    response.pendingOrder,
+                    case["legacy"],
+                )
+                self.assertEqual(
+                    status_state["known"],
+                    case["known"],
+                )
+                self.assertEqual(
+                    status_state["pending"],
+                    case["pending"],
+                )
+                self.assertEqual(
+                    status_state["safe"],
+                    case["safe"],
+                )
+                self.assertEqual(
+                    status_state["reason"],
+                    case["reason"],
+                )
+                self.assertEqual(
+                    status_state["source"],
+                    case["source"],
+                )
+                self.assertEqual(
+                    status_state["mismatch"],
+                    case["mismatch"],
+                )
+                self.assertIn("pending_order_state", status)
 
     def test_emergency_unlock_rejects_pending_order_not_authoritative(
         self,

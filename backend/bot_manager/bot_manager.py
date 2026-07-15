@@ -23,6 +23,7 @@ from backend.runtime.runtime_health_snapshot import (
 )
 from backend import config as backend_config
 import traceback
+import math
 import os
 import threading
 import time
@@ -2541,6 +2542,258 @@ class BotManager:
 
         return "flat"
 
+    @staticmethod
+    def _pending_order_authority_payload(
+        known,
+        pending,
+        safe,
+        reason,
+        source,
+        manager_pending_order=None,
+        engine_available=False,
+        engine_pending_order=None,
+        mismatch=False,
+    ):
+
+        legacy_pending_order = (
+            pending is True
+            if known
+            else True
+        )
+
+        return {
+            "pending_order": legacy_pending_order,
+            "known": known,
+            "pending": pending,
+            "safe": safe,
+            "reason": reason,
+            "source": source,
+            "manager_pending_order": manager_pending_order,
+            "engine_available": engine_available,
+            "engine_pending_order": engine_pending_order,
+            "mismatch": mismatch,
+        }
+
+    @staticmethod
+    def _pending_order_status_state(pending_order_state):
+
+        return {
+            "known": pending_order_state.get("known") is True,
+            "pending": pending_order_state.get("pending"),
+            "safe": pending_order_state.get("safe") is True,
+            "reason": pending_order_state.get("reason"),
+            "source": pending_order_state.get("source", "unknown"),
+            "managerPendingOrder": pending_order_state.get(
+                "manager_pending_order"
+            ),
+            "engineAvailable": pending_order_state.get(
+                "engine_available"
+            ) is True,
+            "enginePendingOrder": pending_order_state.get(
+                "engine_pending_order"
+            ),
+            "mismatch": pending_order_state.get("mismatch") is True,
+        }
+
+    def _stopped_paper_snapshot_timestamp_state(self, snapshot):
+
+        missing = object()
+        last_update = snapshot.get("last_update", missing)
+
+        if last_update is missing or last_update is None:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIMESTAMP_MISSING",
+            }
+
+        if type(last_update) not in {int, float}:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIMESTAMP_INVALID",
+            }
+
+        if (
+            not math.isfinite(last_update)
+            or last_update <= 0
+        ):
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIMESTAMP_INVALID",
+            }
+
+        try:
+            stale_after = self.account_stale_after
+        except Exception:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_STALE_THRESHOLD_INVALID",
+            }
+
+        if type(stale_after) not in {int, float}:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_STALE_THRESHOLD_INVALID",
+            }
+
+        if (
+            not math.isfinite(stale_after)
+            or stale_after <= 0
+        ):
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_STALE_THRESHOLD_INVALID",
+            }
+
+        try:
+            now = time.time()
+        except Exception:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIME_UNAVAILABLE",
+            }
+
+        if (
+            type(now) not in {int, float}
+            or not math.isfinite(now)
+            or now <= 0
+        ):
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIME_UNAVAILABLE",
+            }
+
+        age = now - last_update
+
+        if age < 0:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_TIMESTAMP_FUTURE",
+                "age": age,
+                "threshold": stale_after,
+            }
+
+        if age > stale_after:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_STALE",
+                "age": age,
+                "threshold": stale_after,
+            }
+
+        return {
+            "valid": True,
+            "reason": None,
+            "age": age,
+            "threshold": stale_after,
+        }
+
+    def _stopped_paper_authoritative_safety_state(self):
+
+        state = {
+            "applies": True,
+            "safe": False,
+            "reason": None,
+            "snapshot": None,
+            "snapshot_timestamp_state": None,
+            "position_state": None,
+            "pending_order_state": None,
+        }
+
+        def unknown(reason):
+            result = dict(state)
+            result["reason"] = reason
+            return result
+
+        if not isinstance(self.config, dict):
+            return unknown("MODE_UNKNOWN")
+
+        if "mode" not in self.config:
+            return unknown("MODE_UNKNOWN")
+
+        raw_mode = self.config.get("mode")
+
+        if raw_mode is None:
+            return unknown("MODE_UNKNOWN")
+
+        selected_mode = str(raw_mode).strip().lower()
+
+        if selected_mode == "live":
+            result = unknown("LIVE_MODE")
+            result["applies"] = False
+            return result
+
+        if selected_mode != "paper":
+            return unknown("MODE_UNKNOWN")
+
+        if (
+            self._running
+            or self.lifecycle_state != "STOPPED"
+        ):
+            return unknown("BOT_NOT_STOPPED")
+
+        if governance_state.get("execution_enabled") is not False:
+            return unknown("EXECUTION_STATE_UNKNOWN")
+
+        try:
+            snapshot = self._capture_account_snapshot()
+        except Exception:
+            return unknown("SNAPSHOT_UNAVAILABLE")
+
+        if not isinstance(snapshot, dict):
+            return unknown("SNAPSHOT_UNAVAILABLE")
+
+        if snapshot.get("available") is not True:
+            result = unknown("SNAPSHOT_NOT_SYNCED")
+            result["snapshot"] = snapshot
+            return result
+
+        timestamp_state = (
+            self._stopped_paper_snapshot_timestamp_state(snapshot)
+        )
+
+        if timestamp_state.get("valid") is not True:
+            result = unknown(
+                timestamp_state.get(
+                    "reason",
+                    "SNAPSHOT_TIMESTAMP_INVALID",
+                )
+            )
+            result["snapshot"] = snapshot
+            result["snapshot_timestamp_state"] = timestamp_state
+            return result
+
+        position_state = self._stopped_paper_position_state(snapshot)
+        pending_order_state = self._stopped_paper_pending_order_state()
+
+        result = dict(state)
+        result["snapshot"] = snapshot
+        result["snapshot_timestamp_state"] = timestamp_state
+        result["position_state"] = position_state
+        result["pending_order_state"] = pending_order_state
+
+        if position_state == "unknown":
+            result["reason"] = "POSITION_STATE_UNKNOWN"
+            return result
+
+        if pending_order_state == "unknown":
+            result["reason"] = "PENDING_ORDER_UNKNOWN"
+            return result
+
+        result["position_remaining"] = position_state == "remaining"
+        result["pending_order"] = pending_order_state == "remaining"
+
+        if result["position_remaining"]:
+            result["reason"] = "POSITION_REMAINING"
+            return result
+
+        if result["pending_order"]:
+            result["reason"] = "PENDING_ORDER_REMAINING"
+            return result
+
+        result["safe"] = True
+        result["reason"] = "STOPPED_PAPER_AUTHORITATIVE_SAFE"
+        return result
+
     def get_authoritative_pending_order_state(self):
 
         missing = object()
@@ -2552,43 +2805,117 @@ class BotManager:
                 missing,
             )
         except Exception:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_MANAGER_UNKNOWN",
+                source="unknown",
+            )
 
         if manager_pending_order is missing:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_MANAGER_UNKNOWN",
+                source="unknown",
+            )
 
         if type(manager_pending_order) is not bool:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_MANAGER_UNKNOWN",
+                source="unknown",
+            )
 
         try:
             engine = self.engine
         except Exception:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "ENGINE_UNAVAILABLE",
-                "manager_pending_order": manager_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="ENGINE_UNAVAILABLE",
+                source="unknown",
+                manager_pending_order=manager_pending_order,
+            )
 
         if engine is None:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "ENGINE_UNAVAILABLE",
-                "manager_pending_order": manager_pending_order,
-            }
+            stopped_state = (
+                self._stopped_paper_authoritative_safety_state()
+            )
+            timestamp_state = stopped_state.get(
+                "snapshot_timestamp_state"
+            )
+
+            if stopped_state.get("safe") is True:
+                return self._pending_order_authority_payload(
+                    known=True,
+                    pending=False,
+                    safe=True,
+                    reason="STOPPED_PAPER_AUTHORITATIVE_SAFE",
+                    source="stopped_paper_authoritative",
+                    manager_pending_order=manager_pending_order,
+                    engine_available=False,
+                )
+
+            if (
+                isinstance(timestamp_state, dict)
+                and timestamp_state.get("valid") is False
+            ):
+                return self._pending_order_authority_payload(
+                    known=False,
+                    pending=None,
+                    safe=False,
+                    reason=(
+                        timestamp_state.get("reason")
+                        or "SNAPSHOT_TIMESTAMP_INVALID"
+                    ),
+                    source="stopped_paper_authoritative",
+                    manager_pending_order=manager_pending_order,
+                    engine_available=False,
+                )
+
+            if (
+                stopped_state.get("pending_order_state")
+                == "remaining"
+            ):
+                return self._pending_order_authority_payload(
+                    known=True,
+                    pending=True,
+                    safe=False,
+                    reason="PENDING_ORDER_REMAINING",
+                    source="stopped_paper_authoritative",
+                    manager_pending_order=manager_pending_order,
+                    engine_available=False,
+                )
+
+            if (
+                stopped_state.get("pending_order_state")
+                == "unknown"
+            ):
+                return self._pending_order_authority_payload(
+                    known=False,
+                    pending=None,
+                    safe=False,
+                    reason="PENDING_ORDER_UNKNOWN",
+                    source="stopped_paper_authoritative",
+                    manager_pending_order=manager_pending_order,
+                    engine_available=False,
+                )
+
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="ENGINE_UNAVAILABLE",
+                source="unknown",
+                manager_pending_order=manager_pending_order,
+                engine_available=False,
+            )
 
         try:
             engine_pending_order = getattr(
@@ -2597,132 +2924,97 @@ class BotManager:
                 missing,
             )
         except Exception:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_READ_FAILED",
-                "manager_pending_order": manager_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_READ_FAILED",
+                source="engine",
+                manager_pending_order=manager_pending_order,
+                engine_available=True,
+            )
 
         if engine_pending_order is missing:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_UNKNOWN",
-                "manager_pending_order": manager_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_UNKNOWN",
+                source="engine",
+                manager_pending_order=manager_pending_order,
+                engine_available=True,
+            )
 
         if type(engine_pending_order) is not bool:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_UNKNOWN",
-                "manager_pending_order": manager_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_UNKNOWN",
+                source="engine",
+                manager_pending_order=manager_pending_order,
+                engine_available=True,
+                engine_pending_order=None,
+            )
 
         if engine_pending_order != manager_pending_order:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_MISMATCH",
-                "manager_pending_order": manager_pending_order,
-                "engine_pending_order": engine_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_MISMATCH",
+                source="manager_and_engine",
+                manager_pending_order=manager_pending_order,
+                engine_available=True,
+                engine_pending_order=engine_pending_order,
+                mismatch=True,
+            )
 
         if engine_pending_order is True:
-            return {
-                "pending_order": True,
-                "safe": False,
-                "reason": "PENDING_ORDER_REMAINING",
-                "manager_pending_order": manager_pending_order,
-                "engine_pending_order": engine_pending_order,
-            }
+            return self._pending_order_authority_payload(
+                known=True,
+                pending=True,
+                safe=False,
+                reason="PENDING_ORDER_REMAINING",
+                source="manager_and_engine",
+                manager_pending_order=manager_pending_order,
+                engine_available=True,
+                engine_pending_order=engine_pending_order,
+            )
 
-        return {
-            "pending_order": False,
-            "safe": True,
-            "reason": None,
-            "manager_pending_order": manager_pending_order,
-            "engine_pending_order": engine_pending_order,
-        }
+        return self._pending_order_authority_payload(
+            known=True,
+            pending=False,
+            safe=True,
+            reason="NO_PENDING_ORDER",
+            source="manager_and_engine",
+            manager_pending_order=manager_pending_order,
+            engine_available=True,
+            engine_pending_order=engine_pending_order,
+        )
 
     def _stopped_paper_emergency_response(self, symbol):
 
-        if not isinstance(self.config, dict):
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "MODE_UNKNOWN",
-                execution_path=None,
-            )
+        stopped_state = (
+            self._stopped_paper_authoritative_safety_state()
+        )
 
-        if "mode" not in self.config:
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "MODE_UNKNOWN",
-                execution_path=None,
-            )
-
-        raw_mode = self.config.get("mode")
-
-        if raw_mode is None:
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "MODE_UNKNOWN",
-                execution_path=None,
-            )
-
-        selected_mode = str(raw_mode).strip().lower()
-
-        if selected_mode == "live":
+        if stopped_state.get("applies") is False:
             return None
 
-        if selected_mode != "paper":
+        if stopped_state.get("position_state") is None:
             return self._stopped_paper_unknown_response(
                 symbol,
-                "MODE_UNKNOWN",
-                execution_path=None,
+                stopped_state.get("reason", "STATE_UNKNOWN"),
+                execution_path=(
+                    None
+                    if stopped_state.get("reason") == "MODE_UNKNOWN"
+                    else "paper"
+                ),
             )
 
-        if (
-            self._running
-            or self.lifecycle_state != "STOPPED"
-        ):
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "BOT_NOT_STOPPED",
-            )
-
-        if governance_state.get("execution_enabled") is not False:
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "EXECUTION_STATE_UNKNOWN",
-            )
-
-        try:
-            snapshot = self._capture_account_snapshot()
-        except Exception:
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "SNAPSHOT_UNAVAILABLE",
-            )
-
-        if not isinstance(snapshot, dict):
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "SNAPSHOT_UNAVAILABLE",
-            )
-
-        if (
-            snapshot.get("available") is not True
-            or snapshot.get("last_update") is None
-        ):
-            return self._stopped_paper_unknown_response(
-                symbol,
-                "SNAPSHOT_NOT_SYNCED",
-            )
-
-        position_state = self._stopped_paper_position_state(snapshot)
-        pending_order_state = self._stopped_paper_pending_order_state()
+        position_state = stopped_state.get("position_state")
+        pending_order_state = stopped_state.get("pending_order_state")
 
         if position_state == "unknown":
             return self._stopped_paper_unknown_response(
@@ -3509,6 +3801,9 @@ class BotManager:
         pending_order_state = (
             self.get_authoritative_pending_order_state()
         )
+        pending_order_status_state = (
+            self._pending_order_status_state(pending_order_state)
+        )
         pending_order = (
             pending_order_state.get("pending_order") is True
         )
@@ -3881,6 +4176,10 @@ class BotManager:
             "actual_position": actual_position,
 
             "pendingOrder": pending_order,
+
+            "pendingOrderState": pending_order_status_state,
+
+            "pending_order_state": deepcopy(pending_order_state),
 
             "signal": self.last_signal,
 

@@ -134,6 +134,10 @@ class StatusResponse(BaseModel):
 
     pendingOrder: bool
 
+    pendingOrderState: dict = Field(default_factory=dict)
+
+    pending_order_state: dict = Field(default_factory=dict)
+
     balance: float
 
     equity: float
