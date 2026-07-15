@@ -305,6 +305,10 @@ useEffect(() => {
                             statusEmergency
                         }
 
+                        pendingOrder={
+                            botStatus?.pendingOrder
+                        }
+
                         onStatusRefresh={
                             refreshBotStatus
                         }

@@ -1,33 +1,18 @@
 import { expect, test } from "@playwright/test";
 
-const SAFE_START_PAYLOAD = {
-    symbol: "XRPUSDT",
-    exchange: "kucoin",
-    risk_percent: 1,
-    position_size: 100,
-    max_drawdown_pct: 5,
-    sl_percent: 1,
-    tp_percent: 1,
-    leverage: 5,
-    timeframe: "1m",
-    dry_run: true,
-    mode: "paper",
+import {
+    createEmergencyMock,
+    ENDPOINTS,
+} from "./support/emergencyMock.js";
+
+const waitForDashboard = async (page) => {
+    await page.goto("/");
+    await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
 };
 
-const getStatus = async (request) => {
-    const response = await request.get("/api/bot/status");
-    expect(response.ok()).toBeTruthy();
-    return response.json();
-};
-
-const waitForStatus = async (request, read, expected) => {
-    await expect.poll(async () => {
-        const status = await getStatus(request);
-        return read(status);
-    }, {
-        timeout: 45_000,
-    }).toEqual(expected);
-};
+const emergencyStateLabel = (page) => (
+    page.locator(".operation-emergency-status__state")
+);
 
 const emergencyTimelineFor = (status, operationId) => (
     status.runtime_health?.timeline ?? []
@@ -36,131 +21,112 @@ const emergencyTimelineFor = (status, operationId) => (
     && event.operationId === operationId
 ));
 
-const ensureReady = async (request) => {
-    await request.post("/api/bot/stop");
-
-    let status = await getStatus(request);
-    if (status.emergency?.state === "LOCKED") {
-        const unlockResponse = await request.post(
-            "/api/governance/emergency/unlock",
-        );
-        expect(unlockResponse.ok()).toBeTruthy();
-    }
-
-    await waitForStatus(
-        request,
-        (current) => ({
-            bot: current.status,
-            loopEnabled: current.loopEnabled,
-            emergencyState: current.emergency?.state,
-        }),
-        {
-            bot: "STOPPED",
-            loopEnabled: false,
-            emergencyState: "READY",
-        },
-    );
+const expectNoUnsafeRequests = (mock) => {
+    expect(mock.getExternalRequests()).toEqual([]);
+    expect(mock.getUnexpectedApiRequests()).toEqual([]);
 };
 
-test.describe("Emergency Stop and Unlock E2E", () => {
-    test.beforeEach(async ({ request }) => {
-        await ensureReady(request);
+const clickEmergencyConfirm = async (page) => {
+    await page.getByRole(
+        "button",
+        {
+            name: /EMERGENCY STOP/,
+        },
+    ).click();
+    const dialog = page.getByRole(
+        "dialog",
+        {
+            name: "Confirm emergency stop",
+        },
+    );
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole(
+        "button",
+        {
+            name: "CONFIRM EMERGENCY",
+        },
+    ).click();
+};
+
+const openRetryDialog = async (page) => {
+    await page.getByRole(
+        "button",
+        {
+            name: "安全状態を再確認",
+        },
+    ).click();
+    const dialog = page.getByRole(
+        "dialog",
+        {
+            name: "安全状態を再確認しますか？",
+        },
+    );
+    await expect(dialog).toBeVisible();
+    return dialog;
+};
+
+const openUnlockDialog = async (page) => {
+    await page.getByRole(
+        "button",
+        {
+            name: "緊急状態を解除",
+        },
+    ).click();
+    const dialog = page.getByRole(
+        "dialog",
+        {
+            name: "緊急状態を解除しますか？",
+        },
+    );
+    await expect(dialog).toBeVisible();
+    return dialog;
+};
+
+test.describe.configure({
+    mode: "serial",
+});
+
+test.describe("Emergency Stop local-only E2E", () => {
+    let mock;
+
+    test.beforeEach(async ({ page }) => {
+        mock = createEmergencyMock();
+        await mock.install(page);
     });
 
-    test.afterEach(async ({ request }) => {
-        await request.post("/api/bot/stop");
-        const status = await getStatus(request);
-        if (status.emergency?.state === "LOCKED") {
-            await request.post("/api/governance/emergency/unlock");
-        }
+    test.afterEach(async () => {
+        expectNoUnsafeRequests(mock);
     });
 
-    test("locks after emergency stop and unlocks without restarting execution", async ({
+    test("stopped paper emergency locks safely, records SUCCESS, and unlocks to READY", async ({
         page,
-        request,
     }) => {
-        const initial = await getStatus(request);
-        expect(initial.selectedMode).toBe("PAPER");
-        expect(initial.dryRun).toBe(true);
-        expect(initial.realOrderAllowed).toBe(false);
-        expect(initial.executionMode).toBe("SIMULATION");
-        expect(initial.status).toBe("STOPPED");
-        expect(initial.loopEnabled).toBe(false);
-        expect(initial.autoTradeEnabled).toBe(false);
-        expect(initial.executionEnabled).toBe(false);
-        expect(initial.emergency).toMatchObject({
-            active: false,
-            locked: false,
-            state: "READY",
-        });
-        expect(initial.runtime_health?.timeline ?? []).toHaveLength(0);
+        await waitForDashboard(page);
 
-        await page.goto("/");
-        await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        await expect(page.getByTestId("bot-state")).toHaveText("STOPPED");
         await expect(
-            page.locator(".operation-emergency-status__state"),
-        ).toHaveText("READY");
-        await expect(page.getByText("NO EVENTS", { exact: true })).toBeVisible();
+            page.getByRole("switch", { name: "Toggle trading loop" }),
+        ).toHaveAttribute("aria-checked", "false");
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
-        ).toHaveCount(0);
-
-        const startResponse = await request.post(
-            "/api/bot/start",
-            {
-                data: SAFE_START_PAYLOAD,
-            },
+            page.getByRole("switch", { name: "Toggle automatic trading" }),
+        ).toHaveAttribute("aria-checked", "false");
+        await expect(page.getByTestId("execution-mode")).toHaveText(
+            "SIMULATION",
         );
-        expect(startResponse.ok()).toBeTruthy();
-
-        await waitForStatus(
-            request,
-            (current) => ({
-                bot: current.status,
-                loopEnabled: current.loopEnabled,
-                emergencyState: current.emergency?.state,
-                realOrderAllowed: current.realOrderAllowed,
-            }),
-            {
-                bot: "RUNNING",
-                loopEnabled: true,
-                emergencyState: "READY",
-                realOrderAllowed: false,
-            },
+        await expect(page.getByTestId("selected-mode")).toHaveText("PAPER");
+        await expect(page.getByTestId("real-order-allowed")).toHaveText(
+            "false",
         );
-
-        await page.reload();
-        await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
-        const emergencyButton = page.getByRole(
-            "button",
-            {
-                name: /EMERGENCY STOP/,
-            },
-        );
-        await expect(emergencyButton).toBeEnabled();
-
-        await emergencyButton.click();
-        const emergencyDialog = page.getByRole(
-            "dialog",
-            {
-                name: "Confirm emergency stop",
-            },
-        );
-        await expect(emergencyDialog).toBeVisible();
 
         const emergencyResponsePromise = page.waitForResponse((response) => (
-            response.url().endsWith("/api/governance/emergency-orchestrate")
+            response.url().endsWith(ENDPOINTS.emergency)
             && response.request().method() === "POST"
         ));
-        await emergencyDialog.getByRole(
-            "button",
-            {
-                name: "CONFIRM EMERGENCY",
-            },
-        ).click();
-
+        await clickEmergencyConfirm(page);
         const emergencyResponse = await emergencyResponsePromise;
         expect(emergencyResponse.ok()).toBeTruthy();
+
         const emergencyResult = await emergencyResponse.json();
         expect(emergencyResult).toMatchObject({
             success: true,
@@ -168,212 +134,470 @@ test.describe("Emergency Stop and Unlock E2E", () => {
             partial: false,
             state_unknown: false,
             position_remaining: false,
-            path: "paper",
+            emergency_locked: true,
+            auto_trade_disabled: true,
             retryable: false,
-        });
-
-        await waitForStatus(
-            request,
-            (current) => ({
-                bot: current.status,
-                loopEnabled: current.loopEnabled,
-                loopState: current.loopState,
-                autoTradeEnabled: current.autoTradeEnabled,
-                executionEnabled: current.executionEnabled,
-                emergencyActive: current.emergency?.active,
-                emergencyLocked: current.emergency?.locked,
-                emergencyState: current.emergency?.state,
-            }),
-            {
-                bot: "STOPPED",
-                loopEnabled: false,
-                loopState: "STOPPED",
-                autoTradeEnabled: false,
-                executionEnabled: false,
-                emergencyActive: true,
-                emergencyLocked: true,
-                emergencyState: "LOCKED",
-            },
-        );
-
-        let lockedStatus = await getStatus(request);
-        const operationId = lockedStatus.emergency.lastResult.operationId;
-        expect(lockedStatus.emergency.lastResult).toMatchObject({
-            state: "LOCKED",
-            result: "SUCCESS",
             path: "paper",
-            positionRemaining: false,
-            stateUnknown: false,
-            retryable: false,
         });
+        expect(emergencyResult.cancel.status).toBe("NOT_REQUIRED");
+        expect(emergencyResult.flatten.status).toBe("NOT_REQUIRED");
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(1);
 
-        const guardResponse = await request.post(
-            "/api/governance/execution",
-            {
-                data: {
-                    enabled: true,
-                },
-            },
-        );
-        expect(guardResponse.status()).toBe(409);
-        const guardBody = await guardResponse.json();
-        expect(guardBody.detail.reason).toBe(
-            "AUTO_TRADE_BLOCKED_BY_EMERGENCY_LOCK",
-        );
-
-        await page.reload();
-        await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
-        await expect(
-            page.locator(".operation-emergency-status__state"),
-        ).toHaveText("STOPPED SAFELY");
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
         await expect(page.getByText("BOT STOPPED")).toBeVisible();
         await expect(page.getByText("EXECUTION DISABLED")).toBeVisible();
+        await expect(page.getByText("OPEN ORDERS NONE")).toBeVisible();
         await expect(page.getByText("Execution path: PAPER")).toBeVisible();
-        await expect(page.getByText("EMERGENCY STOPPED SAFELY")).toBeVisible();
         await expect(
-            page.getByRole("switch", { name: "Toggle trading loop" }),
-        ).toBeDisabled();
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toHaveCount(0);
         await expect(
-            page.getByRole("switch", { name: "Toggle automatic trading" }),
-        ).toBeDisabled();
-        await expect(emergencyButton).toBeDisabled();
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toBeEnabled();
 
-        const unlockButton = page.getByRole(
-            "button",
-            {
-                name: "緊急状態を解除",
-            },
+        const lockedStatus = mock.getStatus();
+        const operationId = lockedStatus.emergency.lastResult.operationId;
+        expect(lockedStatus.emergency).toMatchObject({
+            active: true,
+            locked: true,
+            state: "LOCKED",
+        });
+        expect(lockedStatus.emergency.lastResult).toMatchObject({
+            operationId,
+            result: "SUCCESS",
+            success: true,
+            completed: true,
+            stateUnknown: false,
+            positionRemaining: false,
+            path: "paper",
+        });
+        expect(lockedStatus.emergency.lastResult.cancelResult.status).toBe(
+            "NOT_REQUIRED",
         );
-        await expect(unlockButton).toBeEnabled();
-        await unlockButton.click();
-        const unlockDialog = page.getByRole(
-            "dialog",
-            {
-                name: "緊急状態を解除しますか？",
-            },
+        expect(lockedStatus.emergency.lastResult.flattenResult.status).toBe(
+            "NOT_REQUIRED",
         );
-        await expect(unlockDialog).toHaveAttribute("aria-modal", "true");
+
+        const unlockDialog = await openUnlockDialog(page);
         await expect(unlockDialog).toContainText(
             "解除後もBOTは起動しません。",
         );
         await expect(unlockDialog).toContainText(
             "LOOPとAUTO TRADEもOFFのままです。",
         );
-        await unlockDialog.getByRole(
-            "button",
-            {
-                name: "キャンセル",
-            },
-        ).click();
 
-        lockedStatus = await getStatus(request);
-        expect(lockedStatus.emergency).toMatchObject({
-            active: true,
-            locked: true,
-            state: "LOCKED",
-        });
-
-        await unlockButton.click();
-        const unlockConfirmDialog = page.getByRole(
-            "dialog",
-            {
-                name: "緊急状態を解除しますか？",
-            },
-        );
         const unlockResponsePromise = page.waitForResponse((response) => (
-            response.url().endsWith("/api/governance/emergency/unlock")
+            response.url().endsWith(ENDPOINTS.unlock)
             && response.request().method() === "POST"
         ));
-        await unlockConfirmDialog.getByRole(
+        await unlockDialog.getByRole(
             "button",
             {
                 name: "緊急状態を解除",
             },
         ).click();
-
         const unlockResponse = await unlockResponsePromise;
         expect(unlockResponse.ok()).toBeTruthy();
-        const unlockResult = await unlockResponse.json();
-        expect(unlockResult).toMatchObject({
+        expect(await unlockResponse.json()).toMatchObject({
             success: true,
             unlocked: true,
             emergency_stop: false,
             emergency_state: "READY",
             execution_enabled: false,
         });
+        expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(1);
 
-        await waitForStatus(
-            request,
-            (current) => ({
-                bot: current.status,
-                loopEnabled: current.loopEnabled,
-                loopState: current.loopState,
-                autoTradeEnabled: current.autoTradeEnabled,
-                executionEnabled: current.executionEnabled,
-                emergencyActive: current.emergency?.active,
-                emergencyLocked: current.emergency?.locked,
-                emergencyState: current.emergency?.state,
-                operationId: current.emergency?.lastResult?.operationId,
-            }),
-            {
-                bot: "STOPPED",
-                loopEnabled: false,
-                loopState: "STOPPED",
-                autoTradeEnabled: false,
-                executionEnabled: false,
-                emergencyActive: false,
-                emergencyLocked: false,
-                emergencyState: "READY",
-                operationId,
-            },
-        );
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        await expect(page.getByTestId("bot-state")).toHaveText("STOPPED");
+        await expect(
+            page.getByRole("switch", { name: "Toggle trading loop" }),
+        ).toHaveAttribute("aria-checked", "false");
+        await expect(
+            page.getByRole("switch", { name: "Toggle automatic trading" }),
+        ).toHaveAttribute("aria-checked", "false");
 
-        const finalStatus = await getStatus(request);
-        const emergencyEvents = emergencyTimelineFor(
-            finalStatus,
-            operationId,
-        );
-        expect(emergencyEvents.map((event) => event.event)).toEqual([
+        const finalStatus = mock.getStatus();
+        expect(finalStatus.executionEnabled).toBe(false);
+        expect(finalStatus.loopEnabled).toBe(false);
+        expect(finalStatus.autoTradeEnabled).toBe(false);
+        expect(finalStatus.status).toBe("STOPPED");
+        expect(finalStatus.emergency).toMatchObject({
+            active: false,
+            locked: false,
+            state: "READY",
+        });
+        expect(finalStatus.emergency.lastResult.operationId).toBe(operationId);
+        expect(
+            emergencyTimelineFor(finalStatus, operationId)
+                .map((event) => event.event),
+        ).toEqual([
             "EMERGENCY_STARTED",
             "EMERGENCY_COMPLETED",
             "EMERGENCY_UNLOCKED",
         ]);
-        expect(
-            emergencyEvents.filter((event) => event.event === "EMERGENCY_STARTED"),
-        ).toHaveLength(1);
-        expect(
-            emergencyEvents.filter((event) => event.event === "EMERGENCY_COMPLETED"),
-        ).toHaveLength(1);
-        expect(
-            emergencyEvents.filter((event) => event.event === "EMERGENCY_UNLOCKED"),
-        ).toHaveLength(1);
-        expect(
-            emergencyEvents.some((event) => event.event === "EMERGENCY_ACTION_REQUIRED"),
-        ).toBe(false);
+    });
 
-        await page.reload();
-        await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
-        await expect(
-            page.locator(".operation-emergency-status__state"),
-        ).toHaveText("READY");
-        await expect(page.getByText("EMERGENCY UNLOCKED")).toBeVisible();
-        const loopSwitch = page.getByRole(
-            "switch",
+    test("emergency confirm cancel sends no API and keeps READY", async ({
+        page,
+    }) => {
+        await waitForDashboard(page);
+
+        await page.getByRole(
+            "button",
             {
-                name: "Toggle trading loop",
+                name: /EMERGENCY STOP/,
+            },
+        ).click();
+        const dialog = page.getByRole(
+            "dialog",
+            {
+                name: "Confirm emergency stop",
             },
         );
-        const autoTradeSwitch = page.getByRole(
-            "switch",
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole(
+            "button",
             {
-                name: "Toggle automatic trading",
+                name: "CANCEL",
             },
-        );
-        await expect(loopSwitch).toBeEnabled();
-        await expect(loopSwitch).toHaveAttribute("aria-checked", "false");
-        await expect(autoTradeSwitch).toHaveAttribute("aria-checked", "false");
+        ).click();
+
+        await expect(dialog).toHaveCount(0);
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(0);
+        expect(mock.getStatus().runtime_health.timeline).toEqual([]);
+    });
+
+    test("PROCESSING state is displayed when backend status is processing", async ({
+        page,
+    }) => {
+        mock.seedProcessing();
+
+        await waitForDashboard(page);
+
+        await expect(emergencyStateLabel(page)).toHaveText("PROCESSING");
+        await expect(page.getByText("PROCESSING").first()).toBeVisible();
         await expect(
             page.getByRole("button", { name: /EMERGENCY STOP/ }),
+        ).toBeDisabled();
+    });
+
+    test("ACTION_REQUIRED shows retry, hides unlock, and blocks emergency rerun", async ({
+        page,
+    }) => {
+        mock.seedActionRequired({
+            stateUnknown: true,
+            positionRemaining: false,
+        });
+
+        await waitForDashboard(page);
+
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        await expect(page.getByText("STATE UNKNOWN")).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
         ).toBeEnabled();
+        await expect(
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: /EMERGENCY STOP/ }),
+        ).toBeDisabled();
+    });
+
+    test("retry confirm cancel keeps ACTION_REQUIRED and operation id", async ({
+        page,
+    }) => {
+        const operationId = mock.seedActionRequired();
+
+        await waitForDashboard(page);
+
+        const dialog = await openRetryDialog(page);
+        await expect(dialog).toContainText(
+            "注文とポジション状態を再確認し、",
+        );
+        await expect(dialog).toContainText(
+            "必要なら緊急停止処理を再実行します。",
+        );
+        await expect(dialog).toContainText("BOT");
+        await expect(dialog).toContainText("LOOP");
+        await expect(dialog).toContainText("AUTO TRADE");
+        await expect(dialog).toContainText("はOFFのままです。");
+        await dialog.getByRole(
+            "button",
+            {
+                name: "キャンセル",
+            },
+        ).click();
+
+        await expect(dialog).toHaveCount(0);
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        expect(mock.getCallCount(ENDPOINTS.retry)).toBe(0);
+        expect(mock.getStatus().emergency.lastResult.operationId).toBe(
+            operationId,
+        );
+    });
+
+    test("retry success creates a new operation and converges to LOCKED SUCCESS", async ({
+        page,
+    }) => {
+        const firstOperationId = mock.seedActionRequired();
+        mock.setRouteDelay(ENDPOINTS.retry, 200);
+
+        await waitForDashboard(page);
+        const dialog = await openRetryDialog(page);
+
+        const retryResponsePromise = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.retry)
+            && response.request().method() === "POST"
+        ));
+        await dialog.getByRole(
+            "button",
+            {
+                name: "再確認",
+            },
+        ).click();
+        await expect(
+            dialog.getByRole("button", { name: "再確認" }),
+        ).toBeDisabled();
+        const retryResponse = await retryResponsePromise;
+        expect(retryResponse.ok()).toBeTruthy();
+        expect(await retryResponse.json()).toMatchObject({
+            success: true,
+            completed: true,
+            partial: false,
+            state_unknown: false,
+            position_remaining: false,
+            path: "paper",
+        });
+
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        await expect(
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toBeEnabled();
+        expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
+
+        const lockedStatus = mock.getStatus();
+        const retryOperationId = lockedStatus.emergency.lastResult.operationId;
+        expect(retryOperationId).not.toBe(firstOperationId);
+        expect(lockedStatus.emergency.lastResult).toMatchObject({
+            operationId: retryOperationId,
+            result: "SUCCESS",
+            success: true,
+            completed: true,
+            stateUnknown: false,
+            positionRemaining: false,
+        });
+        expect(
+            emergencyTimelineFor(lockedStatus, firstOperationId)
+                .map((event) => event.event),
+        ).toEqual([
+            "EMERGENCY_STARTED",
+            "EMERGENCY_ACTION_REQUIRED",
+        ]);
+        expect(
+            emergencyTimelineFor(lockedStatus, retryOperationId)
+                .map((event) => event.event),
+        ).toEqual([
+            "EMERGENCY_STARTED",
+            "EMERGENCY_COMPLETED",
+        ]);
+    });
+
+    test("retry failure stays ACTION_REQUIRED and never shows unlock", async ({
+        page,
+    }) => {
+        mock.seedActionRequired();
+        mock.setNextRetryOutcome("failure");
+
+        await waitForDashboard(page);
+        const dialog = await openRetryDialog(page);
+
+        const retryResponsePromise = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.retry)
+            && response.request().method() === "POST"
+        ));
+        await dialog.getByRole(
+            "button",
+            {
+                name: "再確認",
+            },
+        ).click();
+        const retryResponse = await retryResponsePromise;
+        expect(retryResponse.ok()).toBeTruthy();
+        expect(await retryResponse.json()).toMatchObject({
+            success: false,
+            completed: false,
+            partial: true,
+            state_unknown: true,
+            emergency_locked: true,
+            retryable: true,
+        });
+
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toHaveCount(0);
+        expect(mock.getStatus().emergency.state).toBe("ACTION_REQUIRED");
+    });
+
+    test("HTTP409 is not treated as success and converges to backend state", async ({
+        page,
+    }) => {
+        mock.seedLockedSuccess();
+        mock.queueHttpError(
+            ENDPOINTS.unlock,
+            409,
+            "POSITION_REMAINING",
+        );
+
+        await waitForDashboard(page);
+        const dialog = await openUnlockDialog(page);
+        await dialog.getByRole(
+            "button",
+            {
+                name: "緊急状態を解除",
+            },
+        ).click();
+
+        await expect(page.getByTestId("emergency-unlock-error")).toContainText(
+            "POSITION_REMAINING",
+        );
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(1);
+        expect(mock.getStatus().emergency).toMatchObject({
+            locked: true,
+            state: "LOCKED",
+        });
+    });
+
+    test("network errors do not fake emergency, retry, or unlock success", async ({
+        page,
+    }) => {
+        mock.queueNetworkError(ENDPOINTS.emergency);
+        await waitForDashboard(page);
+        await clickEmergencyConfirm(page);
+
+        await expect(page.getByTestId("emergency-error")).toContainText(
+            "NETWORK_ERROR",
+        );
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        expect(mock.getStatus().emergency.state).toBe("READY");
+
+        mock.reset();
+        mock.seedActionRequired();
+        mock.queueNetworkError(ENDPOINTS.retry);
+        await page.reload();
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        let dialog = await openRetryDialog(page);
+        await dialog.getByRole(
+            "button",
+            {
+                name: "再確認",
+            },
+        ).click();
+
+        await expect(page.getByTestId("emergency-retry-error")).toContainText(
+            "NETWORK_ERROR",
+        );
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toBeEnabled();
+        expect(mock.getStatus().emergency.state).toBe("ACTION_REQUIRED");
+
+        mock.reset();
+        mock.seedLockedSuccess();
+        mock.queueNetworkError(ENDPOINTS.unlock);
+        await page.reload();
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        dialog = await openUnlockDialog(page);
+        await dialog.getByRole(
+            "button",
+            {
+                name: "緊急状態を解除",
+            },
+        ).click();
+
+        await expect(page.getByTestId("emergency-unlock-error")).toContainText(
+            "NETWORK_ERROR",
+        );
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        expect(mock.getStatus().emergency.state).toBe("LOCKED");
+    });
+
+    test("fast double submit is blocked for emergency, retry, and unlock", async ({
+        page,
+    }) => {
+        mock.setRouteDelay(ENDPOINTS.emergency, 200);
+        await waitForDashboard(page);
+        await page.getByRole(
+            "button",
+            {
+                name: /EMERGENCY STOP/,
+            },
+        ).click();
+        let dialog = page.getByRole(
+            "dialog",
+            {
+                name: "Confirm emergency stop",
+            },
+        );
+        let confirmButton = dialog.getByRole(
+            "button",
+            {
+                name: "CONFIRM EMERGENCY",
+            },
+        );
+        await confirmButton.evaluate((button) => {
+            button.click();
+            button.click();
+        });
+        await expect(confirmButton).toBeDisabled();
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(1);
+
+        mock.reset();
+        mock.seedActionRequired();
+        mock.setRouteDelay(ENDPOINTS.retry, 200);
+        await page.reload();
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        dialog = await openRetryDialog(page);
+        confirmButton = dialog.getByRole(
+            "button",
+            {
+                name: "再確認",
+            },
+        );
+        await confirmButton.evaluate((button) => {
+            button.click();
+            button.click();
+        });
+        await expect(confirmButton).toBeDisabled();
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
+
+        mock.reset();
+        mock.seedLockedSuccess();
+        mock.setRouteDelay(ENDPOINTS.unlock, 200);
+        await page.reload();
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        dialog = await openUnlockDialog(page);
+        confirmButton = dialog.getByRole(
+            "button",
+            {
+                name: "緊急状態を解除",
+            },
+        );
+        await confirmButton.evaluate((button) => {
+            button.click();
+            button.click();
+        });
+        await expect(confirmButton).toBeDisabled();
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(1);
     });
 });

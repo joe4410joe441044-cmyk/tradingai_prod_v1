@@ -2424,7 +2424,21 @@ replace the legacy scaled three-column layout.
     cursor: pointer;
 }
 
-.left-column .operation-emergency-unlock:disabled {
+.left-column .operation-emergency-retry {
+    min-height: 36px;
+    border: 1px solid rgba(255, 184, 77, 0.62);
+    border-radius: 8px;
+    background: rgba(255, 184, 77, 0.1);
+    color: #ffd28a;
+    font-family: var(--operation-font-ui);
+    font-size: 9px;
+    font-weight: 850;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.left-column .operation-emergency-unlock:disabled,
+.left-column .operation-emergency-retry:disabled {
     cursor: not-allowed;
     opacity: 0.62;
 }

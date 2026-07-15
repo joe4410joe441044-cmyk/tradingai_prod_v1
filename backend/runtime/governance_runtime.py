@@ -32,6 +32,8 @@ governance_state = {
 
     "last_emergency_result": None,
 
+    "current_emergency_operation_id": None,
+
     "emergency_timeline": [],
 
 }
@@ -129,12 +131,22 @@ def summarize_cancel_result(value):
             "position_remaining": None,
         }
 
+    not_required = (
+        value.get("status") == "NOT_REQUIRED"
+        or value.get("not_required") is True
+    )
     success = value.get("success") is True
 
     return {
-        "status": "COMPLETED" if success else "FAILED",
+        "status": (
+            "NOT_REQUIRED"
+            if not_required and success
+            else "COMPLETED"
+            if success
+            else "FAILED"
+        ),
         "success": success,
-        "completed": success,
+        "completed": success or not_required,
         "reason": _reason_from_result(value),
         "orders_cancelled": value.get("cancelled"),
         "position_remaining": value.get("position_remaining"),
@@ -156,17 +168,29 @@ def summarize_flatten_result(value, position_remaining=None, state_unknown=None)
             "state_unknown": state_unknown,
         }
 
+    not_required = (
+        value.get("status") == "NOT_REQUIRED"
+        or value.get("not_required") is True
+    )
     success = value.get("success") is True
     closed = (
         value.get("closed") is True
         or value.get("skipped") is True
+        or value.get("position_closed") is True
+        or not_required
         or value.get("flattened") == 1
     )
 
     return {
-        "status": "COMPLETED" if success else "FAILED",
+        "status": (
+            "NOT_REQUIRED"
+            if not_required and success
+            else "COMPLETED"
+            if success
+            else "FAILED"
+        ),
         "success": success,
-        "completed": success,
+        "completed": success or not_required,
         "reason": _reason_from_result(value),
         "position_closed": bool(success and closed),
         "position_remaining": position_remaining,
@@ -305,6 +329,7 @@ def begin_emergency_operation():
     governance_state["execution_enabled"] = False
     governance_state["emergency_state"] = EMERGENCY_PROCESSING
     governance_state["last_emergency_result"] = last_result
+    governance_state["current_emergency_operation_id"] = operation_id
     record_emergency_timeline_event(
         event="EMERGENCY_STARTED",
         state=EMERGENCY_PROCESSING,
@@ -379,6 +404,7 @@ def complete_emergency_operation(result, operation=None):
 
     governance_state["emergency_state"] = state
     governance_state["last_emergency_result"] = last_result
+    governance_state["current_emergency_operation_id"] = operation_id
     completion_event = (
         "EMERGENCY_COMPLETED"
         if state == EMERGENCY_LOCKED
@@ -437,20 +463,29 @@ def build_emergency_status():
     }
 
 
-def _last_emergency_value(*keys):
-    last_result = governance_state.get("last_emergency_result")
+def emergency_pending_order_block_reason(pending_order):
+    if isinstance(pending_order, dict):
+        if (
+            pending_order.get("safe") is True
+            and pending_order.get("pending_order") is False
+        ):
+            return None
 
-    if not isinstance(last_result, dict):
-        return None
+        return (
+            pending_order.get("reason")
+            or "PENDING_ORDER_UNKNOWN"
+        )
 
-    for key in keys:
-        if key in last_result:
-            return last_result.get(key)
+    if type(pending_order) is not bool:
+        return "PENDING_ORDER_UNKNOWN"
+
+    if pending_order is not False:
+        return "PENDING_ORDER_REMAINING"
 
     return None
 
 
-def emergency_unlock_block_reason():
+def emergency_unlock_block_reason(pending_order):
     state = governance_state.get(
         "emergency_state",
         EMERGENCY_READY,
@@ -458,23 +493,9 @@ def emergency_unlock_block_reason():
     emergency_locked = bool(
         governance_state.get("emergency_stop", False)
     )
-    position_remaining = _last_emergency_value(
-        "positionRemaining",
-        "position_remaining",
-    )
-    state_unknown = _last_emergency_value(
-        "stateUnknown",
-        "state_unknown",
-    )
 
     if state == EMERGENCY_PROCESSING:
         return "PROCESSING"
-
-    if position_remaining is True:
-        return "POSITION_REMAINING"
-
-    if state_unknown is True:
-        return "STATE_UNKNOWN"
 
     if state == EMERGENCY_ACTION_REQUIRED:
         return "ACTION_REQUIRED"
@@ -485,11 +506,77 @@ def emergency_unlock_block_reason():
     if governance_state.get("execution_enabled", False) is not False:
         return "EXECUTION_ENABLED"
 
+    last_result = governance_state.get("last_emergency_result")
+
+    if last_result is None:
+        return "LAST_RESULT_MISSING"
+
+    if not isinstance(last_result, dict):
+        return "LAST_RESULT_INVALID"
+
+    current_operation_id = governance_state.get(
+        "current_emergency_operation_id"
+    )
+
+    if not current_operation_id:
+        return "CURRENT_OPERATION_ID_MISSING"
+
+    if "operationId" not in last_result:
+        return "RESULT_OPERATION_ID_MISSING"
+
+    result_operation_id = last_result.get("operationId")
+
+    if not result_operation_id:
+        return "RESULT_OPERATION_ID_MISSING"
+
+    if result_operation_id != current_operation_id:
+        return "OPERATION_ID_MISMATCH"
+
+    if "result" not in last_result:
+        return "RESULT_MISSING"
+
+    if last_result.get("result") != EMERGENCY_RESULT_SUCCESS:
+        return "RESULT_NOT_SUCCESS"
+
+    if "success" not in last_result:
+        return "SUCCESS_MISSING"
+
+    if last_result.get("success") is not True:
+        return "SUCCESS_NOT_TRUE"
+
+    if "completed" not in last_result:
+        return "COMPLETED_MISSING"
+
+    if last_result.get("completed") is not True:
+        return "COMPLETED_NOT_TRUE"
+
+    if "stateUnknown" not in last_result:
+        return "STATE_UNKNOWN_MISSING"
+
+    if last_result.get("stateUnknown") is not False:
+        return "STATE_UNKNOWN"
+
+    if "positionRemaining" not in last_result:
+        return "POSITION_REMAINING_MISSING"
+
+    if last_result.get("positionRemaining") is not False:
+        return "POSITION_REMAINING"
+
+    pending_order_reason = emergency_pending_order_block_reason(
+        pending_order
+    )
+
+    if pending_order_reason is not None:
+        return pending_order_reason
+
     return None
 
 
-def unlock_emergency_lock():
-    reason = emergency_unlock_block_reason()
+def unlock_emergency_lock(pending_order):
+    try:
+        reason = emergency_unlock_block_reason(pending_order)
+    except Exception:
+        reason = "UNLOCK_GUARD_EXCEPTION"
 
     if reason is not None:
         return {
@@ -499,8 +586,6 @@ def unlock_emergency_lock():
             "emergency": build_emergency_status(),
         }
 
-    governance_state["emergency_stop"] = False
-    governance_state["emergency_state"] = EMERGENCY_READY
     last_result = governance_state.get("last_emergency_result")
     operation_id = (
         last_result.get("operationId")
@@ -512,18 +597,30 @@ def unlock_emergency_lock():
         if operation_id
         else f"unknown:{utc_now_iso()}:EMERGENCY_UNLOCKED"
     )
-    record_emergency_timeline_event(
-        event="EMERGENCY_UNLOCKED",
-        state=EMERGENCY_READY,
-        operation_id=operation_id,
-        message="緊急状態を解除しました",
-        details={
-            "operationId": operation_id,
-            "previousState": EMERGENCY_LOCKED,
-        },
-        severity="INFO",
-        event_key=event_key,
-    )
+    try:
+        record_emergency_timeline_event(
+            event="EMERGENCY_UNLOCKED",
+            state=EMERGENCY_READY,
+            operation_id=operation_id,
+            message="緊急状態を解除しました",
+            details={
+                "operationId": operation_id,
+                "previousState": EMERGENCY_LOCKED,
+            },
+            severity="INFO",
+            event_key=event_key,
+        )
+    except Exception:
+        return {
+            "success": False,
+            "unlocked": False,
+            "reason": "UNLOCK_FAILED",
+            "emergency": build_emergency_status(),
+        }
+
+    governance_state["emergency_stop"] = False
+    governance_state["emergency_state"] = EMERGENCY_READY
+    governance_state["current_emergency_operation_id"] = None
 
     return {
         "success": True,

@@ -8,6 +8,7 @@ import {
 } from "../store/telemetryStore";
 
 import {
+    retryEmergency,
     runEmergencyOrchestrator,
     setExecutionEnabled,
     unlockEmergency,
@@ -196,6 +197,35 @@ const formatUnlockError = (
     ) + ` [${code}]`;
 };
 
+const formatRetryError = (
+    error
+) => {
+    const code = (
+        error?.code
+        || error?.data?.detail?.reason
+        || error?.data?.reason
+        || (
+            error?.status
+                ? `HTTP_${error.status}`
+                : null
+        )
+        || "EMERGENCY_RETRY_FAILED"
+    );
+
+    const messages = {
+        PROCESSING: "緊急停止処理中のため再確認できません",
+        NOT_ACTION_REQUIRED: "再確認が必要な状態ではありません",
+        ALREADY_LOCKED: "すでに緊急ロック済みです",
+        NETWORK_ERROR: "サーバーへ接続できません",
+        MALFORMED_RESPONSE: "再確認応答を確認できません",
+    };
+
+    return (
+        messages[code]
+        || "安全状態を再確認できません"
+    ) + ` [${code}]`;
+};
+
 const pickEmergencyValue = (
     value,
     ...keys
@@ -314,6 +344,8 @@ export default function BotControl({
 
     emergency,
 
+    pendingOrder,
+
     onStatusRefresh,
 
     setExecutionEnabledState,
@@ -370,6 +402,18 @@ export default function BotControl({
         unlockConfirmOpen,
         setUnlockConfirmOpen,
     ] = useState(false);
+    const [
+        retryPending,
+        setRetryPending,
+    ] = useState(false);
+    const [
+        retryError,
+        setRetryError,
+    ] = useState(null);
+    const [
+        retryConfirmOpen,
+        setRetryConfirmOpen,
+    ] = useState(false);
     const loopPendingRef =
         useRef(false);
     const autoTradePendingRef =
@@ -377,6 +421,8 @@ export default function BotControl({
     const emergencyPendingRef =
         useRef(false);
     const unlockPendingRef =
+        useRef(false);
+    const retryPendingRef =
         useRef(false);
 
     /* =======================================================
@@ -495,6 +541,26 @@ export default function BotControl({
             "result",
         ) || ""
     ).toUpperCase();
+    const emergencyOperationId = pickEmergencyValue(
+        lastEmergencyResult,
+        "operationId",
+        "operation_id",
+    );
+    const emergencyOperationIdPresent = (
+        typeof emergencyOperationId === "string"
+        && emergencyOperationId.trim().length > 0
+    );
+    const emergencyResultSuccess = (
+        emergencyResultCode === "SUCCESS"
+        && pickEmergencyValue(
+            lastEmergencyResult,
+            "success",
+        ) === true
+        && pickEmergencyValue(
+            lastEmergencyResult,
+            "completed",
+        ) === true
+    );
     const cancelCompleted = (
         cancelResult
         && typeof cancelResult === "object"
@@ -632,18 +698,29 @@ export default function BotControl({
         loopPending
         || emergencyBlocksOperations
     );
-    const unlockAllowed = (
+    const unlockVisible = (
         emergencyStateCode === "LOCKED"
         && emergencyIsLocked
+        && emergencyResultSuccess
         && autoTradeChecked === false
-        && positionRemaining !== true
-        && stateUnknown !== true
+        && stateUnknown === false
+        && positionRemaining === false
+        && pendingOrder === false
+        && emergencyOperationIdPresent
+    );
+    const unlockAllowed = (
+        unlockVisible
         && unlockPending !== true
+    );
+    const retryAllowed = (
+        emergencyStateCode === "ACTION_REQUIRED"
+        && retryPending !== true
     );
     const emergencyButtonDisabled = (
         emergencyPending
         || emergencyConfirmOpen
         || unlockPending
+        || retryPending
         || emergencyStateCode !== "READY"
     );
     const emergencyLockValue = (
@@ -932,6 +1009,7 @@ export default function BotControl({
         setEmergencyPending(true);
         setEmergencyError(null);
         setUnlockError(null);
+        setRetryError(null);
         setUnlockNotice(null);
 
         try {
@@ -984,6 +1062,7 @@ export default function BotControl({
         setUnlockPending(true);
         setUnlockError(null);
         setEmergencyError(null);
+        setRetryError(null);
         setUnlockNotice(null);
 
         try {
@@ -1003,6 +1082,59 @@ export default function BotControl({
             await refreshStatusSafely();
             unlockPendingRef.current = false;
             setUnlockPending(false);
+        }
+    };
+
+    const openRetryConfirm = () => {
+        if (
+            retryPendingRef.current
+            || retryConfirmOpen
+            || !retryAllowed
+        ) {
+            return;
+        }
+
+        setRetryError(null);
+        setRetryConfirmOpen(true);
+    };
+
+    const cancelRetryConfirm = () => {
+        if (retryPendingRef.current) {
+            return;
+        }
+
+        setRetryConfirmOpen(false);
+    };
+
+    const confirmRetry = async () => {
+        if (
+            retryPendingRef.current
+            || !retryAllowed
+        ) {
+            return;
+        }
+
+        retryPendingRef.current = true;
+        setRetryPending(true);
+        setRetryError(null);
+        setEmergencyError(null);
+        setUnlockError(null);
+        setUnlockNotice(null);
+
+        try {
+            await retryEmergency();
+
+            setRetryConfirmOpen(false);
+        } catch (error) {
+            console.error("EMERGENCY RETRY ERROR", error);
+            setRetryError(
+                formatRetryError(error)
+            );
+            setRetryConfirmOpen(false);
+        } finally {
+            await refreshStatusSafely();
+            retryPendingRef.current = false;
+            setRetryPending(false);
         }
     };
 
@@ -1269,7 +1401,74 @@ export default function BotControl({
                     </div>
                 )}
 
-                {emergencyStateCode === "LOCKED" && (
+                {emergencyStateCode === "ACTION_REQUIRED" && (
+                    <button
+                        className="operation-emergency-retry"
+                        disabled={!retryAllowed || retryPending}
+                        onClick={openRetryConfirm}
+                        aria-busy={retryPending ? "true" : undefined}
+                        type="button"
+                    >
+                        {retryPending
+                            ? "再確認中..."
+                            : "安全状態を再確認"
+                        }
+                    </button>
+                )}
+
+                {retryConfirmOpen && (
+                    <div
+                        className="operation-emergency-confirm"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="emergency-retry-title"
+                    >
+                        <div
+                            className="operation-emergency-confirm__title"
+                            id="emergency-retry-title"
+                        >
+                            安全状態を再確認しますか？
+                        </div>
+
+                        <div className="operation-emergency-confirm__body">
+                            注文とポジション状態を再確認し、
+                            <br />
+                            必要なら緊急停止処理を再実行します。
+                            <br />
+                            <br />
+                            BOT
+                            <br />
+                            LOOP
+                            <br />
+                            AUTO TRADE
+                            <br />
+                            <br />
+                            はOFFのままです。
+                        </div>
+
+                        <div className="operation-emergency-confirm__actions">
+                            <button
+                                className="operation-emergency-confirm__cancel"
+                                disabled={retryPending}
+                                onClick={cancelRetryConfirm}
+                                type="button"
+                            >
+                                キャンセル
+                            </button>
+
+                            <button
+                                className="operation-emergency-confirm__confirm"
+                                disabled={retryPending}
+                                onClick={confirmRetry}
+                                type="button"
+                            >
+                                再確認
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {unlockVisible && (
                     <button
                         className="operation-emergency-unlock"
                         disabled={!unlockAllowed || unlockPending}
@@ -1359,6 +1558,16 @@ export default function BotControl({
                         role="alert"
                     >
                         {unlockError}
+                    </div>
+                )}
+
+                {retryError && (
+                    <div
+                        className="operation-emergency-error"
+                        data-testid="emergency-retry-error"
+                        role="alert"
+                    >
+                        {retryError}
                     </div>
                 )}
 

@@ -390,6 +390,62 @@ export async function runEmergencyOrchestrator() {
 
 }
 
+export async function retryEmergency() {
+
+    let response;
+
+    try {
+        response = await fetch(
+            `${API_BASE}/emergency/retry`,
+            {
+                method: "POST",
+            }
+        );
+    } catch (error) {
+        throw new GovernanceApiError({
+            status: null,
+            code: "NETWORK_ERROR",
+            message: "Unable to reach the server.",
+            data: {
+                error: error?.message || String(error),
+            },
+        });
+    }
+
+    const data = await readJsonSafely(
+        response
+    );
+
+    if (!response.ok) {
+        throw new GovernanceApiError({
+            status: response.status,
+            code: extractGovernanceErrorCode(
+                data
+            ),
+            message: extractGovernanceErrorMessage(
+                data,
+                "Emergency retry failed."
+            ),
+            data,
+        });
+    }
+
+    if (
+        !data
+        || !validateEmergencyOrchestratorResponse(data)
+    ) {
+        throw new GovernanceApiError({
+            status: response.status,
+            code: "MALFORMED_RESPONSE",
+            message: "Emergency retry response could not be verified.",
+            data,
+        });
+    }
+
+    return data;
+
+}
+
 export async function unlockEmergency() {
 
     let response;

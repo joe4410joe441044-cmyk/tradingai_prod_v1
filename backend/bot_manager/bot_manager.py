@@ -9,6 +9,10 @@ from backend.aggregation.MicrostructureStateBuilder import (
 
 from backend.runtime import runtime_registry
 from backend.runtime.governance_runtime import (
+    EMERGENCY_ACTION_REQUIRED,
+    EMERGENCY_LOCKED,
+    EMERGENCY_PROCESSING,
+    EMERGENCY_READY,
     begin_emergency_operation,
     build_emergency_status,
     complete_emergency_operation,
@@ -2416,6 +2420,389 @@ class BotManager:
             "error_code": error_code,
         }
 
+    @staticmethod
+    def _emergency_not_required_result(kind):
+
+        result = {
+            "success": True,
+            "completed": True,
+            "status": "NOT_REQUIRED",
+            "skipped": True,
+            "not_required": True,
+            "reason": "NOT_REQUIRED",
+        }
+
+        if kind == "cancel":
+            result.update({
+                "requested": 0,
+                "cancelled": 0,
+                "failed": 0,
+            })
+
+        if kind == "flatten":
+            result.update({
+                "closed": True,
+                "position_closed": True,
+            })
+
+        return result
+
+    @classmethod
+    def _emergency_position_value_present(cls, value):
+
+        if value is None:
+            return False
+
+        if isinstance(value, list):
+            return any(
+                cls._emergency_position_value_present(item)
+                for item in value
+            )
+
+        if isinstance(value, dict):
+            return bool(value)
+
+        if isinstance(value, str):
+            return value.strip().upper() not in {
+                "",
+                "NONE",
+                "NO_OPEN_POSITION",
+                "FLAT",
+            }
+
+        return bool(value)
+
+    def _stopped_paper_unknown_response(
+        self,
+        symbol,
+        error_code,
+        execution_path="paper",
+    ):
+
+        return self._emergency_response(
+            success=False,
+            completed=False,
+            partial=True,
+            state_unknown=True,
+            execution_path=execution_path,
+            symbol=symbol,
+            cancel=None,
+            flatten=None,
+            position_remaining=None,
+            retryable=True,
+            error_code=error_code,
+        )
+
+    @classmethod
+    def _stopped_paper_position_state(cls, snapshot):
+
+        if not isinstance(snapshot, dict):
+            return "unknown"
+
+        if (
+            "position" not in snapshot
+            or "positions" not in snapshot
+        ):
+            return "unknown"
+
+        position = snapshot.get("position")
+        positions = snapshot.get("positions")
+
+        if not isinstance(positions, list):
+            return "unknown"
+
+        if position is not None:
+            if cls._emergency_position_value_present(position):
+                return "remaining"
+            return "unknown"
+
+        if not positions:
+            return "flat"
+
+        for item in positions:
+            if cls._emergency_position_value_present(item):
+                return "remaining"
+            return "unknown"
+
+        return "unknown"
+
+    def _stopped_paper_pending_order_state(self):
+
+        if not hasattr(self, "pending_order"):
+            return "unknown"
+
+        pending_order = self.pending_order
+
+        if type(pending_order) is not bool:
+            return "unknown"
+
+        if pending_order:
+            return "remaining"
+
+        return "flat"
+
+    def get_authoritative_pending_order_state(self):
+
+        missing = object()
+
+        try:
+            manager_pending_order = getattr(
+                self,
+                "pending_order",
+                missing,
+            )
+        except Exception:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+            }
+
+        if manager_pending_order is missing:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+            }
+
+        if type(manager_pending_order) is not bool:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_MANAGER_UNKNOWN",
+            }
+
+        try:
+            engine = self.engine
+        except Exception:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "ENGINE_UNAVAILABLE",
+                "manager_pending_order": manager_pending_order,
+            }
+
+        if engine is None:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "ENGINE_UNAVAILABLE",
+                "manager_pending_order": manager_pending_order,
+            }
+
+        try:
+            engine_pending_order = getattr(
+                engine,
+                "pending_order",
+                missing,
+            )
+        except Exception:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_READ_FAILED",
+                "manager_pending_order": manager_pending_order,
+            }
+
+        if engine_pending_order is missing:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "manager_pending_order": manager_pending_order,
+            }
+
+        if type(engine_pending_order) is not bool:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "manager_pending_order": manager_pending_order,
+            }
+
+        if engine_pending_order != manager_pending_order:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_MISMATCH",
+                "manager_pending_order": manager_pending_order,
+                "engine_pending_order": engine_pending_order,
+            }
+
+        if engine_pending_order is True:
+            return {
+                "pending_order": True,
+                "safe": False,
+                "reason": "PENDING_ORDER_REMAINING",
+                "manager_pending_order": manager_pending_order,
+                "engine_pending_order": engine_pending_order,
+            }
+
+        return {
+            "pending_order": False,
+            "safe": True,
+            "reason": None,
+            "manager_pending_order": manager_pending_order,
+            "engine_pending_order": engine_pending_order,
+        }
+
+    def _stopped_paper_emergency_response(self, symbol):
+
+        if not isinstance(self.config, dict):
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "MODE_UNKNOWN",
+                execution_path=None,
+            )
+
+        if "mode" not in self.config:
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "MODE_UNKNOWN",
+                execution_path=None,
+            )
+
+        raw_mode = self.config.get("mode")
+
+        if raw_mode is None:
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "MODE_UNKNOWN",
+                execution_path=None,
+            )
+
+        selected_mode = str(raw_mode).strip().lower()
+
+        if selected_mode == "live":
+            return None
+
+        if selected_mode != "paper":
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "MODE_UNKNOWN",
+                execution_path=None,
+            )
+
+        if (
+            self._running
+            or self.lifecycle_state != "STOPPED"
+        ):
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "BOT_NOT_STOPPED",
+            )
+
+        if governance_state.get("execution_enabled") is not False:
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "EXECUTION_STATE_UNKNOWN",
+            )
+
+        try:
+            snapshot = self._capture_account_snapshot()
+        except Exception:
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "SNAPSHOT_UNAVAILABLE",
+            )
+
+        if not isinstance(snapshot, dict):
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "SNAPSHOT_UNAVAILABLE",
+            )
+
+        if (
+            snapshot.get("available") is not True
+            or snapshot.get("last_update") is None
+        ):
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "SNAPSHOT_NOT_SYNCED",
+            )
+
+        position_state = self._stopped_paper_position_state(snapshot)
+        pending_order_state = self._stopped_paper_pending_order_state()
+
+        if position_state == "unknown":
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "POSITION_STATE_UNKNOWN",
+            )
+
+        if pending_order_state == "unknown":
+            return self._stopped_paper_unknown_response(
+                symbol,
+                "PENDING_ORDER_UNKNOWN",
+            )
+
+        position_remaining = position_state == "remaining"
+        pending_order = pending_order_state == "remaining"
+
+        cancel_not_required = self._emergency_not_required_result(
+            "cancel"
+        )
+        flatten_not_required = self._emergency_not_required_result(
+            "flatten"
+        )
+
+        if position_remaining:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=False,
+                execution_path="paper",
+                symbol=symbol,
+                cancel=cancel_not_required,
+                flatten={
+                    "success": False,
+                    "completed": False,
+                    "status": "NOT_RUN",
+                    "reason": "POSITION_REMAINING_WITHOUT_ENGINE",
+                    "position_remaining": True,
+                },
+                position_remaining=True,
+                retryable=True,
+                error_code="POSITION_REMAINING",
+            )
+
+        if pending_order:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=False,
+                execution_path="paper",
+                symbol=symbol,
+                cancel={
+                    "success": False,
+                    "completed": False,
+                    "status": "NOT_RUN",
+                    "reason": "PENDING_ORDER_REMAINING_WITHOUT_ENGINE",
+                    "requested": None,
+                    "cancelled": None,
+                    "failed": None,
+                },
+                flatten=flatten_not_required,
+                position_remaining=False,
+                retryable=True,
+                error_code="PENDING_ORDER_REMAINING",
+            )
+
+        return self._emergency_response(
+            success=True,
+            completed=True,
+            partial=False,
+            state_unknown=False,
+            execution_path="paper",
+            symbol=symbol,
+            cancel=cancel_not_required,
+            flatten=flatten_not_required,
+            position_remaining=False,
+            retryable=False,
+        )
+
     def _emergency_symbol(self, engine):
 
         symbol = (
@@ -2638,6 +3025,54 @@ class BotManager:
             error_code=error_code,
         )
 
+    def _emergency_already_running_response(self):
+
+        return self._emergency_response(
+            success=False,
+            completed=False,
+            partial=False,
+            state_unknown=False,
+            execution_path=None,
+            symbol=None,
+            cancel=None,
+            flatten=None,
+            position_remaining=None,
+            retryable=True,
+            error_code="EMERGENCY_ALREADY_RUNNING",
+        )
+
+    @staticmethod
+    def _emergency_retry_block_reason(state):
+
+        if state == EMERGENCY_ACTION_REQUIRED:
+            return None
+
+        if state == EMERGENCY_PROCESSING:
+            return "PROCESSING"
+
+        if state == EMERGENCY_LOCKED:
+            return "ALREADY_LOCKED"
+
+        if state == EMERGENCY_READY:
+            return "NOT_ACTION_REQUIRED"
+
+        if state is None:
+            return "STATE_MISSING"
+
+        return "INVALID_STATE"
+
+    @staticmethod
+    def _emergency_retry_rejected_response(reason):
+
+        return {
+            "success": False,
+            "retry": False,
+            "retry_rejected": True,
+            "reason": reason,
+            "error_code": reason,
+            "emergency": build_emergency_status(),
+        }
+
     def run_emergency_orchestrator(self):
 
         acquired = self.emergency_orchestrator_lock.acquire(
@@ -2645,29 +3080,115 @@ class BotManager:
         )
 
         if not acquired:
-            return self._emergency_response(
-                success=False,
-                completed=False,
-                partial=False,
-                state_unknown=False,
-                execution_path=None,
-                symbol=None,
-                cancel=None,
-                flatten=None,
-                position_remaining=None,
-                retryable=True,
-                error_code="EMERGENCY_ALREADY_RUNNING",
-            )
+            return self._emergency_already_running_response()
 
         operation = None
 
-        def finalize(response):
+        try:
+            governance_state["emergency_stop"] = True
+            governance_state["execution_enabled"] = False
+            operation = begin_emergency_operation()
+
+            return self._run_emergency_orchestrator_locked(
+                operation
+            )
+
+        except Exception:
+            response = self._emergency_response(
+                success=False,
+                completed=False,
+                partial=False,
+                state_unknown=True,
+                execution_path=None,
+                retryable=True,
+                error_code="ORCHESTRATOR_EXCEPTION",
+            )
+
             if operation is not None:
                 complete_emergency_operation(
                     response,
                     operation,
                 )
                 self.stop()
+
+            return response
+
+        finally:
+            self.emergency_orchestrator_lock.release()
+
+    def retry_emergency_orchestrator(self):
+
+        acquired = self.emergency_orchestrator_lock.acquire(
+            blocking=False
+        )
+
+        if not acquired:
+            return self._emergency_retry_rejected_response(
+                "PROCESSING"
+            )
+
+        operation = None
+
+        try:
+            state = governance_state.get("emergency_state")
+            reason = self._emergency_retry_block_reason(state)
+
+            if reason is not None:
+                return self._emergency_retry_rejected_response(
+                    reason
+                )
+
+            if governance_state.get("emergency_stop") is not True:
+                return self._emergency_retry_rejected_response(
+                    "NOT_ACTION_REQUIRED"
+                )
+
+            if governance_state.get("execution_enabled") is not False:
+                return self._emergency_retry_rejected_response(
+                    "EXECUTION_ENABLED"
+                )
+
+            operation = begin_emergency_operation()
+
+            return self._run_emergency_orchestrator_locked(
+                operation
+            )
+
+        except Exception:
+            response = self._emergency_response(
+                success=False,
+                completed=False,
+                partial=False,
+                state_unknown=True,
+                execution_path=None,
+                retryable=True,
+                error_code="ORCHESTRATOR_EXCEPTION",
+            )
+
+            if operation is not None:
+                complete_emergency_operation(
+                    response,
+                    operation,
+                )
+                self.stop()
+
+                return response
+
+            return self._emergency_retry_rejected_response(
+                "RETRY_EXCEPTION"
+            )
+
+        finally:
+            self.emergency_orchestrator_lock.release()
+
+    def _run_emergency_orchestrator_locked(self, operation):
+
+        def finalize(response):
+            complete_emergency_operation(
+                response,
+                operation,
+            )
+            self.stop()
 
             return response
 
@@ -2703,10 +3224,6 @@ class BotManager:
                 live_readiness.get("realOrderAllowed") is True
             )
 
-            governance_state["emergency_stop"] = True
-            governance_state["execution_enabled"] = False
-            operation = begin_emergency_operation()
-
             if governance_state.get("execution_enabled") is not False:
                 return finalize(self._emergency_response(
                     success=False,
@@ -2720,6 +3237,15 @@ class BotManager:
                 ))
 
             if engine is None:
+                stopped_response = (
+                    self._stopped_paper_emergency_response(
+                        symbol
+                    )
+                )
+
+                if stopped_response is not None:
+                    return finalize(stopped_response)
+
                 return finalize(self._emergency_response(
                     success=False,
                     completed=False,
@@ -2828,8 +3354,6 @@ class BotManager:
                 retryable=True,
                 error_code="ORCHESTRATOR_EXCEPTION",
             ))
-        finally:
-            self.emergency_orchestrator_lock.release()
 
     def stop(self):
 
@@ -2982,7 +3506,12 @@ class BotManager:
             snapshot.get("position")
         )
 
-        pending_order = False
+        pending_order_state = (
+            self.get_authoritative_pending_order_state()
+        )
+        pending_order = (
+            pending_order_state.get("pending_order") is True
+        )
 
         pnl = float(snapshot.get("pnl") or 0.0)
 
@@ -3095,12 +3624,6 @@ class BotManager:
                 self.engine,
                 "actual_position",
                 None
-            )
-
-            pending_order = getattr(
-                self.engine,
-                "pending_order",
-                False
             )
 
         position_candidate = (

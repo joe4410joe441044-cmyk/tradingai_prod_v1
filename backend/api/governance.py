@@ -8,6 +8,7 @@ from backend.bot_manager import (
 
 from backend.runtime.governance_runtime import (
     EMERGENCY_ACTION_REQUIRED,
+    build_emergency_status,
     governance_state,
     unlock_emergency_lock,
 )
@@ -132,15 +133,56 @@ async def emergency_orchestrate():
 
     bot_manager = get_bot_manager()
 
-    return bot_manager.run_emergency_orchestrator()
+    result = bot_manager.run_emergency_orchestrator()
+
+    if result.get("error_code") == "EMERGENCY_ALREADY_RUNNING":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "success": False,
+                "reason": "PROCESSING",
+                "emergency": build_emergency_status(),
+            },
+        )
+
+    return result
 
 
 @router.post("/emergency/unlock")
 async def emergency_unlock():
 
-    result = unlock_emergency_lock()
+    try:
+        bot_manager = get_bot_manager()
+        pending_order = (
+            bot_manager.get_authoritative_pending_order_state()
+        )
+    except Exception:
+        pending_order = {
+            "pending_order": True,
+            "safe": False,
+            "reason": "PENDING_ORDER_READ_FAILED",
+        }
+
+    result = unlock_emergency_lock(
+        pending_order=pending_order,
+    )
 
     if not result.get("success", False):
+        raise HTTPException(
+            status_code=409,
+            detail=result,
+        )
+
+    return result
+
+
+@router.post("/emergency/retry")
+async def emergency_retry():
+
+    bot_manager = get_bot_manager()
+    result = bot_manager.retry_emergency_orchestrator()
+
+    if result.get("retry_rejected") is True:
         raise HTTPException(
             status_code=409,
             detail=result,

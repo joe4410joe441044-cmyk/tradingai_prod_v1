@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     classifyEmergencyResult,
     GovernanceApiError,
+    retryEmergency,
     runEmergencyOrchestrator,
     setExecutionEnabled,
     unlockEmergency,
@@ -408,6 +409,101 @@ test("runEmergencyOrchestrator rejects malformed success schema", async () => {
     try {
         await assert.rejects(
             () => runEmergencyOrchestrator(),
+            (error) => {
+                assert.ok(error instanceof GovernanceApiError);
+                assert.equal(error.status, 200);
+                assert.equal(error.code, "MALFORMED_RESPONSE");
+                return true;
+            },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("retryEmergency posts without body and returns verified response", async () => {
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async (
+        url,
+        options
+    ) => {
+        requests.push({
+            url,
+            options,
+        });
+
+        return jsonResponse({
+            body: emergencyResponse(),
+        });
+    };
+
+    try {
+        const result = await retryEmergency();
+
+        assert.equal(requests.length, 1);
+        assert.equal(
+            requests[0].url,
+            "/api/governance/emergency/retry",
+        );
+        assert.equal(requests[0].options.method, "POST");
+        assert.equal(
+            Object.prototype.hasOwnProperty.call(
+                requests[0].options,
+                "body",
+            ),
+            false,
+        );
+        assert.equal(result.completed, true);
+        assert.equal(result.emergency_locked, true);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("retryEmergency keeps 409 reason metadata", async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async () => jsonResponse({
+        ok: false,
+        status: 409,
+        body: {
+            detail: {
+                reason: "NOT_ACTION_REQUIRED",
+            },
+        },
+    });
+
+    try {
+        await assert.rejects(
+            () => retryEmergency(),
+            (error) => {
+                assert.ok(error instanceof GovernanceApiError);
+                assert.equal(error.status, 409);
+                assert.equal(error.code, "NOT_ACTION_REQUIRED");
+                return true;
+            },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("retryEmergency rejects malformed success schema", async () => {
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async () => jsonResponse({
+        ok: true,
+        status: 200,
+        body: {
+            success: true,
+        },
+    });
+
+    try {
+        await assert.rejects(
+            () => retryEmergency(),
             (error) => {
                 assert.ok(error instanceof GovernanceApiError);
                 assert.equal(error.status, 200);

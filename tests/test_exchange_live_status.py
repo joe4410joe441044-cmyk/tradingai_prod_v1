@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import unittest
 from unittest.mock import Mock, call, patch
 from urllib.parse import parse_qs, urlparse
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 
 from backend.api.governance import (
     emergency_orchestrate,
+    emergency_retry,
     emergency_stop,
     emergency_unlock,
     router as governance_router,
@@ -28,6 +30,7 @@ from backend.runtime.governance_runtime import (
     EMERGENCY_RESULT_SUCCESS,
     begin_emergency_operation,
     complete_emergency_operation,
+    emergency_unlock_block_reason,
     governance_state,
 )
 
@@ -574,7 +577,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertTrue(result["state_unknown"])
         self.assertEqual(result["error_code"], "ENGINE_UNAVAILABLE")
 
-    def test_emergency_orchestrate_route_preserves_already_running(self):
+    def test_emergency_orchestrate_route_rejects_already_running(self):
         already_running_response = {
             "success": False,
             "completed": False,
@@ -599,12 +602,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "backend.api.governance.get_bot_manager",
             return_value=bot,
         ):
-            result = asyncio.run(emergency_orchestrate())
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(emergency_orchestrate())
 
-        self.assertIs(result, already_running_response)
+        self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(
-            result["error_code"],
-            "EMERGENCY_ALREADY_RUNNING",
+            raised.exception.detail["reason"],
+            "PROCESSING",
         )
 
     def test_emergency_orchestrate_route_is_registered_without_conflict(self):
@@ -633,6 +637,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertIn(
             (
                 "/api/governance/emergency/unlock",
+                ("POST",),
+            ),
+            routes,
+        )
+        self.assertIn(
+            (
+                "/api/governance/emergency/retry",
                 ("POST",),
             ),
             routes,
@@ -957,6 +968,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             else EMERGENCY_READY
         )
         governance_state["last_emergency_result"] = None
+        governance_state["current_emergency_operation_id"] = None
         governance_state["emergency_timeline"] = []
         return state_before
 
@@ -975,9 +987,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         completed=True,
         partial=False,
         retryable=False,
+        operation_id="emg_20260714T123456Z_unlock",
     ):
         return {
-            "operationId": "emg_20260714T123456Z_unlock",
+            "operationId": operation_id,
             "state": state,
             "result": result,
             "startedAt": "2026-07-14T12:34:56.000Z",
@@ -1001,6 +1014,50 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             },
             "message": "Emergency completed.",
         }
+
+    @staticmethod
+    def _set_current_emergency_operation(last_result):
+        governance_state["current_emergency_operation_id"] = (
+            last_result.get("operationId")
+            if isinstance(last_result, dict)
+            else None
+        )
+
+    @staticmethod
+    def _pending_order_engine(pending_order=False):
+        class Engine:
+            actual_position = None
+
+        engine = Engine()
+
+        if pending_order != "missing":
+            engine.pending_order = pending_order
+
+        return engine
+
+    @staticmethod
+    def _pending_order_raising_engine():
+        class Engine:
+            actual_position = None
+
+            @property
+            def pending_order(self):
+                raise RuntimeError("pending order read failed")
+
+        return Engine()
+
+    @classmethod
+    def _bot_with_pending_sources(
+        cls,
+        manager_pending=False,
+        engine_pending=False,
+    ):
+        bot = BotManager()
+        bot.pending_order = manager_pending
+        bot.engine = cls._pending_order_engine(engine_pending)
+        bot._running = False
+        bot.lifecycle_state = "STOPPED"
+        return bot
 
     @staticmethod
     def _emergency_timeline_events():
@@ -1032,6 +1089,33 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "realOrderAllowed": False,
         }
         return self._emergency_bot_with_engine(engine), engine
+
+    @staticmethod
+    def _stopped_paper_bot():
+        bot = BotManager()
+        bot.engine = None
+        bot._running = False
+        bot.lifecycle_state = "STOPPED"
+        bot.symbol = "XRPUSDT"
+        bot.orderbook_symbol = "XRPUSDTM"
+        bot.config = {
+            "symbol": "XRPUSDT",
+            "mode": "paper",
+            "dry_run": True,
+        }
+        bot.account_snapshot = {
+            "balance": None,
+            "equity": None,
+            "availableBalance": None,
+            "pnl": None,
+            "position": None,
+            "positions": [],
+            "realizedPnl": None,
+            "unrealizedPnl": None,
+            "last_update": 1_700_000_000.0,
+            "available": True,
+        }
+        return bot
 
     def _live_emergency_bot(
         self,
@@ -1240,6 +1324,253 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
+    def test_emergency_stopped_paper_succeeds_without_engine(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+
+            with patch(
+                "backend.bot_manager.bot_manager.ExecutionEngine"
+            ) as engine_class:
+                with patch(
+                    "backend.bot_manager.bot_manager.KucoinTradeClient"
+                ) as client_class:
+                    result = bot.run_emergency_orchestrator()
+
+            status = bot.get_status()
+            last_result = status["emergency"]["lastResult"]
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertFalse(result["position_remaining"])
+            self.assertEqual(result["path"], "paper")
+            self.assertEqual(result["cancel"]["status"], "NOT_REQUIRED")
+            self.assertEqual(result["flatten"]["status"], "NOT_REQUIRED")
+            self.assertFalse(result["retryable"])
+            self.assertTrue(status["emergency"]["locked"])
+            self.assertEqual(status["emergency"]["state"], EMERGENCY_LOCKED)
+            self.assertEqual(
+                last_result["cancelResult"]["status"],
+                "NOT_REQUIRED",
+            )
+            self.assertEqual(
+                last_result["flattenResult"]["status"],
+                "NOT_REQUIRED",
+            )
+            self.assertFalse(status["loopEnabled"])
+            self.assertEqual(status["loopState"], "STOPPED")
+            self.assertFalse(status["autoTradeEnabled"])
+            self.assertFalse(status["executionEnabled"])
+            engine_class.assert_not_called()
+            client_class.assert_not_called()
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_stopped_paper_requires_authoritative_safety(self):
+        cases = [
+            (
+                "mode-missing",
+                lambda bot: bot.config.pop("mode"),
+                "MODE_UNKNOWN",
+            ),
+            (
+                "mode-unknown",
+                lambda bot: bot.config.update({"mode": "unknown"}),
+                "MODE_UNKNOWN",
+            ),
+            (
+                "snapshot-unsynced",
+                lambda bot: bot.account_snapshot.update({
+                    "available": False,
+                }),
+                "SNAPSHOT_NOT_SYNCED",
+            ),
+            (
+                "snapshot-last-update-missing",
+                lambda bot: bot.account_snapshot.update({
+                    "last_update": None,
+                }),
+                "SNAPSHOT_NOT_SYNCED",
+            ),
+            (
+                "snapshot-none",
+                lambda bot: setattr(bot, "account_snapshot", None),
+                "SNAPSHOT_UNAVAILABLE",
+            ),
+            (
+                "position-none-without-authoritative-positions",
+                lambda bot: bot.account_snapshot.update({
+                    "position": None,
+                    "positions": None,
+                }),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "position-empty-dict",
+                lambda bot: bot.account_snapshot.update({
+                    "position": {},
+                }),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "positions-empty-dict",
+                lambda bot: bot.account_snapshot.update({
+                    "position": None,
+                    "positions": [{}],
+                }),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "position-key-missing",
+                lambda bot: bot.account_snapshot.pop("position"),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "positions-key-missing",
+                lambda bot: bot.account_snapshot.pop("positions"),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "pending-order-missing",
+                lambda bot: delattr(bot, "pending_order"),
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "pending-order-none",
+                lambda bot: setattr(bot, "pending_order", None),
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "pending-order-non-bool",
+                lambda bot: setattr(bot, "pending_order", {}),
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "authoritative-state-exception",
+                lambda bot: setattr(
+                    bot,
+                    "_capture_account_snapshot",
+                    Mock(side_effect=RuntimeError("snapshot failed")),
+                ),
+                "SNAPSHOT_UNAVAILABLE",
+            ),
+        ]
+
+        for name, mutate, error_code in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+
+                try:
+                    bot = self._stopped_paper_bot()
+                    mutate(bot)
+
+                    result = bot.run_emergency_orchestrator()
+                    last_result = (
+                        governance_state["last_emergency_result"]
+                    )
+
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["partial"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertIsNone(result["position_remaining"])
+                    self.assertTrue(result["retryable"])
+                    self.assertEqual(result["error_code"], error_code)
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertEqual(
+                        last_result["state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertEqual(
+                        last_result["result"],
+                        EMERGENCY_RESULT_PARTIAL,
+                    )
+                    self.assertTrue(last_result["stateUnknown"])
+                    self.assertNotEqual(
+                        last_result["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_stopped_paper_action_required_on_position(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot["position"] = {
+                "symbol": "XRPUSDT",
+                "side": "BUY",
+            }
+            bot.account_snapshot["positions"] = [
+                bot.account_snapshot["position"],
+            ]
+
+            result = bot.run_emergency_orchestrator()
+            emergency = bot.get_status()["emergency"]
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertTrue(result["position_remaining"])
+            self.assertTrue(result["retryable"])
+            self.assertEqual(result["error_code"], "POSITION_REMAINING")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(emergency["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertTrue(emergency["lastResult"]["positionRemaining"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_stopped_paper_action_required_on_pending_order(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.pending_order = True
+
+            result = bot.run_emergency_orchestrator()
+            emergency = bot.get_status()["emergency"]
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertFalse(result["position_remaining"])
+            self.assertTrue(result["retryable"])
+            self.assertEqual(
+                result["error_code"],
+                "PENDING_ORDER_REMAINING",
+            )
+            self.assertEqual(emergency["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertEqual(
+                emergency["lastResult"]["result"],
+                EMERGENCY_RESULT_PARTIAL,
+            )
+        finally:
+            self._restore_governance(state_before)
+
     def test_emergency_state_model_partial_is_action_required(self):
         state_before = self._set_governance(
             execution_enabled=True,
@@ -1385,11 +1716,17 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
-            bot = BotManager()
-            bot._running = False
-            bot.lifecycle_state = "STOPPED"
+            self._set_current_emergency_operation(last_result)
+            bot = self._bot_with_pending_sources(
+                manager_pending=False,
+                engine_pending=False,
+            )
 
-            result = asyncio.run(emergency_unlock())
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_unlock())
 
             self.assertTrue(result["success"])
             self.assertTrue(result["unlocked"])
@@ -1414,6 +1751,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertEqual(response.loopState, "STOPPED")
             self.assertFalse(response.autoTradeEnabled)
             self.assertFalse(response.executionEnabled)
+            self.assertFalse(response.pendingOrder)
             self.assertFalse(emergency["active"])
             self.assertFalse(emergency["locked"])
             self.assertEqual(emergency["state"], EMERGENCY_READY)
@@ -1464,6 +1802,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_PROCESSING
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
 
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(emergency_unlock())
@@ -1502,6 +1841,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
 
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(emergency_unlock())
@@ -1534,6 +1874,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
 
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(emergency_unlock())
@@ -1562,6 +1903,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
 
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(emergency_unlock())
@@ -1590,6 +1932,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
 
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(emergency_unlock())
@@ -1609,6 +1952,998 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 governance_state["last_emergency_result"],
                 last_result,
             )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_incomplete_or_inconsistent_result(
+        self,
+    ):
+        def missing_operation_id(last_result):
+            last_result.pop("operationId")
+
+        cases = [
+            (
+                "last-result-missing",
+                None,
+                None,
+                "LAST_RESULT_MISSING",
+            ),
+            (
+                "last-result-invalid",
+                "malformed",
+                None,
+                "LAST_RESULT_INVALID",
+            ),
+            (
+                "result-missing",
+                lambda last_result: last_result.pop("result"),
+                None,
+                "RESULT_MISSING",
+            ),
+            (
+                "result-partial",
+                lambda last_result: last_result.update({
+                    "result": EMERGENCY_RESULT_PARTIAL,
+                    "success": False,
+                }),
+                None,
+                "RESULT_NOT_SUCCESS",
+            ),
+            (
+                "result-failed",
+                lambda last_result: last_result.update({
+                    "result": EMERGENCY_RESULT_FAILED,
+                    "success": False,
+                }),
+                None,
+                "RESULT_NOT_SUCCESS",
+            ),
+            (
+                "success-false",
+                lambda last_result: last_result.update({
+                    "success": False,
+                }),
+                None,
+                "SUCCESS_NOT_TRUE",
+            ),
+            (
+                "success-missing",
+                lambda last_result: last_result.pop("success"),
+                None,
+                "SUCCESS_MISSING",
+            ),
+            (
+                "completed-false",
+                lambda last_result: last_result.update({
+                    "completed": False,
+                }),
+                None,
+                "COMPLETED_NOT_TRUE",
+            ),
+            (
+                "completed-missing",
+                lambda last_result: last_result.pop("completed"),
+                None,
+                "COMPLETED_MISSING",
+            ),
+            (
+                "state-unknown-true",
+                lambda last_result: last_result.update({
+                    "stateUnknown": True,
+                }),
+                None,
+                "STATE_UNKNOWN",
+            ),
+            (
+                "state-unknown-missing",
+                lambda last_result: last_result.pop("stateUnknown"),
+                None,
+                "STATE_UNKNOWN_MISSING",
+            ),
+            (
+                "position-remaining-true",
+                lambda last_result: last_result.update({
+                    "positionRemaining": True,
+                }),
+                None,
+                "POSITION_REMAINING",
+            ),
+            (
+                "position-remaining-missing",
+                lambda last_result: last_result.pop("positionRemaining"),
+                None,
+                "POSITION_REMAINING_MISSING",
+            ),
+            (
+                "current-operation-id-missing",
+                lambda _last_result: None,
+                None,
+                "CURRENT_OPERATION_ID_MISSING",
+            ),
+            (
+                "result-operation-id-missing",
+                missing_operation_id,
+                "emg_20260714T123456Z_unlock",
+                "RESULT_OPERATION_ID_MISSING",
+            ),
+            (
+                "operation-id-mismatch",
+                lambda _last_result: None,
+                "emg_20260714T999999Z_current",
+                "OPERATION_ID_MISMATCH",
+            ),
+            (
+                "old-operation-success",
+                lambda _last_result: None,
+                "emg_20260714T999999Z_retry",
+                "OPERATION_ID_MISMATCH",
+            ),
+        ]
+
+        for name, mutation, current_operation_id, reason in cases:
+            with self.subTest(name=name):
+                state_before = dict(governance_state)
+
+                try:
+                    last_result = (
+                        self._saved_emergency_result()
+                        if callable(mutation) or current_operation_id
+                        else mutation
+                    )
+
+                    if callable(mutation):
+                        mutation(last_result)
+
+                    governance_state["execution_enabled"] = False
+                    governance_state["emergency_stop"] = True
+                    governance_state["emergency_state"] = EMERGENCY_LOCKED
+                    governance_state["last_emergency_result"] = last_result
+
+                    if current_operation_id is None:
+                        governance_state[
+                            "current_emergency_operation_id"
+                        ] = None
+                    else:
+                        governance_state[
+                            "current_emergency_operation_id"
+                        ] = current_operation_id
+
+                    if (
+                        current_operation_id is None
+                        and isinstance(last_result, dict)
+                        and name != "current-operation-id-missing"
+                    ):
+                        self._set_current_emergency_operation(last_result)
+
+                    bot = BotManager()
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        with self.assertRaises(HTTPException) as raised:
+                            asyncio.run(emergency_unlock())
+
+                    self.assertEqual(raised.exception.status_code, 409)
+                    self.assertEqual(
+                        raised.exception.detail["reason"],
+                        reason,
+                    )
+                    self.assertTrue(governance_state["emergency_stop"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_LOCKED,
+                    )
+                    self.assertFalse(
+                        governance_state["execution_enabled"]
+                    )
+                    self.assertIs(
+                        governance_state["last_emergency_result"],
+                        last_result,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_pending_order_not_authoritative(
+        self,
+    ):
+        cases = [
+            (
+                "manager-false-engine-true",
+                False,
+                True,
+                "PENDING_ORDER_MISMATCH",
+            ),
+            (
+                "manager-false-engine-none",
+                False,
+                "engine-none",
+                "ENGINE_UNAVAILABLE",
+            ),
+            (
+                "manager-false-engine-pending-none",
+                False,
+                None,
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "manager-false-engine-pending-missing",
+                False,
+                "missing",
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "manager-false-engine-pending-non-bool",
+                False,
+                {},
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "manager-true-engine-false",
+                True,
+                False,
+                "PENDING_ORDER_MISMATCH",
+            ),
+            (
+                "manager-true-engine-true",
+                True,
+                True,
+                "PENDING_ORDER_REMAINING",
+            ),
+            (
+                "manager-pending-missing",
+                "missing",
+                False,
+                "PENDING_ORDER_MANAGER_UNKNOWN",
+            ),
+            (
+                "manager-pending-non-bool",
+                {},
+                False,
+                "PENDING_ORDER_MANAGER_UNKNOWN",
+            ),
+            (
+                "engine-pending-read-exception",
+                False,
+                "raises",
+                "PENDING_ORDER_READ_FAILED",
+            ),
+        ]
+
+        for name, manager_pending, engine_pending, reason in cases:
+            with self.subTest(name=name):
+                state_before = dict(governance_state)
+
+                try:
+                    last_result = self._saved_emergency_result()
+                    governance_state["execution_enabled"] = False
+                    governance_state["emergency_stop"] = True
+                    governance_state["emergency_state"] = EMERGENCY_LOCKED
+                    governance_state["last_emergency_result"] = last_result
+                    self._set_current_emergency_operation(last_result)
+
+                    bot = BotManager()
+                    if manager_pending == "missing":
+                        delattr(bot, "pending_order")
+                    else:
+                        bot.pending_order = manager_pending
+
+                    if engine_pending == "engine-none":
+                        bot.engine = None
+                    elif engine_pending == "raises":
+                        bot.engine = self._pending_order_raising_engine()
+                    else:
+                        bot.engine = self._pending_order_engine(
+                            engine_pending
+                        )
+
+                    pending_state = (
+                        bot.get_authoritative_pending_order_state()
+                    )
+                    status = bot.get_status()
+
+                    self.assertTrue(status["pendingOrder"])
+                    self.assertEqual(pending_state["reason"], reason)
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        with self.assertRaises(HTTPException) as raised:
+                            asyncio.run(emergency_unlock())
+
+                    self.assertEqual(raised.exception.status_code, 409)
+                    self.assertEqual(
+                        raised.exception.detail["reason"],
+                        reason,
+                    )
+                    self.assertTrue(governance_state["emergency_stop"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_LOCKED,
+                    )
+                    self.assertFalse(
+                        governance_state["execution_enabled"]
+                    )
+                    self.assertIs(
+                        governance_state["last_emergency_result"],
+                        last_result,
+                    )
+                    self.assertFalse(bot._running)
+                    self.assertEqual(bot.lifecycle_state, "STOPPED")
+                    self.assertFalse(status["loopEnabled"])
+                    self.assertFalse(status["autoTradeEnabled"])
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_status_and_unlock_guard_share_pending_order_authority(self):
+        cases = [
+            (
+                "safe",
+                False,
+                False,
+                False,
+                None,
+            ),
+            (
+                "engine-pending",
+                False,
+                True,
+                True,
+                "PENDING_ORDER_MISMATCH",
+            ),
+            (
+                "engine-unknown",
+                False,
+                None,
+                True,
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "engine-none",
+                False,
+                "engine-none",
+                True,
+                "ENGINE_UNAVAILABLE",
+            ),
+        ]
+
+        for (
+            name,
+            manager_pending,
+            engine_pending,
+            expected_status_pending,
+            expected_reason,
+        ) in cases:
+            with self.subTest(name=name):
+                state_before = dict(governance_state)
+
+                try:
+                    last_result = self._saved_emergency_result()
+                    governance_state["execution_enabled"] = False
+                    governance_state["emergency_stop"] = True
+                    governance_state["emergency_state"] = EMERGENCY_LOCKED
+                    governance_state["last_emergency_result"] = last_result
+                    self._set_current_emergency_operation(last_result)
+
+                    bot = BotManager()
+                    bot.pending_order = manager_pending
+                    bot.engine = (
+                        None
+                        if engine_pending == "engine-none"
+                        else self._pending_order_engine(engine_pending)
+                    )
+
+                    pending_state = (
+                        bot.get_authoritative_pending_order_state()
+                    )
+                    status = bot.get_status()
+                    reason = emergency_unlock_block_reason(
+                        pending_state
+                    )
+
+                    self.assertEqual(
+                        status["pendingOrder"],
+                        expected_status_pending,
+                    )
+                    self.assertEqual(reason, expected_reason)
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_unlock_rejects_unlock_processing_exception(self):
+        state_before = dict(governance_state)
+
+        try:
+            last_result = self._saved_emergency_result()
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
+            bot = self._bot_with_pending_sources(
+                manager_pending=False,
+                engine_pending=False,
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                with patch(
+                    "backend.runtime.governance_runtime."
+                    "record_emergency_timeline_event",
+                    side_effect=RuntimeError("timeline failed"),
+                ):
+                    with self.assertRaises(HTTPException) as raised:
+                        asyncio.run(emergency_unlock())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "UNLOCK_FAILED",
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                last_result,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_succeeds_only_from_action_required(self):
+        state_before = dict(governance_state)
+
+        try:
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+                state_unknown=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+            governance_state["emergency_timeline"] = []
+            bot = self._stopped_paper_bot()
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_retry())
+
+            emergency = bot.get_status()["emergency"]
+            last_result = governance_state["last_emergency_result"]
+            new_operation_id = last_result["operationId"]
+            events = self._emergency_timeline_events()
+            operation_events = [
+                event
+                for event in events
+                if event.get("operationId") == new_operation_id
+            ]
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["state_unknown"])
+            self.assertFalse(result["position_remaining"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertTrue(emergency["locked"])
+            self.assertEqual(emergency["state"], EMERGENCY_LOCKED)
+            self.assertNotEqual(
+                emergency["lastResult"]["operationId"],
+                previous["operationId"],
+            )
+            self.assertEqual(
+                governance_state["current_emergency_operation_id"],
+                new_operation_id,
+            )
+            self.assertEqual(
+                [event["event"] for event in operation_events],
+                ["EMERGENCY_STARTED", "EMERGENCY_COMPLETED"],
+            )
+            self.assertEqual(len(operation_events), 2)
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_failure_keeps_action_required(self):
+        state_before = dict(governance_state)
+
+        try:
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+                state_unknown=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+            governance_state["emergency_timeline"] = []
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot["position"] = {
+                "symbol": "XRPUSDT",
+                "side": "BUY",
+            }
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_retry())
+
+            emergency = bot.get_status()["emergency"]
+            last_result = governance_state["last_emergency_result"]
+            new_operation_id = last_result["operationId"]
+            events = self._emergency_timeline_events()
+            operation_events = [
+                event
+                for event in events
+                if event.get("operationId") == new_operation_id
+            ]
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertTrue(result["position_remaining"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(emergency["state"], EMERGENCY_ACTION_REQUIRED)
+            self.assertTrue(emergency["lastResult"]["positionRemaining"])
+            self.assertNotEqual(new_operation_id, previous["operationId"])
+            self.assertEqual(
+                governance_state["current_emergency_operation_id"],
+                new_operation_id,
+            )
+            self.assertEqual(
+                [event["event"] for event in operation_events],
+                ["EMERGENCY_STARTED", "EMERGENCY_ACTION_REQUIRED"],
+            )
+            self.assertEqual(len(operation_events), 2)
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_non_action_required_states(self):
+        cases = [
+            (EMERGENCY_READY, False, "NOT_ACTION_REQUIRED"),
+            (EMERGENCY_PROCESSING, True, "PROCESSING"),
+            (EMERGENCY_LOCKED, True, "ALREADY_LOCKED"),
+            (None, True, "STATE_MISSING"),
+            ("BROKEN_STATE", True, "INVALID_STATE"),
+        ]
+
+        for state, emergency_stop, reason in cases:
+            with self.subTest(state=state):
+                state_before = dict(governance_state)
+                bot = BotManager()
+
+                try:
+                    governance_state["execution_enabled"] = False
+                    governance_state["emergency_stop"] = emergency_stop
+                    if state is None:
+                        governance_state.pop("emergency_state", None)
+                    else:
+                        governance_state["emergency_state"] = state
+                    governance_state["last_emergency_result"] = (
+                        self._saved_emergency_result(state=state)
+                        if state not in {EMERGENCY_READY, None}
+                        else None
+                    )
+                    if isinstance(
+                        governance_state["last_emergency_result"],
+                        dict,
+                    ):
+                        self._set_current_emergency_operation(
+                            governance_state["last_emergency_result"]
+                        )
+                    governance_state["emergency_timeline"] = []
+                    expected_last_result = governance_state[
+                        "last_emergency_result"
+                    ]
+                    expected_current_operation_id = governance_state.get(
+                        "current_emergency_operation_id"
+                    )
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        with self.assertRaises(HTTPException) as raised:
+                            asyncio.run(emergency_retry())
+
+                    self.assertEqual(raised.exception.status_code, 409)
+                    self.assertEqual(
+                        raised.exception.detail["reason"],
+                        reason,
+                    )
+                    self.assertIs(
+                        governance_state["last_emergency_result"],
+                        expected_last_result,
+                    )
+                    self.assertEqual(
+                        governance_state.get(
+                            "current_emergency_operation_id"
+                        ),
+                        expected_current_operation_id,
+                    )
+                    self.assertEqual(
+                        self._emergency_timeline_events(),
+                        [],
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_timeline_uses_new_operation(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot["position"] = {
+                "symbol": "XRPUSDT",
+                "side": "BUY",
+            }
+
+            first = bot.run_emergency_orchestrator()
+            first_operation_id = (
+                governance_state["last_emergency_result"]["operationId"]
+            )
+            bot.account_snapshot["position"] = None
+            bot.account_snapshot["positions"] = []
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                second = asyncio.run(emergency_retry())
+
+            second_operation_id = (
+                governance_state["last_emergency_result"]["operationId"]
+            )
+            events = self._emergency_timeline_events()
+            events_by_operation = {
+                operation_id: [
+                    event["event"]
+                    for event in events
+                    if event.get("operationId") == operation_id
+                ]
+                for operation_id in {
+                    first_operation_id,
+                    second_operation_id,
+                }
+            }
+
+            self.assertFalse(first["success"])
+            self.assertTrue(second["success"])
+            self.assertNotEqual(
+                first_operation_id,
+                second_operation_id,
+            )
+            self.assertEqual(
+                events_by_operation[first_operation_id],
+                ["EMERGENCY_STARTED", "EMERGENCY_ACTION_REQUIRED"],
+            )
+            self.assertEqual(
+                events_by_operation[second_operation_id],
+                ["EMERGENCY_STARTED", "EMERGENCY_COMPLETED"],
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_when_mutex_busy(self):
+        state_before = dict(governance_state)
+        bot = self._stopped_paper_bot()
+        acquired = False
+
+        try:
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+            governance_state["emergency_timeline"] = []
+            expected_operation_id = governance_state[
+                "current_emergency_operation_id"
+            ]
+
+            acquired = bot.emergency_orchestrator_lock.acquire(
+                blocking=False
+            )
+            self.assertTrue(acquired)
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                with self.assertRaises(HTTPException) as raised:
+                    asyncio.run(emergency_retry())
+
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(
+                raised.exception.detail["reason"],
+                "PROCESSING",
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertIs(
+                governance_state["last_emergency_result"],
+                previous,
+            )
+            self.assertEqual(
+                governance_state["current_emergency_operation_id"],
+                expected_operation_id,
+            )
+            self.assertEqual(self._emergency_timeline_events(), [])
+        finally:
+            if acquired:
+                bot.emergency_orchestrator_lock.release()
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_concurrent_requests_do_not_queue(self):
+        state_before = dict(governance_state)
+        entered_cancel = threading.Event()
+        release_cancel = threading.Event()
+        outcomes = []
+
+        def call_retry(label):
+            try:
+                outcomes.append((
+                    label,
+                    "success",
+                    asyncio.run(emergency_retry()),
+                ))
+            except HTTPException as exc:
+                outcomes.append((label, "error", exc))
+
+        try:
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+            governance_state["emergency_timeline"] = []
+            bot, _, exchange = self._live_emergency_bot(
+                cancel_result={
+                    "success": True,
+                    "requested": 1,
+                    "cancelled": 1,
+                    "failed": 0,
+                    "skipped": False,
+                },
+                flatten_result={
+                    "success": True,
+                    "skipped": False,
+                    "accepted": True,
+                    "confirmed": True,
+                    "closed": True,
+                },
+                real_order_allowed=True,
+            )
+
+            def blocking_cancel(_symbol):
+                entered_cancel.set()
+                release_cancel.wait(5)
+                return {
+                    "success": True,
+                    "requested": 1,
+                    "cancelled": 1,
+                    "failed": 0,
+                    "skipped": False,
+                }
+
+            exchange.cancel_all_orders.side_effect = blocking_cancel
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                first = threading.Thread(
+                    target=call_retry,
+                    args=("first",),
+                )
+                first.start()
+                self.assertTrue(entered_cancel.wait(5))
+
+                second = threading.Thread(
+                    target=call_retry,
+                    args=("second",),
+                )
+                second.start()
+                second.join(5)
+                self.assertFalse(second.is_alive())
+
+                with self.assertRaises(HTTPException) as emergency_busy:
+                    asyncio.run(emergency_orchestrate())
+
+                with self.assertRaises(HTTPException) as unlock_busy:
+                    asyncio.run(emergency_unlock())
+
+                release_cancel.set()
+                first.join(5)
+                self.assertFalse(first.is_alive())
+
+            success_results = [
+                value
+                for _label, status, value in outcomes
+                if status == "success"
+            ]
+            retry_errors = [
+                value
+                for _label, status, value in outcomes
+                if status == "error"
+            ]
+            events = self._emergency_timeline_events()
+            started_events = [
+                event
+                for event in events
+                if event.get("event") == "EMERGENCY_STARTED"
+            ]
+            completion_events = [
+                event
+                for event in events
+                if event.get("event") == "EMERGENCY_COMPLETED"
+            ]
+            operation_ids = {
+                event.get("operationId")
+                for event in events
+                if event.get("operationId")
+            }
+
+            self.assertEqual(len(success_results), 1)
+            self.assertEqual(len(retry_errors), 1)
+            self.assertTrue(success_results[0]["success"])
+            self.assertEqual(retry_errors[0].status_code, 409)
+            self.assertEqual(
+                retry_errors[0].detail["reason"],
+                "PROCESSING",
+            )
+            self.assertEqual(emergency_busy.exception.status_code, 409)
+            self.assertEqual(
+                emergency_busy.exception.detail["reason"],
+                "PROCESSING",
+            )
+            self.assertEqual(unlock_busy.exception.status_code, 409)
+            self.assertEqual(
+                unlock_busy.exception.detail["reason"],
+                "PROCESSING",
+            )
+            self.assertEqual(exchange.cancel_all_orders.call_count, 1)
+            self.assertEqual(
+                exchange.flatten_current_position.call_count,
+                1,
+            )
+            self.assertEqual(len(started_events), 1)
+            self.assertEqual(len(completion_events), 1)
+            self.assertEqual(len(operation_ids), 1)
+            self.assertNotIn(previous["operationId"], operation_ids)
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertEqual(
+                governance_state["current_emergency_operation_id"],
+                next(iter(operation_ids)),
+            )
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            release_cancel.set()
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_exception_completes_and_releases_mutex(self):
+        state_before = dict(governance_state)
+
+        try:
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+            )
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+            governance_state["emergency_timeline"] = []
+            bot = self._stopped_paper_bot()
+            bot._emergency_symbol = Mock(
+                side_effect=RuntimeError("symbol failed")
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                first = asyncio.run(emergency_retry())
+
+            failed_result = governance_state["last_emergency_result"]
+            failed_operation_id = failed_result["operationId"]
+            failed_events = [
+                event
+                for event in self._emergency_timeline_events()
+                if event.get("operationId") == failed_operation_id
+            ]
+
+            self.assertFalse(first["success"])
+            self.assertTrue(first["state_unknown"])
+            self.assertEqual(
+                first["error_code"],
+                "ORCHESTRATOR_EXCEPTION",
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(
+                [event["event"] for event in failed_events],
+                ["EMERGENCY_STARTED", "EMERGENCY_ACTION_REQUIRED"],
+            )
+            self.assertEqual(len(failed_events), 2)
+
+            delattr(bot, "_emergency_symbol")
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                second = asyncio.run(emergency_retry())
+
+            self.assertTrue(second["success"])
+            self.assertTrue(second["completed"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertNotEqual(
+                governance_state["last_emergency_result"]["operationId"],
+                failed_operation_id,
+            )
+            self.assertFalse(governance_state["execution_enabled"])
         finally:
             self._restore_governance(state_before)
 
@@ -1744,9 +3079,19 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
             governance_state["emergency_timeline"] = []
 
-            result = asyncio.run(emergency_unlock())
+            bot = self._bot_with_pending_sources(
+                manager_pending=False,
+                engine_pending=False,
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_unlock())
             events = self._emergency_timeline_events()
 
             self.assertTrue(result["unlocked"])
@@ -1775,6 +3120,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_LOCKED
             governance_state["last_emergency_result"] = last_result
+            self._set_current_emergency_operation(last_result)
             governance_state["emergency_timeline"] = []
 
             with self.assertRaises(HTTPException):
@@ -2380,7 +3726,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    def test_emergency_orchestrator_engine_unavailable(self):
+    def test_emergency_orchestrator_live_engine_unavailable(self):
         state_before = self._set_governance(
             execution_enabled=True,
             emergency_stop=False,
@@ -2388,6 +3734,15 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         try:
             bot = BotManager()
             bot.engine = None
+            bot.lifecycle_state = "STOPPED"
+            bot._running = False
+            bot.symbol = "XRPUSDT"
+            bot.orderbook_symbol = "XRPUSDTM"
+            bot.config = {
+                "symbol": "XRPUSDT",
+                "mode": "live",
+                "dry_run": False,
+            }
 
             result = bot.run_emergency_orchestrator()
 
