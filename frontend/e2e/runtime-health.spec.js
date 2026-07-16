@@ -1,11 +1,22 @@
 import { expect, test } from "@playwright/test";
 
-const waitForBotState = async (request, expected) => {
+import {
+    createEmergencyMock,
+    ENDPOINTS,
+} from "./support/emergencyMock.js";
+
+const waitForBotState = async (page, expected) => {
     await expect.poll(async () => {
-        const response = await request.get("/api/bot/status");
-        expect(response.ok()).toBeTruthy();
-        const status = await response.json();
-        return status.runtime_health?.bot?.status;
+        return await page.evaluate(async () => {
+            const response = await fetch("/api/bot/status");
+
+            if (!response.ok) {
+                return `HTTP_${response.status}`;
+            }
+
+            const status = await response.json();
+            return status.runtime_health?.bot?.status;
+        });
     }).toBe(expected);
 };
 
@@ -14,15 +25,15 @@ const expectMonitorValue = async (page, testId, expected) => {
 };
 
 test.describe("Runtime Health Monitor lifecycle", () => {
-    test.beforeEach(async ({ request }) => {
-        const response = await request.post("/api/bot/stop");
-        expect(response.ok()).toBeTruthy();
-        await waitForBotState(request, "STOPPED");
+    let mock;
+
+    test.beforeEach(async ({ page }) => {
+        mock = createEmergencyMock();
+        await mock.install(page);
     });
 
-    test.afterEach(async ({ request }) => {
-        await request.post("/api/bot/stop");
-        await waitForBotState(request, "STOPPED");
+    test.afterEach(async () => {
+        mock.assertNetworkClean(expect);
     });
 
     test("shows STOP, START, and STOP current runtime health", async ({ page }) => {
@@ -61,11 +72,12 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expect(loopToggle).toHaveAttribute("aria-checked", "false");
 
         const startResponsePromise = page.waitForResponse((response) => (
-            response.url().endsWith("/api/bot/start")
+            response.url().endsWith(ENDPOINTS.botStart)
             && response.request().method() === "POST"
         ));
         await loopToggle.click();
         expect((await startResponsePromise).ok()).toBeTruthy();
+        await waitForBotState(page, "RUNNING");
 
         await expectMonitorValue(page, "bot-state", "RUNNING");
         await expect(loopToggle).toHaveAttribute("aria-checked", "true");
@@ -74,11 +86,12 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expectMonitorValue(page, "pipeline-status", "OK");
 
         const stopResponsePromise = page.waitForResponse((response) => (
-            response.url().endsWith("/api/bot/stop")
+            response.url().endsWith(ENDPOINTS.botStop)
             && response.request().method() === "POST"
         ));
         await loopToggle.click();
         expect((await stopResponsePromise).ok()).toBeTruthy();
+        await waitForBotState(page, "STOPPED");
 
         await expectMonitorValue(page, "bot-state", "STOPPED");
         await expect(loopToggle).toHaveAttribute("aria-checked", "false");

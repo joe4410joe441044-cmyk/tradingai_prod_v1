@@ -305,6 +305,112 @@ test.describe("Emergency Stop local-only E2E", () => {
         ).toBeDisabled();
     });
 
+    test("SNAPSHOT_STALE recheck converges to unlockable LOCKED state", async ({
+        page,
+    }) => {
+        mock.setNextEmergencyOutcome("snapshot_stale");
+
+        await waitForDashboard(page);
+        await expect(page.getByTestId("bot-state")).toHaveText("STOPPED");
+        await expect(
+            page.getByRole("switch", { name: "Toggle trading loop" }),
+        ).toHaveAttribute("aria-checked", "false");
+        await expect(
+            page.getByRole("switch", { name: "Toggle automatic trading" }),
+        ).toHaveAttribute("aria-checked", "false");
+
+        const emergencyResponsePromise = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.emergency)
+            && response.request().method() === "POST"
+        ));
+        await clickEmergencyConfirm(page);
+        const emergencyResponse = await emergencyResponsePromise;
+        expect(emergencyResponse.ok()).toBeTruthy();
+        expect(await emergencyResponse.json()).toMatchObject({
+            success: false,
+            completed: false,
+            partial: true,
+            state_unknown: true,
+            error_code: "SNAPSHOT_STALE",
+            path: "paper",
+        });
+
+        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+        await expect(page.getByText("SNAPSHOT_STALE")).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toHaveCount(0);
+
+        const dialog = await openRetryDialog(page);
+        const retryResponsePromise = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.retry)
+            && response.request().method() === "POST"
+        ));
+        await dialog.getByRole(
+            "button",
+            {
+                name: "再確認",
+            },
+        ).click();
+        const retryResponse = await retryResponsePromise;
+        expect(retryResponse.ok()).toBeTruthy();
+        expect(await retryResponse.json()).toMatchObject({
+            success: true,
+            completed: true,
+            partial: false,
+            state_unknown: false,
+            position_remaining: false,
+            path: "paper",
+        });
+
+        await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: "緊急状態を解除" }),
+        ).toBeEnabled();
+        expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
+
+        const unlockDialog = await openUnlockDialog(page);
+        const unlockResponsePromise = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.unlock)
+            && response.request().method() === "POST"
+        ));
+        await unlockDialog.getByRole(
+            "button",
+            {
+                name: "緊急状態を解除",
+            },
+        ).click();
+        const unlockResponse = await unlockResponsePromise;
+        expect(unlockResponse.ok()).toBeTruthy();
+        expect(await unlockResponse.json()).toMatchObject({
+            success: true,
+            unlocked: true,
+            emergency_state: "READY",
+            execution_enabled: false,
+        });
+
+        await expect(emergencyStateLabel(page)).toHaveText("READY");
+        await expect(
+            page.getByRole("switch", { name: "Toggle trading loop" }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole("switch", { name: "Toggle automatic trading" }),
+        ).toBeDisabled();
+        await expect(page.getByTestId("auto-trade-disabled-reason")).toContainText(
+            "Loop must be running before Auto Trade can be enabled.",
+        );
+        expect(mock.getStatus().emergency).toMatchObject({
+            locked: false,
+            state: "READY",
+        });
+    });
+
     test("retry confirm cancel keeps ACTION_REQUIRED and operation id", async ({
         page,
     }) => {

@@ -980,6 +980,74 @@ test("Retry confirm true sends one retry POST and never unlocks", async () => {
     }
 });
 
+test("Retry SNAPSHOT_STALE success refreshes status and reveals Unlock", async () => {
+    const fetchMock = installFetchMock(() => jsonResponse({
+        body: emergencyApiResponse(),
+    }));
+    let refreshCount = 0;
+    let renderer;
+
+    try {
+        const staleEmergency = emergencyStatus("ACTION_REQUIRED", {
+            lastResult: lastResult({
+                result: "PARTIAL",
+                state: "ACTION_REQUIRED",
+                success: false,
+                completed: false,
+                partial: true,
+                stateUnknown: true,
+                retryable: true,
+                message: "Emergency requires operator action: SNAPSHOT_STALE",
+            }),
+        });
+
+        renderer = await renderBotControl({
+            emergency: staleEmergency,
+            emergencyLocked: true,
+            emergencyState: "ACTION_REQUIRED",
+            pendingOrder: true,
+            onStatusRefresh: async () => {
+                refreshCount += 1;
+                renderer.render({
+                    emergency: emergencyStatus("LOCKED"),
+                    emergencyLocked: true,
+                    emergencyState: "LOCKED",
+                    pendingOrder: false,
+                });
+            },
+        });
+
+        assert.ok(textIncludes(renderer.root, "SNAPSHOT_STALE"));
+        assert.ok(findButton(renderer.root, "安全状態を再確認"));
+        assert.equal(findButton(renderer.root, "緊急状態を解除"), null);
+
+        clickAndRender(
+            renderer,
+            findButton(renderer.root, "安全状態を再確認"),
+        );
+        await clickAndRender(
+            renderer,
+            findLastButton(renderer.root, "再確認"),
+        );
+        renderer.render();
+
+        assert.equal(fetchMock.requests.length, 1);
+        assert.equal(
+            fetchMock.requests[0].url,
+            "/api/governance/emergency/retry",
+        );
+        assert.equal(refreshCount, 1);
+        assert.ok(textIncludes(renderer.root, "STOPPED SAFELY"));
+        assert.equal(findButton(renderer.root, "安全状態を再確認"), null);
+        assert.equal(
+            findButton(renderer.root, "緊急状態を解除").props.disabled,
+            false,
+        );
+    } finally {
+        fetchMock.restore();
+    }
+});
+
 test("Unlock confirm true sends one unlock POST after safe LOCKED state", async () => {
     const fetchMock = installFetchMock(() => jsonResponse({
         body: {

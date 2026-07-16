@@ -1,7 +1,6 @@
-const LOCAL_HOSTS = new Set([
-    "127.0.0.1",
-    "localhost",
-]);
+import {
+    createNetworkIsolation,
+} from "./networkIsolation.js";
 
 export const ENDPOINTS = {
     status: "/api/bot/status",
@@ -113,8 +112,12 @@ const createLastResult = ({
     cancelResult: baseCancelResult(),
     flattenResult: baseFlattenResult(),
     completedAt: completed ? nowIso() : null,
-    message,
-});
+                message: message || (
+                    errorCode
+                        ? `Emergency requires operator action: ${errorCode}`
+                        : "Manual safety confirmation is required."
+                ),
+            });
 
 const initialState = () => ({
     revision: 0,
@@ -351,9 +354,9 @@ const buildStatus = (state) => {
                 equity: null,
                 availableBalance: null,
                 positionSummary: "NO_OPEN_POSITION",
-                accountReason: "NOT_CONNECTED",
-                balanceReason: "NOT_CONNECTED",
-                positionReason: "NOT_CONNECTED",
+                accountReason: "ACCOUNT_NOT_SYNCED",
+                balanceReason: "ACCOUNT_NOT_SYNCED",
+                positionReason: "ACCOUNT_NOT_SYNCED",
             },
             connection: {
                 apiKeyStatus: "MISSING",
@@ -438,8 +441,12 @@ export function createEmergencyMock() {
     let calls = {};
     let queuedFailures = {};
     let routeDelays = {};
-    const externalRequests = [];
     const unexpectedApiRequests = [];
+    const networkIsolation = createNetworkIsolation({
+        apiHandler: async (route, { path }) => {
+            await handleApi(route, path);
+        },
+    });
 
     const reset = () => {
         state = initialState();
@@ -644,7 +651,14 @@ export function createEmergencyMock() {
 
         const result = state.nextEmergencyOutcome === "action_required"
             ? completeActionRequired(operationId)
-            : completeSuccess(operationId);
+            : state.nextEmergencyOutcome === "snapshot_stale"
+                ? completeActionRequired(operationId, {
+                    errorCode: "SNAPSHOT_STALE",
+                    stateUnknown: true,
+                    positionRemaining: false,
+                    pendingOrder: false,
+                })
+                : completeSuccess(operationId);
 
         await jsonFulfill(route, toApiEmergencyResult(result));
     };
@@ -836,40 +850,16 @@ export function createEmergencyMock() {
         await jsonFulfill(
             route,
             {
-                error: "Unexpected API request",
+                error: "UNMOCKED_API_REQUEST",
                 path,
             },
             599,
         );
-        throw new Error(`Unexpected API request: ${path}`);
+        throw new Error(`UNMOCKED_API_REQUEST ${path}`);
     };
 
     const install = async (page) => {
-        await page.route("**/*", async (route) => {
-            const request = route.request();
-            const url = new URL(request.url());
-            const isLocalhost = LOCAL_HOSTS.has(url.hostname);
-
-            if (!isLocalhost) {
-                externalRequests.push(request.url());
-                await route.abort("blockedbyclient");
-                throw new Error(`External request blocked: ${request.url()}`);
-            }
-
-            if (url.pathname.startsWith("/api/")) {
-                await handleApi(route, url.pathname);
-                return;
-            }
-
-            await route.continue();
-        });
-
-        page.on("websocket", (webSocket) => {
-            const url = new URL(webSocket.url());
-            if (!LOCAL_HOSTS.has(url.hostname)) {
-                externalRequests.push(webSocket.url());
-            }
-        });
+        await networkIsolation.install(page);
     };
 
     reset();
@@ -913,10 +903,29 @@ export function createEmergencyMock() {
             return calls[path] || 0;
         },
         getExternalRequests() {
-            return [...externalRequests];
+            return networkIsolation.getExternalRequests();
+        },
+        getExternalHttpRequests() {
+            return networkIsolation.getExternalHttpRequests();
+        },
+        getExternalWebSocketRequests() {
+            return networkIsolation.getExternalWebSocketRequests();
+        },
+        getProductionIpRequests() {
+            return networkIsolation.getProductionIpRequests();
+        },
+        getNetworkIsolationCounts() {
+            return networkIsolation.getCounts();
         },
         getUnexpectedApiRequests() {
-            return [...unexpectedApiRequests];
+            return [
+                ...unexpectedApiRequests,
+                ...networkIsolation.getUnmockedApiRequests(),
+            ];
+        },
+        assertNetworkClean(expect) {
+            networkIsolation.assertClean(expect);
+            expect(unexpectedApiRequests).toEqual([]);
         },
     };
 }

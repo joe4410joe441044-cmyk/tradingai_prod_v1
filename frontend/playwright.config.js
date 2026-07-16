@@ -11,7 +11,7 @@ export default defineConfig({
     reporter: "line",
     outputDir: "/tmp/tradingai-playwright-results",
     use: {
-        baseURL: "http://127.0.0.1:5173",
+        baseURL: "http://127.0.0.1:4174",
         trace: "retain-on-failure",
         screenshot: "only-on-failure",
     },
@@ -25,8 +25,8 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: "npm run dev -- --host 127.0.0.1 --strictPort",
-        url: "http://127.0.0.1:5173",
+        command: "VITE_API_BASE=/api VITE_WS_BASE=ws://127.0.0.1:4174 VITE_WS_URL=ws://127.0.0.1:4174/ws npx vite --config vite.playwright.config.js --host 127.0.0.1 --port 4174 --strictPort",
+        url: "http://127.0.0.1:4174",
         reuseExistingServer: false,
         timeout: 30_000,
     },

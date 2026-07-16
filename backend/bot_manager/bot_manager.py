@@ -2542,6 +2542,100 @@ class BotManager:
 
         return "flat"
 
+    def _stopped_paper_manager_position_state(self):
+
+        missing = object()
+
+        try:
+            position = getattr(self, "position", missing)
+            entry_price = getattr(self, "entry_price", None)
+        except Exception:
+            return "unknown"
+
+        if position is missing:
+            return "unknown"
+
+        if self._emergency_position_value_present(position):
+            return "remaining"
+
+        if entry_price is None:
+            return "flat"
+
+        if type(entry_price) in {int, float} and entry_price == 0:
+            return "flat"
+
+        if isinstance(entry_price, str) and entry_price.strip() == "":
+            return "flat"
+
+        return "unknown"
+
+    def _refresh_stopped_paper_safety_snapshot(self, snapshot):
+
+        if not isinstance(snapshot, dict):
+            return None, "SNAPSHOT_UNAVAILABLE"
+
+        if snapshot.get("available") is not True:
+            return None, "SNAPSHOT_NOT_SYNCED"
+
+        snapshot_position_state = self._stopped_paper_position_state(
+            snapshot
+        )
+        if snapshot_position_state == "remaining":
+            return None, "POSITION_REMAINING"
+        if snapshot_position_state == "unknown":
+            return None, "POSITION_STATE_UNKNOWN"
+
+        manager_position_state = (
+            self._stopped_paper_manager_position_state()
+        )
+        if manager_position_state == "remaining":
+            return None, "POSITION_REMAINING"
+        if manager_position_state == "unknown":
+            return None, "POSITION_STATE_UNKNOWN"
+
+        pending_order_state = self._stopped_paper_pending_order_state()
+        if pending_order_state == "remaining":
+            return None, "PENDING_ORDER_REMAINING"
+        if pending_order_state == "unknown":
+            return None, "PENDING_ORDER_UNKNOWN"
+
+        try:
+            now = time.time()
+        except Exception:
+            return None, "SNAPSHOT_TIME_UNAVAILABLE"
+
+        if (
+            type(now) not in {int, float}
+            or not math.isfinite(now)
+            or now <= 0
+        ):
+            return None, "SNAPSHOT_TIME_UNAVAILABLE"
+
+        refreshed = deepcopy(snapshot)
+        refreshed.update({
+            "position": None,
+            "positions": [],
+            "last_update": now,
+            "available": True,
+            "capturedAt": now,
+            "timestamp": now,
+            "source": "stopped_paper_recheck",
+            "tradeMode": "paper",
+            "botRunning": False,
+            "loopEnabled": False,
+            "autoTradeEnabled": False,
+            "executionEnabled": False,
+            "positionRemaining": False,
+            "pendingOrder": False,
+            "pending_order": False,
+            "openOrderCount": 0,
+            "stateUnknown": False,
+            "dataQuality": "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
+        })
+
+        self.account_snapshot = refreshed
+        return refreshed, None
+
     @staticmethod
     def _pending_order_authority_payload(
         known,
@@ -2687,7 +2781,10 @@ class BotManager:
             "threshold": stale_after,
         }
 
-    def _stopped_paper_authoritative_safety_state(self):
+    def _stopped_paper_authoritative_safety_state(
+        self,
+        refresh_snapshot=False,
+    ):
 
         state = {
             "applies": True,
@@ -2695,6 +2792,7 @@ class BotManager:
             "reason": None,
             "snapshot": None,
             "snapshot_timestamp_state": None,
+            "snapshot_refresh_state": None,
             "position_state": None,
             "pending_order_state": None,
         }
@@ -2747,6 +2845,32 @@ class BotManager:
             result["snapshot"] = snapshot
             return result
 
+        if refresh_snapshot:
+            refreshed_snapshot, refresh_reason = (
+                self._refresh_stopped_paper_safety_snapshot(snapshot)
+            )
+            if refreshed_snapshot is None:
+                result = unknown(refresh_reason)
+                result["snapshot"] = snapshot
+                result["snapshot_refresh_state"] = {
+                    "refreshed": False,
+                    "reason": refresh_reason,
+                    "source": "stopped_paper_recheck",
+                }
+                if refresh_reason == "POSITION_REMAINING":
+                    result["position_state"] = "remaining"
+                elif refresh_reason == "POSITION_STATE_UNKNOWN":
+                    result["position_state"] = "unknown"
+                if refresh_reason == "PENDING_ORDER_REMAINING":
+                    result["position_state"] = "flat"
+                    result["pending_order_state"] = "remaining"
+                elif refresh_reason == "PENDING_ORDER_UNKNOWN":
+                    result["position_state"] = "flat"
+                    result["pending_order_state"] = "unknown"
+                return result
+
+            snapshot = refreshed_snapshot
+
         timestamp_state = (
             self._stopped_paper_snapshot_timestamp_state(snapshot)
         )
@@ -2768,6 +2892,15 @@ class BotManager:
         result = dict(state)
         result["snapshot"] = snapshot
         result["snapshot_timestamp_state"] = timestamp_state
+        result["snapshot_refresh_state"] = {
+            "refreshed": refresh_snapshot is True,
+            "reason": None,
+            "source": (
+                "stopped_paper_recheck"
+                if refresh_snapshot is True
+                else "account_snapshot"
+            ),
+        }
         result["position_state"] = position_state
         result["pending_order_state"] = pending_order_state
 
@@ -2993,10 +3126,16 @@ class BotManager:
             engine_pending_order=engine_pending_order,
         )
 
-    def _stopped_paper_emergency_response(self, symbol):
+    def _stopped_paper_emergency_response(
+        self,
+        symbol,
+        refresh_snapshot=False,
+    ):
 
         stopped_state = (
-            self._stopped_paper_authoritative_safety_state()
+            self._stopped_paper_authoritative_safety_state(
+                refresh_snapshot=refresh_snapshot,
+            )
         )
 
         if stopped_state.get("applies") is False:
@@ -3441,6 +3580,7 @@ class BotManager:
                 )
 
             operation = begin_emergency_operation()
+            operation["recheck"] = True
 
             return self._run_emergency_orchestrator_locked(
                 operation
@@ -3531,7 +3671,10 @@ class BotManager:
             if engine is None:
                 stopped_response = (
                     self._stopped_paper_emergency_response(
-                        symbol
+                        symbol,
+                        refresh_snapshot=(
+                            operation.get("recheck") is True
+                        ),
                     )
                 )
 

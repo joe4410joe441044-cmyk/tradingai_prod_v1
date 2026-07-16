@@ -1595,6 +1595,298 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             finally:
                 self._restore_governance(state_before)
 
+    def test_emergency_retry_refreshes_stale_stopped_paper_snapshot_and_unlocks(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_stale_after = 90.0
+            bot.account_snapshot["last_update"] = stale_update
+            original_snapshot = bot.account_snapshot
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                initial = bot.run_emergency_orchestrator()
+
+                self.assertFalse(initial["success"])
+                self.assertTrue(initial["state_unknown"])
+                self.assertEqual(initial["error_code"], "SNAPSHOT_STALE")
+                self.assertEqual(
+                    governance_state["emergency_state"],
+                    EMERGENCY_ACTION_REQUIRED,
+                )
+                self.assertIs(bot.account_snapshot, original_snapshot)
+                self.assertEqual(
+                    bot.account_snapshot["last_update"],
+                    stale_update,
+                )
+
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    retry = asyncio.run(emergency_retry())
+
+                self.assertTrue(retry["success"])
+                self.assertTrue(retry["completed"])
+                self.assertFalse(retry["partial"])
+                self.assertFalse(retry["state_unknown"])
+                self.assertFalse(retry["position_remaining"])
+                self.assertFalse(retry["retryable"])
+                self.assertEqual(retry["path"], "paper")
+                self.assertEqual(
+                    governance_state["emergency_state"],
+                    EMERGENCY_LOCKED,
+                )
+                self.assertIsNot(bot.account_snapshot, original_snapshot)
+                self.assertEqual(bot.account_snapshot["last_update"], now)
+                self.assertEqual(bot.account_snapshot["capturedAt"], now)
+                self.assertEqual(bot.account_snapshot["timestamp"], now)
+                self.assertEqual(
+                    bot.account_snapshot["source"],
+                    "stopped_paper_recheck",
+                )
+                self.assertEqual(
+                    bot.account_snapshot["dataQuality"],
+                    "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
+                )
+                self.assertFalse(bot.account_snapshot["positionRemaining"])
+                self.assertFalse(bot.account_snapshot["pendingOrder"])
+                self.assertEqual(bot.account_snapshot["openOrderCount"], 0)
+                self.assertFalse(bot.account_snapshot["stateUnknown"])
+
+                status = bot.get_status()
+                response = StatusResponse(**status)
+                last_result = status["emergency"]["lastResult"]
+                pending_state = bot.get_authoritative_pending_order_state()
+
+                self.assertEqual(status["emergency"]["state"], EMERGENCY_LOCKED)
+                self.assertTrue(status["emergency"]["locked"])
+                self.assertEqual(
+                    last_result["result"],
+                    EMERGENCY_RESULT_SUCCESS,
+                )
+                self.assertFalse(last_result["stateUnknown"])
+                self.assertFalse(last_result["positionRemaining"])
+                self.assertFalse(response.pendingOrder)
+                self.assertFalse(status["pendingOrder"])
+                self.assertIsNone(
+                    emergency_unlock_block_reason(pending_state)
+                )
+
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    unlocked = asyncio.run(emergency_unlock())
+
+                self.assertTrue(unlocked["success"])
+                self.assertTrue(unlocked["unlocked"])
+                self.assertEqual(
+                    governance_state["emergency_state"],
+                    EMERGENCY_READY,
+                )
+                self.assertFalse(governance_state["emergency_stop"])
+                self.assertFalse(status["loopEnabled"])
+                self.assertFalse(status["autoTradeEnabled"])
+                self.assertFalse(status["executionEnabled"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_stale_stopped_paper_unsafe_states(
+        self,
+    ):
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+        cases = [
+            (
+                "position-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "position": {
+                        "side": "BUY",
+                        "qty": 1,
+                    },
+                    "positions": [
+                        {
+                            "side": "BUY",
+                            "qty": 1,
+                        },
+                    ],
+                }),
+                "POSITION_REMAINING",
+                False,
+                True,
+            ),
+            (
+                "manager-position-remaining",
+                lambda bot: setattr(bot, "position", "LONG"),
+                "POSITION_REMAINING",
+                False,
+                True,
+            ),
+            (
+                "pending-order-remaining",
+                lambda bot: setattr(bot, "pending_order", True),
+                "PENDING_ORDER_REMAINING",
+                False,
+                False,
+            ),
+            (
+                "snapshot-unavailable",
+                lambda bot: setattr(bot, "account_snapshot", None),
+                "SNAPSHOT_UNAVAILABLE",
+                True,
+                None,
+            ),
+        ]
+
+        for (
+            name,
+            mutate,
+            reason,
+            state_unknown,
+            position_remaining,
+        ) in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+
+                try:
+                    bot = self._stopped_paper_bot()
+                    bot.account_stale_after = 90.0
+                    bot.account_snapshot["last_update"] = stale_update
+                    original_snapshot = bot.account_snapshot
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=now,
+                    ):
+                        initial = bot.run_emergency_orchestrator()
+                        self.assertEqual(
+                            initial["error_code"],
+                            "SNAPSHOT_STALE",
+                        )
+                        mutate(bot)
+
+                        with patch(
+                            "backend.api.governance.get_bot_manager",
+                            return_value=bot,
+                        ):
+                            retry = asyncio.run(emergency_retry())
+
+                    self.assertFalse(retry["success"])
+                    self.assertTrue(retry["partial"])
+                    self.assertEqual(retry["error_code"], reason)
+                    self.assertEqual(
+                        retry["state_unknown"],
+                        state_unknown,
+                    )
+                    self.assertEqual(
+                        retry["position_remaining"],
+                        position_remaining,
+                    )
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    if isinstance(bot.account_snapshot, dict):
+                        self.assertEqual(
+                            bot.account_snapshot["last_update"],
+                            stale_update,
+                        )
+                        self.assertIs(bot.account_snapshot, original_snapshot)
+
+                    pending_state = (
+                        bot.get_authoritative_pending_order_state()
+                    )
+                    self.assertIsNotNone(
+                        emergency_unlock_block_reason(pending_state)
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_does_not_use_stopped_paper_fallback_for_live_mode(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.config["mode"] = "live"
+            bot.account_stale_after = 90.0
+            bot.account_snapshot["last_update"] = stale_update
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                result = bot.retry_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["state_unknown"])
+            self.assertEqual(result["error_code"], "ENGINE_UNAVAILABLE")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(
+                bot.account_snapshot["last_update"],
+                stale_update,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_processing_state_before_recheck(
+        self,
+    ):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_PROCESSING
+            governance_state["last_emergency_result"] = (
+                self._saved_emergency_result(
+                    state=EMERGENCY_PROCESSING,
+                    result=EMERGENCY_RESULT_NONE,
+                    success=False,
+                    completed=False,
+                    partial=False,
+                    retryable=True,
+                )
+            )
+            self._set_current_emergency_operation(
+                governance_state["last_emergency_result"]
+            )
+            bot = self._stopped_paper_bot()
+
+            result = bot.retry_emergency_orchestrator()
+
+            self.assertTrue(result["retry_rejected"])
+            self.assertEqual(result["reason"], "PROCESSING")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_PROCESSING,
+            )
+        finally:
+            self._restore_governance(state_before)
+
     def test_emergency_stopped_paper_requires_authoritative_safety(self):
         cases = [
             (
