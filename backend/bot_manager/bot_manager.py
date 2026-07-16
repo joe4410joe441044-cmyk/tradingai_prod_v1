@@ -2542,6 +2542,111 @@ class BotManager:
 
         return "flat"
 
+    @staticmethod
+    def _normalize_emergency_mode(value):
+
+        if type(value) is not str:
+            return None
+
+        normalized = value.strip().lower()
+
+        if normalized in {"paper", "live"}:
+            return normalized
+
+        return None
+
+    def _stopped_paper_mode_resolution(self, snapshot=None):
+
+        candidates = []
+
+        def add_candidate(source, value):
+            candidates.append({
+                "source": source,
+                "value": value,
+                "normalized": self._normalize_emergency_mode(value),
+            })
+
+        if not isinstance(self.config, dict):
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_UNKNOWN",
+                "candidates": [{
+                    "source": "manager_config",
+                    "value": type(self.config).__name__,
+                    "normalized": None,
+                }],
+            }
+
+        if "mode" in self.config:
+            add_candidate(
+                "manager_config.mode",
+                self.config.get("mode"),
+            )
+
+        if "mode" in governance_state:
+            add_candidate(
+                "governance_state.mode",
+                governance_state.get("mode"),
+            )
+
+        if isinstance(snapshot, dict):
+            for key in ("tradeMode", "mode", "selectedMode"):
+                if key in snapshot:
+                    add_candidate(
+                        f"account_snapshot.{key}",
+                        snapshot.get(key),
+                    )
+
+        invalid_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["normalized"] is None
+        ]
+
+        if invalid_candidates:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_UNKNOWN",
+                "candidates": candidates,
+            }
+
+        valid_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["normalized"] is not None
+        ]
+        modes = {
+            candidate["normalized"]
+            for candidate in valid_candidates
+        }
+
+        if len(modes) > 1:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_CONFLICT",
+                "candidates": candidates,
+            }
+
+        if not valid_candidates:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_UNKNOWN",
+                "candidates": candidates,
+            }
+
+        selected = valid_candidates[0]
+
+        return {
+            "mode": selected["normalized"],
+            "source": selected["source"],
+            "reason": None,
+            "candidates": candidates,
+        }
+
     def _stopped_paper_manager_position_state(self):
 
         missing = object()
@@ -2793,6 +2898,7 @@ class BotManager:
             "snapshot": None,
             "snapshot_timestamp_state": None,
             "snapshot_refresh_state": None,
+            "mode_resolution": None,
             "position_state": None,
             "pending_order_state": None,
         }
@@ -2801,27 +2907,6 @@ class BotManager:
             result = dict(state)
             result["reason"] = reason
             return result
-
-        if not isinstance(self.config, dict):
-            return unknown("MODE_UNKNOWN")
-
-        if "mode" not in self.config:
-            return unknown("MODE_UNKNOWN")
-
-        raw_mode = self.config.get("mode")
-
-        if raw_mode is None:
-            return unknown("MODE_UNKNOWN")
-
-        selected_mode = str(raw_mode).strip().lower()
-
-        if selected_mode == "live":
-            result = unknown("LIVE_MODE")
-            result["applies"] = False
-            return result
-
-        if selected_mode != "paper":
-            return unknown("MODE_UNKNOWN")
 
         if (
             self._running
@@ -2840,9 +2925,27 @@ class BotManager:
         if not isinstance(snapshot, dict):
             return unknown("SNAPSHOT_UNAVAILABLE")
 
+        mode_resolution = self._stopped_paper_mode_resolution(snapshot)
+
+        if mode_resolution.get("mode") == "live":
+            result = unknown("LIVE_MODE")
+            result["applies"] = False
+            result["snapshot"] = snapshot
+            result["mode_resolution"] = mode_resolution
+            return result
+
+        if mode_resolution.get("mode") != "paper":
+            result = unknown(
+                mode_resolution.get("reason") or "MODE_UNKNOWN"
+            )
+            result["snapshot"] = snapshot
+            result["mode_resolution"] = mode_resolution
+            return result
+
         if snapshot.get("available") is not True:
             result = unknown("SNAPSHOT_NOT_SYNCED")
             result["snapshot"] = snapshot
+            result["mode_resolution"] = mode_resolution
             return result
 
         if refresh_snapshot:
@@ -2867,6 +2970,7 @@ class BotManager:
                 elif refresh_reason == "PENDING_ORDER_UNKNOWN":
                     result["position_state"] = "flat"
                     result["pending_order_state"] = "unknown"
+                result["mode_resolution"] = mode_resolution
                 return result
 
             snapshot = refreshed_snapshot
@@ -2884,6 +2988,7 @@ class BotManager:
             )
             result["snapshot"] = snapshot
             result["snapshot_timestamp_state"] = timestamp_state
+            result["mode_resolution"] = mode_resolution
             return result
 
         position_state = self._stopped_paper_position_state(snapshot)
@@ -2892,6 +2997,7 @@ class BotManager:
         result = dict(state)
         result["snapshot"] = snapshot
         result["snapshot_timestamp_state"] = timestamp_state
+        result["mode_resolution"] = mode_resolution
         result["snapshot_refresh_state"] = {
             "refreshed": refresh_snapshot is True,
             "reason": None,
@@ -3142,12 +3248,17 @@ class BotManager:
             return None
 
         if stopped_state.get("position_state") is None:
+            mode_reason = stopped_state.get("reason")
             return self._stopped_paper_unknown_response(
                 symbol,
-                stopped_state.get("reason", "STATE_UNKNOWN"),
+                mode_reason or "STATE_UNKNOWN",
                 execution_path=(
                     None
-                    if stopped_state.get("reason") == "MODE_UNKNOWN"
+                    if mode_reason in {
+                        "MODE_UNKNOWN",
+                        "MODE_CONFLICT",
+                        "LIVE_MODE",
+                    }
                     else "paper"
                 ),
             )

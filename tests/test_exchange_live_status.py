@@ -1823,6 +1823,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             execution_enabled=False,
             emergency_stop=True,
         )
+        governance_state["mode"] = "LIVE"
         now = 1_800_000_000.0
         stale_update = now - 600.0
 
@@ -1887,11 +1888,214 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
+    def test_emergency_retry_resolves_governance_paper_after_mode_unknown_result(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = {
+                "operationId": "emg_prod_mode_unknown",
+                "state": EMERGENCY_ACTION_REQUIRED,
+                "result": EMERGENCY_RESULT_PARTIAL,
+                "startedAt": "2026-07-16T17:00:00.000Z",
+                "completedAt": "2026-07-16T17:00:01.000Z",
+                "path": None,
+                "success": False,
+                "completed": False,
+                "partial": True,
+                "retryable": True,
+                "positionRemaining": None,
+                "stateUnknown": True,
+                "cancelResult": None,
+                "flattenResult": None,
+                "message": (
+                    "Emergency requires operator action: MODE_UNKNOWN"
+                ),
+            }
+            self._set_current_emergency_operation(
+                governance_state["last_emergency_result"]
+            )
+
+            bot = self._stopped_paper_bot()
+            bot.config.pop("mode", None)
+            bot.account_stale_after = 90.0
+            bot.account_snapshot["last_update"] = stale_update
+            original_snapshot = bot.account_snapshot
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    retry = asyncio.run(emergency_retry())
+
+            self.assertTrue(retry["success"])
+            self.assertTrue(retry["completed"])
+            self.assertFalse(retry["partial"])
+            self.assertFalse(retry["state_unknown"])
+            self.assertFalse(retry["position_remaining"])
+            self.assertEqual(retry["path"], "paper")
+            self.assertNotEqual(retry.get("error_code"), "MODE_UNKNOWN")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertIsNot(bot.account_snapshot, original_snapshot)
+            self.assertEqual(bot.account_snapshot["last_update"], now)
+            self.assertEqual(
+                bot.account_snapshot["source"],
+                "stopped_paper_recheck",
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                pending_state = bot.get_authoritative_pending_order_state()
+                self.assertIsNone(emergency_unlock_block_reason(pending_state))
+
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    unlocked = asyncio.run(emergency_unlock())
+
+            self.assertTrue(unlocked["success"])
+            self.assertTrue(unlocked["unlocked"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_normalizes_governance_paper_mode(self):
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+
+        for mode in ("paper", "PAPER", " paper "):
+            with self.subTest(mode=mode):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=True,
+                )
+
+                try:
+                    governance_state["mode"] = mode
+                    bot = self._stopped_paper_bot()
+                    bot.config.pop("mode", None)
+                    bot.account_stale_after = 90.0
+                    bot.account_snapshot["last_update"] = stale_update
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=now,
+                    ):
+                        result = bot.retry_emergency_orchestrator()
+
+                    self.assertTrue(result["success"])
+                    self.assertEqual(result["path"], "paper")
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_LOCKED,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_malformed_modes(self):
+        malformed_modes = [
+            True,
+            False,
+            1,
+            0,
+            {},
+            [],
+            "demo",
+            "unknown",
+            None,
+        ]
+
+        for mode in malformed_modes:
+            with self.subTest(mode=repr(mode)):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=True,
+                )
+
+                try:
+                    governance_state["mode"] = "PAPER"
+                    bot = self._stopped_paper_bot()
+                    bot.config["mode"] = mode
+
+                    result = bot.retry_emergency_orchestrator()
+
+                    self.assertFalse(result["success"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(result["error_code"], "MODE_UNKNOWN")
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_rejects_mode_conflict(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+        stale_update = now - 600.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._stopped_paper_bot()
+            bot.config["mode"] = "live"
+            bot.account_stale_after = 90.0
+            bot.account_snapshot["last_update"] = stale_update
+            original_snapshot = bot.account_snapshot
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                result = bot.retry_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["state_unknown"])
+            self.assertEqual(result["error_code"], "MODE_CONFLICT")
+            self.assertIsNone(result["path"])
+            self.assertIs(bot.account_snapshot, original_snapshot)
+            self.assertEqual(
+                bot.account_snapshot["last_update"],
+                stale_update,
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
     def test_emergency_stopped_paper_requires_authoritative_safety(self):
         cases = [
             (
                 "mode-missing",
-                lambda bot: bot.config.pop("mode"),
+                lambda bot: (
+                    bot.config.pop("mode", None),
+                    governance_state.pop("mode", None),
+                ),
                 "MODE_UNKNOWN",
             ),
             (
@@ -4470,6 +4674,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             emergency_stop=False,
         )
         try:
+            governance_state["mode"] = "LIVE"
             bot = BotManager()
             bot.engine = None
             bot.lifecycle_state = "STOPPED"
