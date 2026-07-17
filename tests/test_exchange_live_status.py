@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import tempfile
 import threading
 import time
 import unittest
@@ -1074,7 +1076,14 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     @staticmethod
     def _emergency_bot_with_engine(engine):
+        if isinstance(engine, Mock):
+            engine.stop.return_value = {"status": "stopped"}
         bot = BotManager()
+        bot._test_durable_snapshot_dir = tempfile.mkdtemp()
+        bot.stopped_paper_durable_snapshot_path = os.path.join(
+            bot._test_durable_snapshot_dir,
+            "stopped_paper_safety_snapshot.json",
+        )
         bot.engine = engine
         bot.symbol = "XRPUSDT"
         bot.orderbook_symbol = "XRPUSDTM"
@@ -1089,15 +1098,26 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         engine.mode = "paper"
         engine.exchange = exchange or Mock()
         engine.symbol = "XRPUSDT"
+        engine.actual_position = None
+        engine.portfolio.positions = {}
+        engine.pending_order = False
+        engine.open_orders = []
         engine.flatten_paper_position.return_value = flatten_result
         engine.build_live_readiness.return_value = {
             "realOrderAllowed": False,
         }
+        engine.stop.return_value = {"status": "stopped"}
         return self._emergency_bot_with_engine(engine), engine
 
     @staticmethod
     def _stopped_paper_bot():
         bot = BotManager()
+        tempdir = tempfile.mkdtemp()
+        bot._test_durable_snapshot_dir = tempdir
+        bot.stopped_paper_durable_snapshot_path = os.path.join(
+            tempdir,
+            "stopped_paper_safety_snapshot.json",
+        )
         bot.engine = None
         bot._running = False
         bot.lifecycle_state = "STOPPED"
@@ -1137,6 +1157,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             ),
             "operationId": None,
             "generation": bot.account_snapshot_generation,
+            "runtimeInstanceId": bot.runtime_instance_id,
+            "evidenceGeneration": bot.account_snapshot_generation,
+            "evidenceRuntimeInstanceId": bot.runtime_instance_id,
+            "evidenceSource": "stopped_paper_engine_snapshot",
             "positionStateSource": "execution_engine.actual_position",
             "pendingOrderStateSource": (
                 "execution_engine.pending_order_duplicate_lock"
@@ -1250,12 +1274,87 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 if open_orders != "missing":
                     self.open_orders = open_orders
 
+            def stop(self):
+                return {"status": "stopped"}
+
         return Engine(
             actual_position,
             positions,
             pending_order,
             open_orders_marker,
         )
+
+    def _temporary_durable_snapshot_path(self):
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        return os.path.join(
+            tempdir.name,
+            "stopped_paper_safety_snapshot.json",
+        )
+
+    @staticmethod
+    def _configure_durable_snapshot_path(bot, path):
+        tempdir = getattr(bot, "_test_durable_snapshot_dir", None)
+        if hasattr(tempdir, "cleanup"):
+            tempdir.cleanup()
+            bot._test_durable_snapshot_dir = None
+        bot.stopped_paper_durable_snapshot_path = path
+        return bot
+
+    def _restart_stopped_paper_bot(self, path):
+        bot = BotManager()
+        bot.stopped_paper_durable_snapshot_path = path
+        bot.engine = None
+        bot._running = False
+        bot.lifecycle_state = "STOPPED"
+        bot.symbol = "XRPUSDT"
+        bot.orderbook_symbol = "XRPUSDTM"
+        bot.config = {
+            "symbol": "XRPUSDT",
+            "mode": "paper",
+            "dry_run": True,
+        }
+        return bot
+
+    def _persist_flat_stopped_paper_durable_snapshot(
+        self,
+        path,
+        now=None,
+    ):
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        bot.engine = self._paper_engine_for_stop(
+            actual_position=None,
+            portfolio_positions={},
+        )
+        if now is None:
+            bot.stop()
+        else:
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                bot.stop()
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return bot, payload
+
+    def _write_durable_snapshot_payload(self, path, payload):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def _retry_stopped_paper_with_durable_path(self, path):
+        bot = self._restart_stopped_paper_bot(path)
+        self._mark_stopped_paper_snapshot_not_synced(bot)
+        with patch(
+            "backend.api.governance.get_bot_manager",
+            return_value=bot,
+        ):
+            retry = asyncio.run(emergency_retry())
+        return bot, retry
 
     def _live_emergency_bot(
         self,
@@ -2493,7 +2592,17 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     kwargs.update(engine_kwargs)
                     bot.engine = self._paper_engine_for_stop(**kwargs)
 
-                    bot.stop()
+                    stop_result = bot.stop()
+
+                    if name == "unknown-source":
+                        self.assertEqual(stop_result["status"], "error")
+                        self.assertIsNotNone(bot.engine)
+                        self.assertTrue(bot.account_snapshot["stateUnknown"])
+                        self.assertEqual(
+                            bot.account_snapshot["authorityReason"],
+                            "OPEN_ORDER_UNKNOWN",
+                        )
+                        continue
 
                     with patch(
                         "backend.api.governance.get_bot_manager",
@@ -2780,6 +2889,854 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "SNAPSHOT_OPERATION_ID_MISMATCH",
             )
         finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_stop_persists_durable_authoritative_snapshot(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        path = self._temporary_durable_snapshot_path()
+        now = 1_800_000_000.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._configure_durable_snapshot_path(
+                self._stopped_paper_bot(),
+                path,
+            )
+            bot.engine = self._paper_engine_for_stop(
+                actual_position=None,
+                portfolio_positions={},
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                bot.stop()
+
+            self.assertTrue(os.path.exists(path))
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+
+            self.assertEqual(payload["schemaVersion"], 1)
+            self.assertEqual(
+                payload["snapshotType"],
+                "stopped_paper_authoritative_safety",
+            )
+            self.assertEqual(
+                payload["source"],
+                "stopped_paper_engine_portfolio_snapshot",
+            )
+            self.assertEqual(payload["generation"], 1)
+            self.assertEqual(payload["evidenceGeneration"], 1)
+            self.assertEqual(payload["runtimeInstanceId"], (
+                bot.runtime_instance_id
+            ))
+            self.assertEqual(payload["capturedAt"], now)
+            self.assertEqual(payload["timestampEpoch"], now)
+            self.assertEqual(payload["writtenAt"], now)
+            self.assertFalse(payload["positionRemaining"])
+            self.assertFalse(payload["pendingOrder"])
+            self.assertEqual(payload["openOrderCount"], 0)
+            self.assertFalse(payload["stateUnknown"])
+            self.assertEqual(
+                payload["positionStateSource"],
+                "execution_engine.actual_position+portfolio.positions",
+            )
+            self.assertEqual(
+                payload["pendingStateSource"],
+                "execution_engine.pending_order_duplicate_lock",
+            )
+            self.assertEqual(
+                payload["openOrderStateSource"],
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection",
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_durable_atomic_save_failure_fails_closed(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._configure_durable_snapshot_path(
+                self._stopped_paper_bot(),
+                path,
+            )
+            bot.engine = self._paper_engine_for_stop(
+                actual_position=None,
+                portfolio_positions={},
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.os.replace",
+                side_effect=OSError("replace failed"),
+            ):
+                bot.stop()
+
+            self.assertFalse(os.path.exists(path))
+            self.assertTrue(bot.account_snapshot["stateUnknown"])
+            self.assertEqual(
+                bot.account_snapshot["authorityReason"],
+                "SNAPSHOT_PERSIST_FAILED",
+            )
+
+            restarted = self._restart_stopped_paper_bot(path)
+            restarted.account_snapshot = deepcopy(bot.account_snapshot)
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=restarted,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            self.assertFalse(retry["success"])
+            self.assertTrue(retry["state_unknown"])
+            self.assertEqual(
+                retry["error_code"],
+                "SNAPSHOT_PERSIST_FAILED",
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_fastapi_shutdown_hook_uses_existing_singleton_without_creation(
+        self,
+    ):
+        import backend.main as main
+
+        bot = Mock()
+        with patch(
+            "backend.main.get_existing_bot_manager",
+            return_value=bot,
+        ) as existing:
+            asyncio.run(main.shutdown_event())
+
+        existing.assert_called_once_with()
+        bot.shutdown.assert_called_once_with()
+
+        with patch(
+            "backend.main.get_existing_bot_manager",
+            return_value=None,
+        ), patch(
+            "backend.bot_manager.bot_manager.BotManager",
+        ) as constructor:
+            asyncio.run(main.shutdown_event())
+        constructor.assert_not_called()
+        self.assertIn(main.shutdown_event, main.app.router.on_shutdown)
+
+    def test_shutdown_persists_paper_engine_before_destroy_and_is_idempotent(
+        self,
+    ):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        bot.engine = self._paper_engine_for_stop(
+            actual_position=None,
+            portfolio_positions={},
+        )
+        engine = bot.engine
+        engine.stop = Mock(return_value={"status": "stopped"})
+        events = []
+        original_persist = bot._persist_stopped_paper_durable_snapshot
+
+        def persist(snapshot):
+            self.assertIsNotNone(bot.engine)
+            events.append("persist")
+            return original_persist(snapshot)
+
+        def engine_stop():
+            events.append("engine_stop")
+            return {"status": "stopped"}
+
+        engine.stop.side_effect = engine_stop
+
+        with patch.object(
+            bot,
+            "_persist_stopped_paper_durable_snapshot",
+            side_effect=persist,
+        ):
+            bot.shutdown()
+        events.append("destroyed" if bot.engine is None else "retained")
+        second = bot.shutdown()
+
+        self.assertEqual(events, ["persist", "engine_stop", "destroyed"])
+        engine.stop.assert_called_once_with()
+        self.assertTrue(second["persisted"])
+        with open(path, "r", encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["generation"], 1)
+
+    def test_engine_stop_failure_retains_engine_and_fails_closed(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        engine = self._paper_engine_for_stop(None, {})
+        engine.stop = Mock(side_effect=RuntimeError("stop failed"))
+        bot.engine = engine
+
+        result = bot.stop()
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["reason"], "ENGINE_STOP_FAILED")
+        self.assertIs(bot.engine, engine)
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(bot.account_snapshot["stateUnknown"])
+        self.assertEqual(
+            bot.account_snapshot["authorityReason"],
+            "ENGINE_STOP_FAILED",
+        )
+
+    def test_emergency_engine_stop_failure_is_action_required_and_locked(self):
+        from backend.routers import positions as positions_router
+
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        bot, engine = self._paper_emergency_bot({
+            "success": True,
+            "requested": 0,
+            "flattened": 0,
+            "failed": 0,
+            "skipped": True,
+        })
+        engine.stop.side_effect = RuntimeError("stop failed")
+        positions_router.set_engine(engine)
+
+        try:
+            result = bot.run_emergency_orchestrator()
+            last_result = governance_state["last_emergency_result"]
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["partial"])
+            self.assertTrue(result["state_unknown"])
+            self.assertEqual(result["error_code"], "ENGINE_STOP_FAILED")
+            self.assertTrue(result["emergency_locked"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertIs(bot.engine, engine)
+            self.assertIs(positions_router.engine, engine)
+            self.assertFalse(os.path.exists(
+                bot.stopped_paper_durable_snapshot_path
+            ))
+            self.assertFalse(last_result["success"])
+            self.assertFalse(last_result["completed"])
+            self.assertTrue(last_result["stateUnknown"])
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                with self.assertRaises(HTTPException):
+                    asyncio.run(emergency_unlock())
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            positions_router.set_engine(None)
+            self._restore_governance(state_before)
+
+    def test_emergency_rejects_invalid_engine_stop_results(self):
+        invalid_results = (None, False, {}, {"status": "error"})
+
+        for invalid_result in invalid_results:
+            with self.subTest(stop_result=invalid_result):
+                state_before = self._set_governance(
+                    execution_enabled=True,
+                    emergency_stop=False,
+                )
+                bot, engine = self._paper_emergency_bot({
+                    "success": True,
+                    "skipped": True,
+                })
+                engine.stop.return_value = invalid_result
+
+                try:
+                    result = bot.run_emergency_orchestrator()
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        result["error_code"],
+                        "ENGINE_STOP_FAILED",
+                    )
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertIs(bot.engine, engine)
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_success_rejects_remaining_registry_engine(self):
+        from backend.routers import positions as positions_router
+
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        bot, engine = self._paper_emergency_bot({
+            "success": True,
+            "skipped": True,
+        })
+        positions_router.set_engine(engine)
+
+        try:
+            with patch(
+                "backend.routers.positions.set_engine",
+                side_effect=lambda value: None,
+            ):
+                result = bot.run_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["state_unknown"])
+            self.assertEqual(
+                result["error_code"],
+                "ENGINE_REGISTRY_STILL_ATTACHED",
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+        finally:
+            positions_router.set_engine(None)
+            self._restore_governance(state_before)
+
+    def test_stop_and_shutdown_are_serialized_without_double_engine_stop(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        engine = self._paper_engine_for_stop(None, {})
+        engine.stop = Mock(return_value={"status": "stopped"})
+        bot.engine = engine
+        persist_entered = threading.Event()
+        release_persist = threading.Event()
+        shutdown_attempted = threading.Event()
+        shutdown_done = threading.Event()
+        original_persist = bot._persist_stopped_paper_durable_snapshot
+
+        def blocking_persist(snapshot):
+            persist_entered.set()
+            self.assertTrue(release_persist.wait(timeout=2))
+            return original_persist(snapshot)
+
+        def run_shutdown():
+            shutdown_attempted.set()
+            bot.shutdown()
+            shutdown_done.set()
+
+        with patch.object(
+            bot,
+            "_persist_stopped_paper_durable_snapshot",
+            side_effect=blocking_persist,
+        ):
+            stop_thread = threading.Thread(target=bot.stop)
+            stop_thread.start()
+            self.assertTrue(persist_entered.wait(timeout=2))
+            shutdown_thread = threading.Thread(target=run_shutdown)
+            shutdown_thread.start()
+            self.assertTrue(shutdown_attempted.wait(timeout=2))
+            self.assertFalse(shutdown_done.wait(timeout=0.05))
+            release_persist.set()
+            stop_thread.join(timeout=2)
+            shutdown_thread.join(timeout=2)
+
+        self.assertFalse(stop_thread.is_alive())
+        self.assertFalse(shutdown_thread.is_alive())
+        engine.stop.assert_called_once_with()
+        self.assertIsNone(bot.engine)
+        with open(path, "r", encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["generation"], 1)
+
+    def test_shutdown_without_engine_requires_valid_paper_authority(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+
+        result = bot.shutdown()
+        self.assertTrue(result["persisted"])
+        self.assertTrue(os.path.exists(path))
+
+        for mutation in (
+            {"source": "guessed_snapshot"},
+            {"stateUnknown": True},
+            {"mode": "live"},
+        ):
+            if os.path.exists(path):
+                os.remove(path)
+            candidate = deepcopy(bot.account_snapshot)
+            candidate.update(mutation)
+            bot.account_snapshot = candidate
+            result = bot.shutdown()
+            self.assertFalse(result["persisted"])
+            self.assertFalse(os.path.exists(path))
+
+        self.assertEqual(payload["generation"], 1)
+
+    def test_shutdown_invalid_identity_marks_in_memory_state_unknown(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+        bot.account_snapshot["evidenceRuntimeInstanceId"] = ""
+
+        result = bot.shutdown()
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["persisted"])
+        self.assertEqual(
+            result["reason"],
+            "SNAPSHOT_EVIDENCE_IDENTITY_INVALID",
+        )
+        self.assertTrue(bot.account_snapshot["stateUnknown"])
+        self.assertEqual(
+            bot.account_snapshot["authorityReason"],
+            "SNAPSHOT_EVIDENCE_IDENTITY_INVALID",
+        )
+        self.assertFalse(os.path.exists(path))
+
+    def test_shutdown_generation_guard_rejects_older_snapshot(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, newer = self._persist_flat_stopped_paper_durable_snapshot(path)
+        newer["generation"] = 4
+        newer["evidenceGeneration"] = 4
+        self._write_durable_snapshot_payload(path, newer)
+
+        bot.account_snapshot["generation"] = 3
+        bot.account_snapshot["evidenceGeneration"] = 3
+        bot.account_snapshot_generation = 3
+        result = bot.shutdown()
+
+        self.assertFalse(result["persisted"])
+        self.assertEqual(result["reason"], "SNAPSHOT_GENERATION_OLDER")
+        with open(path, "r", encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["generation"], 4)
+
+    def test_shutdown_timestamp_overwrite_boundaries(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        snapshot = deepcopy(bot.account_snapshot)
+        base_timestamp = payload["timestampEpoch"]
+
+        for delta, expected, reason in (
+            (-1, False, "SNAPSHOT_TIMESTAMP_OLDER"),
+            (0, True, None),
+            (1, True, None),
+        ):
+            candidate = deepcopy(snapshot)
+            candidate["capturedAt"] = base_timestamp + delta
+            candidate["timestampEpoch"] = base_timestamp + delta
+            candidate["evidenceCapturedAt"] = base_timestamp + delta
+            persisted, actual_reason = (
+                bot._persist_stopped_paper_durable_snapshot(candidate)
+            )
+            self.assertIs(persisted, expected)
+            self.assertEqual(actual_reason, reason)
+
+    def test_durable_evidence_identity_fields_are_strictly_validated(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        cases = (
+            ("missing-generation", "evidenceGeneration", None, True),
+            ("bool-generation", "evidenceGeneration", True, False),
+            ("mismatch-generation", "evidenceGeneration", 9, False),
+            (
+                "missing-runtime",
+                "evidenceRuntimeInstanceId",
+                None,
+                True,
+            ),
+            ("empty-runtime", "evidenceRuntimeInstanceId", "", False),
+            (
+                "mismatch-runtime",
+                "evidenceRuntimeInstanceId",
+                "different-runtime",
+                False,
+            ),
+        )
+
+        for name, field, value, remove in cases:
+            with self.subTest(name=name):
+                candidate = deepcopy(payload)
+                if remove:
+                    candidate.pop(field, None)
+                else:
+                    candidate[field] = value
+                validation = bot._validate_stopped_paper_durable_snapshot(
+                    candidate,
+                    allow_current_runtime=True,
+                )
+                self.assertFalse(validation["valid"])
+
+    def test_live_shutdown_stops_engine_without_paper_durable_file(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        engine = Mock()
+        engine.mode = "live"
+        engine.stop.return_value = {"status": "stopped"}
+        bot.engine = engine
+
+        result = bot.shutdown()
+
+        self.assertEqual(result["status"], "stopped")
+        engine.stop.assert_called_once_with()
+        self.assertIsNone(bot.engine)
+        self.assertFalse(os.path.exists(path))
+
+    def test_shutdown_atomic_failure_is_logged_and_fails_closed(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+
+        with patch.object(
+            bot,
+            "_write_json_atomic",
+            side_effect=OSError("disk unavailable"),
+        ), patch(
+            "backend.bot_manager.bot_manager.logger.error",
+        ) as log_error:
+            result = bot.shutdown()
+
+        self.assertFalse(result["persisted"])
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(bot.account_snapshot["stateUnknown"])
+        log_error.assert_called_once()
+        self.assertIn("SNAPSHOT_PERSIST_FAILED", log_error.call_args.args[0])
+
+    def test_stopped_paper_restart_rebinds_durable_snapshot_and_unlocks(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            governance_state["mode"] = "PAPER"
+            old_bot, payload = (
+                self._persist_flat_stopped_paper_durable_snapshot(path)
+            )
+            new_bot = self._restart_stopped_paper_bot(path)
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=new_bot,
+            ):
+                first = asyncio.run(emergency_orchestrate())
+
+            self.assertFalse(first["success"])
+            self.assertTrue(first["state_unknown"])
+            self.assertEqual(first["error_code"], "SNAPSHOT_NOT_SYNCED")
+            first_operation_id = (
+                governance_state["last_emergency_result"]["operationId"]
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=new_bot,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            retry_operation_id = (
+                governance_state["last_emergency_result"]["operationId"]
+            )
+            fresh_snapshot = new_bot.account_snapshot
+
+            self.assertTrue(retry["success"])
+            self.assertTrue(retry["completed"])
+            self.assertFalse(retry["state_unknown"])
+            self.assertFalse(retry["position_remaining"])
+            self.assertEqual(retry["path"], "paper")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertNotEqual(first_operation_id, retry_operation_id)
+            self.assertEqual(
+                fresh_snapshot["operationId"],
+                retry_operation_id,
+            )
+            self.assertEqual(
+                fresh_snapshot["source"],
+                "stopped_paper_preserved_runtime_state",
+            )
+            self.assertEqual(
+                fresh_snapshot["sourceSnapshotSource"],
+                payload["source"],
+            )
+            self.assertEqual(
+                fresh_snapshot["evidenceGeneration"],
+                payload["generation"],
+            )
+            self.assertEqual(
+                fresh_snapshot["evidenceRuntimeInstanceId"],
+                old_bot.runtime_instance_id,
+            )
+            self.assertEqual(
+                fresh_snapshot["currentEmergencyOperationId"],
+                retry_operation_id,
+            )
+            self.assertNotEqual(
+                fresh_snapshot["evidenceRuntimeInstanceId"],
+                new_bot.runtime_instance_id,
+            )
+            self.assertFalse(fresh_snapshot["positionRemaining"])
+            self.assertFalse(fresh_snapshot["pendingOrder"])
+            self.assertEqual(fresh_snapshot["openOrderCount"], 0)
+            self.assertFalse(fresh_snapshot["stateUnknown"])
+
+            shutdown_result = new_bot.shutdown()
+            self.assertTrue(shutdown_result["persisted"])
+            self.assertFalse(new_bot.account_snapshot["stateUnknown"])
+            with open(path, "r", encoding="utf-8") as handle:
+                shutdown_payload = json.load(handle)
+            self.assertEqual(
+                shutdown_payload["generation"],
+                payload["generation"],
+            )
+            self.assertEqual(
+                shutdown_payload["runtimeInstanceId"],
+                old_bot.runtime_instance_id,
+            )
+            self.assertEqual(
+                shutdown_payload["evidenceRuntimeInstanceId"],
+                old_bot.runtime_instance_id,
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=new_bot,
+            ):
+                unlocked = asyncio.run(emergency_unlock())
+
+            self.assertTrue(unlocked["success"])
+            self.assertTrue(unlocked["unlocked"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+            self.assertFalse(governance_state["emergency_stop"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_durable_snapshot_invalid_inputs_fail_closed(
+        self,
+    ):
+        cases = [
+            (
+                "corrupt-json",
+                None,
+                "DURABLE_SNAPSHOT_CORRUPT",
+            ),
+            (
+                "bad-schema",
+                lambda payload: payload.update({"schemaVersion": 999}),
+                "DURABLE_SNAPSHOT_SCHEMA_UNSUPPORTED",
+            ),
+            (
+                "bad-type",
+                lambda payload: payload.update({"snapshotType": "other"}),
+                "DURABLE_SNAPSHOT_TYPE_INVALID",
+            ),
+            (
+                "bad-source",
+                lambda payload: payload.update({"source": "unknown"}),
+                "SNAPSHOT_SOURCE_UNKNOWN",
+            ),
+            (
+                "bad-position-source",
+                lambda payload: payload.update({
+                    "positionStateSource": "manager.position",
+                }),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "bad-open-order-source",
+                lambda payload: payload.update({
+                    "openOrderStateSource": "manager.pending_order",
+                }),
+                "OPEN_ORDER_UNKNOWN",
+            ),
+            (
+                "state-unknown",
+                lambda payload: payload.update({
+                    "stateUnknown": True,
+                    "authorityReason": "STATE_UNKNOWN",
+                }),
+                "STATE_UNKNOWN",
+            ),
+            (
+                "position-remaining",
+                lambda payload: payload.update({
+                    "positionRemaining": True,
+                    "position": {
+                        "symbol": "XRPUSDT",
+                        "side": "BUY",
+                    },
+                    "positions": [{
+                        "symbol": "XRPUSDT",
+                        "side": "BUY",
+                    }],
+                }),
+                "POSITION_REMAINING",
+            ),
+            (
+                "pending-remaining",
+                lambda payload: payload.update({"pendingOrder": True}),
+                "PENDING_ORDER_REMAINING",
+            ),
+            (
+                "open-order-remaining",
+                lambda payload: payload.update({
+                    "openOrderCount": 1,
+                    "openOrderStateSource": "execution_engine.open_orders",
+                }),
+                "OPEN_ORDER_REMAINING",
+            ),
+            (
+                "malformed-bool",
+                lambda payload: payload.update({
+                    "positionRemaining": None,
+                }),
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "malformed-open-order-count",
+                lambda payload: payload.update({"openOrderCount": None}),
+                "OPEN_ORDER_UNKNOWN",
+            ),
+            (
+                "malformed-timestamp",
+                lambda payload: payload.update({"capturedAt": "bad"}),
+                "SNAPSHOT_TIMESTAMP_INVALID",
+            ),
+            (
+                "live-mode",
+                lambda payload: payload.update({
+                    "mode": "live",
+                    "tradeMode": "live",
+                    "selectedMode": "LIVE",
+                }),
+                "MODE_UNKNOWN",
+            ),
+        ]
+
+        for name, mutate, error_code in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=True,
+                )
+                path = self._temporary_durable_snapshot_path()
+
+                try:
+                    governance_state["mode"] = "PAPER"
+                    _, payload = (
+                        self._persist_flat_stopped_paper_durable_snapshot(
+                            path
+                        )
+                    )
+                    if name == "corrupt-json":
+                        with open(path, "w", encoding="utf-8") as handle:
+                            handle.write("{bad json")
+                    else:
+                        mutate(payload)
+                        self._write_durable_snapshot_payload(path, payload)
+
+                    _, retry = self._retry_stopped_paper_with_durable_path(
+                        path
+                    )
+
+                    self.assertFalse(retry["success"])
+                    self.assertTrue(retry["partial"])
+                    self.assertEqual(retry["error_code"], error_code)
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_stopped_paper_durable_snapshot_invalidated_on_paper_start(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+        config = {
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+            "mode": "paper",
+            "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 0.5,
+            "tp_percent": 1,
+            "timeframe": "5m",
+            "trailing_stop": False,
+            "leverage": 5,
+        }
+
+        try:
+            governance_state["mode"] = "PAPER"
+            self._persist_flat_stopped_paper_durable_snapshot(path)
+            self.assertTrue(os.path.exists(path))
+
+            bot = None
+            bot = self._restart_stopped_paper_bot(path)
+            ws = Mock()
+            ws.connected = False
+
+            with patch(
+                "backend.bot_manager.bot_manager.ExchangeFactory"
+                ".create_market_ws",
+                return_value=ws,
+            ):
+                result = bot.start(config)
+
+            self.assertEqual(result["status"], "started")
+            self.assertFalse(os.path.exists(path))
+        finally:
+            with patch(
+                "backend.bot_manager.bot_manager.time.sleep",
+                return_value=None,
+            ):
+                try:
+                    if bot is not None:
+                        bot.stop()
+                except Exception:
+                    pass
             self._restore_governance(state_before)
 
     def test_emergency_retry_normalizes_governance_paper_mode(self):

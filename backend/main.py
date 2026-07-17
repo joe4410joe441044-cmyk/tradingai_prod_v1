@@ -33,6 +33,7 @@ from backend.utils.log_buffer import (
     logger,
     runtime_debug,
 )
+from backend.bot_manager.bot_manager import get_existing_bot_manager
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -1163,6 +1164,19 @@ def health():
 async def startup_event():
     add_log("🔥 API STARTED")
     add_log("🧠 Production Execution Cognition Runtime Active")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    bot_manager = get_existing_bot_manager()
+    if bot_manager is None:
+        add_log("SHUTDOWN_SNAPSHOT_NOT_AVAILABLE: BOT_MANAGER_UNAVAILABLE")
+        return
+
+    try:
+        bot_manager.shutdown()
+    except Exception as exc:
+        logger.error("SNAPSHOT_PERSIST_FAILED during shutdown: %s", exc)
 
 
 # ============================================================
