@@ -2527,20 +2527,334 @@ class BotManager:
 
         return "unknown"
 
-    def _stopped_paper_pending_order_state(self):
+    @staticmethod
+    def _stopped_paper_open_order_state(snapshot):
 
-        if not hasattr(self, "pending_order"):
-            return "unknown"
+        missing = object()
+        source = missing
+        open_order_count = missing
 
-        pending_order = self.pending_order
+        if isinstance(snapshot, dict):
+            source = snapshot.get("openOrderStateSource", missing)
+            open_order_count = snapshot.get("openOrderCount", missing)
+
+        allowed_sources = BotManager._stopped_paper_open_order_sources()
+
+        if source is missing or source not in allowed_sources:
+            return {
+                "state": "unknown",
+                "count": None,
+                "source": (
+                    source
+                    if isinstance(source, str)
+                    else "unknown"
+                ),
+                "reason": "OPEN_ORDER_UNKNOWN",
+            }
+
+        if open_order_count is not missing:
+            if (
+                type(open_order_count) is not int
+                or open_order_count < 0
+            ):
+                return {
+                    "state": "unknown",
+                    "count": None,
+                    "source": source,
+                    "reason": "OPEN_ORDER_UNKNOWN",
+                }
+
+            no_collection_source = (
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection"
+            )
+            if (
+                source == no_collection_source
+                and open_order_count != 0
+            ):
+                return {
+                    "state": "unknown",
+                    "count": None,
+                    "source": source,
+                    "reason": "OPEN_ORDER_SOURCE_MISMATCH",
+                }
+
+            if open_order_count > 0:
+                return {
+                    "state": "remaining",
+                    "count": open_order_count,
+                    "source": source,
+                    "reason": "OPEN_ORDER_REMAINING",
+                }
+
+            return {
+                "state": "flat",
+                "count": 0,
+                "source": source,
+                "reason": "NO_OPEN_ORDER",
+            }
+
+        return {
+            "state": "unknown",
+            "count": None,
+            "source": "unknown",
+            "reason": "OPEN_ORDER_UNKNOWN",
+        }
+
+    @staticmethod
+    def _stopped_paper_engine_pending_order_state(engine):
+
+        missing = object()
+
+        try:
+            pending_order = getattr(engine, "pending_order", missing)
+        except Exception:
+            return {
+                "state": "unknown",
+                "pending_order": None,
+                "source": "execution_engine.pending_order_duplicate_lock",
+                "reason": "PENDING_ORDER_READ_FAILED",
+            }
 
         if type(pending_order) is not bool:
-            return "unknown"
+            return {
+                "state": "unknown",
+                "pending_order": None,
+                "source": "execution_engine.pending_order_duplicate_lock",
+                "reason": "PENDING_ORDER_UNKNOWN",
+            }
 
-        if pending_order:
-            return "remaining"
+        if pending_order is True:
+            return {
+                "state": "remaining",
+                "pending_order": True,
+                "source": "execution_engine.pending_order_duplicate_lock",
+                "reason": "PENDING_ORDER_REMAINING",
+            }
 
-        return "flat"
+        return {
+            "state": "flat",
+            "pending_order": False,
+            "source": "execution_engine.pending_order_duplicate_lock",
+            "reason": "NO_PENDING_ORDER",
+        }
+
+    @classmethod
+    def _stopped_paper_engine_position_state(cls, engine):
+
+        missing = object()
+        sources = []
+
+        try:
+            actual_position = getattr(engine, "actual_position", missing)
+        except Exception:
+            actual_position = missing
+
+        if actual_position is not missing:
+            if actual_position is None:
+                sources.append({
+                    "state": "flat",
+                    "source": "execution_engine.actual_position",
+                    "position": None,
+                })
+            elif (
+                isinstance(actual_position, dict)
+                and cls._emergency_position_value_present(actual_position)
+            ):
+                sources.append({
+                    "state": "remaining",
+                    "source": "execution_engine.actual_position",
+                    "position": deepcopy(actual_position),
+                })
+            else:
+                sources.append({
+                    "state": "unknown",
+                    "source": "execution_engine.actual_position",
+                    "reason": "POSITION_MALFORMED",
+                })
+
+        portfolio_positions = missing
+        try:
+            portfolio = getattr(engine, "portfolio", None)
+            if (
+                portfolio is not None
+                and hasattr(portfolio, "positions")
+            ):
+                if hasattr(portfolio, "lock"):
+                    with portfolio.lock:
+                        portfolio_positions = deepcopy(
+                            portfolio.positions
+                        )
+                else:
+                    portfolio_positions = deepcopy(portfolio.positions)
+        except Exception:
+            portfolio_positions = missing
+
+        if portfolio_positions is not missing:
+            if not isinstance(portfolio_positions, dict):
+                sources.append({
+                    "state": "unknown",
+                    "source": "portfolio.positions",
+                    "reason": "POSITION_MALFORMED",
+                })
+            elif not portfolio_positions:
+                sources.append({
+                    "state": "flat",
+                    "source": "portfolio.positions",
+                    "positions": {},
+                })
+            elif any(
+                isinstance(item, dict)
+                and cls._emergency_position_value_present(item)
+                for item in portfolio_positions.values()
+            ):
+                sources.append({
+                    "state": "remaining",
+                    "source": "portfolio.positions",
+                    "positions": deepcopy(portfolio_positions),
+                })
+            else:
+                sources.append({
+                    "state": "unknown",
+                    "source": "portfolio.positions",
+                    "reason": "POSITION_MALFORMED",
+                })
+
+        if not sources:
+            return {
+                "state": "unknown",
+                "source": None,
+                "reason": "POSITION_SOURCE_UNAVAILABLE",
+                "position": None,
+                "positions": None,
+            }
+
+        if any(item["state"] == "unknown" for item in sources):
+            unknown_source = next(
+                item for item in sources if item["state"] == "unknown"
+            )
+            return {
+                "state": "unknown",
+                "source": unknown_source.get("source"),
+                "reason": unknown_source.get("reason")
+                or "POSITION_STATE_UNKNOWN",
+                "position": None,
+                "positions": None,
+            }
+
+        states = {item["state"] for item in sources}
+        if states == {"flat", "remaining"}:
+            return {
+                "state": "unknown",
+                "source": "+".join(item["source"] for item in sources),
+                "reason": "POSITION_SOURCE_MISMATCH",
+                "position": None,
+                "positions": None,
+            }
+
+        if "remaining" in states:
+            position = next(
+                (
+                    item.get("position")
+                    for item in sources
+                    if item.get("position") is not None
+                ),
+                None,
+            )
+            positions = next(
+                (
+                    item.get("positions")
+                    for item in sources
+                    if item.get("positions") is not None
+                ),
+                None,
+            )
+            return {
+                "state": "remaining",
+                "source": "+".join(item["source"] for item in sources),
+                "reason": "POSITION_REMAINING",
+                "position": position,
+                "positions": positions,
+            }
+
+        return {
+            "state": "flat",
+            "source": "+".join(item["source"] for item in sources),
+            "reason": "NO_POSITION",
+            "position": None,
+            "positions": {},
+        }
+
+    @staticmethod
+    def _stopped_paper_engine_open_order_state(engine):
+
+        missing = object()
+
+        for attr in ("open_orders", "open_order", "orders"):
+            try:
+                value = getattr(engine, attr, missing)
+            except Exception:
+                return {
+                    "state": "unknown",
+                    "count": None,
+                    "source": f"execution_engine.{attr}",
+                    "reason": "OPEN_ORDER_UNKNOWN",
+                }
+            if value is missing:
+                continue
+            if isinstance(value, dict):
+                count = len(value)
+            elif isinstance(value, list):
+                count = len(value)
+            else:
+                return {
+                    "state": "unknown",
+                    "count": None,
+                    "source": f"execution_engine.{attr}",
+                    "reason": "OPEN_ORDER_MALFORMED",
+                }
+            return {
+                "state": "remaining" if count > 0 else "flat",
+                "count": count,
+                "source": f"execution_engine.{attr}",
+                "reason": (
+                    "OPEN_ORDER_REMAINING"
+                    if count > 0
+                    else "NO_OPEN_ORDER"
+                ),
+            }
+
+        try:
+            engine_is_immediate_fill = isinstance(engine, ExecutionEngine)
+        except Exception:
+            engine_is_immediate_fill = False
+
+        if engine_is_immediate_fill:
+            for attr in ("open_orders", "open_order", "orders"):
+                if getattr(type(engine), attr, missing) is not missing:
+                    return {
+                        "state": "unknown",
+                        "count": None,
+                        "source": f"execution_engine.{attr}",
+                        "reason": "OPEN_ORDER_UNKNOWN",
+                    }
+
+            return {
+                "state": "flat",
+                "count": 0,
+                "source": (
+                    "execution_engine."
+                    "paper_immediate_fill_no_open_order_collection"
+                ),
+                "reason": "NO_OPEN_ORDER",
+            }
+
+        return {
+            "state": "unknown",
+            "count": None,
+            "source": "unknown",
+            "reason": "OPEN_ORDER_UNKNOWN",
+        }
 
     @staticmethod
     def _normalize_emergency_mode(value):
@@ -2558,13 +2872,25 @@ class BotManager:
     def _stopped_paper_mode_resolution(self, snapshot=None):
 
         candidates = []
+        current_candidates = []
+        snapshot_candidates = []
 
-        def add_candidate(source, value):
-            candidates.append({
+        def candidate(source, value):
+            return {
                 "source": source,
                 "value": value,
                 "normalized": self._normalize_emergency_mode(value),
-            })
+            }
+
+        def add_current_candidate(source, value):
+            item = candidate(source, value)
+            candidates.append(item)
+            current_candidates.append(item)
+
+        def add_snapshot_candidate(source, value):
+            item = candidate(source, value)
+            candidates.append(item)
+            snapshot_candidates.append(item)
 
         if not isinstance(self.config, dict):
             return {
@@ -2579,28 +2905,78 @@ class BotManager:
             }
 
         if "mode" in self.config:
-            add_candidate(
+            add_current_candidate(
                 "manager_config.mode",
                 self.config.get("mode"),
             )
 
         if "mode" in governance_state:
-            add_candidate(
+            add_current_candidate(
                 "governance_state.mode",
                 governance_state.get("mode"),
             )
 
+        invalid_current_candidates = [
+            candidate
+            for candidate in current_candidates
+            if candidate["normalized"] is None
+        ]
+
+        if invalid_current_candidates:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_UNKNOWN",
+                "candidates": candidates,
+            }
+
+        valid_current_candidates = [
+            candidate
+            for candidate in current_candidates
+            if candidate["normalized"] is not None
+        ]
+        current_modes = {
+            candidate["normalized"]
+            for candidate in valid_current_candidates
+        }
+
+        if len(current_modes) > 1:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_CONFLICT",
+                "candidates": candidates,
+            }
+
+        if not valid_current_candidates:
+            return {
+                "mode": None,
+                "source": None,
+                "reason": "MODE_UNKNOWN",
+                "candidates": candidates,
+            }
+
+        selected = valid_current_candidates[0]
+
+        if selected["normalized"] == "live":
+            return {
+                "mode": "live",
+                "source": selected["source"],
+                "reason": None,
+                "candidates": candidates,
+            }
+
         if isinstance(snapshot, dict):
             for key in ("tradeMode", "mode", "selectedMode"):
                 if key in snapshot:
-                    add_candidate(
+                    add_snapshot_candidate(
                         f"account_snapshot.{key}",
                         snapshot.get(key),
                     )
 
         invalid_candidates = [
             candidate
-            for candidate in candidates
+            for candidate in snapshot_candidates
             if candidate["normalized"] is None
         ]
 
@@ -2612,11 +2988,14 @@ class BotManager:
                 "candidates": candidates,
             }
 
-        valid_candidates = [
-            candidate
-            for candidate in candidates
-            if candidate["normalized"] is not None
-        ]
+        valid_candidates = (
+            valid_current_candidates
+            + [
+                candidate
+                for candidate in snapshot_candidates
+                if candidate["normalized"] is not None
+            ]
+        )
         modes = {
             candidate["normalized"]
             for candidate in valid_candidates
@@ -2630,16 +3009,6 @@ class BotManager:
                 "candidates": candidates,
             }
 
-        if not valid_candidates:
-            return {
-                "mode": None,
-                "source": None,
-                "reason": "MODE_UNKNOWN",
-                "candidates": candidates,
-            }
-
-        selected = valid_candidates[0]
-
         return {
             "mode": selected["normalized"],
             "source": selected["source"],
@@ -2647,62 +3016,440 @@ class BotManager:
             "candidates": candidates,
         }
 
-    def _stopped_paper_manager_position_state(self):
+    @staticmethod
+    def _stopped_paper_snapshot_sources():
 
-        missing = object()
+        return {
+            "stopped_paper_engine_snapshot",
+            "stopped_paper_portfolio_snapshot",
+            "stopped_paper_engine_portfolio_snapshot",
+            "stopped_paper_preserved_runtime_state",
+        }
+
+    @staticmethod
+    def _stopped_paper_base_snapshot_sources():
+
+        return {
+            "stopped_paper_engine_snapshot",
+            "stopped_paper_portfolio_snapshot",
+            "stopped_paper_engine_portfolio_snapshot",
+        }
+
+    @staticmethod
+    def _stopped_paper_position_sources():
+
+        return {
+            "execution_engine.actual_position",
+            "portfolio.positions",
+            "execution_engine.actual_position+portfolio.positions",
+        }
+
+    @staticmethod
+    def _stopped_paper_pending_order_sources():
+
+        return {
+            "execution_engine.pending_order_duplicate_lock",
+        }
+
+    @staticmethod
+    def _stopped_paper_open_order_sources():
+
+        return {
+            "execution_engine.open_orders",
+            "execution_engine.open_order",
+            "execution_engine.orders",
+            (
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection"
+            ),
+        }
+
+    @staticmethod
+    def _stopped_paper_snapshot_source_for_authority_sources(
+        position_source,
+        open_order_source=None,
+    ):
+
+        has_engine = (
+            isinstance(position_source, str)
+            and "execution_engine.actual_position" in position_source
+        ) or (
+            isinstance(open_order_source, str)
+            and open_order_source.startswith("execution_engine.")
+        )
+        has_portfolio = (
+            isinstance(position_source, str)
+            and "portfolio.positions" in position_source
+        )
+
+        if has_engine and has_portfolio:
+            return "stopped_paper_engine_portfolio_snapshot"
+        if has_engine:
+            return "stopped_paper_engine_snapshot"
+        if has_portfolio:
+            return "stopped_paper_portfolio_snapshot"
+
+        return None
+
+    def _build_stopped_paper_engine_safety_snapshot(
+        self,
+        engine,
+        operation_id=None,
+    ):
+
+        if engine is None:
+            return None, "ENGINE_UNAVAILABLE"
+
+        mode = self._normalize_emergency_mode(
+            getattr(engine, "mode", None)
+        )
+        if mode != "paper":
+            return None, "LIVE_MODE"
+
+        position_state = self._stopped_paper_engine_position_state(engine)
+        pending_order_state = (
+            self._stopped_paper_engine_pending_order_state(engine)
+        )
+        open_order_state = self._stopped_paper_engine_open_order_state(engine)
 
         try:
-            position = getattr(self, "position", missing)
-            entry_price = getattr(self, "entry_price", None)
+            now = time.time()
         except Exception:
-            return "unknown"
+            return None, "SNAPSHOT_TIME_UNAVAILABLE"
 
-        if position is missing:
-            return "unknown"
+        if (
+            type(now) not in {int, float}
+            or not math.isfinite(now)
+            or now <= 0
+        ):
+            return None, "SNAPSHOT_TIME_UNAVAILABLE"
 
-        if self._emergency_position_value_present(position):
-            return "remaining"
+        position_source = position_state.get("source")
+        open_order_source = open_order_state.get("source")
+        snapshot_source = (
+            self._stopped_paper_snapshot_source_for_authority_sources(
+                position_source,
+                open_order_source,
+            )
+            or "stopped_paper_engine_portfolio_snapshot"
+        )
 
-        if entry_price is None:
-            return "flat"
+        position_unknown = position_state.get("state") == "unknown"
+        pending_order_unknown = (
+            pending_order_state.get("state") == "unknown"
+        )
+        open_order_unknown = open_order_state.get("state") == "unknown"
+        state_unknown = (
+            position_unknown
+            or pending_order_unknown
+            or open_order_unknown
+        )
+        next_generation = self.account_snapshot_generation + 1
 
-        if type(entry_price) in {int, float} and entry_price == 0:
-            return "flat"
+        snapshot = deepcopy(
+            self.account_snapshot
+            if isinstance(self.account_snapshot, dict)
+            else {}
+        )
+        position = position_state.get("position")
+        positions = position_state.get("positions")
+        if position_state.get("state") == "flat":
+            position = None
+            positions = []
+        elif isinstance(positions, dict):
+            positions = list(deepcopy(positions).values())
+        elif positions is None and position is not None:
+            positions = [deepcopy(position)]
 
-        if isinstance(entry_price, str) and entry_price.strip() == "":
-            return "flat"
+        snapshot.update({
+            "position": deepcopy(position),
+            "positions": deepcopy(positions),
+            "last_update": now,
+            "available": state_unknown is not True,
+            "capturedAt": now,
+            "timestamp": now,
+            "timestampEpoch": now,
+            "source": snapshot_source,
+            "tradeMode": "paper",
+            "mode": "paper",
+            "selectedMode": "PAPER",
+            "botRunning": False,
+            "lifecycleState": "STOPPED",
+            "loopEnabled": False,
+            "autoTradeEnabled": False,
+            "executionEnabled": False,
+            "positionRemaining": (
+                position_state.get("state") == "remaining"
+                if position_state.get("state") in {"flat", "remaining"}
+                else None
+            ),
+            "pendingOrder": (
+                pending_order_state.get("pending_order")
+                if type(pending_order_state.get("pending_order")) is bool
+                else None
+            ),
+            "pending_order": (
+                pending_order_state.get("pending_order")
+                if type(pending_order_state.get("pending_order")) is bool
+                else None
+            ),
+            "openOrderCount": open_order_state.get("count"),
+            "stateUnknown": state_unknown,
+            "dataQuality": (
+                "AUTHORITATIVE_STOPPED_PAPER_ENGINE_SNAPSHOT"
+                if state_unknown is not True
+                else "STOPPED_PAPER_ENGINE_SNAPSHOT_UNKNOWN"
+            ),
+            "operationId": operation_id,
+            "generation": next_generation,
+            "positionStateSource": position_state.get("source"),
+            "openOrderStateSource": open_order_state.get("source"),
+            "pendingOrderStateSource": pending_order_state.get("source"),
+            "authorityReason": (
+                position_state.get("reason")
+                if position_unknown
+                else pending_order_state.get("reason")
+                if pending_order_unknown
+                else open_order_state.get("reason")
+                if open_order_unknown
+                else "STOPPED_PAPER_ENGINE_STATE_CAPTURED"
+            ),
+        })
 
-        return "unknown"
+        return snapshot, None
 
-    def _refresh_stopped_paper_safety_snapshot(self, snapshot):
+    def _preserve_stopped_paper_engine_safety_snapshot(
+        self,
+        operation_id=None,
+    ):
+
+        try:
+            engine = self.engine
+        except Exception:
+            return None
+
+        if operation_id is None:
+            operation_id = governance_state.get(
+                "current_emergency_operation_id"
+            )
+
+        snapshot, reason = self._build_stopped_paper_engine_safety_snapshot(
+            engine,
+            operation_id=operation_id,
+        )
+        if snapshot is None:
+            return None
+
+        self.account_snapshot = snapshot
+        self.account_snapshot_generation = snapshot.get(
+            "generation",
+            self.account_snapshot_generation,
+        )
+        return snapshot
+
+    def _stopped_paper_snapshot_authority_state(self, snapshot):
 
         if not isinstance(snapshot, dict):
-            return None, "SNAPSHOT_UNAVAILABLE"
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_UNAVAILABLE",
+            }
 
-        if snapshot.get("available") is not True:
-            return None, "SNAPSHOT_NOT_SYNCED"
+        source = snapshot.get("source")
+        if source not in self._stopped_paper_snapshot_sources():
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_SOURCE_UNKNOWN",
+                "source": source,
+            }
+
+        for field in (
+            "capturedAt",
+            "timestampEpoch",
+            "tradeMode",
+            "mode",
+            "selectedMode",
+            "lifecycleState",
+            "operationId",
+        ):
+            if field not in snapshot:
+                return {
+                    "valid": False,
+                    "reason": "SNAPSHOT_REQUIRED_FIELD_MISSING",
+                    "source": source,
+                    "field": field,
+                }
+
+        generation = snapshot.get("generation")
+        if generation != self.account_snapshot_generation:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_GENERATION_MISMATCH",
+                "source": source,
+                "generation": generation,
+                "expectedGeneration": self.account_snapshot_generation,
+            }
+
+        if snapshot.get("stateUnknown") is True:
+            return {
+                "valid": False,
+                "reason": (
+                    snapshot.get("authorityReason")
+                    or "STATE_UNKNOWN"
+                ),
+                "source": source,
+            }
+
+        position_source = snapshot.get("positionStateSource")
+        if position_source not in self._stopped_paper_position_sources():
+            return {
+                "valid": False,
+                "reason": "POSITION_STATE_UNKNOWN",
+                "source": source,
+                "position_state_source": position_source,
+            }
+
+        pending_order_source = snapshot.get("pendingOrderStateSource")
+        if (
+            pending_order_source
+            not in self._stopped_paper_pending_order_sources()
+        ):
+            return {
+                "valid": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": source,
+                "pending_order_state_source": pending_order_source,
+            }
+
+        open_order_source = snapshot.get("openOrderStateSource")
+        if open_order_source not in self._stopped_paper_open_order_sources():
+            return {
+                "valid": False,
+                "reason": "OPEN_ORDER_UNKNOWN",
+                "source": source,
+                "open_order_state_source": open_order_source,
+            }
+
+        effective_source = source
+        if source == "stopped_paper_preserved_runtime_state":
+            effective_source = snapshot.get("sourceSnapshotSource")
+            if (
+                effective_source
+                not in self._stopped_paper_base_snapshot_sources()
+            ):
+                return {
+                    "valid": False,
+                    "reason": "SNAPSHOT_SOURCE_MISMATCH",
+                    "source": source,
+                    "sourceSnapshotSource": effective_source,
+                }
+
+        expected_source = (
+            self._stopped_paper_snapshot_source_for_authority_sources(
+                position_source,
+                open_order_source,
+            )
+        )
+        if effective_source != expected_source:
+            return {
+                "valid": False,
+                "reason": "SNAPSHOT_SOURCE_MISMATCH",
+                "source": source,
+                "effectiveSource": effective_source,
+                "expectedSource": expected_source,
+            }
+
+        position_remaining = snapshot.get("positionRemaining")
+        if type(position_remaining) is not bool:
+            return {
+                "valid": False,
+                "reason": "POSITION_STATE_UNKNOWN",
+                "source": source,
+            }
 
         snapshot_position_state = self._stopped_paper_position_state(
             snapshot
         )
-        if snapshot_position_state == "remaining":
-            return None, "POSITION_REMAINING"
-        if snapshot_position_state == "unknown":
-            return None, "POSITION_STATE_UNKNOWN"
+        if position_remaining:
+            if snapshot_position_state != "remaining":
+                return {
+                    "valid": False,
+                    "reason": "POSITION_STATE_UNKNOWN",
+                    "source": source,
+                }
+        elif snapshot_position_state != "flat":
+            return {
+                "valid": False,
+                "reason": "POSITION_STATE_UNKNOWN",
+                "source": source,
+            }
 
-        manager_position_state = (
-            self._stopped_paper_manager_position_state()
+        pending_order = snapshot.get("pendingOrder")
+        if type(pending_order) is not bool:
+            return {
+                "valid": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+                "source": source,
+            }
+
+        open_order_state = self._stopped_paper_open_order_state(snapshot)
+        if open_order_state.get("state") == "unknown":
+            return {
+                "valid": False,
+                "reason": (
+                    open_order_state.get("reason")
+                    or "OPEN_ORDER_UNKNOWN"
+                ),
+                "source": source,
+            }
+
+        return {
+            "valid": True,
+            "source": source,
+            "position_state": (
+                "remaining" if position_remaining else "flat"
+            ),
+            "pending_order_state": (
+                "remaining" if pending_order else "flat"
+            ),
+            "open_order_state": open_order_state.get("state"),
+            "open_order_count": open_order_state.get("count"),
+            "position_state_source": snapshot.get("positionStateSource"),
+            "pending_order_state_source": snapshot.get(
+                "pendingOrderStateSource"
+            ),
+            "open_order_state_source": (
+                snapshot.get("openOrderStateSource")
+                or open_order_state.get("source")
+            ),
+        }
+
+    def _save_stopped_paper_safety_snapshot(self, snapshot):
+
+        self.account_snapshot = snapshot
+        return True
+
+    def _refresh_stopped_paper_safety_snapshot(
+        self,
+        snapshot,
+        operation_id=None,
+    ):
+
+        if not isinstance(snapshot, dict):
+            return None, "SNAPSHOT_UNAVAILABLE"
+
+        authority_state = self._stopped_paper_snapshot_authority_state(
+            snapshot
         )
-        if manager_position_state == "remaining":
-            return None, "POSITION_REMAINING"
-        if manager_position_state == "unknown":
-            return None, "POSITION_STATE_UNKNOWN"
+        if authority_state.get("valid") is not True:
+            return None, authority_state.get("reason") or "STATE_UNKNOWN"
 
-        pending_order_state = self._stopped_paper_pending_order_state()
-        if pending_order_state == "remaining":
+        if authority_state.get("position_state") == "remaining":
+            return None, "POSITION_REMAINING"
+        if authority_state.get("pending_order_state") == "remaining":
             return None, "PENDING_ORDER_REMAINING"
-        if pending_order_state == "unknown":
-            return None, "PENDING_ORDER_UNKNOWN"
+        if authority_state.get("open_order_state") == "remaining":
+            return None, "OPEN_ORDER_REMAINING"
 
         try:
             now = time.time()
@@ -2717,6 +3464,7 @@ class BotManager:
             return None, "SNAPSHOT_TIME_UNAVAILABLE"
 
         refreshed = deepcopy(snapshot)
+        next_generation = self.account_snapshot_generation + 1
         refreshed.update({
             "position": None,
             "positions": [],
@@ -2724,21 +3472,46 @@ class BotManager:
             "available": True,
             "capturedAt": now,
             "timestamp": now,
-            "source": "stopped_paper_recheck",
+            "timestampEpoch": now,
+            "source": "stopped_paper_preserved_runtime_state",
+            "sourceSnapshotSource": authority_state.get("source"),
             "tradeMode": "paper",
+            "mode": "paper",
+            "selectedMode": "PAPER",
             "botRunning": False,
+            "lifecycleState": self.lifecycle_state,
             "loopEnabled": False,
             "autoTradeEnabled": False,
             "executionEnabled": False,
             "positionRemaining": False,
             "pendingOrder": False,
             "pending_order": False,
-            "openOrderCount": 0,
+            "openOrderCount": authority_state.get("open_order_count"),
             "stateUnknown": False,
             "dataQuality": "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
+            "operationId": operation_id,
+            "generation": next_generation,
+            "positionStateSource": authority_state.get(
+                "position_state_source"
+            ),
+            "pendingOrderStateSource": authority_state.get(
+                "pending_order_state_source"
+            ),
+            "openOrderStateSource": authority_state.get(
+                "open_order_state_source"
+            ),
+            "authorityReason": "STOPPED_PAPER_PRESERVED_STATE_SYNCED",
         })
 
-        self.account_snapshot = refreshed
+        try:
+            saved = self._save_stopped_paper_safety_snapshot(refreshed)
+        except Exception:
+            return None, "SNAPSHOT_SAVE_FAILED"
+
+        if saved is not True:
+            return None, "SNAPSHOT_SAVE_FAILED"
+
+        self.account_snapshot_generation = next_generation
         return refreshed, None
 
     @staticmethod
@@ -2889,6 +3662,7 @@ class BotManager:
     def _stopped_paper_authoritative_safety_state(
         self,
         refresh_snapshot=False,
+        operation_id=None,
     ):
 
         state = {
@@ -2898,9 +3672,12 @@ class BotManager:
             "snapshot": None,
             "snapshot_timestamp_state": None,
             "snapshot_refresh_state": None,
+            "snapshot_operation_state": None,
             "mode_resolution": None,
             "position_state": None,
             "pending_order_state": None,
+            "open_order_state": None,
+            "open_order_count": None,
         }
 
         def unknown(reason):
@@ -2942,15 +3719,52 @@ class BotManager:
             result["mode_resolution"] = mode_resolution
             return result
 
-        if snapshot.get("available") is not True:
+        if (
+            snapshot.get("available") is not True
+            and refresh_snapshot is not True
+        ):
             result = unknown("SNAPSHOT_NOT_SYNCED")
             result["snapshot"] = snapshot
             result["mode_resolution"] = mode_resolution
             return result
 
+        expected_operation_id = (
+            operation_id
+            or governance_state.get("current_emergency_operation_id")
+        )
+        snapshot_operation_state = {
+            "valid": True,
+            "reason": None,
+            "operationId": snapshot.get("operationId"),
+            "expectedOperationId": expected_operation_id,
+            "source": snapshot.get("source"),
+        }
+
+        if (
+            expected_operation_id
+            and (
+                snapshot.get("source")
+                == "stopped_paper_preserved_runtime_state"
+                or snapshot.get("operationId") is not None
+            )
+            and snapshot.get("operationId") != expected_operation_id
+        ):
+            snapshot_operation_state["valid"] = False
+            snapshot_operation_state[
+                "reason"
+            ] = "SNAPSHOT_OPERATION_ID_MISMATCH"
+            result = unknown("SNAPSHOT_OPERATION_ID_MISMATCH")
+            result["snapshot"] = snapshot
+            result["snapshot_operation_state"] = snapshot_operation_state
+            result["mode_resolution"] = mode_resolution
+            return result
+
         if refresh_snapshot:
             refreshed_snapshot, refresh_reason = (
-                self._refresh_stopped_paper_safety_snapshot(snapshot)
+                self._refresh_stopped_paper_safety_snapshot(
+                    snapshot,
+                    operation_id=operation_id,
+                )
             )
             if refreshed_snapshot is None:
                 result = unknown(refresh_reason)
@@ -2970,10 +3784,25 @@ class BotManager:
                 elif refresh_reason == "PENDING_ORDER_UNKNOWN":
                     result["position_state"] = "flat"
                     result["pending_order_state"] = "unknown"
+                if refresh_reason == "OPEN_ORDER_REMAINING":
+                    result["position_state"] = "flat"
+                    result["pending_order_state"] = "flat"
+                    result["open_order_state"] = "remaining"
+                elif refresh_reason == "OPEN_ORDER_UNKNOWN":
+                    result["position_state"] = "flat"
+                    result["pending_order_state"] = "flat"
+                    result["open_order_state"] = "unknown"
                 result["mode_resolution"] = mode_resolution
                 return result
 
             snapshot = refreshed_snapshot
+            snapshot_operation_state = {
+                "valid": True,
+                "reason": None,
+                "operationId": snapshot.get("operationId"),
+                "expectedOperationId": expected_operation_id,
+                "source": snapshot.get("source"),
+            }
 
         timestamp_state = (
             self._stopped_paper_snapshot_timestamp_state(snapshot)
@@ -2991,12 +3820,23 @@ class BotManager:
             result["mode_resolution"] = mode_resolution
             return result
 
-        position_state = self._stopped_paper_position_state(snapshot)
-        pending_order_state = self._stopped_paper_pending_order_state()
+        authority_state = self._stopped_paper_snapshot_authority_state(
+            snapshot
+        )
+
+        if authority_state.get("valid") is not True:
+            result = unknown(
+                authority_state.get("reason") or "STATE_UNKNOWN"
+            )
+            result["snapshot"] = snapshot
+            result["snapshot_operation_state"] = snapshot_operation_state
+            result["mode_resolution"] = mode_resolution
+            return result
 
         result = dict(state)
         result["snapshot"] = snapshot
         result["snapshot_timestamp_state"] = timestamp_state
+        result["snapshot_operation_state"] = snapshot_operation_state
         result["mode_resolution"] = mode_resolution
         result["snapshot_refresh_state"] = {
             "refreshed": refresh_snapshot is True,
@@ -3007,8 +3847,15 @@ class BotManager:
                 else "account_snapshot"
             ),
         }
+        position_state = authority_state.get("position_state")
+        pending_order_state = authority_state.get("pending_order_state")
+        open_order_state = authority_state.get("open_order_state")
         result["position_state"] = position_state
         result["pending_order_state"] = pending_order_state
+        result["open_order_state"] = open_order_state
+        result["open_order_count"] = authority_state.get(
+            "open_order_count"
+        )
 
         if position_state == "unknown":
             result["reason"] = "POSITION_STATE_UNKNOWN"
@@ -3018,8 +3865,13 @@ class BotManager:
             result["reason"] = "PENDING_ORDER_UNKNOWN"
             return result
 
+        if open_order_state == "unknown":
+            result["reason"] = "OPEN_ORDER_UNKNOWN"
+            return result
+
         result["position_remaining"] = position_state == "remaining"
         result["pending_order"] = pending_order_state == "remaining"
+        result["open_order_remaining"] = open_order_state == "remaining"
 
         if result["position_remaining"]:
             result["reason"] = "POSITION_REMAINING"
@@ -3027,6 +3879,10 @@ class BotManager:
 
         if result["pending_order"]:
             result["reason"] = "PENDING_ORDER_REMAINING"
+            return result
+
+        if result["open_order_remaining"]:
+            result["reason"] = "OPEN_ORDER_REMAINING"
             return result
 
         result["safe"] = True
@@ -3146,6 +4002,19 @@ class BotManager:
                     engine_available=False,
                 )
 
+            stopped_reason = stopped_state.get("reason")
+
+            if stopped_reason:
+                return self._pending_order_authority_payload(
+                    known=False,
+                    pending=None,
+                    safe=False,
+                    reason=stopped_reason,
+                    source="stopped_paper_authoritative",
+                    manager_pending_order=manager_pending_order,
+                    engine_available=False,
+                )
+
             return self._pending_order_authority_payload(
                 known=False,
                 pending=None,
@@ -3236,11 +4105,13 @@ class BotManager:
         self,
         symbol,
         refresh_snapshot=False,
+        operation_id=None,
     ):
 
         stopped_state = (
             self._stopped_paper_authoritative_safety_state(
                 refresh_snapshot=refresh_snapshot,
+                operation_id=operation_id,
             )
         )
 
@@ -3265,6 +4136,7 @@ class BotManager:
 
         position_state = stopped_state.get("position_state")
         pending_order_state = stopped_state.get("pending_order_state")
+        open_order_state = stopped_state.get("open_order_state")
 
         if position_state == "unknown":
             return self._stopped_paper_unknown_response(
@@ -3278,8 +4150,15 @@ class BotManager:
                 "PENDING_ORDER_UNKNOWN",
             )
 
+        if open_order_state == "unknown":
+            return self._stopped_paper_unknown_response(
+                symbol,
+                stopped_state.get("reason") or "OPEN_ORDER_UNKNOWN",
+            )
+
         position_remaining = position_state == "remaining"
         pending_order = pending_order_state == "remaining"
+        open_order_remaining = open_order_state == "remaining"
 
         cancel_not_required = self._emergency_not_required_result(
             "cancel"
@@ -3330,6 +4209,32 @@ class BotManager:
                 position_remaining=False,
                 retryable=True,
                 error_code="PENDING_ORDER_REMAINING",
+            )
+
+        if open_order_remaining:
+            return self._emergency_response(
+                success=False,
+                completed=False,
+                partial=True,
+                state_unknown=False,
+                execution_path="paper",
+                symbol=symbol,
+                cancel={
+                    "success": False,
+                    "completed": False,
+                    "status": "NOT_RUN",
+                    "reason": "OPEN_ORDER_REMAINING_WITHOUT_ENGINE",
+                    "requested": None,
+                    "cancelled": None,
+                    "failed": None,
+                },
+                flatten=flatten_not_required,
+                position_remaining=False,
+                retryable=True,
+                error_code=(
+                    stopped_state.get("reason")
+                    or "OPEN_ORDER_REMAINING"
+                ),
             )
 
         return self._emergency_response(
@@ -3786,6 +4691,7 @@ class BotManager:
                         refresh_snapshot=(
                             operation.get("recheck") is True
                         ),
+                        operation_id=operation.get("operation_id"),
                     )
                 )
 
@@ -3952,6 +4858,8 @@ class BotManager:
             # engine.  /api/bot/status and /ws continue serving this snapshot
             # while execution is stopped.
             self._capture_account_snapshot()
+
+            self._preserve_stopped_paper_engine_safety_snapshot()
 
             from backend.routers.positions import (
                 set_engine

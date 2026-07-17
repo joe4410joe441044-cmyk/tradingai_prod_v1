@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import unittest
+from copy import deepcopy
 from unittest.mock import Mock, call, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -20,6 +21,7 @@ from backend.api.governance import (
 from backend.api.bot_api import StatusResponse
 from backend.bot_manager.bot_manager import BotManager
 from backend.execution.kucoin_trade import KucoinTradeClient
+from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.runtime.governance_runtime import (
     EMERGENCY_ACTION_REQUIRED,
     EMERGENCY_LOCKED,
@@ -35,6 +37,7 @@ from backend.runtime.governance_runtime import (
     emergency_unlock_block_reason,
     governance_state,
 )
+from Bot.engine.execution_engine import ExecutionEngine
 
 
 class FakeEngine:
@@ -1116,8 +1119,143 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "unrealizedPnl": None,
             "last_update": time.time(),
             "available": True,
+            "capturedAt": time.time(),
+            "timestamp": time.time(),
+            "timestampEpoch": time.time(),
+            "source": "stopped_paper_engine_snapshot",
+            "tradeMode": "paper",
+            "mode": "paper",
+            "selectedMode": "PAPER",
+            "lifecycleState": "STOPPED",
+            "positionRemaining": False,
+            "pendingOrder": False,
+            "pending_order": False,
+            "openOrderCount": 0,
+            "stateUnknown": False,
+            "dataQuality": (
+                "AUTHORITATIVE_STOPPED_PAPER_ENGINE_SNAPSHOT"
+            ),
+            "operationId": None,
+            "generation": bot.account_snapshot_generation,
+            "positionStateSource": "execution_engine.actual_position",
+            "pendingOrderStateSource": (
+                "execution_engine.pending_order_duplicate_lock"
+            ),
+            "openOrderStateSource": (
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection"
+            ),
+            "authorityReason": "STOPPED_PAPER_ENGINE_STATE_CAPTURED",
         }
         return bot
+
+    @staticmethod
+    def _mark_stopped_paper_snapshot_not_synced(bot):
+        bot.account_snapshot.update({
+            "available": False,
+            "last_update": None,
+            "position": None,
+            "positions": None,
+            "positionRemaining": None,
+            "pendingOrder": None,
+            "openOrderCount": None,
+            "stateUnknown": True,
+            "source": None,
+            "operationId": None,
+            "generation": None,
+        })
+
+    @staticmethod
+    def _mark_stopped_paper_snapshot_unsynced_with_authority(bot):
+        bot.account_snapshot.update({
+            "available": False,
+            "last_update": time.time(),
+            "position": None,
+            "positions": [],
+            "source": "stopped_paper_engine_snapshot",
+            "positionRemaining": False,
+            "pendingOrder": False,
+            "pending_order": False,
+            "openOrderCount": 0,
+            "stateUnknown": False,
+            "operationId": None,
+            "generation": bot.account_snapshot_generation,
+            "positionStateSource": "execution_engine.actual_position",
+            "pendingOrderStateSource": (
+                "execution_engine.pending_order_duplicate_lock"
+            ),
+            "openOrderStateSource": (
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection"
+            ),
+            "authorityReason": "STOPPED_PAPER_ENGINE_STATE_CAPTURED",
+        })
+
+    @staticmethod
+    def _paper_engine_for_stop(
+        actual_position=None,
+        portfolio_positions=None,
+        pending_order=False,
+        open_orders_marker="missing",
+        use_actual_engine=True,
+    ):
+        positions = (
+            {}
+            if portfolio_positions is None
+            else deepcopy(portfolio_positions)
+        )
+        if use_actual_engine:
+            portfolio = PortfolioManager(initial_balance=1000)
+            portfolio.positions = positions
+            engine = ExecutionEngine(
+                exchange=None,
+                logger=Mock(),
+                portfolio=portfolio,
+                notifier=None,
+                price_manager=None,
+            )
+            engine.mode = "paper"
+            engine.symbol = "XRPUSDT"
+            engine.actual_position = deepcopy(actual_position)
+            if pending_order == "missing":
+                delattr(engine, "pending_order")
+            else:
+                engine.pending_order = pending_order
+            if open_orders_marker != "missing":
+                engine.open_orders = open_orders_marker
+            return engine
+
+        class Portfolio:
+            def __init__(self, positions):
+                self.positions = positions
+                self.lock = threading.Lock()
+
+        class Engine:
+            mode = "paper"
+            balance = 1000.0
+            pnl = 0.0
+            unrealized_pnl = 0.0
+
+            def __init__(
+                self,
+                position,
+                positions,
+                pending,
+                open_orders,
+            ):
+                self.actual_position = position
+                self.portfolio = Portfolio(positions)
+                if pending != "missing":
+                    self.pending_order = pending
+                if open_orders != "missing":
+                    self.open_orders = open_orders
+
+        return Engine(
+            actual_position,
+            positions,
+            pending_order,
+            open_orders_marker,
+        )
 
     def _live_emergency_bot(
         self,
@@ -1653,7 +1791,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertEqual(bot.account_snapshot["timestamp"], now)
                 self.assertEqual(
                     bot.account_snapshot["source"],
-                    "stopped_paper_recheck",
+                    "stopped_paper_preserved_runtime_state",
                 )
                 self.assertEqual(
                     bot.account_snapshot["dataQuality"],
@@ -1711,6 +1849,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             (
                 "position-remaining",
                 lambda bot: bot.account_snapshot.update({
+                    "positionRemaining": True,
                     "position": {
                         "side": "BUY",
                         "qty": 1,
@@ -1727,16 +1866,33 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 True,
             ),
             (
-                "manager-position-remaining",
-                lambda bot: setattr(bot, "position", "LONG"),
+                "snapshot-position-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "positionRemaining": True,
+                    "position": {
+                        "side": "BUY",
+                        "qty": 1,
+                    },
+                    "positions": [
+                        {
+                            "side": "BUY",
+                            "qty": 1,
+                        },
+                    ],
+                }),
                 "POSITION_REMAINING",
                 False,
                 True,
             ),
             (
-                "pending-order-remaining",
-                lambda bot: setattr(bot, "pending_order", True),
-                "PENDING_ORDER_REMAINING",
+                "open-order-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "pendingOrder": False,
+                    "openOrderCount": 1,
+                    "openOrderStateSource": "execution_engine.open_orders",
+                    "source": "stopped_paper_engine_snapshot",
+                }),
+                "OPEN_ORDER_REMAINING",
                 False,
                 False,
             ),
@@ -1955,7 +2111,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertEqual(bot.account_snapshot["last_update"], now)
             self.assertEqual(
                 bot.account_snapshot["source"],
-                "stopped_paper_recheck",
+                "stopped_paper_preserved_runtime_state",
             )
 
             with patch(
@@ -1976,6 +2132,652 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertEqual(
                 governance_state["emergency_state"],
                 EMERGENCY_READY,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_rebuilds_unsynced_stopped_paper_snapshot(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+                state_unknown=True,
+                position_remaining=None,
+                operation_id="emg_prod_snapshot_not_synced",
+            )
+            previous["path"] = "paper"
+            previous["message"] = (
+                "Emergency requires operator action: SNAPSHOT_NOT_SYNCED"
+            )
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+
+            bot = self._stopped_paper_bot()
+            original_snapshot = bot.account_snapshot
+            original_generation = bot.account_snapshot_generation
+            self._mark_stopped_paper_snapshot_unsynced_with_authority(bot)
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    retry = asyncio.run(emergency_retry())
+                    status = bot.get_status()
+                    sync_state = (
+                        bot._stopped_paper_authoritative_safety_state()
+                    )
+                    pending_state = (
+                        bot.get_authoritative_pending_order_state()
+                    )
+                    unlock_block_reason = (
+                        emergency_unlock_block_reason(pending_state)
+                    )
+                    retry_operation_id = (
+                        governance_state["last_emergency_result"][
+                            "operationId"
+                        ]
+                    )
+                    unlocked = asyncio.run(emergency_unlock())
+
+            fresh_snapshot = bot.account_snapshot
+
+            self.assertTrue(retry["success"])
+            self.assertTrue(retry["completed"])
+            self.assertFalse(retry["partial"])
+            self.assertFalse(retry["state_unknown"])
+            self.assertFalse(retry["position_remaining"])
+            self.assertEqual(retry["path"], "paper")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+            self.assertIsNot(fresh_snapshot, original_snapshot)
+            self.assertTrue(fresh_snapshot["available"])
+            self.assertEqual(fresh_snapshot["last_update"], now)
+            self.assertEqual(fresh_snapshot["capturedAt"], now)
+            self.assertEqual(fresh_snapshot["timestamp"], now)
+            self.assertEqual(fresh_snapshot["timestampEpoch"], now)
+            self.assertEqual(
+                fresh_snapshot["source"],
+                "stopped_paper_preserved_runtime_state",
+            )
+            self.assertEqual(
+                fresh_snapshot["sourceSnapshotSource"],
+                "stopped_paper_engine_snapshot",
+            )
+            self.assertEqual(
+                fresh_snapshot["dataQuality"],
+                "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
+            )
+            self.assertEqual(
+                fresh_snapshot["operationId"],
+                retry_operation_id,
+            )
+            self.assertNotEqual(
+                fresh_snapshot["operationId"],
+                previous["operationId"],
+            )
+            self.assertEqual(
+                fresh_snapshot["generation"],
+                original_generation + 1,
+            )
+            self.assertEqual(
+                bot.account_snapshot_generation,
+                original_generation + 1,
+            )
+            self.assertEqual(fresh_snapshot["tradeMode"], "paper")
+            self.assertEqual(fresh_snapshot["selectedMode"], "PAPER")
+            self.assertEqual(fresh_snapshot["lifecycleState"], "STOPPED")
+            self.assertFalse(fresh_snapshot["positionRemaining"])
+            self.assertFalse(fresh_snapshot["pendingOrder"])
+            self.assertEqual(fresh_snapshot["openOrderCount"], 0)
+            self.assertFalse(fresh_snapshot["stateUnknown"])
+            self.assertEqual(
+                fresh_snapshot["positionStateSource"],
+                "execution_engine.actual_position",
+            )
+            self.assertEqual(
+                fresh_snapshot["pendingOrderStateSource"],
+                "execution_engine.pending_order_duplicate_lock",
+            )
+            self.assertEqual(
+                fresh_snapshot["openOrderStateSource"],
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection",
+            )
+
+            self.assertTrue(sync_state["safe"])
+            self.assertIs(sync_state["snapshot"], fresh_snapshot)
+            self.assertEqual(sync_state["open_order_count"], 0)
+            self.assertEqual(sync_state["open_order_state"], "flat")
+            self.assertTrue(sync_state["snapshot_operation_state"]["valid"])
+            self.assertEqual(
+                sync_state["snapshot_operation_state"]["operationId"],
+                retry_operation_id,
+            )
+            self.assertFalse(status["pendingOrder"])
+            self.assertFalse(StatusResponse(**status).pendingOrder)
+            self.assertTrue(pending_state["safe"])
+            self.assertIsNone(unlock_block_reason)
+            self.assertTrue(unlocked["success"])
+            self.assertTrue(unlocked["unlocked"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_stop_preserves_actual_position_authority(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._stopped_paper_bot()
+            bot.engine = self._paper_engine_for_stop(
+                actual_position={
+                    "symbol": "XRPUSDT",
+                    "side": "BUY",
+                    "qty": 1,
+                },
+                portfolio_positions={
+                    "XRPUSDT": {
+                        "symbol": "XRPUSDT",
+                        "side": "BUY",
+                        "size": 1,
+                        "entry": 1.0,
+                    },
+                },
+            )
+
+            bot.stop()
+
+            self.assertIsNone(bot.engine)
+            self.assertEqual(bot.position, "NONE")
+            self.assertTrue(bot.account_snapshot["positionRemaining"])
+            self.assertEqual(
+                bot.account_snapshot["positionStateSource"],
+                "execution_engine.actual_position+portfolio.positions",
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            pending_state = bot.get_authoritative_pending_order_state()
+
+            self.assertFalse(retry["success"])
+            self.assertEqual(retry["error_code"], "POSITION_REMAINING")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertEqual(
+                emergency_unlock_block_reason(pending_state),
+                "ACTION_REQUIRED",
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_stop_preserves_flat_engine_and_portfolio_state(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._stopped_paper_bot()
+            bot.engine = self._paper_engine_for_stop(
+                actual_position=None,
+                portfolio_positions={},
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                bot.stop()
+
+            self.assertIsNone(bot.engine)
+            self.assertFalse(bot.account_snapshot["positionRemaining"])
+            self.assertFalse(bot.account_snapshot["pendingOrder"])
+            self.assertEqual(bot.account_snapshot["openOrderCount"], 0)
+            self.assertEqual(
+                bot.account_snapshot["openOrderStateSource"],
+                "execution_engine."
+                "paper_immediate_fill_no_open_order_collection",
+            )
+            self.assertFalse(bot.account_snapshot["stateUnknown"])
+
+            bot.account_snapshot["available"] = False
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now + 10,
+            ):
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=bot,
+                ):
+                    retry = asyncio.run(emergency_retry())
+
+            self.assertTrue(retry["success"])
+            self.assertEqual(
+                bot.account_snapshot["source"],
+                "stopped_paper_preserved_runtime_state",
+            )
+            self.assertEqual(
+                bot.account_snapshot["sourceSnapshotSource"],
+                "stopped_paper_engine_portfolio_snapshot",
+            )
+            self.assertEqual(
+                bot.account_snapshot["operationId"],
+                governance_state["last_emergency_result"]["operationId"],
+            )
+            self.assertEqual(
+                bot.account_snapshot["generation"],
+                bot.account_snapshot_generation,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_retry_engine_none_without_authoritative_snapshot_fails(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._stopped_paper_bot()
+            self._mark_stopped_paper_snapshot_not_synced(bot)
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            self.assertFalse(retry["success"])
+            self.assertTrue(retry["state_unknown"])
+            self.assertEqual(retry["error_code"], "SNAPSHOT_SOURCE_UNKNOWN")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_manager_pending_false_does_not_prove_open_orders_flat(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+
+        try:
+            governance_state["mode"] = "PAPER"
+            bot = self._stopped_paper_bot()
+            bot.pending_order = False
+            self._mark_stopped_paper_snapshot_not_synced(bot)
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            self.assertFalse(retry["success"])
+            self.assertEqual(retry["error_code"], "SNAPSHOT_SOURCE_UNKNOWN")
+            self.assertIsNone(bot.account_snapshot["openOrderCount"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_open_order_unknown_or_remaining_blocks_success(
+        self,
+    ):
+        cases = [
+            (
+                "unknown-source",
+                {"use_actual_engine": False},
+                "OPEN_ORDER_UNKNOWN",
+            ),
+            (
+                "remaining-open-orders",
+                {"open_orders_marker": [{"id": "paper-open"}]},
+                "OPEN_ORDER_REMAINING",
+            ),
+        ]
+
+        for name, engine_kwargs, error_code in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=True,
+                )
+
+                try:
+                    governance_state["mode"] = "PAPER"
+                    bot = self._stopped_paper_bot()
+                    kwargs = {
+                        "actual_position": None,
+                        "portfolio_positions": {},
+                    }
+                    kwargs.update(engine_kwargs)
+                    bot.engine = self._paper_engine_for_stop(**kwargs)
+
+                    bot.stop()
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        retry = asyncio.run(emergency_retry())
+
+                    self.assertFalse(retry["success"])
+                    self.assertTrue(retry["state_unknown"] or retry["partial"])
+                    self.assertEqual(retry["error_code"], error_code)
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_unsynced_stopped_paper_requires_current_authority(
+        self,
+    ):
+        cases = [
+            (
+                "position-unknown",
+                lambda bot: bot.account_snapshot.update({
+                    "positionRemaining": None,
+                }),
+                "POSITION_STATE_UNKNOWN",
+                True,
+                None,
+            ),
+            (
+                "pending-unknown",
+                lambda bot: bot.account_snapshot.update({
+                    "pendingOrder": None,
+                }),
+                "PENDING_ORDER_UNKNOWN",
+                True,
+                None,
+            ),
+            (
+                "position-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "positionRemaining": True,
+                    "position": {
+                        "symbol": "XRPUSDT",
+                        "side": "BUY",
+                    },
+                    "positions": [
+                        {
+                            "symbol": "XRPUSDT",
+                            "side": "BUY",
+                        },
+                    ],
+                }),
+                "POSITION_REMAINING",
+                False,
+                True,
+            ),
+            (
+                "pending-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "pendingOrder": True,
+                }),
+                "PENDING_ORDER_REMAINING",
+                False,
+                False,
+            ),
+            (
+                "open-order-remaining",
+                lambda bot: bot.account_snapshot.update({
+                    "openOrderCount": 2,
+                    "openOrderStateSource": "execution_engine.open_orders",
+                }),
+                "OPEN_ORDER_REMAINING",
+                False,
+                False,
+            ),
+            (
+                "open-order-malformed",
+                lambda bot: bot.account_snapshot.update({
+                    "openOrderCount": None,
+                }),
+                "OPEN_ORDER_UNKNOWN",
+                True,
+                None,
+            ),
+        ]
+
+        for (
+            name,
+            mutate,
+            error_code,
+            state_unknown,
+            position_remaining,
+        ) in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=True,
+                )
+
+                try:
+                    governance_state["mode"] = "PAPER"
+                    previous = self._saved_emergency_result(
+                        state=EMERGENCY_ACTION_REQUIRED,
+                        result=EMERGENCY_RESULT_PARTIAL,
+                        success=False,
+                        completed=False,
+                        partial=True,
+                        retryable=True,
+                        state_unknown=True,
+                        position_remaining=None,
+                        operation_id=f"emg_{name}_snapshot_not_synced",
+                    )
+                    previous["path"] = "paper"
+                    governance_state["last_emergency_result"] = previous
+                    self._set_current_emergency_operation(previous)
+
+                    bot = self._stopped_paper_bot()
+                    original_snapshot = bot.account_snapshot
+                    self._mark_stopped_paper_snapshot_unsynced_with_authority(
+                        bot
+                    )
+                    mutate(bot)
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        retry = asyncio.run(emergency_retry())
+
+                    self.assertFalse(retry["success"])
+                    self.assertTrue(retry["partial"])
+                    self.assertEqual(retry["error_code"], error_code)
+                    self.assertEqual(
+                        retry["state_unknown"],
+                        state_unknown,
+                    )
+                    self.assertEqual(
+                        retry["position_remaining"],
+                        position_remaining,
+                    )
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertIs(bot.account_snapshot, original_snapshot)
+                    self.assertFalse(bot.account_snapshot["available"])
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_retry_unsynced_stopped_paper_snapshot_save_failure(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+
+        try:
+            governance_state["mode"] = "PAPER"
+            previous = self._saved_emergency_result(
+                state=EMERGENCY_ACTION_REQUIRED,
+                result=EMERGENCY_RESULT_PARTIAL,
+                success=False,
+                completed=False,
+                partial=True,
+                retryable=True,
+                state_unknown=True,
+                position_remaining=None,
+                operation_id="emg_snapshot_save_failed",
+            )
+            previous["path"] = "paper"
+            governance_state["last_emergency_result"] = previous
+            self._set_current_emergency_operation(previous)
+
+            bot = self._stopped_paper_bot()
+            original_snapshot = bot.account_snapshot
+            original_generation = bot.account_snapshot_generation
+            self._mark_stopped_paper_snapshot_unsynced_with_authority(bot)
+            bot._save_stopped_paper_safety_snapshot = Mock(
+                return_value=False
+            )
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                retry = asyncio.run(emergency_retry())
+
+            self.assertFalse(retry["success"])
+            self.assertTrue(retry["state_unknown"])
+            self.assertEqual(retry["error_code"], "SNAPSHOT_SAVE_FAILED")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertIs(bot.account_snapshot, original_snapshot)
+            self.assertEqual(
+                bot.account_snapshot_generation,
+                original_generation,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_snapshot_operation_mismatch_blocks_unlock_authority(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=True,
+        )
+        now = 1_800_000_000.0
+
+        try:
+            current = self._saved_emergency_result(
+                state=EMERGENCY_LOCKED,
+                result=EMERGENCY_RESULT_SUCCESS,
+                success=True,
+                completed=True,
+                partial=False,
+                retryable=False,
+                state_unknown=False,
+                position_remaining=False,
+                operation_id="emg_current_locked",
+            )
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = current
+            self._set_current_emergency_operation(current)
+
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot.update({
+                "available": True,
+                "last_update": now,
+                "capturedAt": now,
+                "timestamp": now,
+                "timestampEpoch": now,
+                "source": "stopped_paper_preserved_runtime_state",
+                "sourceSnapshotSource": "stopped_paper_engine_snapshot",
+                "tradeMode": "paper",
+                "mode": "paper",
+                "selectedMode": "PAPER",
+                "operationId": "emg_old_recheck",
+                "positionRemaining": False,
+                "pendingOrder": False,
+                "openOrderCount": 0,
+                "stateUnknown": False,
+                "generation": bot.account_snapshot_generation,
+                "positionStateSource": "execution_engine.actual_position",
+                "pendingOrderStateSource": (
+                    "execution_engine.pending_order_duplicate_lock"
+                ),
+                "openOrderStateSource": (
+                    "execution_engine."
+                    "paper_immediate_fill_no_open_order_collection"
+                ),
+            })
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                stopped_state = (
+                    bot._stopped_paper_authoritative_safety_state()
+                )
+                pending_state = (
+                    bot.get_authoritative_pending_order_state()
+                )
+
+            self.assertFalse(stopped_state["safe"])
+            self.assertEqual(
+                stopped_state["reason"],
+                "SNAPSHOT_OPERATION_ID_MISMATCH",
+            )
+            self.assertFalse(
+                stopped_state["snapshot_operation_state"]["valid"]
+            )
+            self.assertEqual(
+                pending_state["reason"],
+                "SNAPSHOT_OPERATION_ID_MISMATCH",
+            )
+            self.assertEqual(
+                emergency_unlock_block_reason(pending_state),
+                "SNAPSHOT_OPERATION_ID_MISMATCH",
             )
         finally:
             self._restore_governance(state_before)
@@ -2127,6 +2929,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 lambda bot: bot.account_snapshot.update({
                     "position": None,
                     "positions": None,
+                    "positionRemaining": None,
                 }),
                 "POSITION_STATE_UNKNOWN",
             ),
@@ -2157,17 +2960,21 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             ),
             (
                 "pending-order-missing",
-                lambda bot: delattr(bot, "pending_order"),
+                lambda bot: bot.account_snapshot.pop("pendingOrder"),
                 "PENDING_ORDER_UNKNOWN",
             ),
             (
                 "pending-order-none",
-                lambda bot: setattr(bot, "pending_order", None),
+                lambda bot: bot.account_snapshot.update({
+                    "pendingOrder": None,
+                }),
                 "PENDING_ORDER_UNKNOWN",
             ),
             (
                 "pending-order-non-bool",
-                lambda bot: setattr(bot, "pending_order", {}),
+                lambda bot: bot.account_snapshot.update({
+                    "pendingOrder": {},
+                }),
                 "PENDING_ORDER_UNKNOWN",
             ),
             (
@@ -2232,6 +3039,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         try:
             bot = self._stopped_paper_bot()
+            bot.account_snapshot["positionRemaining"] = True
             bot.account_snapshot["position"] = {
                 "symbol": "XRPUSDT",
                 "side": "BUY",
@@ -2267,7 +3075,8 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         try:
             bot = self._stopped_paper_bot()
-            bot.pending_order = True
+            bot.account_snapshot["pendingOrder"] = True
+            bot.account_snapshot["pending_order"] = True
 
             result = bot.run_emergency_orchestrator()
             emergency = bot.get_status()["emergency"]
@@ -2922,8 +3731,8 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "known": False,
                 "pending": None,
                 "safe": False,
-                "reason": "ENGINE_UNAVAILABLE",
-                "source": "unknown",
+                "reason": "SNAPSHOT_NOT_SYNCED",
+                "source": "stopped_paper_authoritative",
                 "mismatch": False,
                 "legacy": True,
             },
@@ -3100,7 +3909,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "manager-false-engine-none",
                 False,
                 "engine-none",
-                "ENGINE_UNAVAILABLE",
+                "SNAPSHOT_NOT_SYNCED",
             ),
             (
                 "manager-false-engine-pending-none",
@@ -3246,7 +4055,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 False,
                 "engine-none",
                 True,
-                "ENGINE_UNAVAILABLE",
+                "SNAPSHOT_NOT_SYNCED",
             ),
         ]
 
@@ -3423,6 +4232,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self._set_current_emergency_operation(previous)
             governance_state["emergency_timeline"] = []
             bot = self._stopped_paper_bot()
+            bot.account_snapshot["positionRemaining"] = True
             bot.account_snapshot["position"] = {
                 "symbol": "XRPUSDT",
                 "side": "BUY",
@@ -3546,6 +4356,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         try:
             bot = self._stopped_paper_bot()
+            bot.account_snapshot["positionRemaining"] = True
             bot.account_snapshot["position"] = {
                 "symbol": "XRPUSDT",
                 "side": "BUY",
@@ -3557,6 +4368,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             )
             bot.account_snapshot["position"] = None
             bot.account_snapshot["positions"] = []
+            bot.account_snapshot["positionRemaining"] = False
 
             with patch(
                 "backend.api.governance.get_bot_manager",
