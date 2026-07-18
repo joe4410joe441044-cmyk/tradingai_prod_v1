@@ -1681,8 +1681,125 @@ class BotManager:
     def start(self, config):
 
         try:
+            requested_mode = str(
+                config.get("mode", "")
+            ).strip().lower()
+            requested_dry_run = config.get("dry_run", True)
 
-            self.stop()
+            if requested_mode == "paper":
+                pending_authority = (
+                    self.get_authoritative_pending_order_state()
+                )
+                if self.engine is not None:
+                    from backend.routers import positions as positions_router
+
+                    trading_runtime = runtime_registry.trading_runtime
+                    execution_runtime = (
+                        getattr(trading_runtime, "execution_runtime", None)
+                        if trading_runtime is not None
+                        else None
+                    )
+                    if positions_router.engine is not self.engine:
+                        return {
+                            "status": "error",
+                            "reason": "POSITIONS_REGISTRY_MISMATCH",
+                            "success": False,
+                            "completed": False,
+                            "stateUnknown": True,
+                        }
+                    if (
+                        execution_runtime is None
+                        or getattr(execution_runtime, "engine", None)
+                        is not self.engine
+                    ):
+                        return {
+                            "status": "error",
+                            "reason": "EXECUTION_REGISTRY_MISMATCH",
+                            "success": False,
+                            "completed": False,
+                            "stateUnknown": True,
+                        }
+                durable_start_safe = False
+                if (
+                    pending_authority.get("safe") is not True
+                    and os.path.lexists(
+                        self.stopped_paper_durable_snapshot_path
+                    )
+                ):
+                    durable_snapshot, _durable_reason = (
+                        self._load_stopped_paper_durable_snapshot()
+                    )
+                    durable_start_safe = bool(
+                        isinstance(durable_snapshot, dict)
+                        and durable_snapshot.get("mode") == "paper"
+                        and durable_snapshot.get("lifecycleState")
+                        == "STOPPED"
+                        and durable_snapshot.get("stateUnknown") is False
+                        and durable_snapshot.get("positionRemaining")
+                        is False
+                        and durable_snapshot.get("pendingOrder") is False
+                        and durable_snapshot.get("openOrderCount") == 0
+                        and type(
+                            durable_snapshot.get("openOrderCount")
+                        ) is int
+                    )
+                if (
+                    requested_dry_run is not True
+                    or (
+                        durable_start_safe is not True
+                        and (
+                            pending_authority.get("known") is not True
+                            or pending_authority.get("pending") is not False
+                            or pending_authority.get("safe") is not True
+                        )
+                    )
+                ):
+                    reason = (
+                        "PAPER_DRY_RUN_REQUIRED"
+                        if requested_dry_run is not True
+                        else pending_authority.get("reason")
+                        or "PENDING_ORDER_AUTHORITY_REQUIRED"
+                    )
+                    return {
+                        "status": "error",
+                        "reason": reason,
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": (
+                            pending_authority.get("known") is not True
+                        ),
+                    }
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "reason": str(e),
+                "success": False,
+                "completed": False,
+                "stateUnknown": True,
+            }
+
+        try:
+
+            stop_result = self.stop()
+            if (
+                not isinstance(stop_result, dict)
+                or stop_result.get("status") != "stopped"
+                or stop_result.get("success") is not True
+                or stop_result.get("completed") is not True
+                or stop_result.get("stateUnknown") is not False
+            ):
+                return {
+                    "status": "error",
+                    "reason": (
+                        stop_result.get("reason")
+                        if isinstance(stop_result, dict)
+                        else "ENGINE_STOP_RESULT_INVALID"
+                    ),
+                    "success": False,
+                    "completed": False,
+                    "stateUnknown": True,
+                }
 
             self._set_lifecycle_state(
                 "STARTING"
@@ -2323,10 +2440,13 @@ class BotManager:
 
         except Exception as e:
 
-            self._running = False
-
-            self._set_lifecycle_state(
-                "STOPPED"
+            cleanup_result = self.stop()
+            cleanup_succeeded = bool(
+                isinstance(cleanup_result, dict)
+                and cleanup_result.get("status") == "stopped"
+                and cleanup_result.get("success") is True
+                and cleanup_result.get("completed") is True
+                and cleanup_result.get("stateUnknown") is False
             )
 
             add_log(
@@ -2341,6 +2461,9 @@ class BotManager:
             return {
                 "status": "error",
                 "reason": str(e),
+                "success": False,
+                "completed": False,
+                "stateUnknown": cleanup_succeeded is not True,
             }
 
     def shutdown(self):
@@ -4786,6 +4909,110 @@ class BotManager:
         result["reason"] = "STOPPED_PAPER_AUTHORITATIVE_SAFE"
         return result
 
+    def _bootstrap_stopped_paper_authority_state(
+        self,
+        manager_pending_order,
+    ):
+
+        def blocked(reason):
+            return {
+                "safe": False,
+                "reason": reason,
+                "source": "bootstrap_stopped_paper",
+            }
+
+        if self.engine is not None:
+            return blocked("ENGINE_AVAILABLE")
+
+        if (
+            self._running is not False
+            or self.lifecycle_state != "STOPPED"
+        ):
+            return blocked("BOT_NOT_STOPPED")
+
+        if governance_state.get("execution_enabled") is not False:
+            return blocked("EXECUTION_STATE_UNKNOWN")
+
+        if (
+            governance_state.get("emergency_state") != EMERGENCY_READY
+            or governance_state.get("emergency_stop") is not False
+        ):
+            return blocked("EMERGENCY_NOT_READY")
+
+        configured_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().lower()
+        configured_dry_run = self.config.get("dry_run", True)
+        if (
+            configured_mode != "paper"
+            or configured_dry_run is not True
+            or backend_config.TRADE_MODE != "paper"
+            or backend_config.ALLOW_LIVE is not False
+        ):
+            return blocked("BOOTSTRAP_MODE_UNSAFE")
+
+        live_readiness = self._build_live_readiness_snapshot(
+            "PAPER",
+            True,
+        )
+        if live_readiness.get("realOrderAllowed") is not False:
+            return blocked("REAL_ORDER_ALLOWED")
+
+        if manager_pending_order is not False:
+            return blocked("PENDING_ORDER_MANAGER_UNKNOWN")
+
+        try:
+            from backend.routers import positions as positions_router
+
+            if positions_router.engine is not None:
+                return blocked("POSITIONS_REGISTRY_ATTACHED")
+        except Exception:
+            return blocked("POSITIONS_REGISTRY_UNKNOWN")
+
+        try:
+            trading_runtime = runtime_registry.trading_runtime
+            execution_runtime = (
+                getattr(trading_runtime, "execution_runtime", None)
+                if trading_runtime is not None
+                else None
+            )
+            if (
+                execution_runtime is not None
+                and getattr(execution_runtime, "engine", None) is not None
+            ):
+                return blocked("EXECUTION_REGISTRY_ATTACHED")
+        except Exception:
+            return blocked("EXECUTION_REGISTRY_UNKNOWN")
+
+        if os.path.lexists(self.stopped_paper_durable_snapshot_path):
+            return blocked("DURABLE_SNAPSHOT_PRESENT")
+
+        snapshot = self.account_snapshot
+        if not isinstance(snapshot, dict):
+            return blocked("POSITION_STATE_UNKNOWN")
+
+        # Bootstrap authority is restricted to a virgin process.  Once an
+        # engine session or account evidence generation has existed, only the
+        # normal stopped-paper snapshot authority may prove flat state.
+        if (
+            self.session_id != 0
+            or self.account_snapshot_generation != 0
+            or self.position != "NONE"
+            or snapshot.get("position") is not None
+            or snapshot.get("positions") is not None
+        ):
+            return blocked("POSITION_STATE_UNKNOWN")
+
+        return {
+            "safe": True,
+            "reason": "BOOTSTRAP_STOPPED_PAPER_CONFIRMED",
+            "source": "bootstrap_stopped_paper",
+            "position_state": "flat",
+            "pending_order_state": "flat",
+            "open_order_state": "flat",
+            "open_order_count": 0,
+        }
+
     def get_authoritative_pending_order_state(self):
 
         missing = object()
@@ -4902,6 +5129,24 @@ class BotManager:
             stopped_reason = stopped_state.get("reason")
 
             if stopped_reason:
+                bootstrap_state = (
+                    self._bootstrap_stopped_paper_authority_state(
+                        manager_pending_order
+                    )
+                )
+                if bootstrap_state.get("safe") is True:
+                    return self._pending_order_authority_payload(
+                        known=True,
+                        pending=False,
+                        safe=True,
+                        reason=(
+                            "BOOTSTRAP_STOPPED_PAPER_CONFIRMED"
+                        ),
+                        source="bootstrap_stopped_paper",
+                        manager_pending_order=manager_pending_order,
+                        engine_available=False,
+                    )
+
                 return self._pending_order_authority_payload(
                     known=False,
                     pending=None,
@@ -5835,31 +6080,34 @@ class BotManager:
         # Invalidate callbacks from the old exchange WebSocket immediately.
         self.active_runtime_id = None
 
+        cleanup_failures = []
+
         try:
 
             if self.ws:
-
-                self.ws.stop()
-
-                time.sleep(1)
+                try:
+                    self.ws.stop()
+                    time.sleep(1)
+                    self.ws = None
+                except Exception:
+                    cleanup_failures.append("WEBSOCKET_STOP_FAILED")
 
             runtime_metrics = (
                 self.state.runtime_metrics
             )
 
-            runtime_metrics[
-                "ws_connected"
-            ] = False
+            if "WEBSOCKET_STOP_FAILED" not in cleanup_failures:
+                runtime_metrics[
+                    "ws_connected"
+                ] = False
 
-            runtime_metrics[
-                "ws_thread_alive"
-            ] = False
+                runtime_metrics[
+                    "ws_thread_alive"
+                ] = False
 
             runtime_metrics[
                 "market_ready"
             ] = False
-
-            self.ws = None
 
             self.strategy = None
 
@@ -5923,24 +6171,96 @@ class BotManager:
                         "stateUnknown": True,
                     }
 
-            from backend.routers.positions import (
-                set_engine
-            )
+            positions_router = None
+            try:
+                from backend.routers import positions as positions_router
+            except Exception:
+                cleanup_failures.append(
+                    "POSITIONS_REGISTRY_STATE_UNKNOWN"
+                )
 
-            set_engine(None)
-
-            if runtime_registry.trading_runtime:
-
-                runtime_registry \
-                    .trading_runtime \
-                    .execution_runtime \
-                    .set_engine(
-                        None
+            if positions_router is not None:
+                try:
+                    positions_router.set_engine(None)
+                except Exception:
+                    cleanup_failures.append(
+                        "POSITIONS_REGISTRY_DETACH_FAILED"
                     )
 
-            self.engine = None
+            execution_runtime = None
+            try:
+                trading_runtime = runtime_registry.trading_runtime
+                execution_runtime = (
+                    trading_runtime.execution_runtime
+                    if trading_runtime is not None
+                    else None
+                )
+                if execution_runtime is not None:
+                    execution_runtime.set_engine(None)
+            except Exception:
+                cleanup_failures.append(
+                    "EXECUTION_REGISTRY_DETACH_FAILED"
+                )
+
+            try:
+                positions_engine = (
+                    positions_router.engine
+                    if positions_router is not None
+                    else engine
+                )
+            except Exception:
+                positions_engine = engine
+                cleanup_failures.append(
+                    "POSITIONS_REGISTRY_STATE_UNKNOWN"
+                )
+
+            try:
+                execution_engine = (
+                    execution_runtime.engine
+                    if execution_runtime is not None
+                    else None
+                )
+            except Exception:
+                execution_engine = engine
+                cleanup_failures.append(
+                    "EXECUTION_REGISTRY_STATE_UNKNOWN"
+                )
+
+            if positions_engine is not None:
+                cleanup_failures.append(
+                    "ENGINE_REGISTRY_STILL_ATTACHED"
+                )
+            if execution_engine is not None:
+                cleanup_failures.append(
+                    "ENGINE_REGISTRY_STILL_ATTACHED"
+                )
+
+            if (
+                positions_engine is None
+                and execution_engine is None
+            ):
+                self.engine = None
 
             self._running = False
+
+            if (
+                cleanup_failures
+                or self.ws is not None
+                or self.engine is not None
+                or positions_engine is not None
+                or execution_engine is not None
+                or self._running is not False
+            ):
+                self._set_lifecycle_state("STOPPING")
+                return {
+                    "status": "error",
+                    "reason": cleanup_failures[0]
+                    if cleanup_failures
+                    else "STOP_RESIDUAL_STATE",
+                    "success": False,
+                    "completed": False,
+                    "stateUnknown": True,
+                }
 
             self._set_lifecycle_state(
                 "STOPPED"
@@ -5981,7 +6301,7 @@ class BotManager:
         except Exception as e:
 
             self._set_lifecycle_state(
-                "STOPPED"
+                "STOPPING"
             )
 
             add_log(

@@ -4802,6 +4802,11 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                         case["engine_pending"]
                     )
                 )
+                if case["engine_pending"] == "engine-none":
+                    # This legacy normalization case exercises an engine-less
+                    # non-bootstrap state; virgin bootstrap has dedicated
+                    # coverage below.
+                    bot.session_id = 1
 
                 state = bot.get_authoritative_pending_order_state()
                 status = bot.get_status()
@@ -7969,6 +7974,673 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             cached["accountRuntime"]["realAccount"]["generation"],
             status["accountRuntime"]["realAccount"]["generation"],
         )
+
+    @staticmethod
+    def _bootstrap_start_config():
+        return {
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+            "mode": "paper",
+            "dry_run": True,
+            "risk_percent": 1,
+            "position_size": 100,
+            "max_drawdown_pct": 5,
+            "sl_percent": 0.5,
+            "tp_percent": 1,
+            "timeframe": "5m",
+            "trailing_stop": False,
+            "leverage": 5,
+        }
+
+    def _bootstrap_bot(self):
+        bot = BotManager()
+        bot.stopped_paper_durable_snapshot_path = (
+            self._temporary_durable_snapshot_path()
+        )
+        return bot
+
+    def test_initial_stopped_paper_bootstrap_is_authoritative_for_start(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                "paper",
+            ), patch(
+                "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                False,
+            ):
+                pending = bot.get_authoritative_pending_order_state()
+                status = bot.get_status()
+
+            self.assertTrue(pending["known"])
+            self.assertFalse(pending["pending"])
+            self.assertTrue(pending["safe"])
+            self.assertEqual(
+                pending["reason"],
+                "BOOTSTRAP_STOPPED_PAPER_CONFIRMED",
+            )
+            self.assertEqual(
+                pending["source"],
+                "bootstrap_stopped_paper",
+            )
+            self.assertFalse(status["pendingOrder"])
+            self.assertEqual(
+                status["pendingOrderState"]["reason"],
+                "BOOTSTRAP_STOPPED_PAPER_CONFIRMED",
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_bootstrap_fail_closed_conditions(self):
+        cases = (
+            ("pending-true", lambda bot: setattr(bot, "pending_order", True)),
+            ("pending-unknown", lambda bot: setattr(bot, "pending_order", None)),
+            ("live", lambda bot: bot.config.update({"mode": "live"})),
+            (
+                "action-required",
+                lambda _bot: governance_state.update({
+                    "emergency_stop": True,
+                    "emergency_state": EMERGENCY_ACTION_REQUIRED,
+                }),
+            ),
+            ("stopping", lambda bot: setattr(bot, "lifecycle_state", "STOPPING")),
+        )
+
+        for name, mutation in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                bot = self._bootstrap_bot()
+                mutation(bot)
+
+                try:
+                    with patch(
+                        "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                        "paper",
+                    ), patch(
+                        "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                        False,
+                    ):
+                        pending = (
+                            bot.get_authoritative_pending_order_state()
+                        )
+                        start_result = (
+                            bot.start(self._bootstrap_start_config())
+                            if name in {"pending-true", "pending-unknown"}
+                            else None
+                        )
+
+                    self.assertFalse(pending["known"])
+                    self.assertIsNone(pending["pending"])
+                    self.assertFalse(pending["safe"])
+                    if start_result is not None:
+                        self.assertEqual(start_result["status"], "error")
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_stopped_paper_bootstrap_rejects_execution_and_registry(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        for name in (
+            "execution-enabled",
+            "positions-registry",
+            "execution-registry",
+        ):
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=name == "execution-enabled",
+                    emergency_stop=False,
+                )
+                bot = self._bootstrap_bot()
+                marker = Mock()
+                execution_runtime = (
+                    runtime_registry.trading_runtime.execution_runtime
+                )
+                original_runtime_engine = execution_runtime.engine
+
+                try:
+                    if name == "positions-registry":
+                        positions_router.set_engine(marker)
+                    if name == "execution-registry":
+                        execution_runtime.set_engine(marker)
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                        "paper",
+                    ), patch(
+                        "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                        False,
+                    ):
+                        pending = (
+                            bot.get_authoritative_pending_order_state()
+                        )
+
+                    self.assertFalse(pending["safe"])
+                    self.assertFalse(pending["known"])
+                finally:
+                    positions_router.set_engine(None)
+                    execution_runtime.set_engine(original_runtime_engine)
+                    self._restore_governance(state_before)
+
+    def test_bootstrap_start_stop_creates_normal_durable_snapshot(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        path = bot.stopped_paper_durable_snapshot_path
+        ws = Mock()
+        ws.connected = False
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                "paper",
+            ), patch(
+                "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                False,
+            ), patch(
+                "backend.bot_manager.bot_manager.ExchangeFactory"
+                ".create_market_ws",
+                return_value=ws,
+            ):
+                started = bot.start(self._bootstrap_start_config())
+                self.assertEqual(started["status"], "started")
+                self.assertIsNotNone(bot.engine)
+                stopped = bot.stop()
+
+            self.assertEqual(stopped["status"], "stopped")
+            self.assertTrue(stopped["success"])
+            self.assertTrue(stopped["completed"])
+            self.assertFalse(stopped["stateUnknown"])
+            self.assertTrue(os.path.isfile(path))
+            with open(path, "r", encoding="utf-8") as snapshot_file:
+                durable = json.load(snapshot_file)
+            self.assertNotEqual(
+                durable.get("source"),
+                "bootstrap_stopped_paper",
+            )
+            self.assertFalse(durable["stateUnknown"])
+            self.assertFalse(durable["positionRemaining"])
+            self.assertFalse(durable["pendingOrder"])
+            self.assertEqual(durable["openOrderCount"], 0)
+        finally:
+            with patch(
+                "backend.bot_manager.bot_manager.time.sleep",
+                return_value=None,
+            ):
+                bot.stop()
+            self._restore_governance(state_before)
+
+    def test_bootstrap_is_not_emergency_or_restart_authority(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            for name in ("initial", "restart"):
+                with self.subTest(name=name):
+                    bot = BotManager()
+                    bot.stopped_paper_durable_snapshot_path = path
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                        "paper",
+                    ), patch(
+                        "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                        False,
+                    ):
+                        pending = (
+                            bot.get_authoritative_pending_order_state()
+                        )
+                        result = bot.run_emergency_orchestrator()
+
+                    self.assertTrue(pending["safe"])
+                    self.assertFalse(result["success"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertFalse(os.path.exists(path))
+                    self._restore_governance(state_before)
+                    state_before = self._set_governance(
+                        execution_enabled=False,
+                        emergency_stop=False,
+                    )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_running_start_guard_rejection_preserves_runtime_identity(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        cases = (
+            ("pending-unknown", False, None, None),
+            ("pending-present", True, True, None),
+            (
+                "positions-registry-mismatch",
+                False,
+                False,
+                "positions",
+            ),
+            (
+                "execution-registry-mismatch",
+                False,
+                False,
+                "execution",
+            ),
+        )
+
+        for name, manager_pending, engine_pending, mismatch in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                bot = self._bootstrap_bot()
+                engine = Mock()
+                engine.pending_order = engine_pending
+                websocket = Mock()
+                bot.engine = engine
+                bot.ws = websocket
+                bot.pending_order = manager_pending
+                bot._running = True
+                bot.lifecycle_state = "RUNNING"
+                bot.session_id = 7
+                execution_runtime = (
+                    runtime_registry.trading_runtime.execution_runtime
+                )
+                original_runtime_engine = execution_runtime.engine
+                positions_router.set_engine(engine)
+                execution_runtime.set_engine(engine)
+                if mismatch == "positions":
+                    positions_router.set_engine(Mock())
+                if mismatch == "execution":
+                    execution_runtime.set_engine(Mock())
+                expected_positions_engine = positions_router.engine
+                expected_execution_engine = execution_runtime.engine
+
+                try:
+                    result = bot.start(self._bootstrap_start_config())
+
+                    self.assertEqual(result["status"], "error")
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(bot._running)
+                    self.assertEqual(bot.lifecycle_state, "RUNNING")
+                    self.assertIs(bot.engine, engine)
+                    self.assertIs(bot.ws, websocket)
+                    self.assertEqual(bot.session_id, 7)
+                    self.assertIs(
+                        positions_router.engine,
+                        expected_positions_engine,
+                    )
+                    self.assertIs(
+                        execution_runtime.engine,
+                        expected_execution_engine,
+                    )
+                    engine.stop.assert_not_called()
+                    websocket.stop.assert_not_called()
+                finally:
+                    positions_router.set_engine(None)
+                    execution_runtime.set_engine(original_runtime_engine)
+                    self._restore_governance(state_before)
+
+    def test_stopped_start_guard_rejection_preserves_stopped_state(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        bot.pending_order = None
+        execution_runtime = (
+            runtime_registry.trading_runtime.execution_runtime
+        )
+        original_runtime_engine = execution_runtime.engine
+        positions_router.set_engine(None)
+        execution_runtime.set_engine(None)
+
+        try:
+            result = bot.start(self._bootstrap_start_config())
+
+            self.assertEqual(result["status"], "error")
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["stateUnknown"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertIsNone(bot.engine)
+            self.assertIsNone(positions_router.engine)
+            self.assertIsNone(execution_runtime.engine)
+            self.assertEqual(bot.session_id, 0)
+        finally:
+            execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
+
+    def test_bootstrap_rejects_non_bool_pending_loop_and_generation(self):
+        cases = (
+            ("pending-non-bool", lambda bot: setattr(bot, "pending_order", "false")),
+            (
+                "loop-on",
+                lambda bot: (
+                    setattr(bot, "_running", True),
+                    setattr(bot, "lifecycle_state", "RUNNING"),
+                ),
+            ),
+            (
+                "generation-positive",
+                lambda bot: setattr(bot, "account_snapshot_generation", 1),
+            ),
+        )
+
+        for name, mutation in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                bot = self._bootstrap_bot()
+                mutation(bot)
+
+                try:
+                    pending = bot.get_authoritative_pending_order_state()
+                    result = bot.start(self._bootstrap_start_config())
+
+                    self.assertFalse(pending["safe"])
+                    self.assertEqual(result["status"], "error")
+                    if name == "loop-on":
+                        self.assertTrue(bot._running)
+                        self.assertEqual(bot.lifecycle_state, "RUNNING")
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_start_mutation_failure_cleans_up_before_stopped_response(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        execution_runtime = (
+            runtime_registry.trading_runtime.execution_runtime
+        )
+        original_runtime_engine = execution_runtime.engine
+        positions_router.set_engine(None)
+        execution_runtime.set_engine(None)
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.ExecutionEngine",
+                side_effect=RuntimeError("engine construction failed"),
+            ):
+                result = bot.start(self._bootstrap_start_config())
+
+            self.assertEqual(result["status"], "error")
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertFalse(result["stateUnknown"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertIsNone(bot.engine)
+            self.assertIsNone(positions_router.engine)
+            self.assertIsNone(execution_runtime.engine)
+        finally:
+            positions_router.set_engine(None)
+            execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
+
+    def test_running_paper_restart_replaces_runtime_after_preflight(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        first_ws = Mock()
+        first_ws.connected = False
+        second_ws = Mock()
+        second_ws.connected = False
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.ExchangeFactory"
+                ".create_market_ws",
+                side_effect=(first_ws, second_ws),
+            ):
+                first = bot.start(self._bootstrap_start_config())
+                first_engine = bot.engine
+                first_session = bot.session_id
+                second = bot.start(self._bootstrap_start_config())
+
+            self.assertEqual(first["status"], "started")
+            self.assertEqual(second["status"], "started")
+            self.assertTrue(bot._running)
+            self.assertEqual(bot.lifecycle_state, "RUNNING")
+            self.assertIsNot(bot.engine, first_engine)
+            self.assertIs(bot.ws, second_ws)
+            self.assertEqual(bot.session_id, first_session + 1)
+            first_ws.stop.assert_called_once()
+        finally:
+            with patch(
+                "backend.bot_manager.bot_manager.time.sleep",
+                return_value=None,
+            ):
+                bot.stop()
+            self._restore_governance(state_before)
+
+    def test_start_mutation_cleanup_failure_is_not_stopped_safe(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        engine = Mock()
+        engine.mode = "paper"
+        engine.pending_order = False
+        engine.actual_position = None
+        engine.portfolio.positions = {}
+        engine.stop.return_value = {"status": "error"}
+        execution_runtime = (
+            runtime_registry.trading_runtime.execution_runtime
+        )
+        original_runtime_engine = execution_runtime.engine
+        positions_router.set_engine(None)
+        execution_runtime.set_engine(None)
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.ExecutionEngine",
+                return_value=engine,
+            ), patch(
+                "backend.bot_manager.bot_manager.ExchangeFactory"
+                ".create_market_ws",
+                side_effect=RuntimeError("ws construction failed"),
+            ):
+                result = bot.start(self._bootstrap_start_config())
+
+            self.assertEqual(result["status"], "error")
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["stateUnknown"])
+            self.assertFalse(bot._running)
+            self.assertNotEqual(bot.lifecycle_state, "STOPPED")
+            self.assertIs(bot.engine, engine)
+            self.assertIs(positions_router.engine, engine)
+            self.assertIs(execution_runtime.engine, engine)
+        finally:
+            positions_router.set_engine(None)
+            execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
+
+    def test_stop_websocket_exception_continues_runtime_cleanup(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        engine = self._paper_engine_for_stop()
+        engine.stop = Mock(return_value={"status": "stopped"})
+        websocket = Mock()
+        websocket.stop.side_effect = RuntimeError("ws stop failed")
+        bot.engine = engine
+        bot.ws = websocket
+        bot._running = True
+        bot.lifecycle_state = "RUNNING"
+        execution_runtime = (
+            runtime_registry.trading_runtime.execution_runtime
+        )
+        original_runtime_engine = execution_runtime.engine
+        positions_router.set_engine(engine)
+        execution_runtime.set_engine(engine)
+
+        try:
+            with patch.object(
+                engine,
+                "stop",
+                wraps=engine.stop,
+            ) as engine_stop:
+                result = bot.stop()
+
+            self.assertEqual(result["status"], "error")
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["stateUnknown"])
+            self.assertEqual(result["reason"], "WEBSOCKET_STOP_FAILED")
+            self.assertNotEqual(bot.lifecycle_state, "STOPPED")
+            self.assertIs(bot.ws, websocket)
+            self.assertIsNone(bot.engine)
+            self.assertIsNone(positions_router.engine)
+            self.assertIsNone(execution_runtime.engine)
+            engine_stop.assert_called_once()
+        finally:
+            positions_router.set_engine(None)
+            execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
+
+    def test_stop_registry_detach_exceptions_fail_closed(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        for name in ("positions", "execution"):
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                bot = self._bootstrap_bot()
+                engine = self._paper_engine_for_stop()
+                bot.engine = engine
+                bot._running = True
+                bot.lifecycle_state = "RUNNING"
+                execution_runtime = (
+                    runtime_registry.trading_runtime.execution_runtime
+                )
+                original_runtime_engine = execution_runtime.engine
+                positions_router.set_engine(engine)
+                execution_runtime.set_engine(engine)
+
+                try:
+                    if name == "positions":
+                        target = patch.object(
+                            positions_router,
+                            "set_engine",
+                            side_effect=RuntimeError("positions detach failed"),
+                        )
+                    else:
+                        target = patch.object(
+                            execution_runtime,
+                            "set_engine",
+                            side_effect=RuntimeError("runtime detach failed"),
+                        )
+
+                    with target:
+                        result = bot.stop()
+
+                    self.assertEqual(result["status"], "error")
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["stateUnknown"])
+                    self.assertNotEqual(bot.lifecycle_state, "STOPPED")
+                    self.assertIs(bot.engine, engine)
+                    if name == "positions":
+                        self.assertIs(positions_router.engine, engine)
+                        self.assertIsNone(execution_runtime.engine)
+                    else:
+                        self.assertIsNone(positions_router.engine)
+                        self.assertIs(execution_runtime.engine, engine)
+                finally:
+                    positions_router.set_engine(None)
+                    execution_runtime.set_engine(original_runtime_engine)
+                    self._restore_governance(state_before)
+
+    def test_start_mutation_websocket_cleanup_exception_fail_closed(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._bootstrap_bot()
+        engine = self._paper_engine_for_stop()
+        engine.stop = Mock(return_value={"status": "stopped"})
+        websocket = Mock()
+        websocket.start.side_effect = RuntimeError("ws start failed")
+        websocket.stop.side_effect = RuntimeError("ws stop failed")
+        execution_runtime = (
+            runtime_registry.trading_runtime.execution_runtime
+        )
+        original_runtime_engine = execution_runtime.engine
+        positions_router.set_engine(None)
+        execution_runtime.set_engine(None)
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.ExecutionEngine",
+                return_value=engine,
+            ), patch(
+                "backend.bot_manager.bot_manager.ExchangeFactory"
+                ".create_market_ws",
+                return_value=websocket,
+            ):
+                result = bot.start(self._bootstrap_start_config())
+
+            self.assertEqual(result["status"], "error")
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["stateUnknown"])
+            self.assertNotEqual(bot.lifecycle_state, "STOPPED")
+            self.assertIs(bot.ws, websocket)
+            self.assertIs(bot.engine, engine)
+            self.assertIs(positions_router.engine, engine)
+            self.assertIs(execution_runtime.engine, engine)
+        finally:
+            positions_router.set_engine(None)
+            execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
 
 
 if __name__ == "__main__":
