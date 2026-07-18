@@ -3520,7 +3520,6 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             (
                 "pending",
                 lambda payload: payload.update({"pendingOrder": True}),
-                True,
             ),
             (
                 "position",
@@ -3532,11 +3531,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                         "side": "BUY",
                     }],
                 }),
-                None,
             ),
         )
 
-        for name, mutate, expected_pending in cases:
+        for name, mutate in cases:
             with self.subTest(name=name):
                 state_before = self._set_governance(
                     execution_enabled=False,
@@ -3559,9 +3557,8 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     )
 
                     self.assertFalse(authority["safe"])
-                    if expected_pending is True:
-                        self.assertTrue(authority["known"])
-                        self.assertTrue(authority["pending"])
+                    self.assertFalse(authority["known"])
+                    self.assertIsNone(authority["pending"])
                 finally:
                     self._restore_governance(state_before)
 
@@ -3774,7 +3771,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             runtime_registry.trading_runtime = original_trading_runtime
             self._restore_governance(state_before)
 
-    def test_restart_durable_repeated_authority_uses_one_rebind(self):
+    def test_restart_durable_repeated_authority_revalidates_raw_evidence(self):
         state_before = self._set_governance(
             execution_enabled=False,
             emergency_stop=False,
@@ -3797,7 +3794,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     bot.get_authoritative_pending_order_state()
                     for _ in range(3)
                 ]
-            load.assert_called_once_with()
+            self.assertEqual(load.call_count, 4)
             self.assertTrue(all(result["safe"] for result in results))
             self.assertEqual(
                 [result["source"] for result in results],
@@ -3810,7 +3807,9 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    def test_restart_durable_concurrent_authority_uses_one_rebind(self):
+    def test_restart_durable_concurrent_authority_revalidates_raw_evidence(
+        self,
+    ):
         state_before = self._set_governance(
             execution_enabled=False,
             emergency_stop=False,
@@ -3860,7 +3859,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertTrue(all(not thread.is_alive() for thread in threads))
             self.assertEqual(len(results), 3)
             self.assertTrue(all(result["safe"] for result in results))
-            self.assertEqual(load.call_count, 1)
+            self.assertEqual(load.call_count, 4)
             self.assertEqual(bot.account_snapshot_generation, 0)
             identities = {
                 bot.account_snapshot["evidenceRuntimeInstanceId"]
@@ -3927,6 +3926,497 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 EMERGENCY_LOCKED,
             )
             self.assertEqual(
+                governance_state["last_emergency_result"]["result"],
+                EMERGENCY_RESULT_SUCCESS,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_restart_rebound_ignores_runtime_freshness_and_emergency_succeeds(
+        self,
+    ):
+        captured_at = 2_000_000_000.0
+
+        for name, last_update_age in (
+            ("runtime-boundary", 90.0),
+            ("runtime-stale", 90.001),
+        ):
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    governance_state["mode"] = "PAPER"
+                    self._persist_flat_stopped_paper_durable_snapshot(
+                        path,
+                        now=captured_at,
+                    )
+                    now = captured_at + 600.0
+                    restarted = self._restart_stopped_paper_bot(path)
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=now,
+                    ):
+                        authority = (
+                            restarted.get_authoritative_pending_order_state()
+                        )
+                        rebound = restarted.account_snapshot
+                        rebound["last_update"] = now - last_update_age
+                        captured_before = rebound["capturedAt"]
+                        evidence_before = rebound["evidenceCapturedAt"]
+                        timestamp_before = rebound["timestampEpoch"]
+                        rebound_before = rebound["durableReboundAt"]
+                        last_update_before = rebound["last_update"]
+                        with open(path, "r", encoding="utf-8") as handle:
+                            written_before = json.load(handle)["writtenAt"]
+                        for _ in range(3):
+                            status = restarted.get_status()
+                            self.assertTrue(
+                                status["pendingOrderState"]["safe"]
+                            )
+                        authority = (
+                            restarted.get_authoritative_pending_order_state()
+                        )
+                        with open(path, "r", encoding="utf-8") as handle:
+                            written_after = json.load(handle)["writtenAt"]
+                        result = restarted.run_emergency_orchestrator()
+
+                    self.assertIs(authority["known"], True)
+                    self.assertIs(authority["pending"], False)
+                    self.assertIs(authority["safe"], True)
+                    self.assertEqual(
+                        authority["reason"],
+                        "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+                    )
+                    self.assertEqual(rebound["capturedAt"], captured_before)
+                    self.assertEqual(
+                        rebound["evidenceCapturedAt"],
+                        evidence_before,
+                    )
+                    self.assertEqual(
+                        rebound["timestampEpoch"], timestamp_before
+                    )
+                    self.assertEqual(
+                        rebound["durableReboundAt"], rebound_before
+                    )
+                    self.assertEqual(
+                        rebound["last_update"], last_update_before
+                    )
+                    self.assertEqual(written_after, written_before)
+                    self.assertTrue(result["success"])
+                    self.assertTrue(result["completed"])
+                    self.assertFalse(result["partial"])
+                    self.assertFalse(result["state_unknown"])
+                    self.assertFalse(result["retryable"])
+                    self.assertEqual(result["cancel"]["status"], "NOT_REQUIRED")
+                    self.assertEqual(
+                        result["flatten"]["status"],
+                        "NOT_REQUIRED",
+                    )
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_LOCKED,
+                    )
+                    self.assertEqual(
+                        governance_state["last_emergency_result"]["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_restart_rebound_durable_freshness_boundaries(self):
+        captured_at = 2_000_000_000.0
+        threshold = 7 * 24 * 60 * 60
+
+        for name, age, expected_safe in (
+            ("durable-boundary", threshold, True),
+            ("durable-stale", threshold + 0.001, False),
+        ):
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    governance_state["mode"] = "PAPER"
+                    self._persist_flat_stopped_paper_durable_snapshot(
+                        path,
+                        now=captured_at,
+                    )
+                    restarted = self._restart_stopped_paper_bot(path)
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=captured_at + age,
+                    ):
+                        authority = (
+                            restarted.get_authoritative_pending_order_state()
+                        )
+                        result = restarted.run_emergency_orchestrator()
+
+                    self.assertIs(authority["safe"], expected_safe)
+                    if expected_safe:
+                        self.assertTrue(result["success"])
+                        self.assertEqual(
+                            governance_state["emergency_state"],
+                            EMERGENCY_LOCKED,
+                        )
+                    else:
+                        self.assertEqual(
+                            authority["reason"],
+                            "DURABLE_SNAPSHOT_STALE",
+                        )
+                        self.assertFalse(result["success"])
+                        self.assertFalse(result["completed"])
+                        self.assertTrue(result["state_unknown"])
+                        self.assertEqual(
+                            governance_state["emergency_state"],
+                            EMERGENCY_ACTION_REQUIRED,
+                        )
+                        self.assertNotEqual(
+                            governance_state["last_emergency_result"][
+                                "result"
+                            ],
+                            EMERGENCY_RESULT_SUCCESS,
+                        )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_preserved_rebound_keeps_original_durable_expiry(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+        captured_at = 2_000_000_000.0
+        preserve_at = captured_at + (7 * 24 * 60 * 60) - 10.0
+
+        try:
+            governance_state["mode"] = "PAPER"
+            self._persist_flat_stopped_paper_durable_snapshot(
+                path,
+                now=captured_at,
+            )
+            restarted = self._restart_stopped_paper_bot(path)
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=preserve_at,
+            ):
+                authority = restarted.get_authoritative_pending_order_state()
+                rebound = deepcopy(restarted.account_snapshot)
+                governance_state["emergency_stop"] = True
+                governance_state["emergency_state"] = (
+                    EMERGENCY_ACTION_REQUIRED
+                )
+                with patch(
+                    "backend.api.governance.get_bot_manager",
+                    return_value=restarted,
+                ):
+                    with open(path, "r", encoding="utf-8") as snapshot_file:
+                        raw_before = json.load(snapshot_file)
+                    retry = asyncio.run(emergency_retry())
+                    with open(path, "r", encoding="utf-8") as snapshot_file:
+                        raw_after = json.load(snapshot_file)
+                preserved = restarted.account_snapshot
+
+            self.assertTrue(authority["safe"])
+            self.assertTrue(retry["success"])
+            self.assertTrue(retry["completed"])
+            self.assertFalse(retry["state_unknown"])
+            self.assertEqual(preserved["capturedAt"], captured_at)
+            self.assertEqual(preserved["timestampEpoch"], captured_at)
+            self.assertEqual(preserved["evidenceCapturedAt"], captured_at)
+            self.assertEqual(
+                preserved["last_update"],
+                rebound["last_update"],
+            )
+            self.assertEqual(
+                preserved["durableReboundAt"],
+                rebound["durableReboundAt"],
+            )
+            self.assertEqual(
+                raw_after["capturedAt"],
+                raw_before["capturedAt"],
+            )
+            self.assertEqual(
+                raw_after["writtenAt"],
+                raw_before["writtenAt"],
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=preserve_at + 11.0,
+            ):
+                expired = restarted.get_authoritative_pending_order_state()
+
+            self.assertFalse(expired["safe"])
+            self.assertEqual(expired["reason"], "DURABLE_SNAPSHOT_STALE")
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=restarted,
+            ):
+                with patch(
+                    "backend.bot_manager.bot_manager.time.time",
+                    return_value=preserve_at + 11.0,
+                ):
+                    expired_retry = asyncio.run(emergency_retry())
+            self.assertFalse(expired_retry["success"])
+            self.assertFalse(expired_retry["completed"])
+            self.assertTrue(expired_retry["state_unknown"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertNotEqual(
+                governance_state["last_emergency_result"]["result"],
+                EMERGENCY_RESULT_SUCCESS,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_restart_rebound_requires_strict_flat_durable_evidence(self):
+        cases = (
+            ("pending-none", {"pendingOrder": None}),
+            ("pending-true", {"pendingOrder": True}),
+            ("open-none", {"openOrderCount": None}),
+            ("open-one", {"openOrderCount": 1}),
+            ("position", {"positionRemaining": True}),
+            (
+                "position-object",
+                {
+                    "position": {
+                        "symbol": "XRPUSDTM",
+                        "side": "long",
+                        "size": 1,
+                        "entryPrice": 0.5,
+                    },
+                    "positions": [
+                        {
+                            "symbol": "XRPUSDTM",
+                            "side": "long",
+                            "size": 1,
+                            "entryPrice": 0.5,
+                        }
+                    ],
+                },
+            ),
+            ("unknown-none", {"stateUnknown": None}),
+            ("unknown-true", {"stateUnknown": True}),
+            ("flat-type", {"positionRemaining": 0}),
+        )
+        for name, mutation in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(False, False)
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    self._persist_flat_stopped_paper_durable_snapshot(path)
+                    bot = self._restart_stopped_paper_bot(path)
+                    self.assertTrue(
+                        bot.get_authoritative_pending_order_state()["safe"]
+                    )
+                    bot.account_snapshot.update(mutation)
+                    authority = bot.get_authoritative_pending_order_state()
+                    result = bot.run_emergency_orchestrator()
+                    self.assertFalse(authority["safe"])
+                    if name == "position-object":
+                        self.assertEqual(
+                            authority["reason"],
+                            "POSITION_STATE_UNKNOWN",
+                        )
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertNotEqual(
+                        governance_state["last_emergency_result"]["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_restart_rebound_rejects_registry_engine_after_rebind(self):
+        from backend.routers import positions as positions_router
+        from backend.runtime import runtime_registry
+
+        original_positions = positions_router.engine
+        original_runtime = runtime_registry.trading_runtime
+        for name in ("manager", "positions", "runtime"):
+            with self.subTest(name=name):
+                state_before = self._set_governance(False, False)
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    self._persist_flat_stopped_paper_durable_snapshot(path)
+                    bot = self._restart_stopped_paper_bot(path)
+                    initial_authority = (
+                        bot.get_authoritative_pending_order_state()
+                    )
+                    self.assertIs(initial_authority["known"], True)
+                    self.assertIs(initial_authority["pending"], False)
+                    self.assertIs(initial_authority["safe"], True)
+                    self.assertEqual(
+                        initial_authority["source"],
+                        "stopped_paper_authoritative",
+                    )
+                    self.assertEqual(
+                        initial_authority["reason"],
+                        "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+                    )
+                    if name == "manager":
+                        bot.engine = object()
+                    elif name == "positions":
+                        positions_router.set_engine(object())
+                    else:
+                        runtime_registry.trading_runtime = Mock(
+                            execution_runtime=Mock(engine=object())
+                        )
+                    authority = bot.get_authoritative_pending_order_state()
+                    result = bot.run_emergency_orchestrator()
+                    self.assertFalse(authority["safe"])
+                    self.assertFalse(result["success"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertNotEqual(
+                        governance_state["last_emergency_result"]["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    positions_router.set_engine(original_positions)
+                    runtime_registry.trading_runtime = original_runtime
+                    self._restore_governance(state_before)
+
+    def test_restart_rebound_raw_change_rejected_by_next_authority(self):
+        for name, mutation in (
+            ("captured", {"capturedAt": 1, "timestampEpoch": 1}),
+            ("generation", {"generation": 9}),
+            ("pending", {"pendingOrder": True}),
+            ("source", {"source": "stopped_paper_engine_snapshot"}),
+            ("missing", None),
+        ):
+            with self.subTest(name=name):
+                state_before = self._set_governance(False, False)
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    _, payload = (
+                        self._persist_flat_stopped_paper_durable_snapshot(path)
+                    )
+                    bot = self._restart_stopped_paper_bot(path)
+                    self.assertTrue(
+                        bot.get_authoritative_pending_order_state()["safe"]
+                    )
+                    if mutation is None:
+                        os.remove(path)
+                    else:
+                        payload.update(mutation)
+                        self._write_durable_snapshot_payload(path, payload)
+                    authority = bot.get_authoritative_pending_order_state()
+                    result = bot.run_emergency_orchestrator()
+                    self.assertFalse(authority["safe"])
+                    self.assertFalse(authority["known"])
+                    self.assertIsNone(authority["pending"])
+                    if mutation is None:
+                        self.assertEqual(
+                            authority["reason"],
+                            "DURABLE_SNAPSHOT_MISSING",
+                        )
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    self.assertNotEqual(
+                        governance_state["last_emergency_result"]["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_restart_rebound_requires_allow_live_exactly_false(self):
+        cases = (
+            ("false", False, True),
+            ("true", True, False),
+            ("none", None, False),
+            ("zero", 0, False),
+            ("one", 1, False),
+            ("false-string", "false", False),
+            ("true-string", "true", False),
+            ("empty-string", "", False),
+            ("dict", {}, False),
+            ("list", [], False),
+        )
+        for name, allow_live, expected_safe in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(False, False)
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    self._persist_flat_stopped_paper_durable_snapshot(path)
+                    bot = self._restart_stopped_paper_bot(path)
+                    self.assertTrue(
+                        bot.get_authoritative_pending_order_state()["safe"]
+                    )
+                    with patch(
+                        "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                        allow_live,
+                    ):
+                        authority = (
+                            bot.get_authoritative_pending_order_state()
+                        )
+                        result = bot.run_emergency_orchestrator()
+
+                    self.assertIs(authority["safe"], expected_safe)
+                    if expected_safe:
+                        self.assertTrue(result["success"])
+                    else:
+                        self.assertFalse(authority["known"])
+                        self.assertIsNone(authority["pending"])
+                        self.assertEqual(
+                            authority["reason"],
+                            "DURABLE_RESTORE_MODE_UNSAFE",
+                        )
+                        self.assertFalse(result["success"])
+                        self.assertFalse(result["completed"])
+                        self.assertTrue(result["state_unknown"])
+                        self.assertEqual(
+                            governance_state["emergency_state"],
+                            EMERGENCY_ACTION_REQUIRED,
+                        )
+                        self.assertNotEqual(
+                            governance_state["last_emergency_result"]["result"],
+                            EMERGENCY_RESULT_SUCCESS,
+                        )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_restart_rebound_old_memory_rejected_after_generation_change(self):
+        state_before = self._set_governance(False, False)
+        path = self._temporary_durable_snapshot_path()
+        try:
+            self._persist_flat_stopped_paper_durable_snapshot(path)
+            bot = self._restart_stopped_paper_bot(path)
+            self.assertTrue(bot.get_authoritative_pending_order_state()["safe"])
+            old_memory = deepcopy(bot.account_snapshot)
+            bot.account_snapshot_generation += 1
+            bot.account_snapshot = old_memory
+            authority = bot.get_authoritative_pending_order_state()
+            result = bot.run_emergency_orchestrator()
+            self.assertFalse(authority["safe"])
+            self.assertFalse(result["success"])
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+            self.assertNotEqual(
                 governance_state["last_emergency_result"]["result"],
                 EMERGENCY_RESULT_SUCCESS,
             )
