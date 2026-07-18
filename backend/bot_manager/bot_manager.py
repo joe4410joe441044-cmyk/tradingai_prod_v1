@@ -93,6 +93,7 @@ class BotManager:
         # stop() and shutdown() share this re-entrant lifecycle boundary.
         # shutdown() delegates to stop(), so a plain Lock would deadlock.
         self.shutdown_lock = threading.RLock()
+        self.stopped_paper_durable_rebind_lock = threading.Lock()
 
         # ============================================
         # COOLDOWN
@@ -3641,7 +3642,7 @@ class BotManager:
             }
 
         age = now - snapshot.get("capturedAt")
-        if age < -5:
+        if age < 0:
             return {
                 "valid": False,
                 "reason": "SNAPSHOT_TIMESTAMP_FUTURE",
@@ -3827,7 +3828,7 @@ class BotManager:
             "realizedPnl": None,
             "unrealizedPnl": None,
             "last_update": now,
-            "available": False,
+            "available": True,
             "capturedAt": durable_snapshot.get("capturedAt"),
             "timestamp": durable_snapshot.get("timestampEpoch"),
             "timestampEpoch": durable_snapshot.get("timestampEpoch"),
@@ -3874,6 +3875,85 @@ class BotManager:
         }
 
         return rebound, None
+
+    def _restore_stopped_paper_durable_authority(self):
+
+        with self.stopped_paper_durable_rebind_lock:
+            current = self.account_snapshot
+            if (
+                isinstance(current, dict)
+                and current.get("available") is True
+            ):
+                return current, None
+
+            if self._running is not False:
+                return None, "BOT_NOT_STOPPED"
+
+            if self.lifecycle_state != "STOPPED":
+                return None, "BOT_NOT_STOPPED"
+
+            if governance_state.get("execution_enabled") is not False:
+                return None, "EXECUTION_STATE_UNKNOWN"
+
+            if self.engine is not None:
+                return None, "ENGINE_AVAILABLE"
+
+            if self.session_id != 0 or self.account_snapshot_generation != 0:
+                return None, "SNAPSHOT_NOT_SYNCED"
+
+            if (
+                governance_state.get("emergency_state") != EMERGENCY_READY
+                or governance_state.get("emergency_stop") is not False
+            ):
+                return None, "SNAPSHOT_NOT_SYNCED"
+
+            configured_mode = str(
+                self.config.get("mode", "paper")
+            ).strip().lower()
+            if (
+                configured_mode != "paper"
+                or self.config.get("dry_run", True) is not True
+                or backend_config.TRADE_MODE != "paper"
+                or backend_config.ALLOW_LIVE is not False
+            ):
+                return None, "DURABLE_RESTORE_MODE_UNSAFE"
+
+            live_readiness = self._build_live_readiness_snapshot(
+                "PAPER",
+                True,
+            )
+            if live_readiness.get("realOrderAllowed") is not False:
+                return None, "REAL_ORDER_ALLOWED"
+
+            try:
+                from backend.routers import positions as positions_router
+
+                if positions_router.engine is not None:
+                    return None, "POSITIONS_REGISTRY_ATTACHED"
+            except Exception:
+                return None, "POSITIONS_REGISTRY_UNKNOWN"
+
+            try:
+                trading_runtime = runtime_registry.trading_runtime
+                execution_runtime = (
+                    getattr(trading_runtime, "execution_runtime", None)
+                    if trading_runtime is not None
+                    else None
+                )
+                if (
+                    execution_runtime is not None
+                    and getattr(execution_runtime, "engine", None) is not None
+                ):
+                    return None, "EXECUTION_REGISTRY_ATTACHED"
+            except Exception:
+                return None, "EXECUTION_REGISTRY_UNKNOWN"
+
+            rebound, reason = self._rebind_stopped_paper_durable_snapshot()
+            if rebound is None:
+                return None, reason
+
+            self.account_snapshot = rebound
+            return rebound, None
 
     def _stopped_paper_unknown_snapshot(
         self,
@@ -4711,10 +4791,25 @@ class BotManager:
             snapshot.get("available") is not True
             and refresh_snapshot is not True
         ):
-            result = unknown("SNAPSHOT_NOT_SYNCED")
-            result["snapshot"] = snapshot
-            result["mode_resolution"] = mode_resolution
-            return result
+            snapshot, restore_reason = (
+                self._restore_stopped_paper_durable_authority()
+            )
+            if snapshot is None:
+                result = unknown(
+                    restore_reason or "SNAPSHOT_NOT_SYNCED"
+                )
+                result["snapshot"] = self.account_snapshot
+                result["durable_snapshot_state"] = {
+                    "loaded": False,
+                    "reason": restore_reason,
+                }
+                result["mode_resolution"] = mode_resolution
+                return result
+            mode_resolution = self._stopped_paper_mode_resolution(snapshot)
+            state["durable_snapshot_state"] = {
+                "loaded": True,
+                "reason": None,
+            }
 
         expected_operation_id = (
             operation_id
