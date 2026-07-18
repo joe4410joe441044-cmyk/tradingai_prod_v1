@@ -562,7 +562,7 @@ test("BotControl shows Retry only for ACTION_REQUIRED", async () => {
     }
 });
 
-test("BotControl shows Unlock only for LOCKED SUCCESS safe state", async () => {
+test("BotControl shows Normal disabled for ACTION_REQUIRED and enabled only when safe", async () => {
     const cases = [
         [
             "LOCKED / SUCCESS / safe",
@@ -582,7 +582,7 @@ test("BotControl shows Unlock only for LOCKED SUCCESS safe state", async () => {
                 }),
             }),
             false,
-            false,
+            true,
             false,
         ],
         [
@@ -798,7 +798,7 @@ test("BotControl shows Unlock only for LOCKED SUCCESS safe state", async () => {
         });
         const unlock = findButton(
             renderer.root,
-            "緊急状態を解除",
+            "通常に戻る",
         );
 
         if (expectedVisible) {
@@ -885,7 +885,7 @@ test("Emergency confirm true sends one orchestrate POST without body", async () 
     }
 });
 
-test("Retry confirm cancel sends no API request", async () => {
+test("ACTION_REQUIRED shows fixed retry and disabled normal buttons", async () => {
     const fetchMock = installFetchMock(() => {
         throw new Error("fetch should not be called");
     });
@@ -905,34 +905,46 @@ test("Retry confirm cancel sends no API request", async () => {
             emergencyState: "ACTION_REQUIRED",
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
+        assert.equal(
+            findButton(renderer.root, "安全状態を再確認").props.disabled,
+            false,
         );
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "キャンセル"),
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
+            true,
         );
-
         assert.equal(fetchMock.requests.length, 0);
         assert.equal(
-            findButton(
-                renderer.root,
-                (name) => name === "再確認",
-            ),
+            findButton(renderer.root, "キャンセル"),
             null,
+        );
+        assert.equal(
+            findAll(
+                renderer.root,
+                (element) => (
+                    element.props?.role === "dialog"
+                    && element.props?.["aria-labelledby"]
+                        === "emergency-retry-title"
+                ),
+            ).length,
+            0,
+        );
+        assert.equal(
+            buttons(renderer.root).filter(
+                (button) => buttonName(button) === "再確認"
+            ).length,
+            0,
         );
     } finally {
         fetchMock.restore();
     }
 });
 
-test("Retry confirm true sends one retry POST and never unlocks", async () => {
+test("Retry first click sends one retry POST and does not call unlock", async () => {
     const fetchMock = installFetchMock(() => jsonResponse({
         body: emergencyApiResponse(),
     }));
     let refreshCount = 0;
-
     try {
         const renderer = await renderBotControl({
             emergency: emergencyStatus("ACTION_REQUIRED", {
@@ -951,13 +963,9 @@ test("Retry confirm true sends one retry POST and never unlocks", async () => {
             },
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
-        );
         await clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            findButton(renderer.root, "安全状態を再確認"),
         );
 
         assert.equal(fetchMock.requests.length, 1);
@@ -975,6 +983,13 @@ test("Retry confirm true sends one retry POST and never unlocks", async () => {
             "/api/governance/emergency-orchestrate",
         );
         assert.equal(refreshCount, 1);
+        assert.equal(
+            textIncludes(
+                renderer.root,
+                "安全状態を確認できませんでした",
+            ),
+            false,
+        );
     } finally {
         fetchMock.restore();
     }
@@ -1019,15 +1034,14 @@ test("Retry SNAPSHOT_STALE success refreshes status and reveals Unlock", async (
 
         assert.ok(textIncludes(renderer.root, "SNAPSHOT_STALE"));
         assert.ok(findButton(renderer.root, "安全状態を再確認"));
-        assert.equal(findButton(renderer.root, "緊急状態を解除"), null);
-
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
+            true,
         );
+
         await clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            findButton(renderer.root, "安全状態を再確認"),
         );
         renderer.render();
 
@@ -1040,9 +1054,76 @@ test("Retry SNAPSHOT_STALE success refreshes status and reveals Unlock", async (
         assert.ok(textIncludes(renderer.root, "STOPPED SAFELY"));
         assert.equal(findButton(renderer.root, "安全状態を再確認"), null);
         assert.equal(
-            findButton(renderer.root, "緊急状態を解除").props.disabled,
+            findButton(renderer.root, "通常に戻る").props.disabled,
             false,
         );
+    } finally {
+        fetchMock.restore();
+    }
+});
+
+test("Retry HTTP200 semantic failure shows error and never calls unlock", async () => {
+    const fetchMock = installFetchMock(() => jsonResponse({
+        body: emergencyApiResponse({
+            success: false,
+            completed: false,
+            partial: true,
+            state_unknown: true,
+            retryable: true,
+            error_code: "STATE_NOT_CONFIRMED",
+        }),
+    }));
+    let refreshCount = 0;
+
+    try {
+        const renderer = await renderBotControl({
+            emergency: emergencyStatus("ACTION_REQUIRED", {
+                lastResult: lastResult({
+                    result: "PARTIAL",
+                    state: "ACTION_REQUIRED",
+                    success: false,
+                    completed: false,
+                    stateUnknown: true,
+                }),
+            }),
+            emergencyLocked: true,
+            emergencyState: "ACTION_REQUIRED",
+            onStatusRefresh: async () => {
+                refreshCount += 1;
+            },
+        });
+
+        await clickAndRender(
+            renderer,
+            findButton(renderer.root, "安全状態を再確認"),
+        );
+        renderer.render();
+
+        assert.equal(fetchMock.requests.length, 1);
+        assert.equal(
+            fetchMock.requests[0].url,
+            "/api/governance/emergency/retry",
+        );
+        assert.ok(textIncludes(renderer.root, "STATE_NOT_CONFIRMED"));
+        assert.ok(textIncludes(
+            renderer.root,
+            "安全状態を確認できませんでした。状態を確認して再実行してください。",
+        ));
+        assert.equal(
+            findButton(renderer.root, "安全状態を再確認").props.disabled,
+            false,
+        );
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
+            true,
+        );
+        assert.equal(
+            fetchMock.requests.filter(
+                ({ url }) => url === "/api/governance/emergency/unlock"
+            ).length,
+            0,
+        );
+        assert.equal(refreshCount, 1);
     } finally {
         fetchMock.restore();
     }
@@ -1072,7 +1153,7 @@ test("Unlock confirm true sends one unlock POST after safe LOCKED state", async 
 
         clickAndRender(
             renderer,
-            findButton(renderer.root, "緊急状態を解除"),
+            findButton(renderer.root, "通常に戻る"),
         );
         await clickAndRender(
             renderer,
@@ -1131,7 +1212,7 @@ test("Emergency double confirm keeps one in-flight request and disables controls
     }
 });
 
-test("Retry double confirm keeps one request and disables Emergency while loading", async () => {
+test("Retry double click keeps one request and disables controls while loading", async () => {
     const pending = deferred();
     const fetchMock = installFetchMock(() => pending.promise);
 
@@ -1150,27 +1231,26 @@ test("Retry double confirm keeps one request and disables Emergency while loadin
             emergencyState: "ACTION_REQUIRED",
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
-        );
-
-        const confirm = findButton(
+        const retry = findButton(
             renderer.root,
-            "再確認",
+            "安全状態を再確認",
         );
         const request = clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            retry,
         );
         clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            retry,
         );
 
         assert.equal(fetchMock.requests.length, 1);
         assert.equal(
-            findLastButton(renderer.root, "再確認").props.disabled,
+            findButton(renderer.root, "再確認中...").props.disabled,
+            true,
+        );
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
             true,
         );
         assert.equal(
@@ -1201,7 +1281,7 @@ test("Unlock double confirm keeps one request and disables retry path", async ()
 
         clickAndRender(
             renderer,
-            findButton(renderer.root, "緊急状態を解除"),
+            findButton(renderer.root, "通常に戻る"),
         );
 
         const confirm = findLastButton(
@@ -1238,7 +1318,7 @@ test("Unlock double confirm keeps one request and disables retry path", async ()
     }
 });
 
-test("Retry HTTP409 keeps ACTION_REQUIRED and does not show Unlock", async () => {
+test("Retry HTTP409 keeps ACTION_REQUIRED and Normal disabled", async () => {
     const fetchMock = installFetchMock(() => jsonResponse({
         ok: false,
         status: 409,
@@ -1264,18 +1344,17 @@ test("Retry HTTP409 keeps ACTION_REQUIRED and does not show Unlock", async () =>
             emergencyState: "ACTION_REQUIRED",
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
-        );
         await clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            findButton(renderer.root, "安全状態を再確認"),
         );
         renderer.render();
 
         assert.ok(textIncludes(renderer.root, "ACTION REQUIRED"));
-        assert.equal(findButton(renderer.root, "緊急状態を解除"), null);
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
+            true,
+        );
         assert.ok(textIncludes(renderer.root, "PROCESSING"));
         assert.equal(fetchMock.requests.length, 1);
     } finally {
@@ -1303,13 +1382,9 @@ test("Retry network error keeps ACTION_REQUIRED and allows retry again", async (
             emergencyState: "ACTION_REQUIRED",
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
-        );
         await clickAndRender(
             renderer,
-            findLastButton(renderer.root, "再確認"),
+            findButton(renderer.root, "安全状態を再確認"),
         );
         renderer.render();
 
@@ -1319,7 +1394,10 @@ test("Retry network error keeps ACTION_REQUIRED and allows retry again", async (
             findButton(renderer.root, "安全状態を再確認").props.disabled,
             false,
         );
-        assert.equal(findButton(renderer.root, "緊急状態を解除"), null);
+        assert.equal(
+            findButton(renderer.root, "通常に戻る").props.disabled,
+            true,
+        );
     } finally {
         fetchMock.restore();
     }
@@ -1370,7 +1448,7 @@ test("Unlock network error keeps LOCKED and does not fake READY", async () => {
 
         clickAndRender(
             renderer,
-            findButton(renderer.root, "緊急状態を解除"),
+            findButton(renderer.root, "通常に戻る"),
         );
         await clickAndRender(
             renderer,
@@ -1383,7 +1461,7 @@ test("Unlock network error keeps LOCKED and does not fake READY", async () => {
         assert.equal(textIncludes(renderer.root, "UNLOCKED"), false);
         assert.ok(textIncludes(renderer.root, "NETWORK_ERROR"));
         assert.equal(
-            findButton(renderer.root, "緊急状態を解除").props.disabled,
+            findButton(renderer.root, "通常に戻る").props.disabled,
             false,
         );
     } finally {
@@ -1423,7 +1501,7 @@ test("Operation success refreshes status before backend props drive display", as
 
         clickAndRender(
             renderer,
-            findButton(renderer.root, "緊急状態を解除"),
+            findButton(renderer.root, "通常に戻る"),
         );
         await clickAndRender(
             renderer,
@@ -1462,13 +1540,9 @@ test("Old retry response cannot overwrite newer LOCKED backend props", async () 
             emergencyState: "ACTION_REQUIRED",
         });
 
-        clickAndRender(
-            renderer,
-            findButton(renderer.root, "安全状態を再確認"),
-        );
         const request = clickAndRender(
             renderer,
-            findButton(renderer.root, "再確認"),
+            findButton(renderer.root, "安全状態を再確認"),
         );
 
         renderer.render({

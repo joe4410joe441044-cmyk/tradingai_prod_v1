@@ -48,28 +48,11 @@ const clickEmergencyConfirm = async (page) => {
     ).click();
 };
 
-const openRetryDialog = async (page) => {
-    await page.getByRole(
-        "button",
-        {
-            name: "安全状態を再確認",
-        },
-    ).click();
-    const dialog = page.getByRole(
-        "dialog",
-        {
-            name: "安全状態を再確認しますか？",
-        },
-    );
-    await expect(dialog).toBeVisible();
-    return dialog;
-};
-
 const openUnlockDialog = async (page) => {
     await page.getByRole(
         "button",
         {
-            name: "緊急状態を解除",
+            name: "通常に戻る",
         },
     ).click();
     const dialog = page.getByRole(
@@ -152,7 +135,7 @@ test.describe("Emergency Stop local-only E2E", () => {
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toHaveCount(0);
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
+            page.getByRole("button", { name: "通常に戻る" }),
         ).toBeEnabled();
 
         const lockedStatus = mock.getStatus();
@@ -282,7 +265,7 @@ test.describe("Emergency Stop local-only E2E", () => {
         ).toBeDisabled();
     });
 
-    test("ACTION_REQUIRED shows retry, hides unlock, and blocks emergency rerun", async ({
+    test("ACTION_REQUIRED shows retry, disables normal, and blocks emergency rerun", async ({
         page,
     }) => {
         mock.seedActionRequired({
@@ -298,8 +281,8 @@ test.describe("Emergency Stop local-only E2E", () => {
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toBeEnabled();
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
-        ).toHaveCount(0);
+            page.getByRole("button", { name: "通常に戻る" }),
+        ).toBeDisabled();
         await expect(
             page.getByRole("button", { name: /EMERGENCY STOP/ }),
         ).toBeDisabled();
@@ -341,19 +324,16 @@ test.describe("Emergency Stop local-only E2E", () => {
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toBeEnabled();
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
-        ).toHaveCount(0);
+            page.getByRole("button", { name: "通常に戻る" }),
+        ).toBeDisabled();
 
-        const dialog = await openRetryDialog(page);
         const retryResponsePromise = page.waitForResponse((response) => (
             response.url().endsWith(ENDPOINTS.retry)
             && response.request().method() === "POST"
         ));
-        await dialog.getByRole(
+        await page.getByRole(
             "button",
-            {
-                name: "再確認",
-            },
+            { name: "安全状態を再確認" },
         ).click();
         const retryResponse = await retryResponsePromise;
         expect(retryResponse.ok()).toBeTruthy();
@@ -371,7 +351,7 @@ test.describe("Emergency Stop local-only E2E", () => {
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toHaveCount(0);
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
+            page.getByRole("button", { name: "通常に戻る" }),
         ).toBeEnabled();
         expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
 
@@ -411,37 +391,29 @@ test.describe("Emergency Stop local-only E2E", () => {
         });
     });
 
-    test("retry confirm cancel keeps ACTION_REQUIRED and operation id", async ({
+    test("ACTION_REQUIRED shows fixed retry and disabled normal buttons", async ({
         page,
     }) => {
-        const operationId = mock.seedActionRequired();
-
+        mock.seedActionRequired();
         await waitForDashboard(page);
-
-        const dialog = await openRetryDialog(page);
-        await expect(dialog).toContainText(
-            "注文とポジション状態を再確認し、",
-        );
-        await expect(dialog).toContainText(
-            "必要なら緊急停止処理を再実行します。",
-        );
-        await expect(dialog).toContainText("BOT");
-        await expect(dialog).toContainText("LOOP");
-        await expect(dialog).toContainText("AUTO TRADE");
-        await expect(dialog).toContainText("はOFFのままです。");
-        await dialog.getByRole(
+        await expect(
+            page.getByRole("button", { name: "安全状態を再確認" }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole("button", { name: "通常に戻る" }),
+        ).toBeDisabled();
+        await expect(page.getByRole(
+            "dialog",
+            { name: "安全状態を再確認しますか？" },
+        )).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: "キャンセル" }),
+        ).toHaveCount(0);
+        await expect(page.getByRole(
             "button",
-            {
-                name: "キャンセル",
-            },
-        ).click();
-
-        await expect(dialog).toHaveCount(0);
-        await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
+            { name: "再確認", exact: true },
+        )).toHaveCount(0);
         expect(mock.getCallCount(ENDPOINTS.retry)).toBe(0);
-        expect(mock.getStatus().emergency.lastResult.operationId).toBe(
-            operationId,
-        );
     });
 
     test("retry success creates a new operation and converges to LOCKED SUCCESS", async ({
@@ -451,21 +423,17 @@ test.describe("Emergency Stop local-only E2E", () => {
         mock.setRouteDelay(ENDPOINTS.retry, 200);
 
         await waitForDashboard(page);
-        const dialog = await openRetryDialog(page);
+        const retryButton = page.getByRole(
+            "button",
+            { name: "安全状態を再確認" },
+        );
 
         const retryResponsePromise = page.waitForResponse((response) => (
             response.url().endsWith(ENDPOINTS.retry)
             && response.request().method() === "POST"
         ));
-        await dialog.getByRole(
-            "button",
-            {
-                name: "再確認",
-            },
-        ).click();
-        await expect(
-            dialog.getByRole("button", { name: "再確認" }),
-        ).toBeDisabled();
+        await retryButton.click();
+        await expect(page.locator(".operation-emergency-retry")).toBeDisabled();
         const retryResponse = await retryResponsePromise;
         expect(retryResponse.ok()).toBeTruthy();
         expect(await retryResponse.json()).toMatchObject({
@@ -479,7 +447,7 @@ test.describe("Emergency Stop local-only E2E", () => {
 
         await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
+            page.getByRole("button", { name: "通常に戻る" }),
         ).toBeEnabled();
         expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
 
@@ -510,25 +478,23 @@ test.describe("Emergency Stop local-only E2E", () => {
         ]);
     });
 
-    test("retry failure stays ACTION_REQUIRED and never shows unlock", async ({
+    test("retry failure stays ACTION_REQUIRED with normal disabled", async ({
         page,
     }) => {
         mock.seedActionRequired();
         mock.setNextRetryOutcome("failure");
 
         await waitForDashboard(page);
-        const dialog = await openRetryDialog(page);
+        const retryButton = page.getByRole(
+            "button",
+            { name: "安全状態を再確認" },
+        );
 
         const retryResponsePromise = page.waitForResponse((response) => (
             response.url().endsWith(ENDPOINTS.retry)
             && response.request().method() === "POST"
         ));
-        await dialog.getByRole(
-            "button",
-            {
-                name: "再確認",
-            },
-        ).click();
+        await retryButton.click();
         const retryResponse = await retryResponsePromise;
         expect(retryResponse.ok()).toBeTruthy();
         expect(await retryResponse.json()).toMatchObject({
@@ -545,8 +511,13 @@ test.describe("Emergency Stop local-only E2E", () => {
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toBeEnabled();
         await expect(
-            page.getByRole("button", { name: "緊急状態を解除" }),
-        ).toHaveCount(0);
+            page.getByRole("button", { name: "通常に戻る" }),
+        ).toBeDisabled();
+        await expect(page.getByTestId("emergency-retry-error")).toContainText(
+            "STATE_UNKNOWN",
+        );
+        expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
+        expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(0);
         expect(mock.getStatus().emergency.state).toBe("ACTION_REQUIRED");
     });
 
@@ -598,12 +569,9 @@ test.describe("Emergency Stop local-only E2E", () => {
         mock.queueNetworkError(ENDPOINTS.retry);
         await page.reload();
         await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
-        let dialog = await openRetryDialog(page);
-        await dialog.getByRole(
+        await page.getByRole(
             "button",
-            {
-                name: "再確認",
-            },
+            { name: "安全状態を再確認" },
         ).click();
 
         await expect(page.getByTestId("emergency-retry-error")).toContainText(
@@ -620,7 +588,7 @@ test.describe("Emergency Stop local-only E2E", () => {
         mock.queueNetworkError(ENDPOINTS.unlock);
         await page.reload();
         await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
-        dialog = await openUnlockDialog(page);
+        let dialog = await openUnlockDialog(page);
         await dialog.getByRole(
             "button",
             {
@@ -671,18 +639,15 @@ test.describe("Emergency Stop local-only E2E", () => {
         mock.setRouteDelay(ENDPOINTS.retry, 200);
         await page.reload();
         await expect(emergencyStateLabel(page)).toHaveText("ACTION REQUIRED");
-        dialog = await openRetryDialog(page);
-        confirmButton = dialog.getByRole(
+        confirmButton = page.getByRole(
             "button",
-            {
-                name: "再確認",
-            },
+            { name: "安全状態を再確認" },
         );
         await confirmButton.evaluate((button) => {
             button.click();
             button.click();
         });
-        await expect(confirmButton).toBeDisabled();
+        await expect(page.locator(".operation-emergency-retry")).toBeDisabled();
         await expect(emergencyStateLabel(page)).toHaveText("STOPPED SAFELY");
         expect(mock.getCallCount(ENDPOINTS.retry)).toBe(1);
 

@@ -410,10 +410,6 @@ export default function BotControl({
         retryError,
         setRetryError,
     ] = useState(null);
-    const [
-        retryConfirmOpen,
-        setRetryConfirmOpen,
-    ] = useState(false);
     const loopPendingRef =
         useRef(false);
     const autoTradePendingRef =
@@ -1085,27 +1081,6 @@ export default function BotControl({
         }
     };
 
-    const openRetryConfirm = () => {
-        if (
-            retryPendingRef.current
-            || retryConfirmOpen
-            || !retryAllowed
-        ) {
-            return;
-        }
-
-        setRetryError(null);
-        setRetryConfirmOpen(true);
-    };
-
-    const cancelRetryConfirm = () => {
-        if (retryPendingRef.current) {
-            return;
-        }
-
-        setRetryConfirmOpen(false);
-    };
-
     const confirmRetry = async () => {
         if (
             retryPendingRef.current
@@ -1122,15 +1097,28 @@ export default function BotControl({
         setUnlockNotice(null);
 
         try {
-            await retryEmergency();
+            const result = await retryEmergency();
 
-            setRetryConfirmOpen(false);
+            if (
+                result.success !== true
+                || result.completed !== true
+            ) {
+                const errorCode = typeof result.error_code === "string"
+                    && result.error_code.trim()
+                    ? result.error_code.trim()
+                    : null;
+
+                setRetryError(
+                    errorCode
+                        ? `${errorCode}: 安全状態を確認できませんでした。状態を確認して再実行してください。`
+                        : "安全状態を確認できませんでした。状態を確認して再実行してください。"
+                );
+            }
         } catch (error) {
             console.error("EMERGENCY RETRY ERROR", error);
             setRetryError(
                 formatRetryError(error)
             );
-            setRetryConfirmOpen(false);
         } finally {
             await refreshStatusSafely();
             retryPendingRef.current = false;
@@ -1405,7 +1393,7 @@ export default function BotControl({
                     <button
                         className="operation-emergency-retry"
                         disabled={!retryAllowed || retryPending}
-                        onClick={openRetryConfirm}
+                        onClick={confirmRetry}
                         aria-busy={retryPending ? "true" : undefined}
                         type="button"
                     >
@@ -1416,59 +1404,7 @@ export default function BotControl({
                     </button>
                 )}
 
-                {retryConfirmOpen && (
-                    <div
-                        className="operation-emergency-confirm"
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="emergency-retry-title"
-                    >
-                        <div
-                            className="operation-emergency-confirm__title"
-                            id="emergency-retry-title"
-                        >
-                            安全状態を再確認しますか？
-                        </div>
-
-                        <div className="operation-emergency-confirm__body">
-                            注文とポジション状態を再確認し、
-                            <br />
-                            必要なら緊急停止処理を再実行します。
-                            <br />
-                            <br />
-                            BOT
-                            <br />
-                            LOOP
-                            <br />
-                            AUTO TRADE
-                            <br />
-                            <br />
-                            はOFFのままです。
-                        </div>
-
-                        <div className="operation-emergency-confirm__actions">
-                            <button
-                                className="operation-emergency-confirm__cancel"
-                                disabled={retryPending}
-                                onClick={cancelRetryConfirm}
-                                type="button"
-                            >
-                                キャンセル
-                            </button>
-
-                            <button
-                                className="operation-emergency-confirm__confirm"
-                                disabled={retryPending}
-                                onClick={confirmRetry}
-                                type="button"
-                            >
-                                再確認
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {unlockVisible && (
+                {(emergencyStateCode === "ACTION_REQUIRED" || unlockVisible) && (
                     <button
                         className="operation-emergency-unlock"
                         disabled={!unlockAllowed || unlockPending}
@@ -1478,7 +1414,7 @@ export default function BotControl({
                     >
                         {unlockPending
                             ? "解除中..."
-                            : "緊急状態を解除"
+                            : "通常に戻る"
                         }
                     </button>
                 )}
