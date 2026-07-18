@@ -3870,6 +3870,323 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
+    def test_restart_rebound_authority_allows_emergency_success(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            governance_state["mode"] = "PAPER"
+            old_bot, payload = (
+                self._persist_flat_stopped_paper_durable_snapshot(path)
+            )
+            restarted = self._restart_stopped_paper_bot(path)
+
+            authority = restarted.get_authoritative_pending_order_state()
+            rebound = deepcopy(restarted.account_snapshot)
+            result = restarted.run_emergency_orchestrator()
+
+            self.assertIs(authority["known"], True)
+            self.assertIs(authority["pending"], False)
+            self.assertIs(authority["safe"], True)
+            self.assertEqual(
+                authority["source"],
+                "stopped_paper_authoritative",
+            )
+            self.assertEqual(
+                authority["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+            self.assertNotEqual(
+                old_bot.runtime_instance_id,
+                restarted.runtime_instance_id,
+            )
+            self.assertEqual(
+                rebound["runtimeInstanceId"],
+                restarted.runtime_instance_id,
+            )
+            self.assertEqual(
+                rebound["evidenceRuntimeInstanceId"],
+                payload["runtimeInstanceId"],
+            )
+            self.assertNotEqual(
+                rebound["runtimeInstanceId"],
+                rebound["evidenceRuntimeInstanceId"],
+            )
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertFalse(result["retryable"])
+            self.assertEqual(result["cancel"]["status"], "NOT_REQUIRED")
+            self.assertEqual(result["flatten"]["status"], "NOT_REQUIRED")
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
+            )
+            self.assertEqual(
+                governance_state["last_emergency_result"]["result"],
+                EMERGENCY_RESULT_SUCCESS,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_restart_rebound_emergency_rejects_provenance_tampering(self):
+        cases = (
+            (
+                "captured-at-changed",
+                lambda snapshot: snapshot.__setitem__(
+                    "capturedAt", snapshot["capturedAt"] + 1
+                ),
+            ),
+            (
+                "captured-at-none",
+                lambda snapshot: snapshot.__setitem__("capturedAt", None),
+            ),
+            (
+                "captured-at-bool",
+                lambda snapshot: snapshot.__setitem__("capturedAt", True),
+            ),
+            (
+                "evidence-captured-at",
+                lambda snapshot: snapshot.__setitem__(
+                    "evidenceCapturedAt",
+                    snapshot["evidenceCapturedAt"] + 1,
+                ),
+            ),
+            (
+                "lifecycle-running",
+                lambda snapshot: snapshot.__setitem__(
+                    "lifecycleState", "RUNNING"
+                ),
+            ),
+            ("lifecycle-none", lambda snapshot: snapshot.__setitem__(
+                "lifecycleState", None
+            )),
+            ("state-unknown-true", lambda snapshot: snapshot.__setitem__(
+                "stateUnknown", True
+            )),
+            ("state-unknown-none", lambda snapshot: snapshot.__setitem__(
+                "stateUnknown", None
+            )),
+            ("state-unknown-zero", lambda snapshot: snapshot.__setitem__(
+                "stateUnknown", 0
+            )),
+            ("mode-live", lambda snapshot: snapshot.__setitem__(
+                "mode", "live"
+            )),
+            ("pending-true", lambda snapshot: snapshot.__setitem__(
+                "pendingOrder", True
+            )),
+            ("pending-none", lambda snapshot: snapshot.__setitem__(
+                "pendingOrder", None
+            )),
+            ("position-true", lambda snapshot: snapshot.__setitem__(
+                "positionRemaining", True
+            )),
+            ("position-none", lambda snapshot: snapshot.__setitem__(
+                "positionRemaining", None
+            )),
+            ("open-order-one", lambda snapshot: snapshot.__setitem__(
+                "openOrderCount", 1
+            )),
+            ("open-order-none", lambda snapshot: snapshot.__setitem__(
+                "openOrderCount", None
+            )),
+            ("open-order-bool", lambda snapshot: snapshot.__setitem__(
+                "openOrderCount", False
+            )),
+            ("runtime-id", lambda snapshot: snapshot.__setitem__(
+                "runtimeInstanceId", "tampered"
+            )),
+            ("evidence-runtime", lambda snapshot: snapshot.__setitem__(
+                "evidenceRuntimeInstanceId", "tampered"
+            )),
+            ("generation", lambda snapshot: snapshot.__setitem__(
+                "generation", snapshot["generation"] + 1
+            )),
+            ("evidence-generation", lambda snapshot: snapshot.__setitem__(
+                "evidenceGeneration", snapshot["evidenceGeneration"] + 1
+            )),
+            ("source", lambda snapshot: snapshot.__setitem__(
+                "source", "stopped_paper_engine_snapshot"
+            )),
+            ("position-source", lambda snapshot: snapshot.__setitem__(
+                "positionStateSource", "tampered"
+            )),
+            ("pending-source", lambda snapshot: snapshot.__setitem__(
+                "pendingStateSource", "tampered"
+            )),
+            ("pending-order-source", lambda snapshot: snapshot.__setitem__(
+                "pendingOrderStateSource", "tampered"
+            )),
+            ("open-order-source", lambda snapshot: snapshot.__setitem__(
+                "openOrderStateSource", "tampered"
+            )),
+            ("marker-missing", lambda snapshot: snapshot.pop(
+                "authorityReason"
+            )),
+            ("rebound-at-missing", lambda snapshot: snapshot.pop(
+                "durableReboundAt"
+            )),
+            ("rebound-at-zero", lambda snapshot: snapshot.__setitem__(
+                "durableReboundAt", 0
+            )),
+        )
+
+        for name, mutate in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    governance_state["mode"] = "PAPER"
+                    self._persist_flat_stopped_paper_durable_snapshot(path)
+                    restarted = self._restart_stopped_paper_bot(path)
+                    authority = (
+                        restarted.get_authoritative_pending_order_state()
+                    )
+                    self.assertTrue(authority["safe"])
+                    mutate(restarted.account_snapshot)
+
+                    result = restarted.run_emergency_orchestrator()
+
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    last_result = governance_state.get(
+                        "last_emergency_result"
+                    )
+                    self.assertIsInstance(last_result, dict)
+                    self.assertIn("result", last_result)
+                    self.assertNotEqual(
+                        last_result["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_restart_emergency_rejects_durable_internal_identity_mismatch(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            governance_state["mode"] = "PAPER"
+            _, payload = self._persist_flat_stopped_paper_durable_snapshot(
+                path
+            )
+            payload["evidenceRuntimeInstanceId"] = "tampered"
+            self._write_durable_snapshot_payload(path, payload)
+            restarted = self._restart_stopped_paper_bot(path)
+
+            authority = restarted.get_authoritative_pending_order_state()
+            result = restarted.run_emergency_orchestrator()
+
+            self.assertFalse(authority["safe"])
+            self.assertEqual(
+                authority["reason"],
+                "SNAPSHOT_EVIDENCE_IDENTITY_INVALID",
+            )
+            self.assertFalse(result["success"])
+            self.assertTrue(result["state_unknown"])
+
+            self._restore_governance(state_before)
+            state_before = self._set_governance(
+                execution_enabled=False,
+                emergency_stop=False,
+            )
+            governance_state["mode"] = "PAPER"
+            _, payload = self._persist_flat_stopped_paper_durable_snapshot(
+                path
+            )
+            restarted = self._restart_stopped_paper_bot(path)
+            authority = restarted.get_authoritative_pending_order_state()
+            self.assertTrue(authority["safe"])
+            payload["evidenceRuntimeInstanceId"] = "tampered"
+            self._write_durable_snapshot_payload(path, payload)
+
+            result = restarted.run_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertTrue(result["state_unknown"])
+            self.assertEqual(
+                result["error_code"],
+                "SNAPSHOT_EVIDENCE_IDENTITY_INVALID",
+            )
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_ACTION_REQUIRED,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_restart_rebound_emergency_rejects_raw_durable_change(self):
+        for name in ("missing", "replaced"):
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=False,
+                    emergency_stop=False,
+                )
+                path = self._temporary_durable_snapshot_path()
+                try:
+                    governance_state["mode"] = "PAPER"
+                    self._persist_flat_stopped_paper_durable_snapshot(path)
+                    restarted = self._restart_stopped_paper_bot(path)
+                    authority = (
+                        restarted.get_authoritative_pending_order_state()
+                    )
+                    self.assertTrue(authority["safe"])
+
+                    if name == "missing":
+                        os.remove(path)
+                    else:
+                        replacement_path = (
+                            self._temporary_durable_snapshot_path()
+                        )
+                        _, replacement = (
+                            self._persist_flat_stopped_paper_durable_snapshot(
+                                replacement_path
+                            )
+                        )
+                        self._write_durable_snapshot_payload(
+                            path,
+                            replacement,
+                        )
+
+                    result = restarted.run_emergency_orchestrator()
+
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertEqual(
+                        governance_state["emergency_state"],
+                        EMERGENCY_ACTION_REQUIRED,
+                    )
+                    last_result = governance_state.get(
+                        "last_emergency_result"
+                    )
+                    self.assertIsInstance(last_result, dict)
+                    self.assertIn("result", last_result)
+                    self.assertNotEqual(
+                        last_result["result"],
+                        EMERGENCY_RESULT_SUCCESS,
+                    )
+                finally:
+                    self._restore_governance(state_before)
+
     def test_live_shutdown_stops_engine_without_paper_durable_file(self):
         path = self._temporary_durable_snapshot_path()
         bot = self._configure_durable_snapshot_path(
