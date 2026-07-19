@@ -1,3 +1,5 @@
+import { formatLatency } from "../runtime/runtimeDisplay";
+
 const EMPTY_VALUES = new Set([
     "UNKNOWN",
     "NO DATA",
@@ -17,14 +19,6 @@ const displayValue = (value) => {
     return String(value);
 };
 
-const displayLatency = (value) => {
-    if (value === null || value === undefined || value === "") {
-        return "--";
-    }
-
-    return typeof value === "number" ? `${value} ms` : String(value);
-};
-
 export default function ExecutionPanel({
     executionStatus = "UNKNOWN",
     runtimePhase,
@@ -41,7 +35,7 @@ export default function ExecutionPanel({
         },
         { label: "PHASE（実行段階）", value: displayValue(runtimePhase) },
         { label: "WS（通信）", value: displayValue(websocketStatus) },
-        { label: "LATENCY（遅延）", value: displayLatency(latency) },
+        { label: "LATENCY（遅延）", value: formatLatency(latency) },
     ];
 
     return (

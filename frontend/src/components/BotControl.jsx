@@ -51,6 +51,26 @@ const formatLoopError = (
     );
 };
 
+const getAutoTradeActivity = ({ enabled, emergencyState, runtimeAvailable,
+    governance, tradingAction, decision }) => {
+    if (!enabled) return { state: "DISABLED", detail: null };
+    if (["LOCKED", "PROCESSING", "ACTION_REQUIRED"].includes(emergencyState)) {
+        return { state: "ENABLED", detail: "BLOCKED BY EMERGENCY" };
+    }
+    if (!runtimeAvailable) return { state: "ENABLED", detail: "RUNTIME UNAVAILABLE" };
+    if (String(governance?.status).toUpperCase() === "BLOCKED") {
+        return { state: "ENABLED", detail: "BLOCKED BY GOVERNANCE" };
+    }
+    if (/ORDER|PROCESSING|SUBMITTING/.test(String(tradingAction).toUpperCase())) {
+        return { state: "ENABLED", detail: "ORDER PROCESSING" };
+    }
+    if (String(decision).toUpperCase() === "HOLD"
+        && String(tradingAction).toUpperCase() === "IDLE_BY_AI_HOLD") {
+        return { state: "ENABLED", detail: "WAITING FOR SIGNAL" };
+    }
+    return { state: "ENABLED", detail: null };
+};
+
 const formatAutoTradeError = (
     error
 ) => {
@@ -336,6 +356,8 @@ export default function BotControl({
 
     pendingOrder,
 
+    runtimeHealth,
+
     onStatusRefresh,
 
     setExecutionEnabledState,
@@ -403,12 +425,6 @@ export default function BotControl({
 
     const autoTradeChecked =
         executionEnabled === true;
-    const autoTradeStateText = autoTradeChecked
-        ? "ENABLED"
-        : "DISABLED";
-    const autoTradeStateReason = autoTradeChecked
-        ? null
-        : "Reason: DISABLED_BY_OPERATOR";
     const loopChecked = (
         typeof loopEnabled === "boolean"
             ? loopEnabled
@@ -453,6 +469,16 @@ export default function BotControl({
         emergencyLocked,
         emergencyState,
     );
+    const autoTradeActivity = getAutoTradeActivity({
+        enabled: autoTradeChecked,
+        emergencyState: emergencyStateCode,
+        runtimeAvailable: runtimeHealth?.snapshotPresent !== false,
+        governance: runtimeHealth?.governance,
+        tradingAction: runtimeHealth?.tradingAction?.status,
+        decision: runtimeHealth?.tradingAction?.decision,
+    });
+    const autoTradeStateText = autoTradeActivity.state;
+    const autoTradeStateReason = autoTradeActivity.detail;
     const lastEmergencyResult = (
         emergencyStatus?.lastResult
         && typeof emergencyStatus.lastResult === "object"
@@ -1026,7 +1052,7 @@ export default function BotControl({
             }
 
             setUnlockNotice(
-                "緊急状態は解除されました。BOTは停止中です。"
+                "緊急状態は解除されました。"
             );
         } catch (error) {
             console.error("EMERGENCY UNLOCK ERROR", error);
@@ -1205,6 +1231,17 @@ export default function BotControl({
                     <span className="operation-emergency-status__message">
                         {emergencyStateDetails.text}
                     </span>
+
+                    {emergencyStateCode === "READY" && (
+                        <span className="operation-emergency-status__message" data-testid="emergency-bot-state">
+                            {botRunning === true
+                                ? "Botは稼働中です"
+                                : botRunning === false
+                                    ? "Botは停止中です"
+                                    : "Bot状態を確認できません"
+                            }
+                        </span>
+                    )}
 
                     {emergencyStateCode === "PROCESSING" && (
                         <span className="operation-emergency-status__pending">

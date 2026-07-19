@@ -3631,3 +3631,29 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
         overflow-y: visible;
     }
 }
+.timeline-detail {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.timeline-detail small {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--text-muted, #8794a8);
+    font-size: 0.72rem;
+}
+
+.execution-activity {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.semantic-card-context {
+    margin: 0 0 0.75rem;
+    color: var(--text-muted, #8794a8);
+    font-size: 0.78rem;
+}

@@ -1,3 +1,5 @@
+import { getRuntimeSourceLabel } from "../../runtime/runtimeDisplay";
+
 export default function StageInspectorPanel({ stage }) {
     const fields = [
         { label: "BACKEND FILE（ファイル）", value: stage?.backendFile ?? "--" },
@@ -20,8 +22,8 @@ export default function StageInspectorPanel({ stage }) {
 
             <div className="stage-inspector-selection">
                 <div className="stage-inspector-summary">
-                    <span>STAGE（ステージ）</span>
-                    <strong>{stage?.name ?? "Runtime Health Snapshot"}</strong>
+                    <span>CURRENT STAGE（現在のステージ）</span>
+                    <strong>{getRuntimeSourceLabel(stage?.name ?? "Runtime Health Snapshot")}</strong>
                 </div>
 
                 <div className="stage-inspector-summary">

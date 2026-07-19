@@ -14,6 +14,7 @@ import AccountRuntimeOverview from "../components/runtime/AccountRuntimeOverview
 import RuntimeHealthPanel from "../components/runtime/RuntimeHealthPanel";
 import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel";
 import StageInspectorPanel from "../components/runtime/StageInspectorPanel";
+import { formatActivityTime, formatLatency, getLastExecutionActivity } from "../runtime/runtimeDisplay";
 import Header from "../components/header";
 
 import { deriveRuntimeHealth } from "../utils/runtimeHealth";
@@ -205,6 +206,7 @@ const runtimeHealth = useMemo(() => deriveRuntimeHealth({
 }), [
     botStatus,
 ]);
+const lastExecutionActivity = getLastExecutionActivity(runtimeHealth.timeline);
 
 const browserWsConnected = runtimeHealth.browserWebSocket.connected === true;
 const apiHealth = apiBotStatusSnapshot?.data?.runtime_health;
@@ -308,6 +310,8 @@ useEffect(() => {
                         pendingOrder={
                             botStatus?.pendingOrder
                         }
+
+                        runtimeHealth={runtimeHealth}
 
                         onStatusRefresh={
                             refreshBotStatus
@@ -679,9 +683,14 @@ useEffect(() => {
 
                         <div className="monitoring-row">
                             <span>LATENCY（遅延）</span>
-                            <span>{runtimeHealth.latencyMs ?? "--"}</span>
+                            <span>{formatLatency(runtimeHealth.latencyMs)}</span>
                         </div>
 
+                    </div>
+
+                    <div className="execution-activity" data-testid="last-execution-activity">
+                        <span>{lastExecutionActivity.label}</span>
+                        <strong>{formatActivityTime(lastExecutionActivity.timestamp)}</strong>
                     </div>
 
                 </div>

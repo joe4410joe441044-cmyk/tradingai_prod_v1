@@ -287,6 +287,14 @@ export default function AccountRuntimeOverview({
             || realAccount.connected === true
         );
     const normalizedSelectedMode = String(selectedMode ?? "PAPER").toUpperCase();
+    const paperMode = normalizedSelectedMode === "PAPER";
+    const realSyncStatus = realLoading
+        ? "REFRESHING"
+        : realStale
+            ? "STALE"
+            : realConnected
+                ? "CONNECTED"
+                : "NOT_CONNECTED";
     const normalizedAuth = String(resolvedExchangeAuth ?? "NOT_VERIFIED").toUpperCase();
     const authVerified = normalizedAuth === "VERIFIED";
     const displayedReason = normalizedSelectedMode === "LIVE" && !realOrderAllowed
@@ -416,16 +424,15 @@ export default function AccountRuntimeOverview({
                                             : "not-connected"
                             }`}
                         >
-                            {realLoading
-                                ? "REFRESHING"
-                                : realStale
-                                    ? "STALE"
-                                    : realConnected
-                                        ? "CONNECTED"
-                                        : "NOT_CONNECTED"
-                            }
+                            {paperMode ? "READ ONLY" : realSyncStatus}
                         </span>
                     </header>
+
+                    {paperMode && (
+                        <p className="semantic-card-context" data-testid="real-account-paper-context">
+                            PAPER MODE — LIVE ACCOUNT INACTIVE · Sync: {realSyncStatus}
+                        </p>
+                    )}
 
                     <div className="semantic-metric-grid three-columns">
                         <StatusMetric

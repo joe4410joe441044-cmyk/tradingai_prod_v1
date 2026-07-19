@@ -5,6 +5,7 @@ import {
 } from "react";
 
 import "../../styles/dashboard.css";
+import { getRuntimeReasonLabel, getRuntimeSourceLabel } from "../../runtime/runtimeDisplay";
 
 const safeArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -243,18 +244,26 @@ export default function LogsPanel({
                         key={`${event.time ?? event.timestamp}-${event.source}-${index}`}
                     >
                         <div>{formatTime(event.time ?? event.timestamp)}</div>
-                        <div>{event.source ?? "SYSTEM"}</div>
+                        <div>{getRuntimeSourceLabel(event.source)}</div>
                         {showLevel && (
                             <div className={categoryClass(event.level)}>
                                 {event.level ?? "INFO"}
                             </div>
                         )}
-                        <div>
-                            {event.label ?? event.event ?? event.state ?? "UNKNOWN"}
+                        <div className="timeline-detail">
+                            <strong>{getRuntimeReasonLabel(event.label ?? event.event ?? event.state ?? "UNKNOWN")}</strong>
+                            {event.state && (event.label || event.event) && <small>{event.state}</small>}
                         </div>
                         {!showLevel && (
-                            <div>
-                                {event.message ?? event.reason ?? "--"}
+                            <div className="timeline-detail">
+                                <span>{getRuntimeReasonLabel(event.message ?? event.reason)}</span>
+                                {event.reason && getRuntimeReasonLabel(event.reason) !== event.reason && <small>{event.reason}</small>}
+                                {event.confidence !== null && event.confidence !== undefined && (
+                                    <small>Confidence: {String(event.confidence)}</small>
+                                )}
+                                {(event.suppressionReason || event.governanceBlockReason) && (
+                                    <small>{getRuntimeReasonLabel(event.suppressionReason ?? event.governanceBlockReason)}</small>
+                                )}
                             </div>
                         )}
                     </div>

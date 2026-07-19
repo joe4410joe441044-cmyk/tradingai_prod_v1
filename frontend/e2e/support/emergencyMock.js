@@ -213,7 +213,9 @@ const buildRuntimeHealth = (state) => {
             reached: running,
         },
         executionEngine: {
-            status: executionStatus,
+            status: running && state.executionEnabled
+                ? "ENABLED_IDLE_BY_AI_HOLD"
+                : executionStatus,
             available: running,
             enabled: state.executionEnabled,
             allowed: running && state.executionEnabled,
@@ -222,7 +224,9 @@ const buildRuntimeHealth = (state) => {
                 : "BOT_STOPPED",
         },
         tradingAction: {
-            status: running ? "WAIT" : "NONE_BY_BOT_STOP",
+            status: running && state.executionEnabled
+                ? "IDLE_BY_AI_HOLD"
+                : running ? "WAIT" : "NONE_BY_BOT_STOP",
             decision: running ? "HOLD" : "N/A",
             reason: actionReason,
         },

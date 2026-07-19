@@ -54,6 +54,7 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expect(page.getByTestId("account-source")).toHaveText("PAPER_SIMULATION");
         await expect(page.getByTestId("real-order-allowed")).toHaveText("false");
         await expect(page.getByTestId("execution-mode")).toHaveText("SIMULATION");
+        await expect(page.getByTestId("real-account-paper-context")).toContainText("PAPER MODE — LIVE ACCOUNT INACTIVE");
 
         await expectMonitorValue(page, "bot-state", "STOPPED");
         await expectMonitorValue(page, "trading-runtime", "STOPPED");
@@ -84,6 +85,17 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await expectMonitorValue(page, "exchange-ws", "LIVE");
         await expectMonitorValue(page, "trading-runtime", "ACTIVE");
         await expectMonitorValue(page, "pipeline-status", "OK");
+        await expect(page.getByTestId("emergency-bot-state")).toHaveText("Botは稼働中です");
+        await expect(page.getByTestId("emergency-bot-state")).not.toContainText("停止中");
+
+        const autoTradeToggle = page.getByRole("switch", {
+            name: "Toggle automatic trading",
+        });
+        await autoTradeToggle.click();
+        await expect(page.getByText("WAITING FOR SIGNAL", { exact: true })).toBeVisible();
+        await expectMonitorValue(page, "trading-action", "IDLE_BY_AI_HOLD");
+        await expectMonitorValue(page, "current-decision", "HOLD");
+        await expect(monitor.getByText("1.00 ms", { exact: true })).toBeVisible();
 
         const stopResponsePromise = page.waitForResponse((response) => (
             response.url().endsWith(ENDPOINTS.botStop)

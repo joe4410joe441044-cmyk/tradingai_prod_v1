@@ -1,4 +1,5 @@
 import React from "react";
+import { formatLatency } from "../runtime/runtimeDisplay";
 export default function StatusStrip({ runtimeHealth }) {
 
     const botStatus = runtimeHealth.running ? "RUNNING" : "STOPPED";
@@ -9,9 +10,7 @@ export default function StatusStrip({ runtimeHealth }) {
     const loopCount = runtimeHealth.loopCount;
     const session = runtimeHealth.session;
     const version = runtimeHealth.version;
-    const latency = runtimeHealth.latencyMs == null
-        ? "--"
-        : `${Number(runtimeHealth.latencyMs).toFixed(2)} ms`;
+    const latency = formatLatency(runtimeHealth.latencyMs);
 
 
     /* =====================================================
