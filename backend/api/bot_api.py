@@ -210,6 +210,8 @@ class StatusResponse(BaseModel):
 
     emergency: dict = Field(default_factory=dict)
 
+    emergencyReturnWarnings: List[str] = Field(default_factory=list)
+
     real_qty: Optional[float] = None
 
     notional: Optional[float] = None

@@ -13,6 +13,7 @@ from fastapi.middleware.cors import (
 )
 
 import time
+import json
 
 import backend.runtime.runtime_registry as registry
 
@@ -34,6 +35,7 @@ from backend.utils.log_buffer import (
     runtime_debug,
 )
 from backend.bot_manager.bot_manager import get_existing_bot_manager
+from backend.api.runtime import router as runtime_api_router
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -1174,7 +1176,48 @@ async def shutdown_event():
         return
 
     try:
-        bot_manager.shutdown()
+        result = bot_manager.shutdown()
+        safe_result = {
+            "eventId": (
+                result.get("eventId")
+                if isinstance(result, dict)
+                else "STOPPED_PAPER_SHUTDOWN_CAPTURE"
+            ),
+            "success": result.get("success") is True
+            if isinstance(result, dict) else False,
+            "completed": result.get("completed") is True
+            if isinstance(result, dict) else False,
+            "durablePersisted": result.get("durablePersisted") is True
+            if isinstance(result, dict) else False,
+            "stateUnknown": result.get("stateUnknown") is not False
+            if isinstance(result, dict) else True,
+            "reason": result.get("reason")
+            if isinstance(result, dict) else "SHUTDOWN_RESULT_INVALID",
+            "captureAttempted": result.get("captureAttempted") is True
+            if isinstance(result, dict) else False,
+            "captureSucceeded": result.get("captureSucceeded") is True
+            if isinstance(result, dict) else False,
+            "shutdownRuntimeInstanceId": result.get(
+                "shutdownRuntimeInstanceId"
+            ) if isinstance(result, dict) else None,
+            "evidenceRuntimeInstanceId": result.get(
+                "evidenceRuntimeInstanceId"
+            ) if isinstance(result, dict) else None,
+            "runtimeInstanceId": result.get("runtimeInstanceId")
+            if isinstance(result, dict) else None,
+            "generation": result.get("generation")
+            if isinstance(result, dict) else None,
+            "capturedAt": result.get("capturedAt")
+            if isinstance(result, dict) else None,
+            "originMode": result.get("originMode")
+            if isinstance(result, dict) else "NO_DURABLE_EVIDENCE",
+            "evidenceReused": result.get("evidenceReused") is True
+            if isinstance(result, dict) else False,
+        }
+        logger.info(
+            "Shutdown safety capture: %s",
+            json.dumps(safe_result, sort_keys=True, separators=(",", ":")),
+        )
     except Exception as exc:
         logger.error("SNAPSHOT_PERSIST_FAILED during shutdown: %s", exc)
 
@@ -1249,6 +1292,10 @@ from backend.routers import positions
 
 app.include_router(
     governance_router
+)
+
+app.include_router(
+    runtime_api_router
 )
 
 # ------------------------------------------------------------

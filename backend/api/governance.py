@@ -150,22 +150,70 @@ async def emergency_orchestrate():
 
 @router.post("/emergency/unlock")
 async def emergency_unlock():
+    bot_manager = get_bot_manager()
+
+    if governance_state.get("emergency_state") == "PROCESSING":
+        result = unlock_emergency_lock()
+        raise HTTPException(
+            status_code=409,
+            detail=result,
+        )
+
+    warnings = []
+    last_result = governance_state.get("last_emergency_result")
+    if isinstance(last_result, dict):
+        if last_result.get("positionRemaining") is True:
+            warnings.append("POSITION_REMAINING")
+        if last_result.get("stateUnknown") is True:
+            warnings.append("PENDING_ORDER_STATE_UNKNOWN")
+        diagnostic_reason = (
+            last_result.get("error_code")
+            or last_result.get("errorCode")
+            or last_result.get("reason")
+        )
+        if (
+            isinstance(diagnostic_reason, str)
+            and diagnostic_reason.strip()
+        ):
+            warnings.append(diagnostic_reason)
+        diagnostic_message = last_result.get("message")
+        if (
+            isinstance(diagnostic_message, str)
+            and ":" in diagnostic_message
+        ):
+            message_code = diagnostic_message.rsplit(":", 1)[-1].strip()
+            if message_code and message_code.replace("_", "").isalnum():
+                warnings.append(message_code)
+
+    if getattr(bot_manager, "engine", None) is None:
+        warnings.append("ENGINE_UNAVAILABLE")
 
     try:
-        bot_manager = get_bot_manager()
-        pending_order = (
+        pending_state = (
             bot_manager.get_authoritative_pending_order_state()
         )
+        if pending_state.get("pending_order") is True:
+            warnings.append("PENDING_ORDER_REMAINING")
+        elif pending_state.get("known") is not True:
+            warnings.append("PENDING_ORDER_STATE_UNKNOWN")
     except Exception:
-        pending_order = {
-            "pending_order": True,
-            "safe": False,
-            "reason": "PENDING_ORDER_READ_FAILED",
-        }
+        warnings.append("PENDING_ORDER_STATE_UNKNOWN")
 
-    result = unlock_emergency_lock(
-        pending_order=pending_order,
-    )
+    try:
+        bot_manager._running = False
+        bot_manager._set_lifecycle_state("STOPPED")
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "unlocked": False,
+                "reason": "UNLOCK_STATE_UPDATE_FAILED",
+                "emergency": build_emergency_status(),
+            },
+        )
+
+    result = unlock_emergency_lock(warnings=warnings)
 
     if not result.get("success", False):
         raise HTTPException(

@@ -1,11 +1,15 @@
 import asyncio
+import io
 import json
 import os
+import stat
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stdout
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -200,7 +204,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "emergency_stop": False,
                 "execution_enabled": False,
                 "emergency_locked": False,
-                "emergency_state": "UNLOCKED",
+                "emergency_state": EMERGENCY_READY,
                 "loop_enabled": False,
                 "auto_trade_enabled": False,
             },
@@ -236,6 +240,11 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     )
                     governance_state["execution_enabled"] = (
                         scenario["execution_enabled"]
+                    )
+                    governance_state["emergency_state"] = (
+                        EMERGENCY_LOCKED
+                        if scenario["emergency_stop"]
+                        else EMERGENCY_READY
                     )
                     bot = BotManager()
                     bot._running = scenario["running"]
@@ -359,6 +368,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         try:
             governance_state["execution_enabled"] = False
             governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
 
             with patch(
                 "backend.api.governance.get_bot_manager",
@@ -382,7 +392,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             response = StatusResponse(**status)
 
             self.assertTrue(response.emergencyLocked)
-            self.assertEqual(response.emergencyState, "LOCKED")
+            self.assertEqual(response.emergencyState, EMERGENCY_LOCKED)
             self.assertFalse(response.autoTradeEnabled)
         finally:
             governance_state.clear()
@@ -730,7 +740,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_restart_path_still_works_after_stop(self):
         execution_enabled_before = governance_state["execution_enabled"]
-        bot = BotManager()
+        bot = self._configure_durable_snapshot_path(
+            BotManager(),
+            self._temporary_durable_snapshot_path(),
+        )
         config = {
             "symbol": "XRPUSDT",
             "exchange": "kucoin",
@@ -3020,14 +3033,52 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         import backend.main as main
 
         bot = Mock()
+        bot.shutdown.return_value = {
+            "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+            "success": False,
+            "completed": False,
+            "durablePersisted": False,
+            "reason": "DURABLE_SNAPSHOT_MISSING",
+            "stateUnknown": True,
+            "captureAttempted": False,
+            "captureSucceeded": False,
+            "shutdownRuntimeInstanceId": "shutdown-runtime-test",
+            "evidenceRuntimeInstanceId": None,
+            "runtimeInstanceId": None,
+            "generation": None,
+            "capturedAt": None,
+            "originMode": "NO_DURABLE_EVIDENCE",
+            "evidenceReused": False,
+        }
         with patch(
             "backend.main.get_existing_bot_manager",
             return_value=bot,
-        ) as existing:
+        ) as existing, patch.object(main.logger, "info") as log_info:
             asyncio.run(main.shutdown_event())
 
         existing.assert_called_once_with()
         bot.shutdown.assert_called_once_with()
+        log_info.assert_called_once()
+        log_args = log_info.call_args.args
+        self.assertEqual(log_args[0], "Shutdown safety capture: %s")
+        logged = json.loads(log_args[1])
+        self.assertEqual(logged, {
+            "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+            "success": False,
+            "completed": False,
+            "durablePersisted": False,
+            "stateUnknown": True,
+            "reason": "DURABLE_SNAPSHOT_MISSING",
+            "captureAttempted": False,
+            "captureSucceeded": False,
+            "shutdownRuntimeInstanceId": "shutdown-runtime-test",
+            "evidenceRuntimeInstanceId": None,
+            "runtimeInstanceId": None,
+            "generation": None,
+            "capturedAt": None,
+            "originMode": "NO_DURABLE_EVIDENCE",
+            "evidenceReused": False,
+        })
 
         with patch(
             "backend.main.get_existing_bot_manager",
@@ -3078,9 +3129,837 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         self.assertEqual(events, ["persist", "engine_stop", "destroyed"])
         engine.stop.assert_called_once_with()
-        self.assertTrue(second["persisted"])
+        self.assertTrue(second["success"])
+        self.assertTrue(second["completed"])
+        self.assertFalse(second["captureRequired"])
+        self.assertFalse(second["captureAttempted"])
+        self.assertFalse(second["captureSucceeded"])
+        self.assertTrue(second["durablePersisted"])
+        self.assertFalse(second["stateUnknown"])
+        self.assertFalse(second["engineAvailable"])
+        self.assertEqual(
+            second["shutdownRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertEqual(
+            second["evidenceRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertEqual(second["runtimeInstanceId"], bot.runtime_instance_id)
+        self.assertEqual(second["originMode"], "EXISTING_DURABLE")
+        self.assertTrue(second["evidenceReused"])
         with open(path, "r", encoding="utf-8") as handle:
             self.assertEqual(json.load(handle)["generation"], 1)
+
+    def test_shutdown_result_contract_for_paper_engine_capture(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        bot.engine = self._paper_engine_for_stop(None, {})
+
+        result = bot.shutdown()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["captureRequired"])
+        self.assertTrue(result["captureAttempted"])
+        self.assertTrue(result["captureSucceeded"])
+        self.assertTrue(result["durablePersisted"])
+        self.assertFalse(result["stateUnknown"])
+        self.assertTrue(result["engineAvailable"])
+        self.assertEqual(
+            result["snapshotSource"],
+            "stopped_paper_engine_portfolio_snapshot",
+        )
+        self.assertEqual(result["durablePath"], path)
+        self.assertEqual(
+            result["eventId"],
+            "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+        )
+        self.assertEqual(result["runtimeInstanceId"], bot.runtime_instance_id)
+        self.assertEqual(
+            result["shutdownRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertEqual(
+            result["evidenceRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertEqual(result["originMode"], "CURRENT_PROCESS_CAPTURE")
+        self.assertFalse(result["evidenceReused"])
+        self.assertEqual(result["generation"], 1)
+        self.assertIsInstance(result["capturedAt"], float)
+        self.assertIsNone(bot.engine)
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        self.assertEqual(
+            result["runtimeInstanceId"],
+            payload["runtimeInstanceId"],
+        )
+        self.assertEqual(result["generation"], payload["generation"])
+        self.assertEqual(result["capturedAt"], payload["capturedAt"])
+
+    def test_shutdown_result_contract_rejects_missing_durable_and_authority(
+        self,
+    ):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._restart_stopped_paper_bot(path)
+
+        result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertTrue(result["captureRequired"])
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertFalse(result["engineAvailable"])
+        self.assertEqual(result["reason"], "DURABLE_SNAPSHOT_MISSING")
+        self.assertEqual(
+            result["eventId"],
+            "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+        )
+        self.assertEqual(
+            result["shutdownRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertIsNone(result["evidenceRuntimeInstanceId"])
+        self.assertIsNone(result["runtimeInstanceId"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertFalse(result["evidenceReused"])
+        self.assertIsNone(result["generation"])
+        self.assertIsNone(result["capturedAt"])
+
+    def test_shutdown_result_contract_reports_durable_write_failure(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.replace",
+            side_effect=OSError("replace failed"),
+        ):
+            result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["reason"], "SNAPSHOT_PERSIST_FAILED")
+        self.assertEqual(
+            result["shutdownRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertIsNone(result["evidenceRuntimeInstanceId"])
+        self.assertIsNone(result["generation"])
+        self.assertIsNone(result["capturedAt"])
+        self.assertFalse(os.path.exists(path))
+
+    def test_shutdown_reuses_durable_with_distinct_origin_identities(self):
+        path = self._temporary_durable_snapshot_path()
+        _, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        restarted = self._restart_stopped_paper_bot(path)
+
+        result = restarted.shutdown()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["completed"])
+        self.assertFalse(result["captureRequired"])
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertTrue(result["durablePersisted"])
+        self.assertFalse(result["stateUnknown"])
+        self.assertNotEqual(
+            restarted.runtime_instance_id,
+            payload["runtimeInstanceId"],
+        )
+        self.assertEqual(
+            result["shutdownRuntimeInstanceId"],
+            restarted.runtime_instance_id,
+        )
+        self.assertEqual(
+            result["evidenceRuntimeInstanceId"],
+            payload["runtimeInstanceId"],
+        )
+        self.assertEqual(
+            result["runtimeInstanceId"],
+            result["evidenceRuntimeInstanceId"],
+        )
+        self.assertEqual(result["generation"], payload["generation"])
+        self.assertEqual(result["capturedAt"], payload["capturedAt"])
+        self.assertEqual(result["originMode"], "EXISTING_DURABLE")
+        self.assertTrue(result["evidenceReused"])
+
+        import backend.main as main
+
+        restarted.shutdown = Mock(return_value=result)
+        with patch(
+            "backend.main.get_existing_bot_manager",
+            return_value=restarted,
+        ), patch.object(main.logger, "info") as log_info:
+            asyncio.run(main.shutdown_event())
+        logged = json.loads(log_info.call_args.args[1])
+        self.assertNotEqual(
+            logged["shutdownRuntimeInstanceId"],
+            logged["evidenceRuntimeInstanceId"],
+        )
+        self.assertFalse(logged["captureAttempted"])
+        self.assertFalse(logged["captureSucceeded"])
+        self.assertEqual(logged["originMode"], "EXISTING_DURABLE")
+        self.assertTrue(logged["evidenceReused"])
+
+        from tools import validate_stopped_paper_snapshot as validator
+
+        code, validated = validator.validate(SimpleNamespace(
+            path=path,
+            expected_runtime_instance_id=result[
+                "evidenceRuntimeInstanceId"
+            ],
+            expected_generation=result["generation"],
+        ))
+        self.assertEqual(code, 0)
+        self.assertTrue(validated["valid"])
+
+    def test_stopped_paper_snapshot_status_is_read_only_and_redacted(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+        writer, payload = self._persist_flat_stopped_paper_durable_snapshot(
+            path
+        )
+        reader = self._restart_stopped_paper_bot(path)
+        before_snapshot = deepcopy(reader.account_snapshot)
+        before_runtime = reader.runtime_instance_id
+        before_generation = reader.account_snapshot_generation
+        with open(path, "rb") as handle:
+            before_bytes = handle.read()
+        before_mtime = os.stat(path).st_mtime_ns
+
+        try:
+            status = reader.get_stopped_paper_snapshot_status()
+
+            self.assertTrue(status["valid"])
+            self.assertTrue(status["durableExists"])
+            self.assertEqual(
+                status["evidenceRuntimeInstanceId"],
+                payload["runtimeInstanceId"],
+            )
+            self.assertEqual(status["generation"], payload["generation"])
+            self.assertEqual(status["capturedAt"], payload["capturedAt"])
+            self.assertTrue(status["reboundEligible"])
+            self.assertNotEqual(
+                status["currentRuntimeInstanceId"],
+                status["evidenceRuntimeInstanceId"],
+            )
+            for forbidden in (
+                "snapshot", "position", "positions", "pendingOrder",
+                "openOrders", "balance", "durablePath",
+            ):
+                self.assertNotIn(forbidden, status)
+
+            self.assertEqual(reader.account_snapshot, before_snapshot)
+            self.assertEqual(reader.runtime_instance_id, before_runtime)
+            self.assertEqual(
+                reader.account_snapshot_generation,
+                before_generation,
+            )
+            self.assertIsNone(reader.engine)
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), before_bytes)
+            self.assertEqual(os.stat(path).st_mtime_ns, before_mtime)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_snapshot_status_missing_is_read_only(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._restart_stopped_paper_bot(path)
+        before = deepcopy(bot.account_snapshot)
+
+        status = bot.get_stopped_paper_snapshot_status()
+
+        self.assertFalse(status["valid"])
+        self.assertFalse(status["durableExists"])
+        self.assertEqual(status["reason"], "DURABLE_SNAPSHOT_MISSING")
+        self.assertFalse(status["reboundEligible"])
+        self.assertEqual(bot.account_snapshot, before)
+        self.assertFalse(os.path.exists(path))
+
+    def test_stopped_paper_snapshot_inspection_rejects_tampering(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        base_time = payload["capturedAt"]
+        cases = (
+            ("source", {"source": "test_process_snapshot"}, None),
+            ("generation", {"evidenceGeneration": 9}, None),
+            (
+                "runtime-identity",
+                {"evidenceRuntimeInstanceId": "different-runtime"},
+                None,
+            ),
+            ("future", {}, base_time - 1),
+            (
+                "stale",
+                {},
+                base_time + bot.stopped_paper_durable_snapshot_max_age + 1,
+            ),
+            ("unknown", {"stateUnknown": True}, None),
+        )
+
+        for name, mutation, now in cases:
+            with self.subTest(case=name):
+                candidate = deepcopy(payload)
+                candidate.update(mutation)
+                self._write_durable_snapshot_payload(path, candidate)
+                context = (
+                    patch("backend.bot_manager.bot_manager.time.time", return_value=now)
+                    if now is not None
+                    else patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=base_time,
+                    )
+                )
+                with context:
+                    inspected = bot.inspect_stopped_paper_durable_snapshot(path)
+                self.assertFalse(inspected["valid"])
+                self.assertIsNotNone(inspected["reason"])
+
+    def test_runtime_snapshot_status_endpoint_returns_redacted_status(self):
+        from backend.api import runtime as runtime_api
+
+        bot = Mock()
+        expected = {
+            "valid": False,
+            "reason": "DURABLE_SNAPSHOT_MISSING",
+            "durableExists": False,
+        }
+        bot.get_stopped_paper_snapshot_status.return_value = expected
+        with patch.object(runtime_api, "get_bot_manager", return_value=bot):
+            actual = runtime_api.stopped_paper_snapshot_status()
+
+        self.assertEqual(actual, expected)
+        bot.get_stopped_paper_snapshot_status.assert_called_once_with()
+
+    def test_offline_snapshot_validator_origin_and_exit_codes(self):
+        from tools import validate_stopped_paper_snapshot as validator
+
+        path = self._temporary_durable_snapshot_path()
+        _, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+
+        def run(*arguments):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = validator.main(list(arguments))
+            return code, json.loads(output.getvalue())
+
+        valid_args = (
+            "--path", path,
+            "--expected-runtime-instance-id", payload["runtimeInstanceId"],
+            "--expected-generation", str(payload["generation"]),
+        )
+        code, result = run(*valid_args)
+        self.assertEqual(code, 0)
+        self.assertTrue(result["valid"])
+
+        code, result = run(
+            "--path", path,
+            "--expected-runtime-instance-id", "another-process",
+            "--expected-generation", str(payload["generation"]),
+        )
+        self.assertEqual(code, 3)
+        self.assertEqual(
+            result["reason"],
+            "EXPECTED_RUNTIME_INSTANCE_MISMATCH",
+        )
+
+        code, result = run(
+            "--path", path,
+            "--expected-runtime-instance-id", payload["runtimeInstanceId"],
+            "--expected-generation", str(payload["generation"] + 1),
+        )
+        self.assertEqual(code, 3)
+        self.assertEqual(result["reason"], "EXPECTED_GENERATION_MISMATCH")
+
+        missing = f"{path}.missing"
+        code, result = run(
+            "--path", missing,
+            "--expected-runtime-instance-id", "runtime",
+            "--expected-generation", "1",
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(result["reason"], "DURABLE_SNAPSHOT_MISSING")
+
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{")
+        code, result = run(
+            "--path", path,
+            "--expected-runtime-instance-id", "runtime",
+            "--expected-generation", "1",
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(result["reason"], "DURABLE_SNAPSHOT_CORRUPT")
+
+    def test_snapshot_inspector_and_validator_reject_non_regular_paths(self):
+        from tools import validate_stopped_paper_snapshot as validator
+
+        target = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(
+            target
+        )
+
+        def validate(path):
+            return validator.validate(SimpleNamespace(
+                path=path,
+                expected_runtime_instance_id=payload["runtimeInstanceId"],
+                expected_generation=payload["generation"],
+            ))
+
+        symlink_path = f"{target}.symlink"
+        os.symlink(target, symlink_path)
+        inspected = bot.inspect_stopped_paper_durable_snapshot(symlink_path)
+        code, validated = validate(symlink_path)
+        self.assertFalse(inspected["valid"])
+        self.assertTrue(inspected["durableExists"])
+        self.assertEqual(
+            inspected["reason"],
+            "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(validated["reason"], inspected["reason"])
+
+        dangling_path = f"{target}.dangling"
+        os.symlink(f"{target}.missing", dangling_path)
+        code, validated = validate(dangling_path)
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            validated["reason"],
+            "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+        )
+
+        directory_path = tempfile.mkdtemp(dir=os.path.dirname(target))
+        code, validated = validate(directory_path)
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            validated["reason"],
+            "DURABLE_SNAPSHOT_NOT_REGULAR_FILE",
+        )
+
+        fifo_path = f"{target}.fifo"
+        os.mkfifo(fifo_path)
+        code, validated = validate(fifo_path)
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            validated["reason"],
+            "DURABLE_SNAPSHOT_NOT_REGULAR_FILE",
+        )
+
+    def test_snapshot_status_rejects_symlink_without_state_side_effects(self):
+        target = self._temporary_durable_snapshot_path()
+        _, _ = self._persist_flat_stopped_paper_durable_snapshot(target)
+        symlink_path = f"{target}.symlink"
+        os.symlink(target, symlink_path)
+        bot = self._restart_stopped_paper_bot(symlink_path)
+        before_snapshot = deepcopy(bot.account_snapshot)
+        before_generation = bot.account_snapshot_generation
+
+        status = bot.get_stopped_paper_snapshot_status()
+
+        self.assertFalse(status["valid"])
+        self.assertTrue(status["durableExists"])
+        self.assertFalse(status["reboundEligible"])
+        self.assertEqual(
+            status["reason"],
+            "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+        )
+        self.assertEqual(bot.account_snapshot, before_snapshot)
+        self.assertEqual(
+            bot.account_snapshot_generation,
+            before_generation,
+        )
+
+    def test_shutdown_rejects_symlink_durable_snapshot(self):
+        target = self._temporary_durable_snapshot_path()
+        _, payload = self._persist_flat_stopped_paper_durable_snapshot(
+            target
+        )
+        symlink_path = f"{target}.symlink"
+        os.symlink(target, symlink_path)
+        bot = self._restart_stopped_paper_bot(symlink_path)
+
+        inspected = bot.inspect_stopped_paper_durable_snapshot(symlink_path)
+        result = bot.shutdown()
+
+        self.assertFalse(inspected["valid"])
+        self.assertEqual(
+            inspected["reason"],
+            "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertNotEqual(result["originMode"], "EXISTING_DURABLE")
+        self.assertEqual(
+            result["reason"],
+            "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+        )
+        self.assertIsNone(result["evidenceRuntimeInstanceId"])
+        self.assertIsNone(result["runtimeInstanceId"])
+        self.assertIsNone(result["generation"])
+        self.assertIsNone(result["capturedAt"])
+        with open(target, "r", encoding="utf-8") as handle:
+            self.assertEqual(
+                json.load(handle)["evidenceRuntimeInstanceId"],
+                payload["evidenceRuntimeInstanceId"],
+            )
+
+    def test_shutdown_rejects_non_regular_durable_snapshots_without_blocking(
+        self,
+    ):
+        base = self._temporary_durable_snapshot_path()
+        dangling = f"{base}.dangling"
+        os.symlink(f"{base}.missing", dangling)
+        directory = tempfile.mkdtemp(dir=os.path.dirname(base))
+        fifo = f"{base}.fifo"
+        os.mkfifo(fifo)
+
+        for name, path, expected_reason in (
+            (
+                "dangling-symlink",
+                dangling,
+                "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+            ),
+            (
+                "directory",
+                directory,
+                "DURABLE_SNAPSHOT_NOT_REGULAR_FILE",
+            ),
+            (
+                "fifo",
+                fifo,
+                "DURABLE_SNAPSHOT_NOT_REGULAR_FILE",
+            ),
+        ):
+            with self.subTest(case=name):
+                bot = self._restart_stopped_paper_bot(path)
+                result = bot.shutdown()
+                self.assertFalse(result["success"])
+                self.assertFalse(result["completed"])
+                self.assertFalse(result["durablePersisted"])
+                self.assertTrue(result["stateUnknown"])
+                self.assertEqual(
+                    result["originMode"],
+                    "NO_DURABLE_EVIDENCE",
+                )
+                self.assertEqual(result["reason"], expected_reason)
+
+    def test_shutdown_rejects_durable_file_identity_change(self):
+        path = self._temporary_durable_snapshot_path()
+        self._persist_flat_stopped_paper_durable_snapshot(path)
+        bot = self._restart_stopped_paper_bot(path)
+        original_fstat = os.fstat
+
+        def changed_identity(descriptor):
+            opened = original_fstat(descriptor)
+            fields = list(opened)
+            fields[stat.ST_INO] += 1
+            return os.stat_result(fields)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.fstat",
+            side_effect=changed_identity,
+        ):
+            result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertEqual(
+            result["reason"],
+            "DURABLE_SNAPSHOT_FILE_IDENTITY_CHANGED",
+        )
+
+    def test_stopped_paper_snapshot_persist_fsyncs_parent_after_replace(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+        events = []
+        directory_descriptors = set()
+        original_open = os.open
+        original_fsync = os.fsync
+        original_replace = os.replace
+
+        def tracked_open(candidate, flags, *args):
+            descriptor = original_open(candidate, flags, *args)
+            if hasattr(os, "O_DIRECTORY") and flags & os.O_DIRECTORY:
+                directory_descriptors.add(descriptor)
+            return descriptor
+
+        def tracked_fsync(descriptor):
+            events.append(
+                "directory_fsync"
+                if descriptor in directory_descriptors
+                else "file_fsync"
+            )
+            return original_fsync(descriptor)
+
+        def tracked_replace(source, destination):
+            events.append("replace")
+            return original_replace(source, destination)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.open",
+            side_effect=tracked_open,
+        ), patch(
+            "backend.bot_manager.bot_manager.os.fsync",
+            side_effect=tracked_fsync,
+        ), patch(
+            "backend.bot_manager.bot_manager.os.replace",
+            side_effect=tracked_replace,
+        ):
+            persisted, reason = (
+                bot._persist_stopped_paper_durable_snapshot(
+                    bot.account_snapshot
+                )
+            )
+
+        self.assertTrue(persisted)
+        self.assertIsNone(reason)
+        self.assertEqual(
+            events,
+            ["file_fsync", "replace", "directory_fsync"],
+        )
+        self.assertTrue(
+            bot.inspect_stopped_paper_durable_snapshot(path)["valid"]
+        )
+
+    def test_shutdown_fails_when_parent_directory_fsync_fails(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+        original_fsync = os.fsync
+
+        def fail_directory_fsync(descriptor):
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise OSError("directory fsync failed")
+            return original_fsync(descriptor)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.fsync",
+            side_effect=fail_directory_fsync,
+        ):
+            result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["persisted"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertTrue(os.path.exists(path))
+
+    def test_shutdown_fails_when_parent_directory_open_fails(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        os.remove(path)
+        original_open = os.open
+
+        def fail_directory_open(candidate, flags, *args):
+            if hasattr(os, "O_DIRECTORY") and flags & os.O_DIRECTORY:
+                raise OSError("directory open failed")
+            return original_open(candidate, flags, *args)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.open",
+            side_effect=fail_directory_open,
+        ):
+            result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["persisted"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertTrue(os.path.exists(path))
+
+    def test_current_capture_separates_directory_fsync_persist_failure(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        bot.engine = self._paper_engine_for_stop(None, {})
+        original_fsync = os.fsync
+
+        def fail_directory_fsync(descriptor):
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise OSError("directory fsync failed")
+            return original_fsync(descriptor)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.fsync",
+            side_effect=fail_directory_fsync,
+        ):
+            result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertTrue(result["captureAttempted"])
+        self.assertTrue(result["captureSucceeded"])
+        self.assertFalse(result["persisted"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["originMode"], "NO_DURABLE_EVIDENCE")
+        self.assertTrue(os.path.exists(path))
+
+    def test_snapshot_inspector_rejects_file_identity_change(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+        original_fstat = os.fstat
+
+        def changed_identity(descriptor):
+            opened = original_fstat(descriptor)
+            fields = list(opened)
+            fields[stat.ST_INO] += 1
+            return os.stat_result(fields)
+
+        with patch(
+            "backend.bot_manager.bot_manager.os.fstat",
+            side_effect=changed_identity,
+        ):
+            inspected = bot.inspect_stopped_paper_durable_snapshot(path)
+
+        self.assertFalse(inspected["valid"])
+        self.assertTrue(inspected["durableExists"])
+        self.assertEqual(
+            inspected["reason"],
+            "DURABLE_SNAPSHOT_FILE_IDENTITY_CHANGED",
+        )
+
+    def test_offline_validator_rejects_empty_runtime_before_file_inspection(
+        self,
+    ):
+        from tools import validate_stopped_paper_snapshot as validator
+
+        valid_path = self._temporary_durable_snapshot_path()
+        _, payload = self._persist_flat_stopped_paper_durable_snapshot(
+            valid_path
+        )
+        malformed_path = f"{valid_path}.malformed"
+        with open(malformed_path, "w", encoding="utf-8") as handle:
+            handle.write("{")
+        symlink_path = f"{valid_path}.symlink"
+        os.symlink(valid_path, symlink_path)
+        missing_path = f"{valid_path}.missing"
+
+        invalid_cases = (
+            ("empty-missing", "", missing_path),
+            ("empty-valid", "", valid_path),
+            ("empty-malformed", "", malformed_path),
+            ("empty-symlink", "", symlink_path),
+            ("spaces-valid", "   ", valid_path),
+            ("tab-valid", "\t", valid_path),
+            ("newline-valid", "\n", valid_path),
+        )
+        for name, runtime_id, path in invalid_cases:
+            with self.subTest(case=name), patch.object(
+                BotManager,
+                "inspect_stopped_paper_durable_snapshot",
+            ) as inspect:
+                code, result = validator.validate(SimpleNamespace(
+                    path=path,
+                    expected_runtime_instance_id=runtime_id,
+                    expected_generation=payload["generation"],
+                ))
+                self.assertEqual(code, 4)
+                self.assertEqual(result, {
+                    "valid": False,
+                    "reason": "CLI_ARGUMENT_ERROR",
+                })
+                inspect.assert_not_called()
+
+        code, result = validator.validate(SimpleNamespace(
+            path=valid_path,
+            expected_runtime_instance_id=(
+                f"  {payload['runtimeInstanceId']}  "
+            ),
+            expected_generation=payload["generation"],
+        ))
+        self.assertEqual(code, 0)
+        self.assertTrue(result["valid"])
+
+        code, result = validator.validate(SimpleNamespace(
+            path=valid_path,
+            expected_runtime_instance_id="wrong-runtime",
+            expected_generation=payload["generation"],
+        ))
+        self.assertEqual(code, 3)
+        self.assertEqual(
+            result["reason"],
+            "EXPECTED_RUNTIME_INSTANCE_MISMATCH",
+        )
+
+        for name, path, expected_reason in (
+            (
+                "missing",
+                missing_path,
+                "DURABLE_SNAPSHOT_MISSING",
+            ),
+            (
+                "malformed",
+                malformed_path,
+                "DURABLE_SNAPSHOT_CORRUPT",
+            ),
+            (
+                "symlink",
+                symlink_path,
+                "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+            ),
+        ):
+            with self.subTest(case=f"valid-runtime-{name}"):
+                code, result = validator.validate(SimpleNamespace(
+                    path=path,
+                    expected_runtime_instance_id="valid-runtime",
+                    expected_generation=payload["generation"],
+                ))
+                self.assertEqual(code, 2)
+                self.assertEqual(result["reason"], expected_reason)
+
+    def test_shutdown_result_contract_rejects_malformed_engine_authority(self):
+        path = self._temporary_durable_snapshot_path()
+        bot = self._configure_durable_snapshot_path(
+            self._stopped_paper_bot(),
+            path,
+        )
+        engine = self._paper_engine_for_stop(None, {})
+        engine.pending_order = "false"
+        bot.engine = engine
+
+        result = bot.shutdown()
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertTrue(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
+        self.assertEqual(result["reason"], "PENDING_ORDER_UNKNOWN")
+        self.assertIs(bot.engine, engine)
+        self.assertFalse(os.path.exists(path))
 
     def test_engine_stop_failure_retains_engine_and_fails_closed(self):
         path = self._temporary_durable_snapshot_path()
@@ -3148,13 +4027,14 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "backend.api.governance.get_bot_manager",
                 return_value=bot,
             ):
-                with self.assertRaises(HTTPException):
-                    asyncio.run(emergency_unlock())
+                unlock_result = asyncio.run(emergency_unlock())
+            self.assertIs(unlock_result["success"], True)
+            self.assertIn("ENGINE_STOP_FAILED", unlock_result["warnings"])
             self.assertEqual(
                 governance_state["emergency_state"],
-                EMERGENCY_ACTION_REQUIRED,
+                EMERGENCY_READY,
             )
-            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["emergency_stop"])
             self.assertFalse(governance_state["execution_enabled"])
         finally:
             positions_router.set_engine(None)
@@ -3279,8 +4159,39 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
         os.remove(path)
 
-        result = bot.shutdown()
+        with patch.object(
+            bot,
+            "_capture_account_snapshot",
+            wraps=bot._capture_account_snapshot,
+        ) as capture:
+            result = bot.shutdown()
+        capture.assert_not_called()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["captureRequired"])
+        self.assertFalse(result["captureAttempted"])
+        self.assertFalse(result["captureSucceeded"])
+        self.assertTrue(result["durablePersisted"])
         self.assertTrue(result["persisted"])
+        self.assertFalse(result["stateUnknown"])
+        self.assertEqual(
+            result["originMode"],
+            "EXISTING_MEMORY_EVIDENCE_PERSISTED",
+        )
+        self.assertTrue(result["evidenceReused"])
+        self.assertEqual(
+            result["shutdownRuntimeInstanceId"],
+            bot.runtime_instance_id,
+        )
+        self.assertEqual(
+            result["evidenceRuntimeInstanceId"],
+            payload["evidenceRuntimeInstanceId"],
+        )
+        self.assertEqual(
+            result["runtimeInstanceId"],
+            result["evidenceRuntimeInstanceId"],
+        )
         self.assertTrue(os.path.exists(path))
 
         for mutation in (
@@ -3307,8 +4218,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         result = bot.shutdown()
 
-        self.assertTrue(result["success"])
-        self.assertFalse(result["persisted"])
+        self.assertFalse(result["success"])
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["durablePersisted"])
+        self.assertTrue(result["stateUnknown"])
         self.assertEqual(
             result["reason"],
             "SNAPSHOT_EVIDENCE_IDENTITY_INVALID",
@@ -3332,8 +4245,11 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         bot.account_snapshot_generation = 3
         result = bot.shutdown()
 
-        self.assertFalse(result["persisted"])
-        self.assertEqual(result["reason"], "SNAPSHOT_GENERATION_OLDER")
+        self.assertTrue(result["success"])
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["durablePersisted"])
+        self.assertFalse(result["captureAttempted"])
+        self.assertIsNone(result["reason"])
         with open(path, "r", encoding="utf-8") as handle:
             self.assertEqual(json.load(handle)["generation"], 4)
 
@@ -5528,7 +6444,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    def test_emergency_unlock_rejects_ready_state(self):
+    def test_emergency_unlock_is_idempotent_from_ready_state(self):
         state_before = dict(governance_state)
 
         try:
@@ -5537,14 +6453,14 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             governance_state["emergency_state"] = EMERGENCY_READY
             governance_state["last_emergency_result"] = None
 
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(emergency_unlock())
+            result = asyncio.run(emergency_unlock())
 
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "NOT_LOCKED",
-            )
+            self.assertIs(result["success"], True)
+            self.assertIs(result["unlocked"], True)
+            self.assertEqual(result["emergencyState"], EMERGENCY_READY)
+            self.assertIs(result["loopEnabled"], False)
+            self.assertIs(result["autoTradeEnabled"], False)
+            self.assertIs(result["executionEnabled"], False)
             self.assertFalse(governance_state["emergency_stop"])
             self.assertFalse(governance_state["execution_enabled"])
             self.assertEqual(
@@ -5593,325 +6509,6 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             )
         finally:
             self._restore_governance(state_before)
-
-    def test_emergency_unlock_rejects_action_required_state(self):
-        state_before = dict(governance_state)
-
-        try:
-            last_result = self._saved_emergency_result(
-                state=EMERGENCY_ACTION_REQUIRED,
-                result=EMERGENCY_RESULT_PARTIAL,
-                success=False,
-                completed=False,
-                partial=True,
-                retryable=True,
-            )
-            governance_state["execution_enabled"] = False
-            governance_state["emergency_stop"] = True
-            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
-            governance_state["last_emergency_result"] = last_result
-            self._set_current_emergency_operation(last_result)
-
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(emergency_unlock())
-
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "ACTION_REQUIRED",
-            )
-            self.assertTrue(governance_state["emergency_stop"])
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_ACTION_REQUIRED,
-            )
-            self.assertIs(
-                governance_state["last_emergency_result"],
-                last_result,
-            )
-        finally:
-            self._restore_governance(state_before)
-
-    def test_emergency_unlock_rejects_position_remaining(self):
-        state_before = dict(governance_state)
-
-        try:
-            last_result = self._saved_emergency_result(
-                position_remaining=True,
-            )
-            governance_state["execution_enabled"] = False
-            governance_state["emergency_stop"] = True
-            governance_state["emergency_state"] = EMERGENCY_LOCKED
-            governance_state["last_emergency_result"] = last_result
-            self._set_current_emergency_operation(last_result)
-
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(emergency_unlock())
-
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "POSITION_REMAINING",
-            )
-            self.assertTrue(governance_state["emergency_stop"])
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_LOCKED,
-            )
-        finally:
-            self._restore_governance(state_before)
-
-    def test_emergency_unlock_rejects_state_unknown(self):
-        state_before = dict(governance_state)
-
-        try:
-            last_result = self._saved_emergency_result(
-                state_unknown=True,
-            )
-            governance_state["execution_enabled"] = False
-            governance_state["emergency_stop"] = True
-            governance_state["emergency_state"] = EMERGENCY_LOCKED
-            governance_state["last_emergency_result"] = last_result
-            self._set_current_emergency_operation(last_result)
-
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(emergency_unlock())
-
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "STATE_UNKNOWN",
-            )
-            self.assertTrue(governance_state["emergency_stop"])
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_LOCKED,
-            )
-        finally:
-            self._restore_governance(state_before)
-
-    def test_emergency_unlock_rejects_execution_enabled_without_changing_it(
-        self,
-    ):
-        state_before = dict(governance_state)
-
-        try:
-            last_result = self._saved_emergency_result()
-            governance_state["execution_enabled"] = True
-            governance_state["emergency_stop"] = True
-            governance_state["emergency_state"] = EMERGENCY_LOCKED
-            governance_state["last_emergency_result"] = last_result
-            self._set_current_emergency_operation(last_result)
-
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(emergency_unlock())
-
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "EXECUTION_ENABLED",
-            )
-            self.assertTrue(governance_state["execution_enabled"])
-            self.assertTrue(governance_state["emergency_stop"])
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_LOCKED,
-            )
-            self.assertIs(
-                governance_state["last_emergency_result"],
-                last_result,
-            )
-        finally:
-            self._restore_governance(state_before)
-
-    def test_emergency_unlock_rejects_incomplete_or_inconsistent_result(
-        self,
-    ):
-        def missing_operation_id(last_result):
-            last_result.pop("operationId")
-
-        cases = [
-            (
-                "last-result-missing",
-                None,
-                None,
-                "LAST_RESULT_MISSING",
-            ),
-            (
-                "last-result-invalid",
-                "malformed",
-                None,
-                "LAST_RESULT_INVALID",
-            ),
-            (
-                "result-missing",
-                lambda last_result: last_result.pop("result"),
-                None,
-                "RESULT_MISSING",
-            ),
-            (
-                "result-partial",
-                lambda last_result: last_result.update({
-                    "result": EMERGENCY_RESULT_PARTIAL,
-                    "success": False,
-                }),
-                None,
-                "RESULT_NOT_SUCCESS",
-            ),
-            (
-                "result-failed",
-                lambda last_result: last_result.update({
-                    "result": EMERGENCY_RESULT_FAILED,
-                    "success": False,
-                }),
-                None,
-                "RESULT_NOT_SUCCESS",
-            ),
-            (
-                "success-false",
-                lambda last_result: last_result.update({
-                    "success": False,
-                }),
-                None,
-                "SUCCESS_NOT_TRUE",
-            ),
-            (
-                "success-missing",
-                lambda last_result: last_result.pop("success"),
-                None,
-                "SUCCESS_MISSING",
-            ),
-            (
-                "completed-false",
-                lambda last_result: last_result.update({
-                    "completed": False,
-                }),
-                None,
-                "COMPLETED_NOT_TRUE",
-            ),
-            (
-                "completed-missing",
-                lambda last_result: last_result.pop("completed"),
-                None,
-                "COMPLETED_MISSING",
-            ),
-            (
-                "state-unknown-true",
-                lambda last_result: last_result.update({
-                    "stateUnknown": True,
-                }),
-                None,
-                "STATE_UNKNOWN",
-            ),
-            (
-                "state-unknown-missing",
-                lambda last_result: last_result.pop("stateUnknown"),
-                None,
-                "STATE_UNKNOWN_MISSING",
-            ),
-            (
-                "position-remaining-true",
-                lambda last_result: last_result.update({
-                    "positionRemaining": True,
-                }),
-                None,
-                "POSITION_REMAINING",
-            ),
-            (
-                "position-remaining-missing",
-                lambda last_result: last_result.pop("positionRemaining"),
-                None,
-                "POSITION_REMAINING_MISSING",
-            ),
-            (
-                "current-operation-id-missing",
-                lambda _last_result: None,
-                None,
-                "CURRENT_OPERATION_ID_MISSING",
-            ),
-            (
-                "result-operation-id-missing",
-                missing_operation_id,
-                "emg_20260714T123456Z_unlock",
-                "RESULT_OPERATION_ID_MISSING",
-            ),
-            (
-                "operation-id-mismatch",
-                lambda _last_result: None,
-                "emg_20260714T999999Z_current",
-                "OPERATION_ID_MISMATCH",
-            ),
-            (
-                "old-operation-success",
-                lambda _last_result: None,
-                "emg_20260714T999999Z_retry",
-                "OPERATION_ID_MISMATCH",
-            ),
-        ]
-
-        for name, mutation, current_operation_id, reason in cases:
-            with self.subTest(name=name):
-                state_before = dict(governance_state)
-
-                try:
-                    last_result = (
-                        self._saved_emergency_result()
-                        if callable(mutation) or current_operation_id
-                        else mutation
-                    )
-
-                    if callable(mutation):
-                        mutation(last_result)
-
-                    governance_state["execution_enabled"] = False
-                    governance_state["emergency_stop"] = True
-                    governance_state["emergency_state"] = EMERGENCY_LOCKED
-                    governance_state["last_emergency_result"] = last_result
-
-                    if current_operation_id is None:
-                        governance_state[
-                            "current_emergency_operation_id"
-                        ] = None
-                    else:
-                        governance_state[
-                            "current_emergency_operation_id"
-                        ] = current_operation_id
-
-                    if (
-                        current_operation_id is None
-                        and isinstance(last_result, dict)
-                        and name != "current-operation-id-missing"
-                    ):
-                        self._set_current_emergency_operation(last_result)
-
-                    bot = BotManager()
-
-                    with patch(
-                        "backend.api.governance.get_bot_manager",
-                        return_value=bot,
-                    ):
-                        with self.assertRaises(HTTPException) as raised:
-                            asyncio.run(emergency_unlock())
-
-                    self.assertEqual(raised.exception.status_code, 409)
-                    self.assertEqual(
-                        raised.exception.detail["reason"],
-                        reason,
-                    )
-                    self.assertTrue(governance_state["emergency_stop"])
-                    self.assertEqual(
-                        governance_state["emergency_state"],
-                        EMERGENCY_LOCKED,
-                    )
-                    self.assertFalse(
-                        governance_state["execution_enabled"]
-                    )
-                    self.assertIs(
-                        governance_state["last_emergency_result"],
-                        last_result,
-                    )
-                finally:
-                    self._restore_governance(state_before)
 
     def test_pending_order_state_normalizes_manager_and_engine(
         self,
@@ -6141,138 +6738,6 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 )
                 self.assertIn("pending_order_state", status)
 
-    def test_emergency_unlock_rejects_pending_order_not_authoritative(
-        self,
-    ):
-        cases = [
-            (
-                "manager-false-engine-true",
-                False,
-                True,
-                "PENDING_ORDER_MISMATCH",
-            ),
-            (
-                "manager-false-engine-none",
-                False,
-                "engine-none",
-                "SNAPSHOT_NOT_SYNCED",
-            ),
-            (
-                "manager-false-engine-pending-none",
-                False,
-                None,
-                "PENDING_ORDER_UNKNOWN",
-            ),
-            (
-                "manager-false-engine-pending-missing",
-                False,
-                "missing",
-                "PENDING_ORDER_UNKNOWN",
-            ),
-            (
-                "manager-false-engine-pending-non-bool",
-                False,
-                {},
-                "PENDING_ORDER_UNKNOWN",
-            ),
-            (
-                "manager-true-engine-false",
-                True,
-                False,
-                "PENDING_ORDER_MISMATCH",
-            ),
-            (
-                "manager-true-engine-true",
-                True,
-                True,
-                "PENDING_ORDER_REMAINING",
-            ),
-            (
-                "manager-pending-missing",
-                "missing",
-                False,
-                "PENDING_ORDER_MANAGER_UNKNOWN",
-            ),
-            (
-                "manager-pending-non-bool",
-                {},
-                False,
-                "PENDING_ORDER_MANAGER_UNKNOWN",
-            ),
-            (
-                "engine-pending-read-exception",
-                False,
-                "raises",
-                "PENDING_ORDER_READ_FAILED",
-            ),
-        ]
-
-        for name, manager_pending, engine_pending, reason in cases:
-            with self.subTest(name=name):
-                state_before = dict(governance_state)
-
-                try:
-                    last_result = self._saved_emergency_result()
-                    governance_state["execution_enabled"] = False
-                    governance_state["emergency_stop"] = True
-                    governance_state["emergency_state"] = EMERGENCY_LOCKED
-                    governance_state["last_emergency_result"] = last_result
-                    self._set_current_emergency_operation(last_result)
-
-                    bot = BotManager()
-                    if manager_pending == "missing":
-                        delattr(bot, "pending_order")
-                    else:
-                        bot.pending_order = manager_pending
-
-                    if engine_pending == "engine-none":
-                        bot.engine = None
-                    elif engine_pending == "raises":
-                        bot.engine = self._pending_order_raising_engine()
-                    else:
-                        bot.engine = self._pending_order_engine(
-                            engine_pending
-                        )
-
-                    pending_state = (
-                        bot.get_authoritative_pending_order_state()
-                    )
-                    status = bot.get_status()
-
-                    self.assertTrue(status["pendingOrder"])
-                    self.assertEqual(pending_state["reason"], reason)
-
-                    with patch(
-                        "backend.api.governance.get_bot_manager",
-                        return_value=bot,
-                    ):
-                        with self.assertRaises(HTTPException) as raised:
-                            asyncio.run(emergency_unlock())
-
-                    self.assertEqual(raised.exception.status_code, 409)
-                    self.assertEqual(
-                        raised.exception.detail["reason"],
-                        reason,
-                    )
-                    self.assertTrue(governance_state["emergency_stop"])
-                    self.assertEqual(
-                        governance_state["emergency_state"],
-                        EMERGENCY_LOCKED,
-                    )
-                    self.assertFalse(
-                        governance_state["execution_enabled"]
-                    )
-                    self.assertIs(
-                        governance_state["last_emergency_result"],
-                        last_result,
-                    )
-                    self.assertFalse(bot._running)
-                    self.assertEqual(bot.lifecycle_state, "STOPPED")
-                    self.assertFalse(status["loopEnabled"])
-                    self.assertFalse(status["autoTradeEnabled"])
-                finally:
-                    self._restore_governance(state_before)
-
     def test_status_and_unlock_guard_share_pending_order_authority(self):
         cases = [
             (
@@ -6371,18 +6836,14 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     "record_emergency_timeline_event",
                     side_effect=RuntimeError("timeline failed"),
                 ):
-                    with self.assertRaises(HTTPException) as raised:
-                        asyncio.run(emergency_unlock())
+                    result = asyncio.run(emergency_unlock())
 
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(
-                raised.exception.detail["reason"],
-                "UNLOCK_FAILED",
-            )
-            self.assertTrue(governance_state["emergency_stop"])
+            self.assertIs(result["success"], True)
+            self.assertIn("UNLOCK_LOG_WRITE_FAILED", result["warnings"])
+            self.assertFalse(governance_state["emergency_stop"])
             self.assertEqual(
                 governance_state["emergency_state"],
-                EMERGENCY_LOCKED,
+                EMERGENCY_READY,
             )
             self.assertFalse(governance_state["execution_enabled"])
             self.assertIs(
@@ -7105,32 +7566,6 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self.assertIs(
                 governance_state["last_emergency_result"],
                 last_result,
-            )
-        finally:
-            self._restore_governance(state_before)
-
-    def test_emergency_timeline_does_not_record_unlock_rejection(self):
-        state_before = dict(governance_state)
-
-        try:
-            last_result = self._saved_emergency_result(
-                position_remaining=True,
-            )
-            governance_state["execution_enabled"] = False
-            governance_state["emergency_stop"] = True
-            governance_state["emergency_state"] = EMERGENCY_LOCKED
-            governance_state["last_emergency_result"] = last_result
-            self._set_current_emergency_operation(last_result)
-            governance_state["emergency_timeline"] = []
-
-            with self.assertRaises(HTTPException):
-                asyncio.run(emergency_unlock())
-
-            self.assertEqual(self._emergency_timeline_events(), [])
-            self.assertTrue(governance_state["emergency_stop"])
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_LOCKED,
             )
         finally:
             self._restore_governance(state_before)
@@ -9924,6 +10359,124 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             positions_router.set_engine(None)
             execution_runtime.set_engine(original_runtime_engine)
+            self._restore_governance(state_before)
+
+
+    def test_emergency_unlock_returns_action_required_to_ready(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = False
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
+            governance_state["last_emergency_result"] = (
+                self._saved_emergency_result(
+                    state=EMERGENCY_ACTION_REQUIRED,
+                    result=EMERGENCY_RESULT_FAILED,
+                    success=False,
+                    completed=False,
+                    state_unknown=True,
+                )
+            )
+            governance_state["current_emergency_operation_id"] = None
+            bot = BotManager()
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_unlock())
+
+            self.assertIs(result["success"], True)
+            self.assertIs(result["unlocked"], True)
+            self.assertIs(result["emergencyLocked"], False)
+            self.assertEqual(result["emergencyState"], EMERGENCY_READY)
+            self.assertIs(result["loopEnabled"], False)
+            self.assertIs(result["autoTradeEnabled"], False)
+            self.assertIs(result["executionEnabled"], False)
+            self.assertIs(governance_state["execution_enabled"], False)
+            self.assertIs(governance_state["emergency_stop"], False)
+            self.assertEqual(
+                governance_state["emergency_state"],
+                EMERGENCY_READY,
+            )
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_unlock_does_not_require_snapshot_or_recheck(self):
+        cases = [
+            "SNAPSHOT_MISSING",
+            "SNAPSHOT_STALE",
+            "SNAPSHOT_NOT_SYNCED",
+            "MODE_UNKNOWN",
+            "ENGINE_UNAVAILABLE",
+        ]
+
+        for reason in cases:
+            with self.subTest(reason=reason):
+                state_before = dict(governance_state)
+
+                try:
+                    governance_state["execution_enabled"] = False
+                    governance_state["emergency_stop"] = True
+                    governance_state["emergency_state"] = (
+                        EMERGENCY_ACTION_REQUIRED
+                    )
+                    governance_state["last_emergency_result"] = {
+                        "result": EMERGENCY_RESULT_FAILED,
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": True,
+                        "positionRemaining": None,
+                        "error_code": reason,
+                    }
+                    governance_state[
+                        "current_emergency_operation_id"
+                    ] = None
+                    bot = BotManager()
+                    bot.engine = None
+
+                    with patch(
+                        "backend.api.governance.get_bot_manager",
+                        return_value=bot,
+                    ):
+                        result = asyncio.run(emergency_unlock())
+
+                    self.assertIs(result["success"], True)
+                    self.assertEqual(
+                        result["emergencyState"],
+                        EMERGENCY_READY,
+                    )
+                    self.assertIs(result["loopEnabled"], False)
+                    self.assertIs(result["autoTradeEnabled"], False)
+                    self.assertIs(result["executionEnabled"], False)
+                    self.assertIn(reason, result["warnings"])
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_unlock_forces_execution_off(self):
+        state_before = dict(governance_state)
+
+        try:
+            governance_state["execution_enabled"] = True
+            governance_state["emergency_stop"] = True
+            governance_state["emergency_state"] = EMERGENCY_LOCKED
+            governance_state["last_emergency_result"] = None
+            governance_state["current_emergency_operation_id"] = None
+            bot = BotManager()
+
+            with patch(
+                "backend.api.governance.get_bot_manager",
+                return_value=bot,
+            ):
+                result = asyncio.run(emergency_unlock())
+
+            self.assertIs(result["success"], True)
+            self.assertIs(result["executionEnabled"], False)
+            self.assertIs(governance_state["execution_enabled"], False)
+        finally:
             self._restore_governance(state_before)
 
 

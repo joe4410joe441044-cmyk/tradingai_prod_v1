@@ -25,7 +25,9 @@ from backend import config as backend_config
 import json
 import traceback
 import math
+import errno
 import os
+import stat
 import threading
 import time
 import uuid
@@ -2467,6 +2469,44 @@ class BotManager:
                 "stateUnknown": cleanup_succeeded is not True,
             }
 
+    def _shutdown_origin_metadata(
+        self,
+        evidence_snapshot=None,
+        origin_mode="NO_DURABLE_EVIDENCE",
+        evidence_reused=False,
+    ):
+
+        """Describe shutdown process and durable evidence origins separately.
+
+        ``runtimeInstanceId`` is retained as a compatibility alias for
+        ``evidenceRuntimeInstanceId``; it never identifies the shutdown
+        process when no durable evidence exists.
+        """
+
+        evidence_runtime_id = (
+            evidence_snapshot.get("evidenceRuntimeInstanceId")
+            or evidence_snapshot.get("runtimeInstanceId")
+            if isinstance(evidence_snapshot, dict)
+            else None
+        )
+        return {
+            "shutdownRuntimeInstanceId": self.runtime_instance_id,
+            "evidenceRuntimeInstanceId": evidence_runtime_id,
+            "runtimeInstanceId": evidence_runtime_id,
+            "generation": (
+                evidence_snapshot.get("generation")
+                if isinstance(evidence_snapshot, dict)
+                else None
+            ),
+            "capturedAt": (
+                evidence_snapshot.get("capturedAt")
+                if isinstance(evidence_snapshot, dict)
+                else None
+            ),
+            "originMode": origin_mode,
+            "evidenceReused": evidence_reused is True,
+        }
+
     def shutdown(self):
 
         """Persist stopped-paper authority before process teardown."""
@@ -2481,14 +2521,120 @@ class BotManager:
                     add_log("SHUTDOWN_SNAPSHOT_NOT_AVAILABLE: LIVE_MODE")
 
                 # stop() persists paper authority before clearing self.engine.
-                return self.stop()
+                stopped = self.stop()
+                stopped_successfully = (
+                    isinstance(stopped, dict)
+                    and stopped.get("success") is True
+                    and stopped.get("completed") is True
+                    and stopped.get("stateUnknown") is False
+                )
+                capture_required = mode == "paper"
+                capture_succeeded = (
+                    capture_required
+                    and (
+                        stopped_successfully
+                        or (
+                            isinstance(stopped, dict)
+                            and stopped.get("reason")
+                            == "SNAPSHOT_PERSIST_FAILED"
+                        )
+                    )
+                )
+                snapshot = self.account_snapshot
+                trusted_snapshot = (
+                    snapshot
+                    if capture_required and stopped_successfully
+                    else None
+                )
+                return {
+                    "status": (
+                        stopped.get("status")
+                        if isinstance(stopped, dict)
+                        else "error"
+                    ),
+                    "success": stopped_successfully,
+                    "completed": stopped_successfully,
+                    "captureRequired": capture_required,
+                    "captureAttempted": capture_required,
+                    "captureSucceeded": capture_succeeded,
+                    "durablePersisted": (
+                        stopped_successfully if capture_required else False
+                    ),
+                    # Retain the old field while callers migrate to the
+                    # explicit durable result contract.
+                    "persisted": (
+                        stopped_successfully if capture_required else False
+                    ),
+                    "stateUnknown": not stopped_successfully,
+                    "reason": (
+                        None
+                        if stopped_successfully
+                        else stopped.get("reason")
+                        if isinstance(stopped, dict)
+                        else "SHUTDOWN_STOP_FAILED"
+                    ),
+                    "engineAvailable": True,
+                    "snapshotSource": (
+                        snapshot.get("source")
+                        if isinstance(snapshot, dict)
+                        else None
+                    ),
+                    "durablePath": self.stopped_paper_durable_snapshot_path,
+                    "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                    **self._shutdown_origin_metadata(
+                        trusted_snapshot,
+                        origin_mode=(
+                            "CURRENT_PROCESS_CAPTURE"
+                            if trusted_snapshot is not None
+                            else "NO_DURABLE_EVIDENCE"
+                        ),
+                        evidence_reused=False,
+                    ),
+                }
+
+            durable_snapshot, durable_reason = (
+                self._load_stopped_paper_durable_snapshot(
+                    allow_current_runtime=True,
+                )
+            )
+            if durable_snapshot is not None:
+                return {
+                    "status": "stopped",
+                    "success": True,
+                    "completed": True,
+                    "captureRequired": False,
+                    "captureAttempted": False,
+                    "captureSucceeded": False,
+                    "durablePersisted": True,
+                    "persisted": True,
+                    "stateUnknown": False,
+                    "reason": None,
+                    "engineAvailable": False,
+                    "snapshotSource": durable_snapshot.get("source"),
+                    "durablePath": self.stopped_paper_durable_snapshot_path,
+                    "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                    **self._shutdown_origin_metadata(
+                        durable_snapshot,
+                        origin_mode="EXISTING_DURABLE",
+                        evidence_reused=True,
+                    ),
+                }
 
             snapshot = self.account_snapshot
             authority = self._stopped_paper_shutdown_evidence_state(
                 snapshot
             )
             if authority.get("valid") is not True:
-                reason = authority.get("reason") or "STATE_UNKNOWN"
+                authority_reason = authority.get("reason")
+                reason = (
+                    durable_reason
+                    if authority_reason in {
+                        None,
+                        "SNAPSHOT_UNAVAILABLE",
+                        "SNAPSHOT_SOURCE_UNKNOWN",
+                    }
+                    else authority_reason
+                ) or "STATE_UNKNOWN"
                 self.account_snapshot = (
                     self._stopped_paper_unknown_snapshot(
                         snapshot,
@@ -2499,9 +2645,25 @@ class BotManager:
                     f"SHUTDOWN_SNAPSHOT_NOT_AVAILABLE: {reason}"
                 )
                 return {
-                    "success": True,
+                    "status": "error",
+                    "success": False,
+                    "completed": False,
+                    "captureRequired": True,
+                    "captureAttempted": False,
+                    "captureSucceeded": False,
+                    "durablePersisted": False,
                     "persisted": False,
+                    "stateUnknown": True,
                     "reason": reason,
+                    "engineAvailable": False,
+                    "snapshotSource": (
+                        snapshot.get("source")
+                        if isinstance(snapshot, dict)
+                        else None
+                    ),
+                    "durablePath": self.stopped_paper_durable_snapshot_path,
+                    "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                    **self._shutdown_origin_metadata(),
                 }
 
             persisted, reason = (
@@ -2518,9 +2680,21 @@ class BotManager:
                         f"{failure_reason}"
                     )
                     return {
-                        "success": True,
+                        "status": "error",
+                        "success": False,
+                        "completed": False,
+                        "captureRequired": True,
+                        "captureAttempted": False,
+                        "captureSucceeded": False,
+                        "durablePersisted": False,
                         "persisted": False,
+                        "stateUnknown": True,
                         "reason": failure_reason,
+                        "engineAvailable": False,
+                        "snapshotSource": snapshot.get("source"),
+                        "durablePath": self.stopped_paper_durable_snapshot_path,
+                        "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                        **self._shutdown_origin_metadata(),
                     }
                 logger.error(
                     "SNAPSHOT_PERSIST_FAILED during shutdown: %s",
@@ -2533,15 +2707,43 @@ class BotManager:
                     )
                 )
                 return {
-                    "success": True,
+                    "status": "error",
+                    "success": False,
+                    "completed": False,
+                    "captureRequired": True,
+                    "captureAttempted": False,
+                    "captureSucceeded": False,
+                    "durablePersisted": False,
                     "persisted": False,
+                    "stateUnknown": True,
                     "reason": failure_reason,
+                    "engineAvailable": False,
+                    "snapshotSource": snapshot.get("source"),
+                    "durablePath": self.stopped_paper_durable_snapshot_path,
+                    "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                    **self._shutdown_origin_metadata(),
                 }
 
             return {
+                "status": "stopped",
                 "success": True,
+                "completed": True,
+                "captureRequired": True,
+                "captureAttempted": False,
+                "captureSucceeded": False,
+                "durablePersisted": True,
                 "persisted": True,
+                "stateUnknown": False,
                 "reason": None,
+                "engineAvailable": False,
+                "snapshotSource": snapshot.get("source"),
+                "durablePath": self.stopped_paper_durable_snapshot_path,
+                "eventId": "STOPPED_PAPER_SHUTDOWN_CAPTURE",
+                **self._shutdown_origin_metadata(
+                    snapshot,
+                    origin_mode="EXISTING_MEMORY_EVIDENCE_PERSISTED",
+                    evidence_reused=True,
+                ),
             }
 
     # =========================
@@ -3705,6 +3907,21 @@ class BotManager:
                 os.fsync(handle.fileno())
 
             os.replace(temp_path, path)
+            directory_descriptor = None
+            try:
+                directory_flags = os.O_RDONLY
+                if hasattr(os, "O_DIRECTORY"):
+                    directory_flags |= os.O_DIRECTORY
+                if hasattr(os, "O_CLOEXEC"):
+                    directory_flags |= os.O_CLOEXEC
+                directory_descriptor = os.open(
+                    directory or ".",
+                    directory_flags,
+                )
+                os.fsync(directory_descriptor)
+            finally:
+                if directory_descriptor is not None:
+                    os.close(directory_descriptor)
         finally:
             try:
                 if os.path.exists(temp_path):
@@ -3779,28 +3996,184 @@ class BotManager:
             )
             return False
 
-    def _load_stopped_paper_durable_snapshot(self):
+    @staticmethod
+    def _read_stopped_paper_durable_snapshot_file(snapshot_path):
 
-        path = self.stopped_paper_durable_snapshot_path
+        """Read one path-bound regular JSON file without following links."""
 
-        if not path or not os.path.exists(path):
-            return None, "DURABLE_SNAPSHOT_MISSING"
+        if not snapshot_path:
+            return None, "DURABLE_SNAPSHOT_MISSING", False
 
         try:
-            with open(path, "r", encoding="utf-8") as handle:
-                snapshot = json.load(handle)
-        except json.JSONDecodeError:
-            return None, "DURABLE_SNAPSHOT_CORRUPT"
+            path_stat = os.lstat(snapshot_path)
+        except FileNotFoundError:
+            return None, "DURABLE_SNAPSHOT_MISSING", False
         except Exception:
-            return None, "DURABLE_SNAPSHOT_READ_FAILED"
+            return None, "DURABLE_SNAPSHOT_READ_FAILED", False
+
+        if stat.S_ISLNK(path_stat.st_mode):
+            return (
+                None,
+                "DURABLE_SNAPSHOT_SYMLINK_NOT_ALLOWED",
+                True,
+            )
+        if not stat.S_ISREG(path_stat.st_mode):
+            return None, "DURABLE_SNAPSHOT_NOT_REGULAR_FILE", True
+
+        descriptor = None
+        try:
+            flags = os.O_RDONLY
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = os.open(snapshot_path, flags)
+            opened_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or path_stat.st_dev != opened_stat.st_dev
+                or path_stat.st_ino != opened_stat.st_ino
+            ):
+                return (
+                    None,
+                    "DURABLE_SNAPSHOT_FILE_IDENTITY_CHANGED",
+                    True,
+                )
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                descriptor = None
+                return json.load(handle), None, True
+        except json.JSONDecodeError:
+            return None, "DURABLE_SNAPSHOT_CORRUPT", True
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOENT}:
+                return (
+                    None,
+                    "DURABLE_SNAPSHOT_FILE_IDENTITY_CHANGED",
+                    True,
+                )
+            return None, "DURABLE_SNAPSHOT_READ_FAILED", True
+        except Exception:
+            return None, "DURABLE_SNAPSHOT_READ_FAILED", True
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def _load_stopped_paper_durable_snapshot(
+        self,
+        allow_current_runtime=False,
+    ):
+
+        snapshot, read_reason, _ = (
+            self._read_stopped_paper_durable_snapshot_file(
+                self.stopped_paper_durable_snapshot_path
+            )
+        )
+        if snapshot is None:
+            return None, read_reason or "DURABLE_SNAPSHOT_READ_FAILED"
 
         validation = self._validate_stopped_paper_durable_snapshot(
-            snapshot
+            snapshot,
+            allow_current_runtime=allow_current_runtime,
         )
         if validation.get("valid") is not True:
             return None, validation.get("reason") or "STATE_UNKNOWN"
 
         return snapshot, None
+
+    def inspect_stopped_paper_durable_snapshot(self, path=None):
+
+        """Strictly inspect durable evidence without mutating runtime state."""
+
+        snapshot_path = path or self.stopped_paper_durable_snapshot_path
+        result = {
+            "valid": False,
+            "reason": None,
+            "durableExists": False,
+            "snapshot": None,
+            "evidenceRuntimeInstanceId": None,
+            "generation": None,
+            "capturedAt": None,
+            "source": None,
+            "stateUnknown": True,
+            "schemaVersion": None,
+            "snapshotType": None,
+            "evidenceGeneration": None,
+        }
+
+        snapshot, read_reason, durable_exists = (
+            self._read_stopped_paper_durable_snapshot_file(snapshot_path)
+        )
+        result["durableExists"] = durable_exists is True
+        if snapshot is None:
+            result["reason"] = read_reason or "DURABLE_SNAPSHOT_READ_FAILED"
+            return result
+
+        validation = self._validate_stopped_paper_durable_snapshot(
+            snapshot,
+            allow_current_runtime=True,
+        )
+        if validation.get("valid") is not True:
+            result["reason"] = validation.get("reason") or "STATE_UNKNOWN"
+            return result
+
+        result.update({
+            "valid": True,
+            "reason": None,
+            "snapshot": snapshot,
+            "evidenceRuntimeInstanceId": snapshot.get(
+                "evidenceRuntimeInstanceId"
+            ),
+            "generation": snapshot.get("generation"),
+            "capturedAt": snapshot.get("capturedAt"),
+            "source": snapshot.get("source"),
+            "stateUnknown": snapshot.get("stateUnknown"),
+            "schemaVersion": snapshot.get("schemaVersion"),
+            "snapshotType": snapshot.get("snapshotType"),
+            "evidenceGeneration": snapshot.get("evidenceGeneration"),
+        })
+        return result
+
+    def get_stopped_paper_snapshot_status(self):
+
+        inspection = self.inspect_stopped_paper_durable_snapshot()
+        evidence_runtime_id = inspection.get(
+            "evidenceRuntimeInstanceId"
+        )
+        rebound_eligible = (
+            inspection.get("valid") is True
+            and evidence_runtime_id != self.runtime_instance_id
+            and self.engine is None
+            and self._running is False
+            and self.lifecycle_state == "STOPPED"
+            and governance_state.get("execution_enabled") is False
+            and self.session_id == 0
+            and self.account_snapshot_generation == 0
+            and governance_state.get("emergency_state") == EMERGENCY_READY
+            and governance_state.get("emergency_stop") is False
+            and str(self.config.get("mode", "paper")).strip().lower()
+            == "paper"
+            and self.config.get("dry_run", True) is True
+            and backend_config.TRADE_MODE == "paper"
+            and backend_config.ALLOW_LIVE is False
+        )
+
+        return {
+            "valid": inspection.get("valid") is True,
+            "reason": inspection.get("reason"),
+            "durableExists": inspection.get("durableExists") is True,
+            "currentRuntimeInstanceId": self.runtime_instance_id,
+            "evidenceRuntimeInstanceId": evidence_runtime_id,
+            "generation": inspection.get("generation"),
+            "capturedAt": inspection.get("capturedAt"),
+            "source": inspection.get("source"),
+            "stateUnknown": inspection.get("stateUnknown") is not False,
+            "engineAvailable": self.engine is not None,
+            "lifecycleState": self.lifecycle_state,
+            "reboundEligible": rebound_eligible,
+            "schemaVersion": inspection.get("schemaVersion"),
+            "snapshotType": inspection.get("snapshotType"),
+            "evidenceGeneration": inspection.get("evidenceGeneration"),
+        }
 
     def _rebind_stopped_paper_durable_snapshot(
         self,
@@ -6810,12 +7183,8 @@ class BotManager:
                 False,
             )
         )
-        emergency_state = (
-            "LOCKED"
-            if emergency_locked
-            else "UNLOCKED"
-        )
         emergency_status = build_emergency_status()
+        emergency_state = emergency_status["state"]
 
         runtime_health = build_runtime_health_snapshot(
             running=self._running,
@@ -7079,6 +7448,11 @@ class BotManager:
             "emergencyState": emergency_state,
 
             "emergency": emergency_status,
+
+            "emergencyReturnWarnings": emergency_status.get(
+                "returnWarnings",
+                [],
+            ),
 
             "real_qty": risk_state.get(
                 "realQty"

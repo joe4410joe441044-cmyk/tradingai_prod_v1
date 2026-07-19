@@ -8,7 +8,6 @@ export const ENDPOINTS = {
     botStop: "/api/bot/stop",
     execution: "/api/governance/execution",
     emergency: "/api/governance/emergency-orchestrate",
-    retry: "/api/governance/emergency/retry",
     unlock: "/api/governance/emergency/unlock",
 };
 
@@ -139,7 +138,6 @@ const initialState = () => ({
     lastResult: null,
     timeline: [],
     nextEmergencyOutcome: "success",
-    nextRetryOutcome: "success",
 });
 
 const buildRuntimeHealth = (state) => {
@@ -663,35 +661,6 @@ export function createEmergencyMock() {
         await jsonFulfill(route, toApiEmergencyResult(result));
     };
 
-    const handleRetry = async (route, path) => {
-        increment(path);
-
-        if (await handleQueuedFailure(route, path)) {
-            return;
-        }
-
-        if (state.emergencyState !== "ACTION_REQUIRED") {
-            await jsonFulfill(
-                route,
-                makeHttpError(409, "NOT_ACTION_REQUIRED"),
-                409,
-            );
-            return;
-        }
-
-        const operationId = beginOperation();
-
-        if (routeDelays[path]) {
-            await delay(routeDelays[path]);
-        }
-
-        const result = state.nextRetryOutcome === "failure"
-            ? completeActionRequired(operationId)
-            : completeSuccess(operationId);
-
-        await jsonFulfill(route, toApiEmergencyResult(result));
-    };
-
     const handleUnlock = async (route, path) => {
         increment(path);
 
@@ -701,16 +670,10 @@ export function createEmergencyMock() {
 
         const lastResult = state.lastResult;
         const safeToUnlock = (
-            state.emergencyState === "LOCKED"
+            state.emergencyState !== "READY"
+            && state.emergencyState !== "PROCESSING"
             && state.emergencyLocked === true
             && state.emergencyStop === true
-            && state.executionEnabled === false
-            && state.pendingOrder === false
-            && lastResult?.result === "SUCCESS"
-            && lastResult?.success === true
-            && lastResult?.completed === true
-            && lastResult?.stateUnknown === false
-            && lastResult?.positionRemaining === false
         );
 
         if (!safeToUnlock) {
@@ -821,11 +784,6 @@ export function createEmergencyMock() {
             return;
         }
 
-        if (path === ENDPOINTS.retry) {
-            await handleRetry(route, path);
-            return;
-        }
-
         if (path === ENDPOINTS.unlock) {
             await handleUnlock(route, path);
             return;
@@ -872,9 +830,6 @@ export function createEmergencyMock() {
         seedProcessing,
         setNextEmergencyOutcome(outcome) {
             state.nextEmergencyOutcome = outcome;
-        },
-        setNextRetryOutcome(outcome) {
-            state.nextRetryOutcome = outcome;
         },
         setRouteDelay(path, ms) {
             routeDelays[path] = ms;

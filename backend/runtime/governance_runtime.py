@@ -7,7 +7,6 @@ import uuid
 # ============================================================
 # GOVERNANCE RUNTIME STATE
 # ============================================================
-
 governance_state = {
 
     "execution_enabled": False,
@@ -460,6 +459,10 @@ def build_emergency_status():
         "locked": emergency_locked,
         "state": state,
         "lastResult": governance_state.get("last_emergency_result"),
+        "returnWarnings": governance_state.get(
+            "emergency_return_warnings",
+            [],
+        ),
     }
 
 
@@ -572,11 +575,16 @@ def emergency_unlock_block_reason(pending_order):
     return None
 
 
-def unlock_emergency_lock(pending_order):
-    try:
-        reason = emergency_unlock_block_reason(pending_order)
-    except Exception:
-        reason = "UNLOCK_GUARD_EXCEPTION"
+def unlock_emergency_lock(pending_order=None, warnings=None):
+    state = governance_state.get(
+        "emergency_state",
+        EMERGENCY_READY,
+    )
+    reason = (
+        "PROCESSING"
+        if state == EMERGENCY_PROCESSING
+        else None
+    )
 
     if reason is not None:
         return {
@@ -586,6 +594,7 @@ def unlock_emergency_lock(pending_order):
             "emergency": build_emergency_status(),
         }
 
+    return_warnings = list(dict.fromkeys(warnings or []))
     last_result = governance_state.get("last_emergency_result")
     operation_id = (
         last_result.get("operationId")
@@ -598,6 +607,20 @@ def unlock_emergency_lock(pending_order):
         else f"unknown:{utc_now_iso()}:EMERGENCY_UNLOCKED"
     )
     try:
+        governance_state["execution_enabled"] = False
+        governance_state["emergency_stop"] = False
+        governance_state["emergency_state"] = EMERGENCY_READY
+        governance_state["current_emergency_operation_id"] = None
+        governance_state["emergency_return_warnings"] = return_warnings
+    except Exception:
+        return {
+            "success": False,
+            "unlocked": False,
+            "reason": "UNLOCK_STATE_UPDATE_FAILED",
+            "emergency": build_emergency_status(),
+        }
+
+    try:
         record_emergency_timeline_event(
             event="EMERGENCY_UNLOCKED",
             state=EMERGENCY_READY,
@@ -606,21 +629,14 @@ def unlock_emergency_lock(pending_order):
             details={
                 "operationId": operation_id,
                 "previousState": EMERGENCY_LOCKED,
+                "warnings": return_warnings,
             },
-            severity="INFO",
+            severity="WARNING" if return_warnings else "INFO",
             event_key=event_key,
         )
     except Exception:
-        return {
-            "success": False,
-            "unlocked": False,
-            "reason": "UNLOCK_FAILED",
-            "emergency": build_emergency_status(),
-        }
-
-    governance_state["emergency_stop"] = False
-    governance_state["emergency_state"] = EMERGENCY_READY
-    governance_state["current_emergency_operation_id"] = None
+        return_warnings.append("UNLOCK_LOG_WRITE_FAILED")
+        governance_state["emergency_return_warnings"] = return_warnings
 
     return {
         "success": True,
@@ -631,6 +647,13 @@ def unlock_emergency_lock(pending_order):
             "execution_enabled",
             False,
         ),
+        "emergencyLocked": False,
+        "emergencyState": EMERGENCY_READY,
+        "loopEnabled": False,
+        "loopState": "STOPPED",
+        "autoTradeEnabled": False,
+        "executionEnabled": False,
+        "warnings": return_warnings,
         "emergency": build_emergency_status(),
     }
 # ============================================================
