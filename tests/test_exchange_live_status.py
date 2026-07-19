@@ -2821,7 +2821,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    def test_stopped_paper_snapshot_operation_mismatch_blocks_unlock_authority(
+    def test_stopped_paper_snapshot_operation_mismatch_does_not_block_emergency(
         self,
     ):
         state_before = self._set_governance(
@@ -2885,21 +2885,39 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     bot.get_authoritative_pending_order_state()
                 )
 
-            self.assertFalse(stopped_state["safe"])
+            self.assertTrue(stopped_state["safe"])
             self.assertEqual(
                 stopped_state["reason"],
-                "SNAPSHOT_OPERATION_ID_MISMATCH",
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
             )
-            self.assertFalse(
+            self.assertTrue(
                 stopped_state["snapshot_operation_state"]["valid"]
             )
+            self.assertTrue(pending_state["known"])
+            self.assertFalse(pending_state["pending"])
+            self.assertTrue(pending_state["safe"])
             self.assertEqual(
                 pending_state["reason"],
-                "SNAPSHOT_OPERATION_ID_MISMATCH",
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
             )
+            self.assertIsNone(
+                emergency_unlock_block_reason(pending_state)
+            )
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                result = bot.run_emergency_orchestrator()
+
+            self.assertIs(result["success"], True)
+            self.assertIs(result["completed"], True)
+            self.assertIs(result["partial"], False)
+            self.assertIs(result["state_unknown"], False)
+            self.assertIs(result["emergency_locked"], True)
             self.assertEqual(
-                emergency_unlock_block_reason(pending_state),
-                "SNAPSHOT_OPERATION_ID_MISMATCH",
+                governance_state["emergency_state"],
+                EMERGENCY_LOCKED,
             )
         finally:
             self._restore_governance(state_before)

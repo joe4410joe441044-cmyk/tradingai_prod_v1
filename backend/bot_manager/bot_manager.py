@@ -5440,7 +5440,8 @@ class BotManager:
         }
 
         if (
-            expected_operation_id
+            refresh_snapshot is True
+            and expected_operation_id
             and (
                 snapshot.get("source")
                 == "stopped_paper_preserved_runtime_state"
