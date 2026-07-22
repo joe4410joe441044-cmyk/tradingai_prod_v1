@@ -7,6 +7,7 @@ import App from "./App.jsx";
 import "./App.css";
 import "./index.css";
 import "./styles/dashboard.css";
+import "./styles/market-intelligence.css";
 
 const rootElement = document.getElementById("root");
 
