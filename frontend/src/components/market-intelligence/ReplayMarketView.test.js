@@ -57,6 +57,7 @@ test("empty market view renders accessible sections and empty states", async () 
         "Data Quality", "Diagnostics"]) assert.match(text, new RegExp(heading));
     assert.match(text, /ORDER BOOK EMPTY（板情報なし）/);
     assert.match(text, /RECENT TRADES EMPTY/);
+    assert.doesNotMatch(text, /Time Marker Overlay|NO TIME MARKERS/);
     assert.equal(nodes.some(({ props }) => props?.["aria-labelledby"] === "mi-market-view-title"), true);
     assert.equal(nodes.filter(({ type }) => type === "details").length, 2);
     assert.equal(nodes.filter(({ type }) => type === "details").every(({ props }) => props.open === undefined), true);
@@ -76,6 +77,7 @@ test("loaded market view renders tables, side labels, summaries, and quality", a
         assert.match(text, new RegExp(expected));
     assert.match(text, /Market Analysis Details/);
     assert.match(text, /Marker Details/);
+    assert.doesNotMatch(text, /Time Marker Overlay|NO TIME MARKERS/);
     assert.equal(nodes.some(({ props }) => props?.className === "mi-order-book__marker" && textOf({ props }) === "BUY"), true);
 });
 

@@ -1,3 +1,4 @@
+import AIIntelligenceWorkspace from "../components/market-intelligence/AIIntelligenceWorkspace";
 import DecisionRailway, { DecisionRailwaySummary } from "../components/market-intelligence/DecisionRailway";
 import MarketIntelligenceErrorBoundary from "../components/market-intelligence/MarketIntelligenceErrorBoundary";
 import MarketIntelligenceToolbar from "../components/market-intelligence/MarketIntelligenceToolbar";
@@ -16,15 +17,19 @@ export default function MarketIntelligencePage() {
                 <main className="mi-page">
                     <h1 className="mi-visually-hidden">MARKET INTELLIGENCE（市場インテリジェンス）</h1>
                     <MarketIntelligenceToolbar />
-                    <section aria-label="Primary market intelligence" className="mi-primary-view">
-                        <ReplayMarketView />
-                        <DecisionRailwaySummary />
-                        <ReplayController />
-                    </section>
-                    <MarketIntelligenceWorkspace leftPanel={<DecisionRailway showSummary={false} />}
-                        rightPanel={<ReplayInspector />} />
-                    <PositionTimeline />
-                    <ReplayTimeline />
+                    <MarketIntelligenceWorkspace
+                        leftPanel={<ReplayMarketView />}
+                        rightPanel={<AIIntelligenceWorkspace finalDecision={<DecisionRailwaySummary />} />}
+                        bottomPanel={<>
+                            <ReplayController />
+                            <div className="mi-replay-workspace__analysis">
+                                <DecisionRailway showSummary={false} />
+                                <ReplayInspector />
+                            </div>
+                            <PositionTimeline />
+                            <ReplayTimeline />
+                        </>}
+                    />
                 </main>
             </MarketIntelligenceProvider>
         </MarketIntelligenceErrorBoundary>

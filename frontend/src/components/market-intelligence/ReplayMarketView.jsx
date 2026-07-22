@@ -3,7 +3,7 @@ import { useState } from "react";
 import { buildOrderBookDomDisplay, buildRecentTradesDisplay, buildReplayMarketViewModel } from "../../features/market-intelligence/replay/replayMarketViewModel.js";
 import { buildReplayMarkerOverlayModel } from "../../features/market-intelligence/replay/replayMarkerOverlayModel.js";
 import { useMarketIntelligence } from "../../state/market-intelligence/MarketIntelligenceProvider.jsx";
-import ReplayMarkerOverlay, { TimeMarkerLayer } from "./ReplayMarkerOverlay.jsx";
+import ReplayMarkerOverlay from "./ReplayMarkerOverlay.jsx";
 import { bilingual } from "./marketIntelligenceLabels.js";
 
 const FieldGrid = ({ fields }) => (
@@ -134,7 +134,6 @@ export function ReplayMarketViewContent({
                             </tr>
                         ))}</tbody>
                     </table></div>}
-                    <TimeMarkerLayer model={markerModel} />
                     {!model.isEmpty && <><h4>Trade Summary</h4>
                         <FieldGrid fields={[
                             ["Visible Trades", trades.count], ["BUY Count", trades.buyCount], ["SELL Count", trades.sellCount],
