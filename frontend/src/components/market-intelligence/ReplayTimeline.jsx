@@ -17,7 +17,6 @@ export function ReplayTimelineView({ model }) {
                 <div><dt>Total（総イベント数）</dt><dd>{summary.totalEvents}</dd></div>
                 <div><dt>Reached（到達イベント）</dt><dd>{summary.reachedCount}</dd></div>
                 <div><dt>Past（過去イベント）</dt><dd>{summary.pastCount}</dd></div>
-                <div><dt>Future（未来イベント）</dt><dd>{summary.futureCount}</dd></div>
                 <div><dt>{bilingual("currentEvent")}</dt><dd>{summary.currentEvent}</dd></div>
                 <div><dt>Cursor（カーソル）</dt><dd>{summary.replayCursor}</dd></div>
             </dl>}

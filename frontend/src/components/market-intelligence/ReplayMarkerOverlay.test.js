@@ -39,7 +39,7 @@ test("empty overlay renders summary, legend, diagnostics, and empty layers", asy
     const nodes = descendants([module.PriceMarkerLayer({ model }), module.TimeMarkerLayer({ model }), module.default({ model })]);
     const text = nodes.map(textOf).join(" ");
     for (const expected of ["NO PRICE MARKERS", "NO TIME MARKERS", "Marker Summary", "Marker Legend", "Marker Diagnostics",
-        "BUY", "SELL", "ENTRY", "EXIT", "REDUCE ONLY", "FLATTEN", "ORDER FAILED", "GOVERNANCE BLOCK"])
+        "BUY", "SELL", "ENTRY", "EXIT", "REDUCE ONLY", "FLATTEN", "ORDER FAILED", "GOVERNANCE BLOCK", "UNKNOWN"])
         assert.match(text, new RegExp(expected));
 });
 
@@ -49,14 +49,27 @@ test("overlay renders block, failure, reduce-only, and flatten text safely", asy
         ["block", "GOVERNANCE_BLOCK", { reason: "blocked", blocked: true }],
         ["fail", "ORDER_FAILED", { reason: "failed", failed: true, orderId: "order-1" }],
         ["reduce", "REDUCE_ONLY", { reduceOnly: true }], ["flat", "FLATTEN", { flatten: true }],
-    ].map(([markerId, markerType, payload]) => ({ markerId, events: [{ id: markerId, timestamp: "2026-01-01T00:00:00Z",
-        payload: { markerType, price: 100, ...payload } }] }));
-    const model = buildReplayMarkerOverlayModel({ projection: { markerContext: { markers: events } } }, {
+    ].map(([markerId, markerType, values], sequence) => ({
+        id: markerId, markerId, type: markerType, timestamp: "2026-01-01T00:00:00Z", sequence,
+        price: 100, quantity: null, side: null, reason: null, orderId: null,
+        reduceOnly: false, flatten: false, blocked: false, failed: false,
+        source: "SYSTEM", eventType: "MARKET_SNAPSHOT", dataQuality: "VALID", ...values,
+    }));
+    const byType = Object.fromEntries(["BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN", "ORDER_FAILED",
+        "GOVERNANCE_BLOCK", "UNKNOWN"].map((type) => [type, events.filter((marker) => marker.type === type).length]));
+    const model = buildReplayMarkerOverlayModel({ projection: { markerContext: { markers: events, count: events.length,
+        latestMarker: events.at(-1), summary: { total: events.length, byType, buy: 0, sell: 0, entry: 0, exit: 0,
+            reduceOnly: 1, flatten: 1, failed: 1, blocked: 1, unknown: 0 } } } }, {
         orderBook: { asks: [], bids: [] }, recentTrades: { rows: [] },
     });
     const nodes = descendants([module.PriceMarkerLayer({ model }), module.TimeMarkerLayer({ model }), module.default({ model })]);
     const text = nodes.map(textOf).join(" ");
-    for (const expected of ["GOVERNANCE BLOCK", "ORDER FAILED", "REDUCE ONLY", "FLATTEN", "BlockedTRUE", "ErrorTRUE"])
+    for (const expected of ["GOVERNANCE BLOCK", "ORDER FAILED", "REDUCE ONLY", "FLATTEN", "BlockedTRUE", "FailedTRUE",
+        "Marker Details", "Formal Marker Summary", "Data QualityVALID", "Event TypeMARKET_SNAPSHOT",
+        "IDblock", "Marker IDblock", "TypeGOVERNANCE_BLOCK", "Timestamp2026-01-01T00:00:00.000Z",
+        "Sequence0", "Price100", "Quantity—", "Side—", "Reasonblocked", "Order ID—",
+        "Reduce OnlyFALSE", "FlattenFALSE", "SourceSYSTEM", "Event ID—", "Trade ID—",
+        "Decision ID—", "Position ID—", "Station ID—"])
         assert.match(text, new RegExp(expected));
     assert.equal(nodes.some(({ type }) => ["button", "input", "select"].includes(type)), false);
     assert.equal(nodes.some(({ props }) => typeof props?.onClick === "function" || props?.tabIndex !== undefined), false);

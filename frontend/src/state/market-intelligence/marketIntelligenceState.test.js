@@ -267,26 +267,84 @@ test("compatibility selectors derive values without duplicate state", () => {
     assert.equal(getLoadingState(state), true);
 });
 
-test("selection actions remain independent from replay commands and reset", () => {
+test("selection actions accept only reached projection entities and reconcile backward commands", () => {
     const selections = {
-        position: { id: "position-1" },
-        decision: { id: "decision-1" },
-        marker: { id: "marker-1" },
-        station: { id: "station-1" },
+        position: { id: "position-xrpusdtm-001" },
+        decision: { id: "decision-xrpusdtm-001" },
+        marker: { id: "marker-position-closed" },
+        station: { id: "governance" },
     };
-    let state = createInitialState();
+    let state = reduce(createInitialState(), loadReplayDataset(XRP_REPLAY_FIXTURE));
+    state = reduce(state, applyReplayCommandAction({ type: C.JUMP_TO_END }));
     state = reduce(state, selectPosition(selections.position));
     state = reduce(state, selectDecision(selections.decision));
     state = reduce(state, selectMarker(selections.marker));
     state = reduce(state, selectStation(selections.station));
-    const selectionState = state;
-    state = reduce(state, loadReplayDataset(XRP_REPLAY_FIXTURE));
-    state = reduce(state, resetReplay());
     assert.equal(getSelectedPosition(state), selections.position);
     assert.equal(getSelectedDecision(state), selections.decision);
     assert.equal(getSelectedMarker(state), selections.marker);
     assert.equal(getSelectedStation(state), selections.station);
-    assert.equal(state.selectedPosition, selectionState.selectedPosition);
+
+    state = reduce(state, seekReplay(XRP_REPLAY_FIXTURE.startedAt));
+    assert.equal(getSelectedPosition(state), null);
+    assert.equal(getSelectedDecision(state), null);
+    assert.equal(getSelectedMarker(state), null);
+    assert.equal(getSelectedStation(state), null);
+    state = reduce(state, selectMarker(selections.marker));
+    assert.equal(getSelectedMarker(state), null);
+});
+
+test("reset and dataset replacement clear selections that are no longer reachable", () => {
+    const marker = { id: "marker-position-closed" };
+    let state = reduce(createInitialState(), loadReplayDataset(XRP_REPLAY_FIXTURE));
+    state = reduce(state, applyReplayCommandAction({ type: C.JUMP_TO_END }));
+    state = reduce(state, selectMarker(marker));
+    assert.equal(getSelectedMarker(state), marker);
+    state = reduce(state, resetReplay());
+    assert.equal(getSelectedMarker(state), null);
+
+    state = reduce(state, loadReplayDataset(XRP_REPLAY_FIXTURE));
+    state = reduce(state, applyReplayCommandAction({ type: C.JUMP_TO_END }));
+    state = reduce(state, selectMarker(marker));
+    const replacement = structuredClone(XRP_REPLAY_FIXTURE);
+    replacement.datasetId = "replacement-dataset";
+    replacement.events = replacement.events.slice(0, 1);
+    replacement.endedAt = replacement.startedAt;
+    state = reduce(state, loadReplayDataset(replacement));
+    assert.equal(getSelectedMarker(state), null);
+});
+
+test("step back, jump start, and restart clear a future marker selection", () => {
+    const marker = { id: "marker-position-closed" };
+    const completedWithSelection = () => {
+        let state = reduce(createInitialState(), loadReplayDataset(XRP_REPLAY_FIXTURE));
+        state = reduce(state, applyReplayCommandAction({ type: C.JUMP_TO_END }));
+        return reduce(state, selectMarker(marker));
+    };
+    for (const command of [
+        { type: C.STEP_BACKWARD },
+        { type: C.JUMP_TO_START },
+        { type: C.RESTART },
+    ]) {
+        const state = reduce(completedWithSelection(), applyReplayCommandAction(command));
+        assert.equal(getSelectedMarker(state), null, command.type);
+    }
+});
+
+test("forward and playback commands preserve selections that remain reached", () => {
+    const marker = { id: "marker-market-001" };
+    let state = reduce(createInitialState(), loadReplayDataset(XRP_REPLAY_FIXTURE));
+    state = reduce(state, selectMarker(marker));
+    for (const command of [
+        { type: C.PLAY },
+        { type: C.PAUSE },
+        { type: C.STEP_FORWARD },
+        { type: C.SEEK, payload: { timestamp: "2026-07-20T12:00:30.000Z" } },
+        { type: C.JUMP_TO_END },
+    ]) {
+        state = reduce(state, applyReplayCommandAction(command));
+        assert.equal(getSelectedMarker(state), marker, command.type);
+    }
 });
 
 test("reducer does not mutate state, engine, action, or selection objects", () => {

@@ -2,6 +2,7 @@ import DecisionRailway, { DecisionRailwaySummary } from "../components/market-in
 import MarketIntelligenceErrorBoundary from "../components/market-intelligence/MarketIntelligenceErrorBoundary";
 import MarketIntelligenceToolbar from "../components/market-intelligence/MarketIntelligenceToolbar";
 import MarketIntelligenceWorkspace from "../components/market-intelligence/MarketIntelligenceWorkspace";
+import PositionTimeline from "../components/market-intelligence/PositionTimeline";
 import ReplayController from "../components/market-intelligence/ReplayController";
 import ReplayInspector from "../components/market-intelligence/ReplayInspector";
 import ReplayMarketView from "../components/market-intelligence/ReplayMarketView";
@@ -22,6 +23,7 @@ export default function MarketIntelligencePage() {
                     </section>
                     <MarketIntelligenceWorkspace leftPanel={<DecisionRailway showSummary={false} />}
                         rightPanel={<ReplayInspector />} />
+                    <PositionTimeline />
                     <ReplayTimeline />
                 </main>
             </MarketIntelligenceProvider>

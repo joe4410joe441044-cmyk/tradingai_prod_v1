@@ -1,27 +1,14 @@
-import { marketDisplayValue, marketTimestamp, normalizeMarketSide } from "./replayMarketViewModel.js";
+import { REPLAY_DATA_QUALITY, REPLAY_MARKER_TYPES } from "./replayConstants.js";
+import { marketDisplayValue, marketTimestamp } from "./replayMarketViewModel.js";
+import { validateReplayMarker } from "./replayValidation.js";
 
 const DASH = "—";
-const TYPES = ["BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN", "ORDER_FAILED", "GOVERNANCE_BLOCK", "UNKNOWN"];
 const MAX_PRICE = 20;
 const MAX_TIME = 20;
 const MAX_UNMATCHED = 10;
+const MAX_DETAILS = 20;
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const payloadOf = (event) => event?.payload && typeof event.payload === "object"
-    && !Array.isArray(event.payload) ? event.payload : {};
-
-export function normalizeMarkerType(type) {
-    const value = typeof type === "string" ? type.trim().toUpperCase().replaceAll(" ", "_") : "";
-    if (["BUY", "LONG"].includes(value)) return "BUY";
-    if (["SELL", "SHORT"].includes(value)) return "SELL";
-    if (value === "ENTRY") return "ENTRY";
-    if (value === "EXIT") return "EXIT";
-    if (value === "REDUCE_ONLY") return "REDUCE_ONLY";
-    if (value === "FLATTEN") return "FLATTEN";
-    if (["ORDER_FAILED", "ORDER_ERROR"].includes(value)) return "ORDER_FAILED";
-    if (["GOVERNANCE_BLOCK", "BLOCKED"].includes(value)) return "GOVERNANCE_BLOCK";
-    return "UNKNOWN";
-}
 
 const categoryFor = (type) => {
     if (["BUY", "SELL"].includes(type)) return "DECISION";
@@ -35,37 +22,21 @@ const categoryFor = (type) => {
 const labelFor = (type) => type.replaceAll("_", " ");
 const normalizedScalar = (value) => marketDisplayValue(value);
 
-const markerFromGroup = (group, index) => {
-    if (!group || typeof group !== "object" || Array.isArray(group)) return null;
-    const events = Array.isArray(group.events) ? group.events : [];
-    const event = events.findLast((candidate) => candidate && typeof candidate === "object") ?? null;
-    const payload = payloadOf(event);
-    const type = normalizeMarkerType(payload.markerType ?? group.type ?? group.markerType);
-    const price = finite(payload.price) ? payload.price
-        : finite(payload.entryPrice) ? payload.entryPrice : finite(payload.exitPrice) ? payload.exitPrice : null;
-    const quantity = finite(payload.quantity) ? payload.quantity : null;
-    const timestamp = marketTimestamp(payload.timestamp ?? event?.timestamp);
-    const sourceId = group.markerId ?? group.id ?? event?.markerId ?? event?.id;
-    const id = normalizedScalar(sourceId) === DASH ? `marker-${index + 1}` : String(sourceId);
-    const side = normalizeMarketSide(payload.side);
-    const invalid = normalizedScalar(sourceId) === DASH || type === "UNKNOWN"
-        || (payload.price !== undefined && price === null)
-        || (payload.quantity !== undefined && quantity === null);
+const markerFromContract = (marker, index) => {
+    if (!validateReplayMarker(marker).valid) return null;
+    const id = marker.id;
     return {
-        id, displayKey: `${id}-${index}`, type, category: categoryFor(type), side, label: labelFor(type),
-        eventId: normalizedScalar(payload.eventId ?? event?.id),
-        timestamp, numericPrice: price, price: normalizedScalar(price), quantity: normalizedScalar(quantity),
-        orderId: normalizedScalar(payload.orderId ?? payload.clientOrderId),
-        positionId: normalizedScalar(event?.positionId ?? payload.positionId),
-        reason: normalizedScalar(payload.reason ?? payload.blockReason),
-        status: normalizedScalar(payload.status ?? payload.outcome),
-        reduceOnly: payload.reduceOnly === true, flatten: payload.flatten === true,
-        blocked: payload.blocked === true || type === "GOVERNANCE_BLOCK",
-        failed: payload.failed === true || type === "ORDER_FAILED",
-        dataQuality: normalizedScalar(event?.dataQuality) === DASH ? "UNKNOWN" : event.dataQuality,
-        sourceSequence: finite(payload.sequence) ? payload.sequence : finite(event?.sequence) ? event.sequence : null,
-        tradeId: normalizedScalar(payload.tradeId),
-        invalid,
+        id, markerId: marker.markerId, displayKey: `${id}-${index}`, type: marker.type,
+        category: categoryFor(marker.type), side: normalizedScalar(marker.side), label: labelFor(marker.type),
+        eventId: normalizedScalar(marker.eventId), timestamp: marketTimestamp(marker.timestamp),
+        numericPrice: marker.price, price: normalizedScalar(marker.price), quantity: normalizedScalar(marker.quantity),
+        orderId: normalizedScalar(marker.orderId), positionId: normalizedScalar(marker.positionId),
+        decisionId: normalizedScalar(marker.decisionId), stationId: normalizedScalar(marker.stationId),
+        reason: normalizedScalar(marker.reason), sequence: marker.sequence,
+        reduceOnly: marker.reduceOnly, flatten: marker.flatten, blocked: marker.blocked, failed: marker.failed,
+        source: marker.source, eventType: marker.eventType, dataQuality: marker.dataQuality,
+        sourceSequence: marker.sequence,
+        tradeId: normalizedScalar(marker.tradeId), invalid: false,
     };
 };
 
@@ -75,12 +46,31 @@ const LEGEND = Object.freeze([
     ["REDUCE_ONLY", "Position-reducing order"], ["FLATTEN", "Explicit full close"],
     ["ORDER_FAILED", "Order failed or rejected"],
     ["GOVERNANCE_BLOCK", "Execution prevented by governance"],
+    ["UNKNOWN", "Unknown marker type; no direction inferred"],
 ].map(([type, description]) => ({ type, label: labelFor(type), description })));
+
+const formalSummary = (markerContext) => {
+    const source = markerContext?.summary && typeof markerContext.summary === "object"
+        && !Array.isArray(markerContext.summary) ? markerContext.summary : {};
+    const sourceByType = source.byType && typeof source.byType === "object" && !Array.isArray(source.byType)
+        ? source.byType : {};
+    const byType = Object.fromEntries(REPLAY_MARKER_TYPES.map((type) => [
+        type, Number.isInteger(sourceByType[type]) && sourceByType[type] >= 0 ? sourceByType[type] : 0,
+    ]));
+    return {
+        total: Number.isInteger(source.total) && source.total >= 0 ? source.total : 0,
+        byType,
+        buy: source.buy ?? 0, sell: source.sell ?? 0, entry: source.entry ?? 0, exit: source.exit ?? 0,
+        reduceOnly: source.reduceOnly ?? 0, flatten: source.flatten ?? 0,
+        failed: source.failed ?? 0, blocked: source.blocked ?? 0, unknown: source.unknown ?? 0,
+    };
+};
 
 export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}) {
     const markerContext = replayEngine?.projection?.markerContext;
     const source = Array.isArray(markerContext?.markers) ? markerContext.markers : [];
-    const normalized = source.map(markerFromGroup).filter(Boolean);
+    const normalized = source.map(markerFromContract).filter(Boolean);
+    const summary = formalSummary(markerContext);
     const bookRows = [...(Array.isArray(marketViewModel?.orderBook?.asks) ? marketViewModel.orderBook.asks : []),
         ...(Array.isArray(marketViewModel?.orderBook?.bids) ? marketViewModel.orderBook.bids : [])];
     const bookPrices = new Set(bookRows.map(({ price }) => price).filter((price) => typeof price === "string"));
@@ -100,12 +90,11 @@ export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}
     const allPriceMarkers = markers.filter(({ numericPrice }) => finite(numericPrice));
     const allTimeMarkers = markers.filter(({ timestamp }) => timestamp !== DASH);
     const allUnmatched = markers.filter(({ priceMatch, timeMatch }) => !priceMatch && !timeMatch);
-    const formalLatest = markerContext?.latestMarker;
-    const formalLatestId = formalLatest?.markerId ?? formalLatest?.id;
-    const latestMarker = markers.findLast(({ id }) => formalLatestId !== undefined && String(formalLatestId) === id)
-        ?? (formalLatest && typeof formalLatest === "object" ? markerFromGroup(formalLatest, source.length) : null)
-        ?? markers.at(-1) ?? null;
-    const byType = Object.fromEntries(TYPES.map((type) => [type, markers.filter((marker) => marker.type === type).length]));
+    const formalLatestId = markerContext?.latestMarker?.id;
+    const latestMarker = markers.find(({ id }) => id === formalLatestId) ?? null;
+    const byQuality = Object.fromEntries(REPLAY_DATA_QUALITY.map((quality) => [
+        quality, markers.filter((marker) => marker.dataQuality === quality).length,
+    ]));
     const displayedIds = new Set([
         ...allPriceMarkers.slice(0, MAX_PRICE), ...allTimeMarkers.slice(0, MAX_TIME), ...allUnmatched.slice(0, MAX_UNMATCHED),
     ].map(({ id }) => id));
@@ -115,13 +104,15 @@ export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}
         priceMarkers: allPriceMarkers.slice(0, MAX_PRICE),
         timeMarkers: allTimeMarkers.slice(0, MAX_TIME),
         unmatchedMarkers: allUnmatched.slice(0, MAX_UNMATCHED),
+        detailMarkers: markers.slice(0, MAX_DETAILS),
         latestMarker,
+        summary,
         counts: {
-            visible: markers.length,
+            visible: Number.isInteger(markerContext?.count) && markerContext.count >= 0 ? markerContext.count : 0,
             priceMatched: markers.filter(({ priceMatch }) => priceMatch).length,
             timeMatched: markers.filter(({ timeMatch }) => timeMatch).length,
             unmatched: allUnmatched.length,
-            byType,
+            byType: summary.byType,
         },
         legend: LEGEND,
         quality: replayEngine?.projection?.dataQuality ?? "UNKNOWN",
@@ -135,8 +126,10 @@ export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}
             unmatchedTimeCount: allTimeMarkers.filter(({ timeMatch }) => !timeMatch).length,
             truncatedMarkerCount: Math.max(0, allPriceMarkers.length - MAX_PRICE)
                 + Math.max(0, allTimeMarkers.length - MAX_TIME)
-                + Math.max(0, allUnmatched.length - MAX_UNMATCHED),
-            unknownTypeCount: byType.UNKNOWN,
+                + Math.max(0, allUnmatched.length - MAX_UNMATCHED)
+                + Math.max(0, markers.length - MAX_DETAILS),
+            unknownTypeCount: summary.unknown,
+            byQuality,
         },
         hasMarkers: markers.length > 0,
         isEmpty: markers.length === 0,

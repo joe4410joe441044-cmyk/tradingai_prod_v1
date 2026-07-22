@@ -96,11 +96,13 @@ test("markers are projection ordered and capped at five", () => {
     const engine = load();
     engine.projection.markerContext = {
         markers: Array.from({ length: 7 }, (_, index) => ({
-            markerId: `marker-${index}`,
-            events: [{ id: `event-${index}`, timestamp: XRP_REPLAY_FIXTURE.startedAt,
-                eventType: "MARKET_SNAPSHOT", payload: { side: index % 2 ? "SELL" : "BUY" } }],
+            id: `marker-${index}`, markerId: `marker-${index}`, type: "BUY",
+            timestamp: XRP_REPLAY_FIXTURE.startedAt, sequence: index, price: null,
+            quantity: null, side: index % 2 ? "SELL" : "BUY", reason: null,
+            orderId: null, reduceOnly: false, flatten: false, blocked: false,
+            failed: false, source: "SYSTEM", eventType: "MARKET_SNAPSHOT", dataQuality: "VALID",
         })),
-        latestMarker: { markerId: "marker-6" },
+        latestMarker: { id: "marker-6", markerId: "marker-6" },
     };
     const model = buildReplayInspectorModel(engine);
     assert.equal(model.markers.count, 7);

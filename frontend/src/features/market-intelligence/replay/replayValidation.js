@@ -2,6 +2,8 @@ import {
     REPLAY_DATA_QUALITY,
     REPLAY_EVENT_SOURCES,
     REPLAY_EVENT_TYPES,
+    REPLAY_MARKER_SIDES,
+    REPLAY_MARKER_TYPES,
 } from "./replayConstants.js";
 
 const EVENT_FIELDS = [
@@ -27,6 +29,12 @@ const DATASET_FIELDS = [
     "endedAt",
     "events",
     "metadata",
+];
+
+const MARKER_FIELDS = [
+    "id", "markerId", "type", "timestamp", "sequence", "price", "quantity",
+    "side", "reason", "orderId", "reduceOnly", "flatten", "blocked", "failed",
+    "source", "eventType", "dataQuality",
 ];
 
 const isRecord = (value) => (
@@ -87,6 +95,59 @@ export function validateReplayEvent(event) {
         errors.push(error("dataQuality", "UNKNOWN_VALUE", "dataQuality is not supported."));
     }
 
+    return { valid: errors.length === 0, errors };
+}
+
+export function validateReplayMarker(marker) {
+    const errors = [];
+    if (!isRecord(marker)) {
+        return { valid: false, errors: [error("marker", "INVALID_TYPE", "Replay marker must be an object.")] };
+    }
+    for (const field of MARKER_FIELDS) {
+        if (!Object.hasOwn(marker, field)) errors.push(error(field, "REQUIRED", `${field} is required.`));
+    }
+    for (const field of ["id", "markerId"]) {
+        if (Object.hasOwn(marker, field) && (typeof marker[field] !== "string" || marker[field] === "")) {
+            errors.push(error(field, "INVALID_VALUE", `${field} must be a non-empty string.`));
+        }
+    }
+    if (Object.hasOwn(marker, "type") && !REPLAY_MARKER_TYPES.includes(marker.type)) {
+        errors.push(error("type", "UNKNOWN_VALUE", "type is not supported."));
+    }
+    if (Object.hasOwn(marker, "timestamp") && !isValidTimestamp(marker.timestamp)) {
+        errors.push(error("timestamp", "INVALID_TIMESTAMP", "timestamp must be valid."));
+    }
+    if (Object.hasOwn(marker, "sequence") && (!Number.isInteger(marker.sequence) || marker.sequence < 0)) {
+        errors.push(error("sequence", "INVALID_VALUE", "sequence must be a non-negative integer."));
+    }
+    for (const field of ["price", "quantity"]) {
+        if (Object.hasOwn(marker, field) && marker[field] !== null
+            && (typeof marker[field] !== "number" || !Number.isFinite(marker[field]))) {
+            errors.push(error(field, "INVALID_VALUE", `${field} must be a finite number or null.`));
+        }
+    }
+    if (Object.hasOwn(marker, "side") && marker.side !== null && !REPLAY_MARKER_SIDES.includes(marker.side)) {
+        errors.push(error("side", "UNKNOWN_VALUE", "side must be BUY, SELL, or null."));
+    }
+    for (const field of ["reason", "orderId"]) {
+        if (Object.hasOwn(marker, field) && marker[field] !== null && typeof marker[field] !== "string") {
+            errors.push(error(field, "INVALID_TYPE", `${field} must be a string or null.`));
+        }
+    }
+    for (const field of ["reduceOnly", "flatten", "blocked", "failed"]) {
+        if (Object.hasOwn(marker, field) && typeof marker[field] !== "boolean") {
+            errors.push(error(field, "INVALID_TYPE", `${field} must be a boolean.`));
+        }
+    }
+    if (Object.hasOwn(marker, "source") && !REPLAY_EVENT_SOURCES.includes(marker.source)) {
+        errors.push(error("source", "UNKNOWN_VALUE", "source is not supported."));
+    }
+    if (Object.hasOwn(marker, "eventType") && !REPLAY_EVENT_TYPES.includes(marker.eventType)) {
+        errors.push(error("eventType", "UNKNOWN_VALUE", "eventType is not supported."));
+    }
+    if (Object.hasOwn(marker, "dataQuality") && !REPLAY_DATA_QUALITY.includes(marker.dataQuality)) {
+        errors.push(error("dataQuality", "UNKNOWN_VALUE", "dataQuality is not supported."));
+    }
     return { valid: errors.length === 0, errors };
 }
 

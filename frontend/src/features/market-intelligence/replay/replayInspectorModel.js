@@ -126,24 +126,21 @@ export function buildReplayInspectorModel(replayEngine) {
     const openedPayload = payloadOf(position.openedEvent);
     const updatePayload = payloadOf(position.latestUpdateEvent);
     const closedPayload = payloadOf(position.closedEvent);
-    const markerGroups = Array.isArray(projection.markerContext?.markers)
+    const markerContracts = Array.isArray(projection.markerContext?.markers)
         ? projection.markerContext.markers
         : [];
-    const markers = markerGroups.slice(0, 5).map((group, index) => {
-        const events = Array.isArray(group?.events) ? group.events : [];
-        const markerEvent = events.at(-1) ?? null;
-        const payload = payloadOf(markerEvent);
+    const markers = markerContracts.slice(0, 5).map((marker, index) => {
         return {
-            id: normalizeInspectorValue(group?.markerId).displayValue === DASH
-                ? `marker-${index + 1}` : group.markerId,
+            id: normalizeInspectorValue(marker?.id).displayValue === DASH
+                ? `marker-${index + 1}` : marker.id,
             fields: fields([
-                ["marker-id", "Marker ID", group?.markerId],
-                ["type", "Marker Type", payload.markerType ?? markerEvent?.eventType],
-                ["side", "Side", payload.side], ["price", "Price", payload.price ?? payload.entryPrice ?? payload.exitPrice],
-                ["quantity", "Quantity", payload.quantity],
-                ["timestamp", "Timestamp", markerEvent?.timestamp, { timestamp: true }],
-                ["reason", "Reason", payload.reason], ["order-id", "Order ID", payload.orderId ?? payload.clientOrderId],
-                ["reduce-only", "Reduce Only", payload.reduceOnly], ["flatten", "Flatten", payload.flatten],
+                ["marker-id", "Marker ID", marker?.markerId],
+                ["type", "Marker Type", marker?.type],
+                ["side", "Side", marker?.side], ["price", "Price", marker?.price],
+                ["quantity", "Quantity", marker?.quantity],
+                ["timestamp", "Timestamp", marker?.timestamp, { timestamp: true }],
+                ["reason", "Reason", marker?.reason], ["order-id", "Order ID", marker?.orderId],
+                ["reduce-only", "Reduce Only", marker?.reduceOnly], ["flatten", "Flatten", marker?.flatten],
             ]),
         };
     });
@@ -241,7 +238,7 @@ export function buildReplayInspectorModel(replayEngine) {
             ]),
         },
         markers: {
-            count: markerGroups.length,
+            count: markerContracts.length,
             latestMarkerId: projection.markerContext?.latestMarker?.markerId ?? DASH,
             items: markers,
         },
@@ -262,7 +259,7 @@ export function buildReplayInspectorModel(replayEngine) {
             event: current?.dataQuality ?? "UNKNOWN",
             position: position.openedEvent?.dataQuality ?? "UNKNOWN",
             decision: execution?.dataQuality ?? governance?.dataQuality ?? ai?.dataQuality ?? strategy?.dataQuality ?? "UNKNOWN",
-            marker: markerGroups.at(-1)?.events?.at(-1)?.dataQuality ?? "UNKNOWN",
+            marker: markerContracts.at(-1)?.dataQuality ?? "UNKNOWN",
             station: railway.stations.find(({ active }) => active)?.dataQuality ?? "UNKNOWN",
         },
         diagnostics: fields([

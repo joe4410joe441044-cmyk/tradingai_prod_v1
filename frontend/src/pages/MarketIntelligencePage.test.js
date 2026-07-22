@@ -22,10 +22,12 @@ const loadPage = async () => {
         ["DecisionRailway", "DECISION RAILWAY", "export const DecisionRailwaySummary=()=>({type:'section',props:{children:'AI FINAL DECISION'}})"], ["MarketIntelligenceHeader", "MI HEADER"],
         ["MarketIntelligenceStatusLayer", "PAGE STATUS"], ["MarketIntelligenceToolbar", "MI TOOLBAR"],
         ["ReplayController", "REPLAY CONTROLLER"], ["ReplayInspector", "REPLAY INSPECTOR"],
-        ["ReplayMarketView", "REPLAY MARKET VIEW MARKER OVERLAY"], ["ReplayTimeline", "POSITION TIMELINE"],
+        ["ReplayMarketView", "REPLAY MARKET VIEW MARKER OVERLAY"], ["PositionTimeline", "POSITION TIMELINE"],
+        ["ReplayTimeline", "REPLAY TIMELINE"],
     ];
     for (const [name, label, named] of replacements) {
-        const path = name.startsWith("MarketIntelligence") || name.startsWith("Replay") || name === "DecisionRailway"
+        const path = name.startsWith("MarketIntelligence") || name.startsWith("Replay")
+            || name === "DecisionRailway" || name === "PositionTimeline"
             ? `../components/market-intelligence/${name}` : name;
         code = code.replace(`from "${path}";`, `from "${componentStub(label, named)}";`);
     }
@@ -51,10 +53,11 @@ test("MarketIntelligencePage integrates components in responsive logical order",
     const { default: Page } = await loadPage();
     const text = textOf(Page());
     for (const expected of ["MARKET INTELLIGENCE（市場インテリジェンス）", "MI TOOLBAR", "REPLAY MARKET VIEW", "MARKER OVERLAY",
-        "AI FINAL DECISION", "REPLAY CONTROLLER", "DECISION RAILWAY", "REPLAY INSPECTOR", "POSITION TIMELINE"])
+        "AI FINAL DECISION", "REPLAY CONTROLLER", "DECISION RAILWAY", "REPLAY INSPECTOR", "POSITION TIMELINE", "REPLAY TIMELINE"])
         assert.match(text, new RegExp(expected));
     assert.doesNotMatch(text, /MI HEADER|PAGE STATUS/);
     assert.equal(text.indexOf("REPLAY MARKET VIEW") < text.indexOf("DECISION RAILWAY"), true);
     assert.equal(text.indexOf("DECISION RAILWAY") < text.indexOf("REPLAY INSPECTOR"), true);
     assert.equal(text.indexOf("REPLAY INSPECTOR") < text.indexOf("POSITION TIMELINE"), true);
+    assert.equal(text.indexOf("POSITION TIMELINE") < text.indexOf("REPLAY TIMELINE"), true);
 });

@@ -42,7 +42,7 @@ test("single current event is normalized without reclassifying projection status
     assert.equal(model.currentItem.id, "event-1");
 });
 
-test("mixed statuses produce the complete summary", () => {
+test("future statuses are excluded from the reached-only summary", () => {
     const timeline = [
         item({ id: "past", isPast: true, isCurrent: false }),
         item({ id: "current", sequence: 2 }),
@@ -51,12 +51,12 @@ test("mixed statuses produce the complete summary", () => {
     ];
     const model = buildReplayTimelineModel(engineWith(timeline));
     assert.deepEqual(model.summary, {
-        totalEvents: 3,
+        totalEvents: 2,
         pastCount: 1,
         currentCount: 1,
-        futureCount: 1,
+        futureCount: 0,
         reachedCount: 2,
-        groupCount: 2,
+        groupCount: 1,
         currentEvent: "MARKET_SNAPSHOT",
         replayCursor: "2026-07-20T12:00:00.000Z",
     });
@@ -74,14 +74,15 @@ test("same timestamp items share one group in projection order", () => {
     assert.equal(model.currentGroup, model.groups[0]);
 });
 
-test("all-past and all-future groups aggregate item statuses only", () => {
+test("future-only groups are excluded", () => {
     const model = buildReplayTimelineModel(engineWith([
         item({ id: "past", isPast: true, isCurrent: false }),
         item({ id: "future", timestamp: "2026-07-20T12:00:01.000Z",
             isCurrent: false, isFuture: true }),
     ]));
     assert.equal(model.groups[0].groupStatus, "past");
-    assert.equal(model.groups[1].groupStatus, "future");
+    assert.equal(model.groups.length, 1);
+    assert.equal(model.summary.futureCount, 0);
 });
 
 test("invalid items, timestamps, unknown status, and duplicate IDs remain safe", () => {
@@ -106,13 +107,17 @@ test("engine cursor commands update current item and reset returns empty", () =>
         payload: { dataset: XRP_REPLAY_FIXTURE },
     });
     assert.equal(buildReplayTimelineModel(engine).currentItem.eventId, "replay-event-001");
+    assert.equal(buildReplayTimelineModel(engine).summary.futureCount, 0);
+    assert.equal(buildReplayTimelineModel(engine).items.length, 1);
     engine = applyReplayCommand(engine, { type: C.STEP_FORWARD });
     assert.equal(buildReplayTimelineModel(engine).currentItem.eventId, "replay-event-002");
     engine = applyReplayCommand(engine, { type: C.STEP_BACKWARD });
     assert.equal(buildReplayTimelineModel(engine).currentItem.eventId, "replay-event-001");
+    assert.equal(buildReplayTimelineModel(engine).items.length, 1);
     engine = applyReplayCommand(engine, { type: C.SEEK,
         payload: { timestamp: "2026-07-20T12:00:45.000Z" } });
     assert.equal(buildReplayTimelineModel(engine).currentItem.eventId, "replay-event-008");
+    assert.equal(buildReplayTimelineModel(engine).summary.futureCount, 0);
     engine = applyReplayCommand(engine, { type: C.JUMP_TO_START });
     assert.equal(buildReplayTimelineModel(engine).currentItem.eventId, "replay-event-001");
     engine = applyReplayCommand(engine, { type: C.JUMP_TO_END });

@@ -33,7 +33,9 @@ export function buildReplayTimelineModel(replayEngine) {
     const projection = engine.projection && typeof engine.projection === "object"
         ? engine.projection
         : {};
-    const timeline = Array.isArray(projection.timeline) ? projection.timeline : [];
+    const timeline = Array.isArray(projection.timeline)
+        ? projection.timeline.filter((item) => item?.isFuture !== true)
+        : [];
     const keyOccurrences = new Map();
 
     const items = timeline.map((item, index) => {

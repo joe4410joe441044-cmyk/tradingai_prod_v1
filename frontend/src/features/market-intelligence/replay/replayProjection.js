@@ -1,5 +1,6 @@
 import { getReplayRange, sortReplayEvents } from "./replayUtils.js";
-import { validateReplayEvent } from "./replayValidation.js";
+import { REPLAY_MARKER_TYPES } from "./replayConstants.js";
+import { validateReplayEvent, validateReplayMarker } from "./replayValidation.js";
 
 const QUALITY_PRIORITY = Object.freeze({
     VALID: 0,
@@ -114,6 +115,108 @@ function groupEventsByReference(visibleEvents, referenceName) {
     return [...groups].map(([id, events]) => ({ [referenceName]: id, events }));
 }
 
+const markerPayload = (event) => event?.payload && typeof event.payload === "object"
+    && !Array.isArray(event.payload) ? event.payload : {};
+const markerType = (value) => {
+    const normalized = typeof value === "string" ? value.trim().toUpperCase().replaceAll(" ", "_") : "";
+    if (["BUY", "LONG"].includes(normalized)) return "BUY";
+    if (["SELL", "SHORT"].includes(normalized)) return "SELL";
+    if (normalized === "ENTRY") return "ENTRY";
+    if (normalized === "EXIT") return "EXIT";
+    if (normalized === "REDUCE_ONLY") return "REDUCE_ONLY";
+    if (normalized === "FLATTEN") return "FLATTEN";
+    if (["ORDER_FAILED", "ORDER_ERROR"].includes(normalized)) return "ORDER_FAILED";
+    if (["GOVERNANCE_BLOCK", "BLOCKED"].includes(normalized)) return "GOVERNANCE_BLOCK";
+    return "UNKNOWN";
+};
+const markerSide = (value) => {
+    const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+    if (["BUY", "LONG"].includes(normalized)) return "BUY";
+    if (["SELL", "SHORT"].includes(normalized)) return "SELL";
+    return null;
+};
+const latestPayloadValue = (events, fields, accept = () => true) => {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const payload = markerPayload(events[index]);
+        for (const field of fields) {
+            if (Object.hasOwn(payload, field) && accept(payload[field])) return payload[field];
+        }
+    }
+    return null;
+};
+const markerQuality = (events) => events.reduce((worst, event) => (
+    QUALITY_PRIORITY[event.dataQuality] > QUALITY_PRIORITY[worst] ? event.dataQuality : worst
+), "VALID");
+const isBlockedEvent = (event) => event.eventType === "GOVERNANCE_DECISION"
+    && /BLOCK|REJECT|DENIED/.test(String(markerPayload(event).outcome ?? "").toUpperCase());
+
+export function projectReplayMarkers(visibleEvents) {
+    const orderedEvents = sortReplayEvents(Array.isArray(visibleEvents) ? visibleEvents : []);
+    return groupEventsByReference(orderedEvents, "markerId").map(({ markerId, events }) => {
+        const latest = events.at(-1);
+        const explicitType = latestPayloadValue(events, ["markerType"], (value) => typeof value === "string");
+        const derivedType = latest.eventType === "POSITION_OPENED" ? "ENTRY"
+            : latest.eventType === "POSITION_CLOSED" ? "EXIT"
+                : events.some((event) => event.eventType === "EXECUTION_REJECTED") ? "ORDER_FAILED"
+                    : events.some(isBlockedEvent) ? "GOVERNANCE_BLOCK" : "UNKNOWN";
+        const type = explicitType === null ? derivedType : markerType(explicitType);
+        const price = latestPayloadValue(events, ["price", "entryPrice", "exitPrice"], Number.isFinite);
+        const quantity = latestPayloadValue(events, ["quantity"], Number.isFinite);
+        const sideValue = latestPayloadValue(events, ["side"], (value) => typeof value === "string");
+        const reason = latestPayloadValue(events, ["reason", "blockReason"], (value) => typeof value === "string");
+        const orderId = latestPayloadValue(events, ["orderId", "clientOrderId"], (value) => typeof value === "string");
+        const reduceOnly = events.some((event) => markerPayload(event).reduceOnly === true) || type === "REDUCE_ONLY";
+        const flatten = events.some((event) => markerPayload(event).flatten === true) || type === "FLATTEN";
+        const blocked = events.some((event) => markerPayload(event).blocked === true || isBlockedEvent(event))
+            || type === "GOVERNANCE_BLOCK";
+        const failed = events.some((event) => markerPayload(event).failed === true
+            || event.eventType === "EXECUTION_REJECTED") || type === "ORDER_FAILED";
+        const marker = {
+            id: markerId,
+            markerId,
+            type,
+            timestamp: latest.timestamp,
+            sequence: latest.sequence,
+            price,
+            quantity,
+            side: markerSide(sideValue),
+            reason,
+            orderId,
+            reduceOnly,
+            flatten,
+            blocked,
+            failed,
+            source: latest.source,
+            eventType: latest.eventType,
+            dataQuality: markerQuality(events),
+            eventId: latest.id,
+            tradeId: latestPayloadValue(events, ["tradeId"], (value) => typeof value === "string"),
+            decisionId: latest.decisionId ?? null,
+            positionId: latest.positionId ?? null,
+            stationId: latest.stationId ?? null,
+        };
+        return validateReplayMarker(marker).valid ? marker : null;
+    }).filter(Boolean);
+}
+
+const summarizeMarkers = (markers) => {
+    const byType = Object.fromEntries(REPLAY_MARKER_TYPES.map((type) => [type, 0]));
+    for (const marker of markers) byType[marker.type] += 1;
+    return {
+        total: markers.length,
+        byType,
+        buy: byType.BUY,
+        sell: byType.SELL,
+        entry: byType.ENTRY,
+        exit: byType.EXIT,
+        reduceOnly: markers.filter((marker) => marker.reduceOnly).length,
+        flatten: markers.filter((marker) => marker.flatten).length,
+        failed: markers.filter((marker) => marker.failed).length,
+        blocked: markers.filter((marker) => marker.blocked).length,
+        unknown: byType.UNKNOWN,
+    };
+};
+
 function calculateProgress(range, cursorEpoch) {
     if (!range || cursorEpoch === null) return 0;
     const start = toEpoch(range.startedAt);
@@ -160,7 +263,7 @@ export function projectReplayState(dataset, replayCursor) {
     const nextEvent = currentEvent
         ? events[currentIndex + 1] ?? null
         : events[0] ?? null;
-    const markers = groupEventsByReference(visibleEvents, "markerId");
+    const markers = projectReplayMarkers(visibleEvents);
     const stations = groupEventsByReference(visibleEvents, "stationId");
     const latestMarkerEvent = visibleEvents.findLast((event) => event.markerId) ?? null;
     const latestStationEvent = visibleEvents.findLast((event) => event.stationId) ?? null;
@@ -183,6 +286,8 @@ export function projectReplayState(dataset, replayCursor) {
             latestMarker: latestMarkerEvent
                 ? markers.find((marker) => marker.markerId === latestMarkerEvent.markerId) ?? null
                 : null,
+            count: markers.length,
+            summary: summarizeMarkers(markers),
         },
         stationContext: {
             stations,

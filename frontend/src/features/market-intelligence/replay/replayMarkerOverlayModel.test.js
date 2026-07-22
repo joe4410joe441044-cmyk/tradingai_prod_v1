@@ -4,15 +4,27 @@ import test from "node:test";
 import { applyReplayCommand, createInitialReplayEngineState, REPLAY_ENGINE_COMMANDS as C } from "./replayEngine.js";
 import { XRP_REPLAY_FIXTURE } from "./replayFixtures.js";
 import { buildReplayMarketViewModel } from "./replayMarketViewModel.js";
-import { buildReplayMarkerOverlayModel, normalizeMarkerType } from "./replayMarkerOverlayModel.js";
+import { buildReplayMarkerOverlayModel } from "./replayMarkerOverlayModel.js";
 
-const group = (id, markerType, payload = {}, event = {}) => ({ markerId: id, events: [{
-    id: `event-${id}`, markerId: id, eventType: "MARKER_EVENT", timestamp: "2026-01-01T00:00:00.000Z",
-    sequence: 1, dataQuality: "VALID", payload: { markerType, ...payload }, ...event,
-}] });
-const engineWith = (markers, latestMarker = null) => ({ projection: {
-    markerContext: { markers, latestMarker }, dataQuality: "VALID",
-} });
+const marker = (id, type, values = {}) => ({
+    id, markerId: id, type, timestamp: "2026-01-01T00:00:00.000Z", sequence: 1,
+    price: null, quantity: null, side: null, reason: null, orderId: null,
+    reduceOnly: false, flatten: false, blocked: false, failed: false,
+    source: "SYSTEM", eventType: "MARKET_SNAPSHOT", dataQuality: "VALID",
+    eventId: null, tradeId: null, decisionId: null, positionId: null, stationId: null,
+    ...values,
+});
+const engineWith = (markers, latestMarker = null) => {
+    const valid = markers.filter((item) => item && typeof item === "object" && typeof item.type === "string");
+    const types = ["BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN", "ORDER_FAILED", "GOVERNANCE_BLOCK", "UNKNOWN"];
+    const byType = Object.fromEntries(types.map((type) => [type, valid.filter((item) => item.type === type).length]));
+    return { projection: { markerContext: { markers, latestMarker, count: valid.length, summary: {
+        total: valid.length, byType, buy: byType.BUY, sell: byType.SELL, entry: byType.ENTRY,
+        exit: byType.EXIT, reduceOnly: valid.filter(({ reduceOnly }) => reduceOnly).length,
+        flatten: valid.filter(({ flatten }) => flatten).length, failed: valid.filter(({ failed }) => failed).length,
+        blocked: valid.filter(({ blocked }) => blocked).length, unknown: byType.UNKNOWN,
+    } }, dataQuality: "VALID" } };
+};
 const market = {
     orderBook: { asks: [{ price: "101" }], bids: [{ price: "100" }] },
     recentTrades: { rows: [{ id: "trade-1", tradeId: "trade-1", timestamp: "2026-01-01T00:00:00.000Z", sourceSequence: 1 }] },
@@ -29,20 +41,12 @@ test("null engines and marker contexts create an empty safe overlay", () => {
     }
 });
 
-test("marker types normalize only the allowed display aliases", () => {
-    const cases = { BUY: "BUY", LONG: "BUY", SELL: "SELL", SHORT: "SELL", ENTRY: "ENTRY", EXIT: "EXIT",
-        "REDUCE ONLY": "REDUCE_ONLY", FLATTEN: "FLATTEN", "ORDER FAILED": "ORDER_FAILED",
-        "ORDER ERROR": "ORDER_FAILED", BLOCKED: "GOVERNANCE_BLOCK", other: "UNKNOWN" };
-    for (const [input, expected] of Object.entries(cases)) assert.equal(normalizeMarkerType(input), expected);
-});
-
 test("price and time markers require exact formal matches", () => {
     const markers = [
-        group("matched", "BUY", { price: 100 }),
-        group("unmatched", "SELL", { price: 100.00001 }, { timestamp: "2026-01-01T00:00:01.000Z", sequence: 2 }),
-        group("zero", "ENTRY", { price: 0 }),
-        group("same", "EXIT", { price: 100 }),
-        group("trade-id", "BUY", { tradeId: "trade-1" }, { timestamp: "invalid", sequence: 3 }),
+        marker("matched", "BUY", { price: 100 }),
+        marker("unmatched", "SELL", { price: 100.00001, timestamp: "2026-01-01T00:00:01.000Z", sequence: 2 }),
+        marker("zero", "ENTRY", { price: 0 }), marker("same", "EXIT", { price: 100 }),
+        marker("trade-id", "BUY", { tradeId: "trade-1", sequence: 3 }),
     ];
     const model = buildReplayMarkerOverlayModel(engineWith(markers), market);
     assert.equal(model.markers[0].priceMatch, true);
@@ -57,9 +61,10 @@ test("price and time markers require exact formal matches", () => {
 
 test("all marker types, formal latest marker, flags, and summary counts are preserved", () => {
     const types = ["BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN", "ORDER_FAILED", "GOVERNANCE_BLOCK", "mystery"];
-    const markers = types.map((type, index) => group(`m-${index}`, type, {
+    const markers = types.map((type, index) => marker(`m-${index}`, type === "mystery" ? "UNKNOWN" : type, {
         price: 100 + index, quantity: index, orderId: `order-${index}`, reason: `reason-${index}`,
         reduceOnly: type === "REDUCE_ONLY", flatten: type === "FLATTEN",
+        failed: type === "ORDER_FAILED", blocked: type === "GOVERNANCE_BLOCK",
     }));
     const model = buildReplayMarkerOverlayModel(engineWith(markers, markers[6]), market);
     assert.equal(model.counts.visible, 9);
@@ -73,10 +78,10 @@ test("all marker types, formal latest marker, flags, and summary counts are pres
 });
 
 test("invalid and huge marker arrays are safe and capped for display", () => {
-    const markers = [null, undefined, {}, group("duplicate", "BUY", { price: 100 }),
-        group("duplicate", "SELL", { price: 100 }), group("bad-price", "BUY", { price: {}, quantity: [] }),
-        group("bad-time", "SELL", { price: Number.NaN }, { timestamp: "bad" }),
-        ...Array.from({ length: 30 }, (_, index) => group(`large-${index}`, "BUY", { price: 100 }))];
+    const markers = [null, undefined, {}, marker("duplicate", "BUY", { price: 100 }),
+        marker("duplicate", "SELL", { price: 100 }), marker("bad-price", "BUY", { price: {}, quantity: [] }),
+        marker("bad-time", "SELL", { price: Number.NaN, timestamp: "bad" }),
+        ...Array.from({ length: 30 }, (_, index) => marker(`large-${index}`, "BUY", { price: 100 }))];
     const model = buildReplayMarkerOverlayModel(engineWith(markers), market);
     assert.equal(model.priceMarkers.length, 20);
     assert.equal(model.timeMarkers.length, 20);
@@ -89,8 +94,8 @@ test("invalid and huge marker arrays are safe and capped for display", () => {
 
 test("governance block and order failure retain formal reasons without invented success", () => {
     const model = buildReplayMarkerOverlayModel(engineWith([
-        group("block", "BLOCKED", { blockReason: "RISK_LIMIT" }),
-        group("failed", "ORDER ERROR", { reason: "VENUE_REJECTED", orderId: "order-failed" }),
+        marker("block", "GOVERNANCE_BLOCK", { reason: "RISK_LIMIT", blocked: true }),
+        marker("failed", "ORDER_FAILED", { reason: "VENUE_REJECTED", orderId: "order-failed", failed: true }),
     ]), market);
     assert.equal(model.markers[0].type, "GOVERNANCE_BLOCK");
     assert.equal(model.markers[0].reason, "RISK_LIMIT");
@@ -99,6 +104,30 @@ test("governance block and order failure retain formal reasons without invented 
     assert.equal(model.markers[1].reason, "VENUE_REJECTED");
     assert.equal(model.markers[1].orderId, "order-failed");
     assert.equal(model.counts.byType.ENTRY, 0);
+});
+
+test("formal projection summary is authoritative and marker qualities remain distinct", () => {
+    const markers = ["VALID", "UNKNOWN", "PARTIAL", "STALE", "INVALID"].map((dataQuality, index) => (
+        marker(`quality-${index}`, index === 0 ? "BUY" : "UNKNOWN", { dataQuality })
+    ));
+    const engine = engineWith(markers, markers.at(-1));
+    engine.projection.markerContext.count = 42;
+    engine.projection.markerContext.summary.total = 42;
+    engine.projection.markerContext.summary.byType.BUY = 12;
+    engine.projection.markerContext.summary.buy = 12;
+    engine.projection.markerContext.summary.unknown = 30;
+    const model = buildReplayMarkerOverlayModel(engine, market);
+    assert.equal(model.counts.visible, 42);
+    assert.equal(model.summary.total, 42);
+    assert.equal(model.counts.byType.BUY, 12);
+    assert.equal(model.summary.buy, 12);
+    assert.equal(model.diagnostics.unknownTypeCount, 30);
+    assert.deepEqual(model.markers.map(({ dataQuality }) => dataQuality), [
+        "VALID", "UNKNOWN", "PARTIAL", "STALE", "INVALID",
+    ]);
+    assert.deepEqual(model.diagnostics.byQuality, {
+        UNKNOWN: 1, VALID: 1, PARTIAL: 1, STALE: 1, INVALID: 1,
+    });
 });
 
 test("real replay commands expose only projection-reached markers", () => {
@@ -117,6 +146,10 @@ test("real replay commands expose only projection-reached markers", () => {
     assert.equal(model().counts.visible, 1);
     engine = applyReplayCommand(engine, { type: C.JUMP_TO_END });
     assert.equal(model().counts.byType.EXIT, 1);
+    engine = applyReplayCommand(engine, { type: C.SEEK, payload: { timestamp: "2026-07-20T12:00:27.000Z" } });
+    assert.equal(model().counts.byType.ENTRY, 0);
+    assert.equal(model().counts.byType.EXIT, 0);
+    engine = applyReplayCommand(engine, { type: C.JUMP_TO_END });
     engine = applyReplayCommand(engine, { type: C.RESTART });
     assert.equal(model().counts.visible, 1);
     engine = applyReplayCommand(engine, { type: C.RESET });

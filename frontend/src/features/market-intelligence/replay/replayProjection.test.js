@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { XRP_REPLAY_FIXTURE } from "./replayFixtures.js";
-import { projectReplayState } from "./replayProjection.js";
+import { projectReplayMarkers, projectReplayState } from "./replayProjection.js";
 
 const clone = (value) => structuredClone(value);
 const at = (timestamp, dataset = XRP_REPLAY_FIXTURE) => projectReplayState(dataset, timestamp);
@@ -105,12 +105,97 @@ test("marker and station contexts group only reached events", () => {
     ]);
     assert.equal(projection.markerContext.selectedCandidate, null);
     assert.equal(projection.markerContext.latestMarker.markerId, "marker-position-opened");
+    assert.equal(projection.markerContext.count, 2);
+    assert.equal(projection.markerContext.summary.total, projection.markerContext.count);
+    assert.equal(projection.markerContext.summary.byType.BUY, 1);
+    assert.equal(projection.markerContext.summary.entry, 1);
     assert.equal(projection.stationContext.stations.some(
         ({ stationId }) => stationId === "execution",
     ), true);
     assert.equal(projection.markerContext.markers.some(
         ({ markerId }) => markerId === "marker-position-closed",
     ), false);
+});
+
+const markerEvent = (id, sequence, markerId, markerType, payload = {}, event = {}) => ({
+    id, timestamp: "2026-07-20T12:00:00.000Z", sequence, eventType: "MARKET_SNAPSHOT",
+    source: "SYSTEM", positionId: null, decisionId: null, markerId, stationId: null,
+    payload: { markerType, ...payload }, dataQuality: "VALID", ...event,
+});
+
+test("formal marker projection supports every type and safe fallbacks", () => {
+    const types = ["BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN",
+        "ORDER_FAILED", "GOVERNANCE_BLOCK", "not-known"];
+    const markers = projectReplayMarkers(types.map((type, index) => markerEvent(
+        `event-${index}`, index, `marker-${index}`, type,
+        index === 0 ? { price: 100, quantity: 2, side: "LONG", orderId: "order-1", reason: "signal" } : {},
+    )));
+    assert.deepEqual(markers.map(({ type }) => type), [
+        "BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN",
+        "ORDER_FAILED", "GOVERNANCE_BLOCK", "UNKNOWN",
+    ]);
+    assert.deepEqual(markers[0], {
+        id: "marker-0", markerId: "marker-0", type: "BUY",
+        timestamp: "2026-07-20T12:00:00.000Z", sequence: 0, price: 100, quantity: 2,
+        side: "BUY", reason: "signal", orderId: "order-1", reduceOnly: false,
+        flatten: false, blocked: false, failed: false, source: "SYSTEM",
+        eventType: "MARKET_SNAPSHOT", dataQuality: "VALID", eventId: "event-0",
+        tradeId: null, decisionId: null, positionId: null, stationId: null,
+    });
+    assert.equal(markers[4].reduceOnly, true);
+    assert.equal(markers[5].flatten, true);
+    assert.equal(markers[6].failed, true);
+    assert.equal(markers[7].blocked, true);
+    assert.equal(markers[8].price, null);
+    assert.equal(markers[8].side, null);
+});
+
+test("same marker grouping is ordered, deterministic, quality-aware, and non-mutating", () => {
+    const events = [
+        markerEvent("latest", 3, "shared", "EXIT", { reason: "closed" }, {
+            timestamp: "2026-07-20T12:00:02.000Z", dataQuality: "PARTIAL", eventType: "POSITION_CLOSED",
+        }),
+        markerEvent("first", 1, "shared", "ENTRY", { price: 100, quantity: 4, side: "BUY" }, {
+            dataQuality: "STALE", eventType: "POSITION_OPENED",
+        }),
+        markerEvent("same-time", 2, "other", "SELL", {}, { dataQuality: "UNKNOWN" }),
+    ];
+    const original = clone(events);
+    const markers = projectReplayMarkers(events);
+    assert.deepEqual(events, original);
+    assert.deepEqual(markers.map(({ markerId }) => markerId), ["shared", "other"]);
+    assert.equal(markers[0].type, "EXIT");
+    assert.equal(markers[0].timestamp, "2026-07-20T12:00:02.000Z");
+    assert.equal(markers[0].price, 100);
+    assert.equal(markers[0].quantity, 4);
+    assert.equal(markers[0].reason, "closed");
+    assert.equal(markers[0].dataQuality, "STALE");
+});
+
+test("latest marker follows the latest marker event rather than group insertion order", () => {
+    const dataset = clone(XRP_REPLAY_FIXTURE);
+    dataset.events = [
+        markerEvent("a-first", 1, "marker-a", "ENTRY"),
+        markerEvent("b-only", 2, "marker-b", "BUY", {}, { timestamp: "2026-07-20T12:00:01.000Z" }),
+        markerEvent("a-last", 3, "marker-a", "EXIT", {}, { timestamp: "2026-07-20T12:00:01.000Z" }),
+    ];
+    dataset.startedAt = dataset.events[0].timestamp;
+    dataset.endedAt = dataset.events[2].timestamp;
+    const context = projectReplayState(dataset, dataset.endedAt).markerContext;
+    assert.deepEqual(context.markers.map(({ markerId }) => markerId), ["marker-a", "marker-b"]);
+    assert.equal(context.latestMarker.markerId, "marker-a");
+    assert.equal(context.latestMarker.type, "EXIT");
+});
+
+test("empty marker context has a complete zero summary", () => {
+    const context = projectReplayState(null, null).markerContext;
+    assert.deepEqual(context.markers, []);
+    assert.equal(context.latestMarker, null);
+    assert.equal(context.count, 0);
+    assert.equal(context.summary.total, 0);
+    assert.equal(Object.values(context.summary.byType).every((count) => count === 0), true);
+    for (const field of ["buy", "sell", "entry", "exit", "reduceOnly", "flatten", "failed", "blocked", "unknown"])
+        assert.equal(context.summary[field], 0);
 });
 
 test("timeline classification is exclusive and does not mutate input", () => {

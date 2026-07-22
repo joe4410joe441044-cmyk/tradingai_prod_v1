@@ -5,6 +5,8 @@ import {
     REPLAY_DATA_QUALITY,
     REPLAY_EVENT_SOURCES,
     REPLAY_EVENT_TYPES,
+    REPLAY_MARKER_SIDES,
+    REPLAY_MARKER_TYPES,
 } from "./replayConstants.js";
 import { XRP_REPLAY_FIXTURE } from "./replayFixtures.js";
 import {
@@ -17,6 +19,7 @@ import {
 import {
     validateReplayDataset,
     validateReplayEvent,
+    validateReplayMarker,
 } from "./replayValidation.js";
 
 const clone = (value) => structuredClone(value);
@@ -38,6 +41,40 @@ test("replay constants contain every required contract value", () => {
         "UNKNOWN", "VALID", "PARTIAL", "STALE", "INVALID",
     ]);
     assert.ok(Object.isFrozen(REPLAY_EVENT_TYPES));
+    assert.deepEqual(REPLAY_MARKER_TYPES, [
+        "BUY", "SELL", "ENTRY", "EXIT", "REDUCE_ONLY", "FLATTEN",
+        "ORDER_FAILED", "GOVERNANCE_BLOCK", "UNKNOWN",
+    ]);
+    assert.deepEqual(REPLAY_MARKER_SIDES, ["BUY", "SELL"]);
+});
+
+const validMarker = () => ({
+    id: "marker-1", markerId: "marker-1", type: "UNKNOWN",
+    timestamp: "2026-07-20T12:00:00.000Z", sequence: 1,
+    price: null, quantity: null, side: null, reason: null, orderId: null,
+    reduceOnly: false, flatten: false, blocked: false, failed: false,
+    source: "SYSTEM", eventType: "MARKET_SNAPSHOT", dataQuality: "VALID",
+});
+
+test("marker validation accepts the formal contract and nullable fields", () => {
+    assert.deepEqual(validateReplayMarker(validMarker()), { valid: true, errors: [] });
+});
+
+test("marker validation reports missing fields and invalid scalar types", () => {
+    const cases = [
+        ["id", ""], ["markerId", null], ["type", "LONG"], ["timestamp", "bad"],
+        ["sequence", -1], ["price", "100"], ["quantity", []], ["side", "LONG"],
+        ["reduceOnly", null], ["flatten", 1], ["blocked", "false"], ["failed", undefined],
+        ["source", "VENUE"], ["eventType", "MARKER_EVENT"], ["dataQuality", "GOOD"],
+    ];
+    for (const [field, value] of cases) {
+        const marker = validMarker();
+        marker[field] = value;
+        assert.equal(validateReplayMarker(marker).valid, false, field);
+    }
+    const missing = validMarker();
+    delete missing.id;
+    assert.equal(hasError(validateReplayMarker(missing), "REQUIRED"), true);
 });
 
 test("event validation accepts a valid event", () => {

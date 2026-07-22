@@ -30,3 +30,17 @@ export const REPLAY_DATA_QUALITY = Object.freeze([
     "STALE",
     "INVALID",
 ]);
+
+export const REPLAY_MARKER_TYPES = Object.freeze([
+    "BUY",
+    "SELL",
+    "ENTRY",
+    "EXIT",
+    "REDUCE_ONLY",
+    "FLATTEN",
+    "ORDER_FAILED",
+    "GOVERNANCE_BLOCK",
+    "UNKNOWN",
+]);
+
+export const REPLAY_MARKER_SIDES = Object.freeze(["BUY", "SELL"]);

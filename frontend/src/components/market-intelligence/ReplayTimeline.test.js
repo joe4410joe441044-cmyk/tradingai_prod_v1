@@ -70,7 +70,7 @@ test("initial timeline renders a compact accessible empty state", async () => {
     assert.equal(nodes.some(({ props }) => typeof props?.onClick === "function"), false);
 });
 
-test("loaded timeline renders every event, group heading, metadata, and one current item", async () => {
+test("loaded timeline renders only reached events, metadata, and one current item", async () => {
     const { ReplayTimelineView } = await loadTimelineModule();
     const engine = applyReplayCommand(createInitialReplayEngineState(), {
         type: C.LOAD_DATASET,
@@ -79,7 +79,7 @@ test("loaded timeline renders every event, group heading, metadata, and one curr
     const view = ReplayTimelineView({ model: buildReplayTimelineModel(engine) });
     const nodes = descendants(view);
     const items = nodes.filter(({ type }) => type === "li");
-    assert.equal(items.length, XRP_REPLAY_FIXTURE.events.length);
+    assert.equal(items.length, 1);
     assert.equal(items.filter(({ props }) => props["aria-current"] === "step").length, 1);
     const allText = nodes.map(textOf).join(" ");
     assert.match(allText, /MARKET_SNAPSHOT/);
@@ -87,6 +87,8 @@ test("loaded timeline renders every event, group heading, metadata, and one curr
     assert.match(allText, /#1/);
     assert.match(allText, /CURRENT/);
     assert.match(allText, /VALID/);
+    assert.doesNotMatch(allText, /DETECTOR_SIGNAL/);
+    assert.doesNotMatch(allText, /FUTURE/);
 });
 
 test("timeline view tolerates normalized invalid items and remains read-only", async () => {

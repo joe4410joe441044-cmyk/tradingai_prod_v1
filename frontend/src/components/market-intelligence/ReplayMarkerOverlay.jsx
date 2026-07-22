@@ -2,17 +2,29 @@ const MarkerBadge = ({ marker, matchLabel }) => (
     <article className={`mi-marker-overlay__marker mi-marker-overlay__marker--${marker.type.toLowerCase()}`}>
         <header><strong>{marker.label}</strong><span>{marker.category}</span></header>
         <dl>
+            <div><dt>ID</dt><dd>{marker.id}</dd></div>
+            <div><dt>Marker ID</dt><dd>{marker.markerId}</dd></div>
+            <div><dt>Type</dt><dd>{marker.type}</dd></div>
             <div><dt>Side</dt><dd>{marker.side}</dd></div>
             <div><dt>Price</dt><dd>{marker.price}</dd></div>
             <div><dt>Quantity</dt><dd>{marker.quantity}</dd></div>
             <div><dt>Timestamp</dt><dd>{marker.timestamp}</dd></div>
+            <div><dt>Sequence</dt><dd>{marker.sequence}</dd></div>
             <div><dt>Reason</dt><dd>{marker.reason}</dd></div>
+            <div><dt>Order ID</dt><dd>{marker.orderId}</dd></div>
+            <div><dt>Reduce Only</dt><dd>{marker.reduceOnly ? "TRUE" : "FALSE"}</dd></div>
+            <div><dt>Flatten</dt><dd>{marker.flatten ? "TRUE" : "FALSE"}</dd></div>
+            <div><dt>Blocked</dt><dd>{marker.blocked ? "TRUE" : "FALSE"}</dd></div>
+            <div><dt>Failed</dt><dd>{marker.failed ? "TRUE" : "FALSE"}</dd></div>
+            <div><dt>Source</dt><dd>{marker.source}</dd></div>
+            <div><dt>Event Type</dt><dd>{marker.eventType}</dd></div>
+            <div><dt>Data Quality</dt><dd>{marker.dataQuality}</dd></div>
+            <div><dt>Event ID</dt><dd>{marker.eventId}</dd></div>
+            <div><dt>Trade ID</dt><dd>{marker.tradeId}</dd></div>
+            <div><dt>Decision ID</dt><dd>{marker.decisionId}</dd></div>
+            <div><dt>Position ID</dt><dd>{marker.positionId}</dd></div>
+            <div><dt>Station ID</dt><dd>{marker.stationId}</dd></div>
             <div><dt>Match</dt><dd>{matchLabel}</dd></div>
-            {marker.orderId !== "—" && <div><dt>Order ID</dt><dd>{marker.orderId}</dd></div>}
-            {marker.reduceOnly && <div><dt>Reduce Only</dt><dd>TRUE</dd></div>}
-            {marker.flatten && <div><dt>Flatten</dt><dd>TRUE</dd></div>}
-            {marker.blocked && <div><dt>Blocked</dt><dd>TRUE</dd></div>}
-            {marker.failed && <div><dt>Error</dt><dd>TRUE</dd></div>}
         </dl>
     </article>
 );
@@ -68,6 +80,18 @@ export default function ReplayMarkerOverlay({ model }) {
             ]} />
             <h4>Marker Type Counts</h4>
             <SummaryFields fields={Object.entries(model.counts.byType).map(([type, count]) => [type.replaceAll("_", " "), count])} />
+            <h4>Formal Marker Summary</h4>
+            <SummaryFields fields={[
+                ["Total", model.summary.total], ["Buy", model.summary.buy], ["Sell", model.summary.sell],
+                ["Entry", model.summary.entry], ["Exit", model.summary.exit],
+                ["Reduce Only", model.summary.reduceOnly], ["Flatten", model.summary.flatten],
+                ["Failed", model.summary.failed], ["Blocked", model.summary.blocked], ["Unknown", model.summary.unknown],
+            ]} />
+            <h4>Marker Details</h4>
+            {model.detailMarkers.length === 0 ? <p>NONE</p> : <div className="mi-marker-overlay__lane">
+                {model.detailMarkers.map((marker) => <MarkerBadge key={marker.displayKey} marker={marker}
+                    matchLabel={marker.priceMatch || marker.timeMatch ? "MATCHED" : "UNMATCHED"} />)}
+            </div>}
             <h4>Unmatched Markers</h4>
             {model.unmatchedMarkers.length === 0 ? <p>NONE</p> : <div className="mi-marker-overlay__lane">
                 {model.unmatchedMarkers.map((marker) => <MarkerBadge key={marker.displayKey} marker={marker} matchLabel="UNMATCHED" />)}
@@ -87,6 +111,7 @@ export default function ReplayMarkerOverlay({ model }) {
                 ["Unmatched Time Count", model.diagnostics.unmatchedTimeCount],
                 ["Truncated Marker Count", model.diagnostics.truncatedMarkerCount],
                 ["Unknown Type Count", model.diagnostics.unknownTypeCount],
+                ...Object.entries(model.diagnostics.byQuality).map(([quality, count]) => [`${quality} Quality Count`, count]),
             ]} />
         </section>
     );
