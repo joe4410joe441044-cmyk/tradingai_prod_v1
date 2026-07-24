@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import "./App.css";
 
 import AppNavigation from "./components/AppNavigation";
 import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
+import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
+import { startWebSocketRuntime } from "./runtime/websocketRuntime";
 
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
 
@@ -27,14 +29,20 @@ export default function App() {
         ? MarketIntelligencePage
         : Dashboard;
 
-    return (
-        <div className="app-shell market-intelligence">
-            <AppNavigation
-                currentPath={currentPath}
-                onPathChange={setCurrentPath}
-            />
+    useEffect(() => {
+        startWebSocketRuntime();
+    }, []);
 
-            <CurrentPage />
-        </div>
+    return (
+        <DashboardMarketContextProvider>
+            <div className="app-shell market-intelligence">
+                <AppNavigation
+                    currentPath={currentPath}
+                    onPathChange={setCurrentPath}
+                />
+
+                <CurrentPage />
+            </div>
+        </DashboardMarketContextProvider>
     );
 }

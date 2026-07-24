@@ -80,6 +80,20 @@ const loadProviderModule = async () => {
         stateDirectory,
         "marketIntelligenceReducer.js",
     )).href;
+    const replayAdapterUrl = pathToFileURL(join(
+        stateDirectory,
+        "../../features/market-intelligence/market/replayMarketAdapter.js",
+    )).href;
+    const liveAdapterUrl = pathToFileURL(join(
+        stateDirectory,
+        "../../features/market-intelligence/market/liveMarketAdapter.js",
+    )).href;
+    const contextSelectionUrl = pathToFileURL(join(
+        stateDirectory,
+        "../../features/market-intelligence/market/marketContextSelection.js",
+    )).href;
+    const dashboardContextStub = "data:text/javascript,export const useOptionalDashboardMarketContext=()=>globalThis.__DASHBOARD_MARKET_CONTEXT__??null";
+    const runtimeTelemetryStub = "data:text/javascript,export const useRuntimeMarketTelemetry=()=>globalThis.__RUNTIME_MARKET_TELEMETRY__??({market:{},runtime:{}})";
     const code = transformed.code
         .replace('from "./initialState.js";', `from "${initialStateUrl}";`)
         .replace(
@@ -89,6 +103,26 @@ const loadProviderModule = async () => {
         .replace(
             'from "./marketIntelligenceReducer.js";',
             `from "${reducerUrl}";`,
+        )
+        .replace(
+            'from "../../features/market-intelligence/market/replayMarketAdapter.js";',
+            `from "${replayAdapterUrl}";`,
+        )
+        .replace(
+            'from "../../features/market-intelligence/market/liveMarketAdapter.js";',
+            `from "${liveAdapterUrl}";`,
+        )
+        .replace(
+            'from "../../features/market-intelligence/market/marketContextSelection.js";',
+            `from "${contextSelectionUrl}";`,
+        )
+        .replace(
+            'from "../dashboard-market/DashboardMarketContext.jsx";',
+            `from "${dashboardContextStub}";`,
+        )
+        .replace(
+            'from "../../hooks/useRuntimeMarketTelemetry.js";',
+            `from "${runtimeTelemetryStub}";`,
         );
 
     try {
@@ -368,12 +402,47 @@ test("unknown and null actions preserve the provider state reference", () => {
 
 test("Provider exposes replay engine and command application and updates context", async () => {
     const { MarketIntelligenceProvider, useMarketIntelligence } = await getProviderModule();
+    globalThis.__DASHBOARD_MARKET_CONTEXT__ = {
+        marketContext: {
+            exchange: "KUCOIN",
+            marketType: "SPOT",
+            exchangeSymbol: "BTCUSDT",
+            normalizedSymbol: null,
+            displaySymbol: null,
+            contextKey: "KUCOIN:SPOT:BTCUSDT",
+            tickSize: null,
+            pricePrecision: null,
+            lotSize: null,
+            quantityPrecision: null,
+        },
+    };
+    globalThis.__RUNTIME_MARKET_TELEMETRY__ = {
+        market: {
+            exchange: "KUCOIN",
+            exchangeSymbol: "BTCUSDT",
+            price: 100,
+            bestBid: 99,
+            bestAsk: 101,
+            lastUpdate: Date.parse("2026-07-23T00:00:00.000Z"),
+        },
+        runtime: { websocketConnected: true, streamStale: false },
+    };
     const Consumer = () => useMarketIntelligence();
     const renderer = createProviderRenderer(MarketIntelligenceProvider, Consumer);
     assert.equal(renderer.result.replayEngine.machine.state, S.IDLE);
     assert.equal(renderer.result.replayEngine.dataset, null);
     assert.equal(typeof renderer.result.dispatch, "function");
     assert.equal(typeof renderer.result.applyReplayCommand, "function");
+    assert.equal(renderer.result.marketContextMode, "LIVE");
+    assert.equal(renderer.result.marketContext.contextKey, "KUCOIN:SPOT:BTCUSDT");
+    assert.equal(renderer.result.normalizedMarketModel.status, "READY");
+    assert.deepEqual(renderer.result.normalizedMarketModel.price, {
+        current: 100,
+        bestBid: 99,
+        bestAsk: 101,
+        spread: 2,
+        midpoint: 100,
+    });
     renderer.result.applyReplayCommand({
         type: C.LOAD_DATASET,
         payload: { dataset: XRP_REPLAY_FIXTURE },
@@ -381,6 +450,22 @@ test("Provider exposes replay engine and command application and updates context
     renderer.render();
     assert.equal(renderer.result.replayEngine.machine.state, S.REPLAY_READY);
     assert.equal(renderer.result.state.replayEngine, renderer.result.replayEngine);
+    assert.equal(renderer.result.marketContextMode, "REPLAY");
+    assert.equal(renderer.result.marketContext.contextKey, "KUCOIN:FUTURES:XRPUSDTM");
+    assert.equal(renderer.result.normalizedMarketModel.price.current, 0.6124);
+    globalThis.__DASHBOARD_MARKET_CONTEXT__.marketContext = {
+        ...globalThis.__DASHBOARD_MARKET_CONTEXT__.marketContext,
+        exchangeSymbol: "ETHUSDT",
+        contextKey: "KUCOIN:SPOT:ETHUSDT",
+    };
+    renderer.result.applyReplayCommand({ type: C.RESET });
+    renderer.render();
+    assert.equal(renderer.result.marketContextMode, "LIVE");
+    assert.equal(renderer.result.marketContext.contextKey, "KUCOIN:SPOT:ETHUSDT");
+    assert.equal(renderer.result.normalizedMarketModel.status, "WAITING");
+    assert.equal(renderer.result.normalizedMarketModel.price.current, null);
+    delete globalThis.__DASHBOARD_MARKET_CONTEXT__;
+    delete globalThis.__RUNTIME_MARKET_TELEMETRY__;
 });
 
 test("useMarketIntelligence rejects consumers outside the Provider", async () => {

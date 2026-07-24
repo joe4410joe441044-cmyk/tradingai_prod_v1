@@ -106,9 +106,26 @@ export const telemetryState = {
 
     market: {
 
-        price: 0,
+        exchange: null,
+        marketType: null,
+        exchangeSymbol: null,
+        timestamp: null,
+        sequence: null,
+        price: null,
+        bestBid: null,
+        bestAsk: null,
 
-        spread: 0,
+        spread: null,
+        orderBook: {
+            timestamp: null,
+            sequence: null,
+            depth: 0,
+            bids: [],
+            asks: [],
+            dataQuality: "UNAVAILABLE",
+            syncState: "UNAVAILABLE",
+        },
+        dataQuality: "UNAVAILABLE",
 
         liquidity: "--",
 
@@ -212,6 +229,19 @@ export const telemetryState = {
 
 };
 
+const telemetrySubscribers = new Set();
+const notifyTelemetrySubscribers = () => {
+    telemetrySubscribers.forEach((listener) => listener());
+};
+
+export const subscribeTelemetry = (listener) => {
+    telemetrySubscribers.add(listener);
+    return () => telemetrySubscribers.delete(listener);
+};
+
+export const getMarketTelemetrySnapshot = () => telemetryState.market;
+export const getRuntimeTelemetrySnapshot = () => telemetryState.runtime;
+
 /* =================================================
    GOVERNANCE TELEMETRY UPDATE
 ================================================= */
@@ -249,6 +279,8 @@ export const updateRuntimeTelemetry = (
         ...payload,
 
     };
+
+    notifyTelemetrySubscribers();
 
 };
 
@@ -289,6 +321,8 @@ export const updateMarketTelemetry = (
         ...payload,
 
     };
+
+    notifyTelemetrySubscribers();
 
 };
 

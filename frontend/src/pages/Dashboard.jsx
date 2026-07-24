@@ -5,9 +5,6 @@ import {
     useState,
 } from "react";
 
-import {
-    startWebSocketRuntime,
-} from "../runtime/websocketRuntime";
 import { API } from "../api";
 import usePolling from "../hooks/usePolling";
 import AccountRuntimeOverview from "../components/runtime/AccountRuntimeOverview";
@@ -22,6 +19,7 @@ import { deriveRuntimeHealth } from "../utils/runtimeHealth";
 import {
     telemetryState,
 } from "../store/telemetryStore";
+import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
 
@@ -102,45 +100,7 @@ const { data: botStatusSnapshot } = usePolling(
     5000,
 );
 
-const [tradeSettings, setTradeSettings] = useState({
-
-    mode: "PAPER",
-
-    exchange: "KUCOIN",
-
-    symbol: "XRPUSDT",
-
-    leverage: 5,
-
-    timeframe: "1m",
-
-    positionSize: 100,
-
-    tp: 1.0,
-
-    sl: 1.0,
-
-    maxDd: 5,
-
-    risk_percent: 1.0,
-
-    trailing: false,
-
-    spreadFilter: true,
-
-    volatilityFilter: true,
-
-    liquidityFilter: true,
-
-    spoofFilter: true,
-
-    momentumFilter: true,
-
-    killSwitch: false,
-
-    autoFlatten: false,
-
-});
+const { tradeSettings, setTradeSettings } = useDashboardMarketContext();
 const [, forceUpdate] = useState(0);
 const [executionEnabled, setExecutionEnabled] = useState(false);
 const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
@@ -250,12 +210,6 @@ useEffect(() => {
     return () => clearInterval(id);
 }, []);
     
-    useEffect(() => {
-
-        startWebSocketRuntime();
-
-    }, []);
-
     return (
 
         <>

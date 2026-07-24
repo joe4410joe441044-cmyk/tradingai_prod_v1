@@ -2,6 +2,8 @@
 
 import {
     telemetryStore,
+    updateMarketTelemetry,
+    updateRuntimeTelemetry,
 } from "../store/telemetryStore";
 
 window.telemetryStore =
@@ -84,10 +86,7 @@ function updateRuntimeState(
     state
 ) {
 
-    telemetryStore.runtime = {
-
-        ...telemetryStore.runtime,
-
+    updateRuntimeTelemetry({
         connectionState:
             state,
 
@@ -100,8 +99,9 @@ function updateRuntimeState(
         reconnectAttempts,
 
         lastPacketTimestamp,
-
-    };
+        streamDisconnected: state === ConnectionState.DISCONNECTED,
+        streamStale: state !== ConnectionState.LIVE,
+    });
 
     /*
     EXECUTION RUNTIME MIRROR
@@ -273,16 +273,14 @@ function connectWebSocket() {
         lastPacketTimestamp =
             Date.now();
 
-        telemetryStore.runtime = {
-
-            ...telemetryStore.runtime,
-
+        updateRuntimeTelemetry({
             lastPacketTimestamp,
 
             lastMessageTimestamp:
                 lastPacketTimestamp,
-
-        };
+            streamDisconnected: false,
+            streamStale: false,
+        });
 
         let message = null;
 
@@ -305,18 +303,14 @@ function connectWebSocket() {
                 error
             );
 
-            telemetryStore.runtime = {
-
-                ...telemetryStore.runtime,
-
+            updateRuntimeTelemetry({
                 malformedPackets:
                     (
                         telemetryStore
                             .runtime
                             ?.malformedPackets || 0
                     ) + 1,
-
-            };
+            });
 
             telemetryStore.executionRuntime = {
 
@@ -346,6 +340,24 @@ function connectWebSocket() {
             message
         );
 
+        const formalMarket = message?.market;
+        if (formalMarket && typeof formalMarket === "object" && !Array.isArray(formalMarket)) {
+            updateMarketTelemetry({
+                exchange: formalMarket.exchange,
+                marketType: formalMarket.marketType,
+                exchangeSymbol: formalMarket.exchangeSymbol,
+                timestamp: formalMarket.timestamp,
+                sequence: formalMarket.sequence,
+                price: formalMarket.price,
+                bestBid: formalMarket.bestBid,
+                bestAsk: formalMarket.bestAsk,
+                spread: formalMarket.spread,
+                orderBook: formalMarket.orderBook,
+                dataQuality: formalMarket.dataQuality,
+                lastUpdate: lastPacketTimestamp,
+            });
+        }
+
                 /*
         ====================================
         BOT RESULT PAYLOAD
@@ -355,18 +367,24 @@ function connectWebSocket() {
         if (
             message &&
             typeof message === "object" &&
-            "price" in message
+            "price" in message &&
+            !formalMarket
         ) {
             if ("status" in message) {
-                telemetryStore.runtime = {
-                    ...telemetryStore.runtime,
+                updateRuntimeTelemetry({
                     botStatus: message,
                     botStatusLastUpdate: lastPacketTimestamp,
-                };
+                });
             }
 
             const marketUpdate = {
                 price: message.price,
+                bestBid: message.bestBid ?? message.best_bid,
+                bestAsk: message.bestAsk ?? message.best_ask,
+                exchange: message.exchange,
+                exchangeSymbol: message.symbol,
+                symbol: message.symbol,
+                marketType: message.marketType,
                 lastUpdate: lastPacketTimestamp,
             };
 
@@ -396,10 +414,7 @@ function connectWebSocket() {
                     ?? message.position;
             }
 
-            telemetryStore.market = {
-                ...telemetryStore.market,
-                ...marketUpdate,
-            };
+            updateMarketTelemetry(marketUpdate);
         }
 
         /*
@@ -437,13 +452,9 @@ function connectWebSocket() {
             "runtime_update"
         ) {
 
-            telemetryStore.runtime = {
-
-                ...telemetryStore.runtime,
-
+            updateRuntimeTelemetry({
                 ...message.data,
-
-            };
+            });
 
         }
 
@@ -512,16 +523,12 @@ function connectWebSocket() {
             "market_update"
         ) {
 
-            telemetryStore.market = {
-
-                ...telemetryStore.market,
-
+            updateMarketTelemetry({
                 ...message.data,
 
                 lastUpdate:
                     lastPacketTimestamp,
-
-            };
+            });
 
         }
 
@@ -697,13 +704,9 @@ function startStaleSocketWatchdog() {
                 now -
                 lastPacketTimestamp;
 
-            telemetryStore.runtime = {
-
-                ...telemetryStore.runtime,
-
+            updateRuntimeTelemetry({
                 staleDuration,
-
-            };
+            });
 
             /*
             STALE DETECTION

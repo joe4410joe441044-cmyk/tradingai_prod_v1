@@ -13,14 +13,20 @@ const loadApp = async () => {
     const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source));
     const temporary = await mkdtemp(join(directory, ".app-integration-test-"));
     const output = join(temporary, "App.mjs");
-    const reactStub = moduleUrl("export const useState=(initializer)=>[typeof initializer==='function'?initializer():initializer,()=>{}]");
+    const reactStub = moduleUrl("export const useEffect=(callback)=>callback();export const useState=(initializer)=>[typeof initializer==='function'?initializer():initializer,()=>{}]");
     const navigationStub = moduleUrl("export default()=>({type:'nav',props:{children:'NAVIGATION'}})");
     const dashboardStub = moduleUrl("export default()=>({type:'main',props:{children:'DASHBOARD PAGE'}})");
     const marketStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET INTELLIGENCE PAGE'}})");
+    const dashboardMarketProviderStub = moduleUrl(
+        "export const DashboardMarketContextProvider=({children})=>children",
+    );
+    const runtimeStub = moduleUrl("export const startWebSocketRuntime=()=>{}");
     const code = transformed.code.replace('from "react";', `from "${reactStub}";`)
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
         .replace('from "./pages/MarketIntelligencePage";', `from "${marketStub}";`)
+        .replace('from "./state/dashboard-market/DashboardMarketContext";', `from "${dashboardMarketProviderStub}";`)
+        .replace('from "./runtime/websocketRuntime";', `from "${runtimeStub}";`)
         .replace('import "./App.css";', "");
     try {
         await writeFile(output, code);
