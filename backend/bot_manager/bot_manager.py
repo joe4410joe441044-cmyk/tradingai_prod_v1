@@ -1687,6 +1687,99 @@ class BotManager:
 
         self.lifecycle_changed_at = time.time()
 
+    def _recheck_stale_stopped_paper_start_authority(
+        self,
+        config,
+        pending_authority,
+    ):
+
+        stale_reasons = {
+            "SNAPSHOT_STALE",
+            "DURABLE_SNAPSHOT_STALE",
+        }
+        if (
+            not isinstance(pending_authority, dict)
+            or pending_authority.get("reason") not in stale_reasons
+        ):
+            return pending_authority
+
+        requested_mode = str(config.get("mode", "")).strip().lower()
+        if requested_mode != "paper":
+            return pending_authority
+        if config.get("dry_run", True) is not True:
+            return pending_authority
+
+        if self._running is not False or self.lifecycle_state != "STOPPED":
+            return pending_authority
+        if self.engine is not None:
+            return pending_authority
+        if governance_state.get("execution_enabled") is not False:
+            return pending_authority
+        if (
+            governance_state.get("emergency_state") == EMERGENCY_PROCESSING
+        ):
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="EMERGENCY_PROCESSING",
+                source="stopped_paper_start_recheck",
+                manager_pending_order=self.pending_order,
+                engine_available=False,
+            )
+        if (
+            governance_state.get("emergency_state") != EMERGENCY_READY
+            or governance_state.get("emergency_stop") is not False
+        ):
+            return pending_authority
+
+        configured_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().lower()
+        if (
+            configured_mode != "paper"
+            or self.config.get("dry_run", True) is not True
+            or backend_config.TRADE_MODE != "paper"
+            or backend_config.ALLOW_LIVE is not False
+        ):
+            return pending_authority
+
+        live_readiness = self._build_live_readiness_snapshot(
+            "PAPER",
+            True,
+        )
+        if live_readiness.get("realOrderAllowed") is not False:
+            return pending_authority
+
+        recheck = self._stopped_paper_authoritative_safety_state(
+            refresh_snapshot=True,
+        )
+        if recheck.get("safe") is not True:
+            reason = (
+                recheck.get("reason")
+                or "SNAPSHOT_REFRESH_FAILED"
+            )
+            known = reason in {
+                "POSITION_REMAINING",
+                "PENDING_ORDER_REMAINING",
+                "OPEN_ORDER_REMAINING",
+            }
+            return self._pending_order_authority_payload(
+                known=known,
+                pending=(
+                    reason == "PENDING_ORDER_REMAINING"
+                    if known
+                    else None
+                ),
+                safe=False,
+                reason=reason,
+                source="stopped_paper_start_recheck",
+                manager_pending_order=self.pending_order,
+                engine_available=False,
+            )
+
+        return self.get_authoritative_pending_order_state()
+
     def start(self, config):
 
         try:
@@ -1698,6 +1791,12 @@ class BotManager:
             if requested_mode == "paper":
                 pending_authority = (
                     self.get_authoritative_pending_order_state()
+                )
+                pending_authority = (
+                    self._recheck_stale_stopped_paper_start_authority(
+                        config,
+                        pending_authority,
+                    )
                 )
                 if self.engine is not None:
                     from backend.routers import positions as positions_router

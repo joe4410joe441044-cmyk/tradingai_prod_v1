@@ -10474,6 +10474,193 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 finally:
                     self._restore_governance(state_before)
 
+    def test_start_rechecks_one_stale_flat_stopped_paper_snapshot(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_900_000_000.0
+
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot["last_update"] = now - 600
+
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ), patch.object(
+                bot,
+                "_stopped_paper_authoritative_safety_state",
+                wraps=bot._stopped_paper_authoritative_safety_state,
+            ) as recheck:
+                stale = bot.get_authoritative_pending_order_state()
+                self.assertEqual(stale["reason"], "SNAPSHOT_STALE")
+                refreshed = (
+                    bot._recheck_stale_stopped_paper_start_authority(
+                        self._bootstrap_start_config(),
+                        stale,
+                    )
+                )
+
+            refresh_calls = [
+                call
+                for call in recheck.call_args_list
+                if call.kwargs.get("refresh_snapshot") is True
+            ]
+            self.assertEqual(len(refresh_calls), 1)
+            self.assertTrue(refreshed["known"])
+            self.assertFalse(refreshed["pending"])
+            self.assertTrue(refreshed["safe"])
+            self.assertEqual(bot.account_snapshot["last_update"], now)
+            self.assertEqual(
+                bot.account_snapshot["dataQuality"],
+                "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
+            )
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_start_stale_recheck_rejects_unsafe_or_unknown_authority(self):
+        cases = [
+            (
+                "position",
+                {
+                    "position": {"symbol": "XRPUSDTM", "side": "BUY"},
+                    "positions": [
+                        {"symbol": "XRPUSDTM", "side": "BUY"}
+                    ],
+                    "positionRemaining": True,
+                },
+                "POSITION_REMAINING",
+            ),
+            (
+                "pending",
+                {
+                    "pendingOrder": True,
+                    "pending_order": True,
+                },
+                "PENDING_ORDER_REMAINING",
+            ),
+            (
+                "position-unknown",
+                {
+                    "positionRemaining": None,
+                },
+                "POSITION_STATE_UNKNOWN",
+            ),
+            (
+                "pending-unknown",
+                {
+                    "pendingOrder": None,
+                    "pending_order": None,
+                },
+                "PENDING_ORDER_UNKNOWN",
+            ),
+            (
+                "tampered-source",
+                {
+                    "source": "manual_snapshot",
+                },
+                "SNAPSHOT_SOURCE_UNKNOWN",
+            ),
+        ]
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_900_000_000.0
+
+        try:
+            for name, changes, expected_reason in cases:
+                with self.subTest(name=name):
+                    bot = self._stopped_paper_bot()
+                    bot.account_snapshot.update(changes)
+                    bot.account_snapshot["last_update"] = now - 600
+
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=now,
+                    ):
+                        stale = bot.get_authoritative_pending_order_state()
+                        self.assertEqual(stale["reason"], "SNAPSHOT_STALE")
+                        result = (
+                            bot._recheck_stale_stopped_paper_start_authority(
+                                self._bootstrap_start_config(),
+                                stale,
+                            )
+                        )
+
+                    self.assertFalse(result["safe"])
+                    self.assertEqual(result["reason"], expected_reason)
+                    self.assertEqual(
+                        bot.account_snapshot["last_update"],
+                        now - 600,
+                    )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_start_stale_recheck_respects_mode_emergency_and_retry_limit(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+
+        try:
+            bot = self._stopped_paper_bot()
+            stale = bot._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="SNAPSHOT_STALE",
+                source="stopped_paper_authoritative",
+            )
+
+            for mode in ("live", "", "unknown"):
+                with self.subTest(mode=mode):
+                    config = self._bootstrap_start_config()
+                    config["mode"] = mode
+                    with patch.object(
+                        bot,
+                        "_stopped_paper_authoritative_safety_state",
+                    ) as recheck:
+                        result = (
+                            bot._recheck_stale_stopped_paper_start_authority(
+                                config,
+                                stale,
+                            )
+                        )
+                    self.assertIs(result, stale)
+                    recheck.assert_not_called()
+
+            governance_state["emergency_state"] = EMERGENCY_PROCESSING
+            governance_state["emergency_stop"] = True
+            result = bot._recheck_stale_stopped_paper_start_authority(
+                self._bootstrap_start_config(),
+                stale,
+            )
+            self.assertEqual(result["reason"], "EMERGENCY_PROCESSING")
+            self.assertFalse(result["safe"])
+
+            governance_state["emergency_state"] = EMERGENCY_READY
+            governance_state["emergency_stop"] = False
+            with patch.object(
+                bot,
+                "_stopped_paper_authoritative_safety_state",
+                return_value={
+                    "safe": False,
+                    "reason": "SNAPSHOT_SAVE_FAILED",
+                },
+            ) as recheck:
+                failed = bot._recheck_stale_stopped_paper_start_authority(
+                    self._bootstrap_start_config(),
+                    stale,
+                )
+            self.assertEqual(recheck.call_count, 1)
+            self.assertEqual(failed["reason"], "SNAPSHOT_SAVE_FAILED")
+            self.assertFalse(failed["safe"])
+        finally:
+            self._restore_governance(state_before)
+
     def test_emergency_unlock_forces_execution_off(self):
         state_before = dict(governance_state)
 
