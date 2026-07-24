@@ -45,4 +45,8 @@ test("AI intelligence workspace renders final decision and the specified skeleto
     assert.equal(skeletons.length, 6);
     assert.equal(skeletons.filter(({ props }) => props["aria-label"] === "EXECUTION / POSITION").length, 1);
     assert.equal(skeletons.some(({ props }) => props["aria-label"] === "Execution" || props["aria-label"] === "Position"), false);
+    for (const title of ["AI Review", "EXECUTION / POSITION"]) assert.equal(skeletons.find(({ props }) =>
+        props["aria-label"] === title).props.className.includes("--priority"), true);
+    assert.equal(skeletons.find(({ props }) => props["aria-label"] === "Feature Snapshot")
+        .props.className.includes("--muted"), true);
 });

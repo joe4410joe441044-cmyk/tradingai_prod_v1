@@ -20,21 +20,32 @@ export default function MarketIntelligenceToolbar() {
         ? "UNAVAILABLE" : quality === "VALID" ? "REPLAY READY" : "PARTIAL";
 
     return (
-        <section aria-labelledby="mi-toolbar-heading" className="mi-toolbar">
+        <section aria-labelledby="mi-toolbar-heading" className={`mi-toolbar${hasReplay ? "" : " mi-toolbar--empty"}`}>
             <h2 className="mi-visually-hidden" id="mi-toolbar-heading">Replay context（リプレイ状況）</h2>
 
-            <label className="mi-toolbar__field">
+            {!hasReplay ? <>
+                <div className="mi-toolbar__field">
+                    <span>{bilingual("mode")}</span>
+                    <strong>REVIEW</strong>
+                </div>
+                <div className="mi-toolbar__field mi-toolbar__status">
+                    <span>REPLAY</span>
+                    <strong className="mi-status-text--missing">{status}</strong>
+                    {hasError && <button onClick={() => applyReplayCommand({ type: REPLAY_ENGINE_COMMANDS.RETRY })}
+                        type="button">RETRY（再試行）</button>}
+                </div>
+            </> : <><label className="mi-toolbar__field">
                 <span>{bilingual("position")}</span>
                 <select disabled value={replayEngine?.dataset?.datasetId ?? ""}>
                     <option value={replayEngine?.dataset?.datasetId ?? ""}>
-                        {hasReplay ? replayEngine.dataset.datasetId ?? "Replay loaded" : "NO REPLAY SELECTED"}
+                        {replayEngine.dataset.datasetId ?? "Replay loaded"}
                     </option>
                 </select>
             </label>
 
             <div className="mi-toolbar__field">
                 <span>{bilingual("mode")}</span>
-                <strong>{hasReplay ? replayEngine.machine?.state ?? "REVIEW" : "REVIEW"}</strong>
+                <strong>{replayEngine.machine?.state ?? "REVIEW"}</strong>
             </div>
 
             <div className="mi-toolbar__field">
@@ -51,7 +62,7 @@ export default function MarketIntelligenceToolbar() {
                 <strong className={status === "REPLAY READY" ? undefined : "mi-status-text--missing"}>{status}</strong>
                 {hasError && <button onClick={() => applyReplayCommand({ type: REPLAY_ENGINE_COMMANDS.RETRY })}
                     type="button">RETRY（再試行）</button>}
-            </div>
+            </div></>}
         </section>
     );
 }

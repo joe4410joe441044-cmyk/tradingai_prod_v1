@@ -53,7 +53,8 @@ test("empty inspector stays compact without rendering advanced field grids", asy
         model: buildReplayInspectorModel(createInitialReplayEngineState()),
     }));
     const text = nodes.map(textOf).join(" ");
-    assert.match(text, /NO CURRENT EVENT（現在イベントなし）/);
+    assert.match(text, /NO CURRENT EVENT/);
+    assert.equal(nodes.some(({ props }) => props?.className === "mi-replay-inspector__empty"), false);
     assert.equal(nodes.some(({ type }) => type === "details"), false);
     assert.doesNotMatch(text, /Position Context/);
     assert.doesNotMatch(text, /Station Context/);

@@ -39,7 +39,8 @@ const displayField = (fields, label) => fields.find((item) => item.label === lab
 
 export function ReplayInspectorView({ model }) {
     return (
-        <section aria-labelledby="mi-replay-inspector-title" className="mi-replay-inspector">
+        <section aria-labelledby="mi-replay-inspector-title"
+            className={`mi-replay-inspector${model.isEmpty ? " mi-replay-inspector--empty" : ""}`}>
             <header className="mi-replay-inspector__header">
                 <div>
                     <h2 id="mi-replay-inspector-title">{bilingual("replayInspector")}</h2>
@@ -48,12 +49,6 @@ export function ReplayInspectorView({ model }) {
                     {model.currentEvent.event?.type ?? "NO CURRENT EVENT"}
                 </span>
             </header>
-
-            {model.isEmpty && (
-                <div className="mi-replay-inspector__empty">
-                    <strong>NO CURRENT EVENT（現在イベントなし）</strong>
-                </div>
-            )}
 
             {!model.isEmpty && <dl className="mi-replay-inspector__summary">
                 <div><dt>{bilingual("currentEvent")}</dt><dd>{displayField(model.currentEvent.fields, "Event ID")}</dd></div>

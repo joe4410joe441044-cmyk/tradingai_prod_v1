@@ -33,13 +33,111 @@ export const normalizeMarketSource = (source) => {
     return {
         exchange: safe(value.exchange), marketType: safe(value.marketType),
         exchangeSymbol: safe(value.exchangeSymbol), canonicalSymbol: safe(value.canonicalSymbol),
-        sourceMode: safe(value.sourceMode), isSample: value.isSample === true,
+        displaySymbol: safe(value.displaySymbol), sourceMode: safe(value.sourceMode),
+        pricePrecision: Number.isInteger(value.pricePrecision) && value.pricePrecision >= 0
+            ? value.pricePrecision : null,
+        tickSize: finite(value.tickSize) && value.tickSize > 0 ? value.tickSize : null,
+        quantityPrecision: Number.isInteger(value.quantityPrecision) && value.quantityPrecision >= 0
+            ? value.quantityPrecision : null,
+        lotSize: finite(value.lotSize) && value.lotSize > 0 ? value.lotSize : null,
+        isSample: value.isSample === true,
     };
 };
 
+const rawMarketContext = (event) => {
+    const payload = payloadOf(event);
+    const source = payload.marketSource && typeof payload.marketSource === "object"
+        && !Array.isArray(payload.marketSource) ? payload.marketSource : payload;
+    const value = {
+        exchange: source.exchange,
+        marketType: source.marketType,
+        exchangeSymbol: source.exchangeSymbol ?? source.symbol,
+        canonicalSymbol: source.canonicalSymbol,
+        displaySymbol: source.displaySymbol,
+        sourceMode: source.sourceMode,
+        pricePrecision: source.pricePrecision,
+        tickSize: source.tickSize,
+        quantityPrecision: source.quantityPrecision,
+        lotSize: source.lotSize,
+        isSample: source.isSample,
+    };
+    const hasIdentity = [value.exchange, value.marketType, value.exchangeSymbol]
+        .every((item) => typeof item === "string" && item.trim());
+    return hasIdentity ? normalizeMarketSource(value) : null;
+};
+
+const tickPrecision = (tickSize) => {
+    if (!finite(tickSize) || tickSize <= 0) return null;
+    const text = String(tickSize).toLowerCase();
+    if (text.includes("e-")) return Number(text.split("e-")[1]);
+    return text.includes(".") ? text.split(".")[1].length : 0;
+};
+export const formatMarketPrice = (value, source = {}) => {
+    if (!finite(value)) return DASH;
+    const precision = source.pricePrecision ?? tickPrecision(source.tickSize);
+    return Number.isInteger(precision) && precision >= 0 && precision <= 20
+        ? value.toFixed(precision) : marketDisplayValue(value);
+};
+export const formatMarketQuantity = (value, source = {}) => {
+    if (!finite(value)) return DASH;
+    const precision = source.quantityPrecision ?? tickPrecision(source.lotSize);
+    return Number.isInteger(precision) && precision >= 0 && precision <= 20
+        ? value.toFixed(precision) : marketDisplayValue(value);
+};
+const marketDataState = ({ replayEngine, source, hasContext, hasMarketData, quality, crossed }) => {
+    const machineState = replayEngine?.machine?.state;
+    if (!hasContext) return "NO MARKET SELECTED";
+    if (machineState === "REPLAY_LOADING" || machineState === "LOADING") return "LOADING";
+    if (machineState === "REPLAY_ERROR" || quality === "INVALID" || crossed) return "UNAVAILABLE";
+    if (!hasMarketData) return "WAITING";
+    if (quality === "STALE") return "STALE";
+    if (source.sourceMode === "LIVE") return "LIVE";
+    if (source.sourceMode === "REPLAY") return "REPLAY";
+    return "UNAVAILABLE";
+};
+const normalizedPresentationState = (model) => {
+    if (!model) return null;
+    if (model.status === "NO_MARKET") return "NO MARKET SELECTED";
+    if (model.status === "READY") return model.source?.mode === "LIVE" ? "READY" : "REPLAY";
+    if (model.status === "INVALID") return "UNAVAILABLE";
+    return model.status;
+};
+
+export const marketContextKey = (context) => context
+    && [context.exchange, context.marketType, context.exchangeSymbol]
+        .every((value) => typeof value === "string" && value && value !== UNKNOWN)
+    ? `${context.exchange}\u0000${context.marketType}\u0000${context.exchangeSymbol}` : null;
+
+const scopeEventsToMarketContext = (events) => {
+    const contexts = events.map(rawMarketContext);
+    const activeIndex = contexts.findLastIndex(Boolean);
+    if (activeIndex < 0) return { activeContext: null, events, contextChanged: false };
+    const activeContext = contexts[activeIndex];
+    const activeKey = marketContextKey(activeContext);
+    let runKey = null;
+    let runStart = 0;
+    let contextChanged = false;
+    contexts.forEach((context, index) => {
+        if (!context) return;
+        const key = marketContextKey(context);
+        if (runKey === null) runStart = index;
+        else if (key !== runKey) {
+            runStart = index;
+            contextChanged = true;
+        }
+        runKey = key;
+    });
+    const scoped = events.slice(runStart).filter((event) => {
+        const context = rawMarketContext(event);
+        return !context || marketContextKey(context) === activeKey;
+    });
+    return { activeContext, events: scoped, contextChanged };
+};
+
 export const normalizedTradeTime = (value) => {
-    if (typeof value !== "string" || !value.trim() || !Number.isFinite(Date.parse(value))) return "TIME UNKNOWN";
-    const match = value.match(/T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
+    const normalized = finite(value) ? new Date(value).toISOString() : value;
+    if (typeof normalized !== "string" || !normalized.trim() || !Number.isFinite(Date.parse(normalized))) return "TIME UNKNOWN";
+    const match = normalized.match(/T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
     if (!match) return "TIME UNKNOWN";
     return match[2] ? `${match[1]}.${match[2].slice(0, 3).padEnd(Math.min(3, match[2].length), "0")}` : match[1];
 };
@@ -58,13 +156,15 @@ const normalizeBookSide = (rows, side) => {
     const valid = [];
     for (const candidate of source) {
         const row = rowValues(candidate);
-        if (!finite(row.price) || !finite(row.quantity) || row.quantity < 0) {
+        if (!finite(row.price) || row.price <= 0 || !finite(row.quantity) || row.quantity <= 0) {
             invalid += 1;
             continue;
         }
         valid.push({
             numericPrice: row.price,
             numericSize: row.quantity,
+            formalCumulativeSize: finite(row.cumulativeSize) && row.cumulativeSize >= 0
+                ? row.cumulativeSize : null,
             largeSize: marketDisplayValue(row.largeSize),
         });
     }
@@ -80,8 +180,10 @@ const normalizeBookSide = (rows, side) => {
             level: index + 1,
             price: marketDisplayValue(row.numericPrice),
             size: marketDisplayValue(row.numericSize),
-            optionalTotal: marketDisplayValue(cumulative),
-            numericCumulativeQuantity: cumulative,
+            optionalTotal: marketDisplayValue(row.formalCumulativeSize ?? cumulative),
+            cumulativeSize: marketDisplayValue(row.formalCumulativeSize ?? cumulative),
+            numericCumulativeQuantity: row.formalCumulativeSize ?? cumulative,
+            cumulativeSource: row.formalCumulativeSize === null ? "CALCULATED" : "FORMAL",
         };
     });
     const displayOrder = side === "ASK" ? [...normalized].reverse() : normalized;
@@ -130,18 +232,23 @@ const tradeCandidates = (event) => {
 };
 
 const normalizeTrade = (trade, event, index) => {
+    const timestamp = marketTimestamp(trade?.timestamp ?? event?.timestamp);
+    const side = normalizeMarketSide(trade?.side ?? trade?.aggressor);
     if (!trade || typeof trade !== "object" || Array.isArray(trade)
-        || !finite(trade.price) || !finite(trade.quantity) || trade.quantity < 0) return null;
+        || !finite(trade.price) || trade.price <= 0 || !finite(trade.quantity) || trade.quantity <= 0
+        || timestamp === DASH || side === UNKNOWN) return null;
     return {
         id: marketDisplayValue(trade.tradeId ?? trade.id) === DASH ? `${event?.id ?? "trade"}-${index}` : String(trade.tradeId ?? trade.id),
-        eventId: marketDisplayValue(trade.eventId),
-        timestamp: marketTimestamp(trade.timestamp ?? event?.timestamp),
+        eventId: marketDisplayValue(trade.eventId ?? (["RECENT_TRADE", "TRADE"].includes(event?.eventType)
+            ? event?.id : null)),
+        timestamp,
         time: normalizedTradeTime(trade.timestamp ?? event?.timestamp),
-        side: normalizeMarketSide(trade.side ?? trade.aggressor),
+        side,
         aggressorSide: normalizeMarketSide(trade.aggressorSide ?? trade.aggressor),
         price: marketDisplayValue(trade.price),
         size: marketDisplayValue(trade.quantity),
         tradeId: marketDisplayValue(trade.tradeId ?? trade.id),
+        orderId: marketDisplayValue(trade.orderId ?? trade.clientOrderId),
         sourceSequence: finite(trade.sequence) ? trade.sequence : finite(event?.sequence) ? event.sequence : null,
         numericPrice: trade.price,
         numericSize: trade.quantity,
@@ -157,18 +264,25 @@ const identityMatch = (trade, identity) => {
     return identity.timestamp !== DASH && identity.timestamp === trade.timestamp
         && identity.price !== DASH && identity.price === trade.price;
 };
+const markerMatchesTrade = (marker, trade) => (
+    marker.eventId !== DASH && trade.eventId !== DASH && marker.eventId === trade.eventId
+) || (
+    marker.tradeId !== DASH && trade.tradeId !== DASH && marker.tradeId === trade.tradeId
+) || (
+    marker.orderId !== DASH && trade.orderId !== DASH && marker.orderId === trade.orderId
+) || (
+    finite(marker.sourceSequence) && finite(trade.sourceSequence)
+        && marker.sourceSequence === trade.sourceSequence
+);
 
-export function buildRecentTradesDisplay(recentTrades, currentIdentity, markers = [], rowLimit = 50) {
-    const safeLimit = [20, 50, 100].includes(rowLimit) ? rowLimit : 50;
+export function buildRecentTradesDisplay(recentTrades, currentIdentity, markers = [], rowLimit = 20) {
+    const safeLimit = [10, 20, 50].includes(rowLimit) ? rowLimit : 20;
     const rows = (Array.isArray(recentTrades?.rows) ? recentTrades.rows : []).slice(0, safeLimit);
     const maxSize = rows.reduce((max, row) => finite(row.numericSize) ? Math.max(max, row.numericSize) : max, 0);
     const decorated = rows.map((row) => ({ ...row,
         intensity: maxSize > 0 ? Math.min(100, Math.max(0, row.numericSize / maxSize * 100)) : 0,
         isCurrent: identityMatch(row, currentIdentity),
-        markers: (Array.isArray(markers) ? markers : []).filter((marker) => identityMatch(row, {
-            eventId: marker.eventId ?? DASH, tradeId: marker.tradeId ?? DASH,
-            sequence: marker.sourceSequence, timestamp: marker.timestamp ?? DASH, price: marker.price ?? DASH,
-        })),
+        markers: (Array.isArray(markers) ? markers : []).filter((marker) => markerMatchesTrade(marker, row)),
     }));
     const bySide = (side) => decorated.filter((row) => row.side === side);
     const size = (side) => bySide(side).reduce((sum, row) => sum + row.numericSize, 0);
@@ -196,7 +310,7 @@ const metricSource = (events) => {
     return { values, sourceEvent };
 };
 
-export function buildReplayMarketViewModel(replayEngine) {
+export function buildReplayMarketViewModel(replayEngine, normalizedMarketModel = null) {
     const projection = replayEngine?.projection && typeof replayEngine.projection === "object"
         ? replayEngine.projection : {};
     const current = projection.currentEvent && typeof projection.currentEvent === "object"
@@ -205,24 +319,36 @@ export function buildReplayMarketViewModel(replayEngine) {
         ? projection.visibleEvents.filter((event) => event && typeof event === "object") : [];
     // currentEvent is itself an authoritative Projection value. Include it only as
     // a fallback for partial projections, without consulting the Dataset or Cursor.
-    const events = current && !visibleEvents.includes(current)
+    const reachedEvents = current && !visibleEvents.includes(current)
         ? [...visibleEvents, current] : visibleEvents;
+    const scoped = scopeEventsToMarketContext(reachedEvents);
+    const events = scoped.events;
     const bookEvent = events.findLast((event) => {
         const payload = payloadOf(event);
         return payload.orderBook && typeof payload.orderBook === "object" && !Array.isArray(payload.orderBook)
             || Array.isArray(payload.asks) || Array.isArray(payload.bids);
     }) ?? null;
     const bookPayload = payloadOf(bookEvent);
-    const book = bookPayload.orderBook && typeof bookPayload.orderBook === "object"
+    const projectionBook = bookPayload.orderBook && typeof bookPayload.orderBook === "object"
         && !Array.isArray(bookPayload.orderBook) ? bookPayload.orderBook : bookPayload;
+    const normalizedBook = normalizedMarketModel?.orderBook;
+    const useLiveBook = normalizedMarketModel?.source?.mode === "LIVE"
+        && !replayEngine?.dataset
+        && normalizedBook && typeof normalizedBook === "object" && !Array.isArray(normalizedBook);
+    const book = useLiveBook ? normalizedBook : projectionBook;
     const asks = normalizeBookSide(book.asks, "ASK");
     const bids = normalizeBookSide(book.bids, "BID");
     const bestAskNumber = asks.valid.length ? Math.min(...asks.valid.map(({ numericPrice }) => numericPrice)) : null;
     const bestBidNumber = bids.valid.length ? Math.max(...bids.valid.map(({ numericPrice }) => numericPrice)) : null;
-    const midpointNumber = finite(bestAskNumber) && finite(bestBidNumber) ? (bestAskNumber + bestBidNumber) / 2 : null;
+    const validTopOfBook = finite(bestAskNumber) && finite(bestBidNumber) && bestAskNumber >= bestBidNumber;
+    const crossedBook = finite(bestAskNumber) && finite(bestBidNumber) && bestBidNumber > bestAskNumber;
+    const lockedBook = finite(bestAskNumber) && finite(bestBidNumber) && bestBidNumber === bestAskNumber;
+    const midpointNumber = validTopOfBook ? (bestAskNumber + bestBidNumber) / 2 : null;
     const payloadSpread = finite(book.spread) ? book.spread : finite(bookPayload.spread) ? bookPayload.spread : null;
-    const spreadNumber = finite(bestAskNumber) && finite(bestBidNumber)
-        ? Number((bestAskNumber - bestBidNumber).toPrecision(12)) : payloadSpread;
+    const spreadNumber = validTopOfBook
+        ? Number((bestAskNumber - bestBidNumber).toPrecision(12))
+        : !finite(bestAskNumber) && !finite(bestBidNumber) && finite(payloadSpread) && payloadSpread >= 0
+            ? payloadSpread : null;
     const spreadPctNumber = finite(book.spreadPct) ? book.spreadPct
         : finite(spreadNumber) && finite(midpointNumber) && midpointNumber !== 0
             ? Number((spreadNumber / midpointNumber * 100).toFixed(6)) : null;
@@ -263,7 +389,20 @@ export function buildReplayMarketViewModel(replayEngine) {
         return event.eventType === "MARKET_SNAPSHOT" || payload.symbol || payload.markPrice;
     }) ?? null;
     const marketPayload = payloadOf(marketEvent);
-    const source = normalizeMarketSource(marketPayload.marketSource ?? marketPayload);
+    const normalizedContext = normalizedMarketModel?.context?.contextKey
+        ? normalizedMarketModel.context : null;
+    const source = normalizedContext ? normalizeMarketSource({
+        exchange: normalizedContext.exchange,
+        marketType: normalizedContext.marketType,
+        exchangeSymbol: normalizedContext.exchangeSymbol,
+        canonicalSymbol: normalizedContext.normalizedSymbol,
+        displaySymbol: normalizedContext.displaySymbol,
+        sourceMode: normalizedMarketModel.source?.mode,
+        pricePrecision: normalizedContext.pricePrecision,
+        tickSize: normalizedContext.tickSize,
+        quantityPrecision: normalizedContext.quantityPrecision,
+        lotSize: normalizedContext.lotSize,
+    }) : scoped.activeContext ?? normalizeMarketSource(marketPayload.marketSource ?? marketPayload);
     const currentPayload = payloadOf(current);
     const currentTradeIdentity = {
         eventId: marketDisplayValue(currentPayload.currentTradeEventId ?? currentPayload.tradeEventId),
@@ -273,8 +412,9 @@ export function buildReplayMarketViewModel(replayEngine) {
         price: marketDisplayValue(currentPayload.currentTradePrice),
     };
     const headerValues = {
-        symbol: marketPayload.symbol,
-        exchange: marketPayload.exchange,
+        symbol: source.exchangeSymbol === UNKNOWN ? marketPayload.symbol : source.exchangeSymbol,
+        exchange: source.exchange,
+        marketType: source.marketType,
         timestamp: current?.timestamp,
         markPrice: marketPayload.markPrice,
         lastTradePrice: lastTrade?.numericPrice ?? marketPayload.lastTradePrice,
@@ -288,6 +428,56 @@ export function buildReplayMarketViewModel(replayEngine) {
         eventType: current?.eventType,
         progress: finite(projection.progress) ? `${projection.progress * 100}%` : DASH,
     };
+    const hasContext = marketContextKey(source) !== null;
+    const hasMarketData = finite(headerValues.currentPrice) || asks.valid.length > 0 || bids.valid.length > 0
+        || tradeRows.length > 0 || Object.keys(metricValues).length > 0;
+    const quality = marketDisplayValue(projection.dataQuality) === DASH ? UNKNOWN : projection.dataQuality;
+    const liveBookUnavailable = useLiveBook && (
+        ["UNAVAILABLE", "INVALID"].includes(normalizedMarketModel.status)
+        || ["UNAVAILABLE", "INVALID"].includes(String(book.dataQuality ?? "").toUpperCase())
+        || ["UNAVAILABLE", "UNSYNCED"].includes(String(book.syncState ?? "").toUpperCase())
+    );
+    const displaySymbol = source.displaySymbol !== UNKNOWN ? source.displaySymbol
+        : source.exchangeSymbol !== UNKNOWN ? source.exchangeSymbol : source.canonicalSymbol;
+    const summary = {
+        exchange: hasContext ? source.exchange : DASH,
+        marketType: hasContext ? source.marketType : DASH,
+        exchangeSymbol: hasContext ? source.exchangeSymbol : DASH,
+        normalizedSymbol: hasContext ? source.canonicalSymbol : DASH,
+        displaySymbol: hasContext ? displaySymbol : DASH,
+        currentPrice: formatMarketPrice(normalizedMarketModel?.price?.current ?? headerValues.currentPrice, source),
+        bestBid: formatMarketPrice(normalizedMarketModel?.price?.bestBid ?? bestBidNumber, source),
+        bestAsk: formatMarketPrice(normalizedMarketModel?.price?.bestAsk ?? bestAskNumber, source),
+        spread: formatMarketPrice(normalizedMarketModel?.price?.spread ?? spreadNumber, source),
+        state: normalizedPresentationState(normalizedMarketModel)
+            ?? marketDataState({ replayEngine, source, hasContext, hasMarketData, quality, crossed: crossedBook }),
+    };
+    const bookHasData = asks.valid.length > 0 || bids.valid.length > 0;
+    const machineState = replayEngine?.machine?.state;
+    const orderBookState = !hasContext ? "NO MARKET SELECTED"
+        : machineState === "REPLAY_LOADING" || machineState === "LOADING" ? "LOADING"
+            : liveBookUnavailable || crossedBook || machineState === "REPLAY_ERROR" || quality === "INVALID" ? "UNAVAILABLE"
+                : !bookHasData && asks.invalid + bids.invalid > 0 ? "UNAVAILABLE"
+                    : !bookHasData ? "WAITING" : asks.valid.length === 0 || bids.valid.length === 0 ? "PARTIAL" : "AVAILABLE";
+    const formatBookRows = (rows) => rows.map((row) => ({
+        ...row,
+        price: formatMarketPrice(row.numericPrice, source),
+        size: formatMarketQuantity(row.numericSize, source),
+        optionalTotal: formatMarketQuantity(row.numericCumulativeQuantity, source),
+        cumulativeSize: formatMarketQuantity(row.numericCumulativeQuantity, source),
+    }));
+    const formattedTradeRows = tradeRows.map((trade) => ({
+        ...trade,
+        price: formatMarketPrice(trade.numericPrice, source),
+        size: formatMarketQuantity(trade.numericSize, source),
+    }));
+    const tradeDataReceived = events.some((event) => Array.isArray(payloadOf(event).trades)
+        || ["RECENT_TRADE", "TRADE"].includes(event?.eventType));
+    const tradeState = !hasContext ? "NO MARKET SELECTED"
+        : machineState === "REPLAY_LOADING" || machineState === "LOADING" ? "LOADING"
+            : machineState === "REPLAY_ERROR" || quality === "INVALID" ? "UNAVAILABLE"
+                : tradeRows.length > 0 ? "AVAILABLE"
+                    : invalidTrades > 0 ? "UNAVAILABLE" : tradeDataReceived ? "NO TRADES" : "WAITING";
     const metrics = {
         buyPressure, sellPressure, pressureBalance,
         liquidity: metricValues.liquidity, momentum: metricValues.momentum,
@@ -300,25 +490,54 @@ export function buildReplayMarketViewModel(replayEngine) {
         .filter((value) => marketDisplayValue(value) === DASH).length;
 
     return {
+        normalizedMarketModel,
         source,
+        marketContext: {
+            exchange: source.exchange,
+            marketType: source.marketType,
+            exchangeSymbol: source.exchangeSymbol,
+            normalizedSymbol: source.canonicalSymbol,
+            displaySymbol,
+            pricePrecision: source.pricePrecision,
+            tickSize: source.tickSize,
+            quantityPrecision: source.quantityPrecision,
+            lotSize: source.lotSize,
+            key: marketContextKey(source),
+        },
+        currentPriceSummary: summary,
+        contextEventIds: events.map(({ id }) => id).filter((id) => typeof id === "string" && id),
         currentTradeIdentity,
         header: Object.fromEntries(Object.entries(headerValues).map(([key, value]) => [key,
-            key === "timestamp" ? marketTimestamp(value) : marketDisplayValue(value)])),
+            key === "timestamp" ? marketTimestamp(value)
+                : ["markPrice", "lastTradePrice", "currentPrice"].includes(key)
+                    ? formatMarketPrice(value, source) : marketDisplayValue(value)])),
         orderBook: {
-            asks: asks.rows, bids: bids.rows,
-            spread: marketDisplayValue(spreadNumber), spreadPct: marketDisplayValue(spreadPctNumber),
-            bestAsk: marketDisplayValue(bestAskNumber), bestBid: marketDisplayValue(bestBidNumber),
-            midpoint: marketDisplayValue(midpointNumber), totalAskQuantity: marketDisplayValue(totalAsk),
+            asks: formatBookRows(useLiveBook ? asks.valid : asks.rows), bids: formatBookRows(bids.rows),
+            spread: formatMarketPrice(spreadNumber, source), spreadPct: marketDisplayValue(spreadPctNumber),
+            bestAsk: formatMarketPrice(bestAskNumber, source), bestBid: formatMarketPrice(bestBidNumber, source),
+            midpoint: formatMarketPrice(midpointNumber, source), totalAskQuantity: marketDisplayValue(totalAsk),
             totalBidQuantity: marketDisplayValue(totalBid),
             imbalance: marketDisplayValue(totalDepth === 0 ? null : (totalBid - totalAsk) / totalDepth),
             depth: asks.rows.length + bids.rows.length,
+            timestamp: marketTimestamp(book.timestamp),
+            sequence: finite(book.sequence) ? book.sequence : null,
+            sourceDepth: Number.isInteger(book.depth) && book.depth >= 0 ? book.depth : null,
+            dataQuality: marketDisplayValue(book.dataQuality),
+            syncState: marketDisplayValue(book.syncState),
+            state: orderBookState,
+            hasData: bookHasData,
+            crossed: crossedBook,
+            locked: lockedBook,
         },
         recentTrades: {
-            rows: tradeRows, count: tradeRows.length, buyCount: buyRows.length, sellCount: sellRows.length,
+            rows: formattedTradeRows, count: formattedTradeRows.length,
+            buyCount: buyRows.length, sellCount: sellRows.length,
             buyQuantity: marketDisplayValue(buyQuantity), sellQuantity: marketDisplayValue(sellQuantity),
             totalQuantity: marketDisplayValue(totalQuantity),
             vwap: marketDisplayValue(totalQuantity === 0 ? null : notional / totalQuantity),
             lastTrade: marketDisplayValue(lastTrade?.numericPrice),
+            state: tradeState,
+            hasData: formattedTradeRows.length > 0,
         },
         metrics: Object.fromEntries(Object.entries(metrics).map(([key, value]) => [key, marketDisplayValue(value)])),
         quality: {
@@ -340,8 +559,10 @@ export function buildReplayMarketViewModel(replayEngine) {
             truncatedBids: bids.truncated,
             truncatedTrades: Math.max(0, allTrades.length - MAX_TRADES),
             sourceEventType: marketDisplayValue(marketEvent?.eventType),
+            contextChanged: scoped.contextChanged,
+            excludedContextEventCount: reachedEvents.length - events.length,
         },
-        hasMarketData: Boolean(marketEvent || bookEvent || allTrades.length || metric.sourceEvent),
-        isEmpty: !(marketEvent || bookEvent || allTrades.length || metric.sourceEvent),
+        hasMarketData,
+        isEmpty: !hasMarketData,
     };
 }

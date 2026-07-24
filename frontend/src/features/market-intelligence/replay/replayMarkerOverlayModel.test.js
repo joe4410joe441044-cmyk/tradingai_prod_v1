@@ -49,14 +49,86 @@ test("price and time markers require exact formal matches", () => {
         marker("trade-id", "BUY", { tradeId: "trade-1", sequence: 3 }),
     ];
     const model = buildReplayMarkerOverlayModel(engineWith(markers), market);
-    assert.equal(model.markers[0].priceMatch, true);
-    assert.equal(model.markers[0].timeMatch, true);
-    assert.equal(model.markers[1].priceMatch, false);
-    assert.equal(model.markers[1].timeMatch, false);
-    assert.equal(model.markers[2].price, "0");
-    assert.equal(model.markers[3].priceMatch, true);
-    assert.equal(model.markers[4].timeMatch, true);
+    const byId = (id) => model.markers.find((item) => item.id === id);
+    assert.equal(byId("matched").priceMatch, true);
+    assert.equal(byId("matched").timeMatch, true);
+    assert.equal(byId("unmatched").priceMatch, false);
+    assert.equal(byId("unmatched").timeMatch, false);
+    assert.equal(byId("zero"), undefined);
+    assert.equal(byId("same").priceMatch, true);
+    assert.equal(byId("trade-id").timeMatch, true);
     assert.equal(model.counts.priceMatched, 2);
+});
+
+test("price marker matching remains numeric when DOM display precision adds trailing zeroes", () => {
+    const model = buildReplayMarkerOverlayModel(engineWith([marker("formatted", "BUY", { price: 100 })]), {
+        orderBook: { asks: [], bids: [{ numericPrice: 100, price: "100.00" }] }, recentTrades: { rows: [] },
+    });
+    assert.equal(model.markers[0].priceMatch, true);
+});
+
+test("tick-size normalization matches only the formal tick and never a nearby level", () => {
+    const scopedMarket = { ...market,
+        marketContext: { tickSize: 0.1 },
+        orderBook: { asks: [], bids: [{ numericPrice: 0.3, price: "0.30" }] }, recentTrades: { rows: [] } };
+    const model = buildReplayMarkerOverlayModel(engineWith([
+        marker("floating", "BUY", { price: 0.1 + 0.2 }),
+        marker("nearby", "SELL", { price: 0.36, sequence: 2 }),
+    ]), scopedMarket);
+    assert.equal(model.markers.find(({ id }) => id === "floating").priceMatch, true);
+    assert.equal(model.markers.find(({ id }) => id === "nearby").priceMatch, false);
+});
+
+test("DOM marker groups preserve newest-first order and expose every hidden remainder", () => {
+    const markers = Array.from({ length: 6 }, (_, index) => marker(`same-${index}`, index % 2 ? "SELL" : "BUY", {
+        price: 100, timestamp: `2026-01-01T00:00:0${index}.000Z`, sequence: index,
+    }));
+    const model = buildReplayMarkerOverlayModel(engineWith(markers), market);
+    const group = model.domMarkerGroups[0];
+    assert.equal(group.markers.length, 6);
+    assert.deepEqual(group.markers.map(({ id }) => id), ["same-5", "same-4", "same-3", "same-2", "same-1", "same-0"]);
+    assert.deepEqual(group.visibleMarkers.map(({ id }) => id), ["same-5", "same-4", "same-3"]);
+    assert.equal(group.remainingCount, 3);
+});
+
+test("marker labels remain neutral and distinguish formal contract outcomes", () => {
+    const cases = [
+        marker("buy-entry", "ENTRY", { side: "BUY" }),
+        marker("sell-entry", "ENTRY", { side: "SELL", sequence: 2 }),
+        marker("add", "ENTRY", { reason: "ADD_POSITION", sequence: 3 }),
+        marker("partial", "REDUCE_ONLY", { reduceOnly: true, sequence: 4 }),
+        marker("exit", "EXIT", { sequence: 5 }),
+        marker("stop", "EXIT", { reason: "STOP_LOSS", sequence: 6 }),
+        marker("take", "EXIT", { reason: "TAKE_PROFIT", sequence: 7 }),
+        marker("failed", "ORDER_FAILED", { failed: true, sequence: 8 }),
+        marker("blocked", "BUY", { blocked: true, sequence: 9 }),
+        marker("hold", "UNKNOWN", { reason: "AI_HOLD", sequence: 10 }),
+        marker("governance", "GOVERNANCE_BLOCK", { blocked: true, sequence: 11 }),
+        marker("flatten", "FLATTEN", { flatten: true, sequence: 12 }),
+        marker("unknown", "UNKNOWN", { sequence: 13 }),
+    ];
+    const model = buildReplayMarkerOverlayModel(engineWith(cases), market);
+    const label = (id) => model.markers.find((item) => item.id === id).label;
+    assert.deepEqual(cases.map(({ id }) => label(id)), ["BUY ENTRY", "SELL ENTRY", "ADD POSITION",
+        "PARTIAL EXIT", "FULL EXIT", "STOP LOSS", "TAKE PROFIT", "FAILED", "BLOCKED",
+        "AI HOLD", "GOVERNANCE BLOCK", "EMERGENCY FLATTEN", "UNKNOWN"]);
+});
+
+test("trade markers require formal relation keys and ignore timestamp or price proximity", () => {
+    const tradeMarket = { orderBook: { asks: [], bids: [] }, recentTrades: { rows: [{ id: "row",
+        eventId: "event-1", tradeId: "trade-1", orderId: "order-1", sourceSequence: 7,
+        timestamp: "2026-01-01T00:00:00.000Z", numericPrice: 100, price: "100" }] } };
+    const markers = [
+        marker("event", "BUY", { eventId: "event-1" }),
+        marker("trade", "SELL", { tradeId: "trade-1", sequence: 2 }),
+        marker("order", "EXIT", { orderId: "order-1", sequence: 3 }),
+        marker("sequence", "ENTRY", { sequence: 7 }),
+        marker("proximity", "BUY", { price: 100, timestamp: "2026-01-01T00:00:00.000Z", sequence: 99 }),
+    ];
+    const model = buildReplayMarkerOverlayModel(engineWith(markers), tradeMarket);
+    assert.deepEqual(model.markers.filter(({ tradeMatch }) => tradeMatch).map(({ id }) => id),
+        ["sequence", "order", "trade", "event"]);
+    assert.equal(model.markers.find(({ id }) => id === "proximity").tradeMatch, false);
 });
 
 test("all marker types, formal latest marker, flags, and summary counts are preserved", () => {
@@ -128,6 +200,25 @@ test("formal projection summary is authoritative and marker qualities remain dis
     assert.deepEqual(model.diagnostics.byQuality, {
         UNKNOWN: 1, VALID: 1, PARTIAL: 1, STALE: 1, INVALID: 1,
     });
+});
+
+test("market context event scope excludes markers from the previous market", () => {
+    const oldMarker = marker("old-marker", "BUY", { eventId: "old-xrp", price: 100 });
+    const newMarker = marker("new-marker", "SELL", { eventId: "new-btc", price: 200, sequence: 2 });
+    const scopedMarket = {
+        ...market,
+        marketContext: { key: "BINANCE\u0000SPOT\u0000BTCUSDT" },
+        contextEventIds: ["new-btc"],
+        orderBook: { asks: [{ price: "201" }], bids: [{ price: "200" }] },
+    };
+    const model = buildReplayMarkerOverlayModel(engineWith([oldMarker, newMarker], oldMarker), scopedMarket);
+    assert.deepEqual(model.markers.map(({ id }) => id), ["new-marker"]);
+    assert.equal(model.counts.visible, 1);
+    assert.equal(model.summary.total, 1);
+    assert.equal(model.counts.byType.BUY, 0);
+    assert.equal(model.counts.byType.SELL, 1);
+    assert.equal(model.latestMarker, null);
+    assert.equal(model.diagnostics.contextExcludedMarkerCount, 1);
 });
 
 test("real replay commands expose only projection-reached markers", () => {

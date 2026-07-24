@@ -47,16 +47,23 @@ const textOf = (node) => {
 };
 
 test("empty railway is compact and remains read-only", async () => {
-    const { DecisionRailwayView } = await loadModule();
-    const nodes = descendants(DecisionRailwayView({
-        model: buildDecisionRailwayModel(createInitialReplayEngineState()),
-    }));
+    const { DecisionFinalSummary, DecisionRailwayView } = await loadModule();
+    const model = buildDecisionRailwayModel(createInitialReplayEngineState());
+    const nodes = descendants(DecisionRailwayView({ model }));
     assert.equal(nodes.filter(({ type }) => type === "article").length, 0);
     assert.equal(nodes.filter(({ type }) => type === "h3").length, 0);
     assert.equal(nodes.some((node) => textOf(node).includes("Load a replay dataset")), true);
     assert.equal(nodes.some(({ type }) => type === "button"), false);
     assert.equal(nodes.some(({ props }) => typeof props?.onClick === "function"), false);
     assert.equal(nodes.some(({ props }) => props?.tabIndex !== undefined), false);
+    assert.doesNotMatch(nodes.map(textOf).join(" "), /QUALITY UNKNOWN/);
+    const noReplay = descendants(DecisionFinalSummary({ model })).map(textOf).join(" ");
+    assert.match(noReplay, /NO DECISION DATA/);
+    assert.match(noReplay, /Load a replay to inspect the AI decision/);
+    assert.doesNotMatch(noReplay, /UNKNOWN（未判定）/);
+    assert.match(descendants(DecisionFinalSummary({ hasReplay: true, model })).map(textOf).join(" "),
+        /NO DECISION AT CURRENT CURSOR/);
+    assert.match(descendants(DecisionFinalSummary({ hasError: true, model })).map(textOf).join(" "), /UNKNOWN/);
 });
 
 test("loaded railway renders final summary and exactly one active station", async () => {

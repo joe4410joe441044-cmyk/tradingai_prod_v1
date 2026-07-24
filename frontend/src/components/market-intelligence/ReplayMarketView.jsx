@@ -1,7 +1,9 @@
 import { useState } from "react";
 
-import { buildOrderBookDomDisplay, buildRecentTradesDisplay, buildReplayMarketViewModel } from "../../features/market-intelligence/replay/replayMarketViewModel.js";
-import { buildReplayMarkerOverlayModel } from "../../features/market-intelligence/replay/replayMarkerOverlayModel.js";
+import { buildOrderBookDomDisplay, buildRecentTradesDisplay, buildReplayMarketViewModel, formatMarketPrice, formatMarketQuantity, marketTimestamp } from "../../features/market-intelligence/replay/replayMarketViewModel.js";
+import { buildReplayMarkerOverlayModel, reconcileMarkerUiSelection, resolveSelectedMarker } from "../../features/market-intelligence/replay/replayMarkerOverlayModel.js";
+import { normalizeReplayMarketModel } from "../../features/market-intelligence/market/replayMarketAdapter.js";
+import { createDashboardContextMarketModel, isReplayMarketContextActive } from "../../features/market-intelligence/market/marketContextSelection.js";
 import { useMarketIntelligence } from "../../state/market-intelligence/MarketIntelligenceProvider.jsx";
 import ReplayMarkerOverlay from "./ReplayMarkerOverlay.jsx";
 import { bilingual } from "./marketIntelligenceLabels.js";
@@ -12,23 +14,75 @@ const FieldGrid = ({ fields }) => (
     </dl>
 );
 
-const BookTable = ({ label, markerModel, rows }) => (
+const present = (value) => value !== null && value !== undefined && value !== "—" && value !== "";
+const booleanValue = (value) => value === true ? "YES" : value === false ? "NO" : "—";
+
+export const MarkerInspector = ({ marker, marketContext }) => {
+    const required = marker ? [
+        ["Marker Type", marker.label], ["Timestamp", marketTimestamp(marker.timestamp)],
+        ["Price", formatMarketPrice(marker.numericPrice, marketContext)], ["Side", marker.side],
+        ["Quantity", formatMarketQuantity(marker.numericQuantity, marketContext)],
+        ["Source", marker.source], ["Data Quality", marker.dataQuality],
+    ] : [];
+    const optional = marker ? [
+        ["Reason", marker.reason, "reason"], ["Order ID", marker.orderId, "id"],
+        ["Event ID", marker.eventId, "id"], ["Trade ID", marker.tradeId, "id"],
+        ["Decision ID", marker.decisionId, "id"], ["Position ID", marker.positionId, "id"],
+        ["Sequence", marker.sequence], ["Reduce Only", booleanValue(marker.reduceOnly)],
+        ["Flatten", booleanValue(marker.flatten)], ["Blocked", booleanValue(marker.blocked)],
+        ["Failed", booleanValue(marker.failed)],
+    ].filter(([, value]) => present(value)) : [];
+    return <section aria-labelledby="mi-marker-inspector-title" className={`mi-marker-inspector${marker ? "" : " mi-marker-inspector--empty"}`}>
+        <header><h3 id="mi-marker-inspector-title">MARKER INSPECTOR</h3>
+            {marker && <strong>{marker.label}</strong>}</header>
+        {!marker ? <div className="mi-marker-inspector__empty"><strong>SELECT A MARKER</strong>
+            <span>Select a marker in DOM or Recent Trades to inspect its details.</span></div>
+            : <dl className="mi-marker-inspector__fields">{[...required, ...optional].map(([label, value, kind]) => (
+                <div className={kind ? `mi-marker-inspector__field--${kind}` : undefined} key={label}>
+                    <dt>{label}</dt><dd title={kind ? String(value) : undefined}>{present(value) ? value : "—"}</dd>
+                </div>
+            ))}</dl>}
+    </section>;
+};
+
+const MarkerStack = ({ allMarkers, expanded = false, groupKey, onSelectMarker, onToggle,
+    selectedMarkerId, visibleMarkers, remainingCount = 0 }) => {
+    const markers = expanded ? allMarkers : visibleMarkers;
+    return <span className={`mi-marker-stack${expanded ? " mi-marker-stack--expanded" : ""}`}>
+        {markers.map((marker) => <button aria-label={marker.accessibilityLabel}
+            aria-pressed={selectedMarkerId === marker.id} className="mi-order-book__marker"
+            key={marker.displayKey} onClick={() => onSelectMarker(marker.id)} title={marker.accessibilityLabel}
+            type="button">{marker.shortLabel}</button>)}
+        {remainingCount > 0 && <button aria-expanded={expanded}
+            aria-label={expanded ? `Close ${remainingCount} additional markers at ${groupKey}`
+                : `Show ${remainingCount} additional markers at ${groupKey}`}
+            className="mi-marker-stack__more" onClick={() => onToggle(groupKey)}
+            title={expanded ? "Close marker list" : `Show ${remainingCount} more markers`} type="button">
+            {expanded ? "CLOSE" : `+${remainingCount}`}
+        </button>}
+    </span>;
+};
+
+const BookTable = ({ expandedMarkerGroupKey, label, markerModel, onMarkerGroupToggle, onMarkerSelect,
+    rows, selectedMarkerId }) => (
     <div className={`mi-market-view__book-side mi-market-view__book-side--${label.toLowerCase()}`}>
         <h4>{label} LEVELS（{label === "ASK" ? "売板" : "買板"}）</h4>
         <div className="mi-market-view__table-wrap">
             <table>
                 <thead><tr><th>{bilingual("price")}</th><th>{bilingual("size")}</th><th>{bilingual("total")}</th><th>{bilingual("marker")}</th></tr></thead>
                 <tbody>{rows.map((row) => {
-                    const markers = markerModel.priceMarkers.filter((marker) => marker.priceMatch && marker.price === row.price);
+                    const group = markerModel.domMarkerGroups.find(({ price }) => price === row.numericPrice);
                     return (
                         <tr key={row.id}>
                             <td className="mi-order-book__price"><span aria-hidden="true" className="mi-order-book__depth"
-                                style={{ width: `${row.depthPercent}%` }} /><span>{row.price}</span></td>
-                            <td>{row.size}</td><td>{row.optionalTotal}</td>
+                                style={{ width: `${row.depthPercent}%` }} /><span>{row.price} <small>{row.side}</small></span></td>
+                            <td>{row.size}</td><td>{row.cumulativeSize}</td>
                             <td className="mi-order-book__marker-slot">
-                                {markers.length === 0 ? "—" : markers.map((marker) => (
-                                    <span className="mi-order-book__marker" key={marker.displayKey}>{marker.label}</span>
-                                ))}
+                                {!group ? "—" : <MarkerStack allMarkers={group.markers}
+                                    expanded={expandedMarkerGroupKey === `dom:${group.price}`} groupKey={`dom:${group.price}`}
+                                    onSelectMarker={onMarkerSelect} onToggle={onMarkerGroupToggle}
+                                    remainingCount={group.remainingCount} selectedMarkerId={selectedMarkerId}
+                                    visibleMarkers={group.visibleMarkers} />}
                             </td>
                         </tr>
                     );
@@ -38,16 +92,41 @@ const BookTable = ({ label, markerModel, rows }) => (
     </div>
 );
 
-const SourceBadge = ({ source }) => <div className="mi-market-source" aria-label="Panel market identity">
-    <span><strong>{source.exchange}</strong> / <strong>{source.exchangeSymbol}</strong></span>
+const SourceBadge = ({ marketContext }) => <div className="mi-market-source" aria-label="Panel market identity">
+    <span><strong>{marketContext.exchange}</strong> / <strong>{marketContext.displaySymbol}</strong></span>
 </div>;
+
+export const CurrentPriceSummary = ({ summary }) => (
+    <section aria-label="Current Price Summary" className="mi-current-price-summary">
+        <div className="mi-current-price-summary__identity">
+            <span>{summary.exchange} · {summary.marketType}</span>
+            <strong>{summary.displaySymbol}</strong>
+        </div>
+        <div className="mi-current-price-summary__price">
+            <span>CURRENT PRICE</span><strong>{summary.currentPrice}</strong>
+        </div>
+        <dl className="mi-current-price-summary__quotes">
+            <div><dt>BEST BID</dt><dd>{summary.bestBid}</dd></div>
+            <div><dt>BEST ASK</dt><dd>{summary.bestAsk}</dd></div>
+            <div><dt>SPREAD</dt><dd>{summary.spread}</dd></div>
+        </dl>
+        <span aria-label={`Market data state: ${summary.state}`}
+            className={`mi-current-price-summary__state mi-current-price-summary__state--${summary.state.toLowerCase().replaceAll(" ", "-")}`}>
+            {summary.state}
+        </span>
+    </section>
+);
 
 export function ReplayMarketViewContent({
     model,
     markerModel = buildReplayMarkerOverlayModel(null, model),
     displayMode = "BOTH",
     rowLimit = 20,
-    tradeRowLimit = 50,
+    tradeRowLimit = 20,
+    expandedMarkerGroupKey = null,
+    onMarkerGroupToggle = () => {},
+    onMarkerSelect = () => {},
+    selectedMarkerId = null,
     onDisplayModeChange = () => {},
     onRowLimitChange = () => {},
     onTradeRowLimitChange = () => {},
@@ -58,49 +137,49 @@ export function ReplayMarketViewContent({
         : { buy: `${dom.buyRatio.toFixed(1)}%`, sell: `${dom.sellRatio.toFixed(1)}%` };
     return (
         <section aria-labelledby="mi-market-view-title" className={`mi-market-view${model.isEmpty ? " mi-market-view--empty" : ""}`}>
-            <section aria-labelledby="mi-market-header-title" className="mi-market-view__market-header">
-                <h2 className="mi-visually-hidden" id="mi-market-view-title">REPLAY MARKET VIEW（リプレイ市場表示）</h2>
-                <h3 className="mi-visually-hidden" id="mi-market-header-title">Market Summary（市場サマリー）</h3>
-                {model.isEmpty ? <p className="mi-market-view__empty-banner"><strong>NO REPLAY SELECTED（リプレイ未選択）</strong>
-                    <span>Load a sample replay or select a position.（サンプルリプレイを読み込むか、対象ポジションを選択してください）</span></p> : (
-                    <dl className="mi-market-summary">
-                        <div className="mi-market-summary__identity"><dt className="mi-visually-hidden">Market identity</dt>
-                            <dd>{model.source.exchange} / {model.source.marketType}（先物） / {model.source.exchangeSymbol}</dd></div>
-                        <div><dt>Mark Price（マーク価格）</dt><dd>{model.header.markPrice}</dd></div>
-                        <div><dt>Last Price（最終約定価格）</dt><dd>{model.header.lastTradePrice}</dd></div>
-                        <div><dt>Spread（スプレッド）</dt><dd>{model.orderBook.spread}</dd></div>
-                        <div><dt>{bilingual("quality")}</dt><dd>{model.header.dataQuality}</dd></div>
-                        <div><dt>{bilingual("source")}</dt><dd>{model.source.sourceMode}{model.source.isSample ? " · SAMPLE REPLAY" : ""}</dd></div>
-                    </dl>
-                )}
+            <section aria-label="Market summary" className="mi-market-view__market-header">
+                <div className="mi-market-view__heading">
+                    <h2 id="mi-market-view-title">MARKET VIEW</h2>
+                </div>
+                <CurrentPriceSummary summary={model.currentPriceSummary} />
             </section>
             <div className="mi-market-view__body">
                 <section aria-labelledby="mi-market-book-title" className="mi-market-view__card">
                     <h3 id="mi-market-book-title">{bilingual("orderBook")}</h3>
-                    <SourceBadge source={model.source} />
-                    <div className="mi-order-book__toolbar">
+                    {!model.isEmpty && <SourceBadge marketContext={model.marketContext} />}
+                    {model.orderBook.hasData && model.orderBook.state !== "UNAVAILABLE" && <div className="mi-order-book__toolbar">
                         <div aria-label="Order book display mode" className="mi-order-book__modes">
                             {["BOTH", "BIDS", "ASKS"].map((mode) => <button aria-pressed={dom.mode === mode}
                                 key={mode} onClick={() => onDisplayModeChange(mode)} type="button">{mode}</button>)}
                         </div>
                         <label>ROWS（行数） <select aria-label="Displayed order book rows" onChange={(event) => onRowLimitChange(Number(event.target.value))}
                             value={dom.rowLimit}>{[10, 20, 50].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-                    </div>
-                    {model.orderBook.asks.length + model.orderBook.bids.length === 0 ? (
-                        <div className="mi-market-view__empty"><strong>ORDER BOOK EMPTY（板情報なし）</strong></div>
+                    </div>}
+                    {model.orderBook.state === "NO MARKET SELECTED" ? (
+                        <div className="mi-market-view__empty"><strong>NO MARKET SELECTED</strong></div>
+                    ) : model.orderBook.state === "LOADING" ? (
+                        <div className="mi-market-view__empty"><strong>LOADING MARKET DATA</strong></div>
+                    ) : model.orderBook.state === "UNAVAILABLE" ? (
+                        <div className="mi-market-view__empty"><strong>ORDER BOOK UNAVAILABLE</strong></div>
+                    ) : model.orderBook.state === "WAITING" ? (
+                        <div className="mi-market-view__empty"><strong>WAITING FOR MARKET DATA</strong></div>
                     ) : <>
                         {displayMode !== "BIDS" && (dom.asks.length > 0
-                            ? <BookTable label="ASK" markerModel={markerModel} rows={dom.asks} />
-                            : <p className="mi-market-view__empty">ASK DATA UNAVAILABLE</p>)}
+                            ? <BookTable expandedMarkerGroupKey={expandedMarkerGroupKey} label="ASK" markerModel={markerModel}
+                                onMarkerGroupToggle={onMarkerGroupToggle} onMarkerSelect={onMarkerSelect}
+                                rows={dom.asks} selectedMarkerId={selectedMarkerId} />
+                            : <p className="mi-market-view__empty">NO ASK DATA</p>)}
                         <div className="mi-order-book__current">
-                            <span>{model.header.currentPriceSource}</span>
+                            <span>CURRENT PRICE · {model.header.currentPriceSource}</span>
                             <strong>{model.header.currentPrice}</strong>
                             <span>{model.header.priceDirection}</span>
-                            <small>Spread（スプレッド） {model.orderBook.spread} · {model.orderBook.spreadPct}%</small>
+                            <small>SPREAD {model.orderBook.spread}</small>
                         </div>
                         {displayMode !== "ASKS" && (dom.bids.length > 0
-                            ? <BookTable label="BID" markerModel={markerModel} rows={dom.bids} />
-                            : <p className="mi-market-view__empty">BID DATA UNAVAILABLE</p>)}
+                            ? <BookTable expandedMarkerGroupKey={expandedMarkerGroupKey} label="BID" markerModel={markerModel}
+                                onMarkerGroupToggle={onMarkerGroupToggle} onMarkerSelect={onMarkerSelect}
+                                rows={dom.bids} selectedMarkerId={selectedMarkerId} />
+                            : <p className="mi-market-view__empty">NO BID DATA</p>)}
                         <div className="mi-order-book__ratio" aria-label="Visible depth ratio">
                             <span>VISIBLE DEPTH RATIO</span><strong>BUY {ratio.buy}</strong><strong>SELL {ratio.sell}</strong>
                         </div>
@@ -114,27 +193,37 @@ export function ReplayMarketViewContent({
                 </section>
                 <section aria-labelledby="mi-market-trades-title" className="mi-market-view__card">
                     <h3 id="mi-market-trades-title">{bilingual("recentTrades")}</h3>
-                    <SourceBadge source={model.source} />
-                    <div className="mi-recent-trades__toolbar"><label>ROWS（行数） <select aria-label="Displayed recent trade rows"
+                    {model.marketContext.key && <SourceBadge marketContext={model.marketContext} />}
+                    {model.recentTrades.hasData && <div className="mi-recent-trades__toolbar"><label>ROWS（行数） <select aria-label="Displayed recent trade rows"
                         onChange={(event) => onTradeRowLimitChange(Number(event.target.value))} value={trades.rowLimit}>
-                        {[20, 50, 100].map((count) => <option key={count} value={count}>{count}</option>)}</select></label></div>
-                    {model.recentTrades.rows.length === 0 ? (
-                        <div className="mi-market-view__empty"><strong>{model.diagnostics.invalidTradeRows > 0
-                            ? "RECENT TRADES UNAVAILABLE（約定履歴取得不可）" : "RECENT TRADES EMPTY（約定履歴なし）"}</strong></div>
+                        {[10, 20, 50].map((count) => <option key={count} value={count}>{count}</option>)}</select></label></div>}
+                    {model.recentTrades.state === "NO MARKET SELECTED" ? (
+                        <div className="mi-market-view__empty"><strong>NO MARKET SELECTED</strong></div>
+                    ) : model.recentTrades.state === "LOADING" ? (
+                        <div className="mi-market-view__empty"><strong>LOADING TRADE DATA</strong></div>
+                    ) : model.recentTrades.state === "UNAVAILABLE" ? (
+                        <div className="mi-market-view__empty"><strong>TRADE DATA UNAVAILABLE</strong></div>
+                    ) : model.recentTrades.state === "NO TRADES" ? (
+                        <div className="mi-market-view__empty"><strong>NO TRADES</strong></div>
+                    ) : model.recentTrades.state === "WAITING" ? (
+                        <div className="mi-market-view__empty"><strong>WAITING FOR TRADE DATA</strong></div>
                     ) : <div className="mi-market-view__table-wrap"><table>
-                        <thead><tr><th>{bilingual("price")}</th><th>{bilingual("size")}</th><th>{bilingual("time")}</th><th>{bilingual("side")}</th><th>{bilingual("marker")}</th></tr></thead>
+                        <thead><tr><th>TIME</th><th>PRICE</th><th>SIZE</th><th>SIDE</th><th>MARKER</th></tr></thead>
                         <tbody>{trades.rows.map((trade) => (
                             <tr key={`${trade.id}-${trade.inputIndex}`} aria-label={trade.isCurrent ? "Current trade" : undefined}
                                 className={`mi-market-view__trade--${trade.side.toLowerCase()}${trade.isCurrent ? " mi-market-view__trade--current" : ""}`}>
-                                <td>{trade.price}</td><td className="mi-recent-trades__size"><span aria-hidden="true"
+                                <td>{trade.time}</td><td>{trade.price}</td><td className="mi-recent-trades__size"><span aria-hidden="true"
                                     className="mi-recent-trades__intensity" style={{ width: `${trade.intensity}%` }} /><span>{trade.size}</span></td>
-                                <td>{trade.time}</td><td>{trade.side}{trade.isCurrent && <small>CURRENT</small>}</td>
-                                <td>{trade.markers.length ? trade.markers.map((marker) => <span className="mi-order-book__marker"
-                                    key={marker.displayKey}>{marker.label}</span>) : "—"}</td>
+                                <td>{trade.side}{trade.isCurrent && <small>CURRENT</small>}</td>
+                                <td>{trade.markers.length ? <MarkerStack allMarkers={trade.markers}
+                                    expanded={expandedMarkerGroupKey === `trade:${trade.id}`} groupKey={`trade:${trade.id}`}
+                                    onSelectMarker={onMarkerSelect} onToggle={onMarkerGroupToggle}
+                                    remainingCount={Math.max(0, trade.markers.length - 3)} selectedMarkerId={selectedMarkerId}
+                                    visibleMarkers={trade.markers.slice(0, 3)} /> : "—"}</td>
                             </tr>
                         ))}</tbody>
                     </table></div>}
-                    {!model.isEmpty && <><h4>Trade Summary</h4>
+                    {model.recentTrades.hasData && <><h4>Trade Summary</h4>
                         <FieldGrid fields={[
                             ["Visible Trades", trades.count], ["BUY Count", trades.buyCount], ["SELL Count", trades.sellCount],
                             ["UNKNOWN Count", trades.unknownCount], ["Visible BUY Size", trades.buySize], ["Visible SELL Size", trades.sellSize],
@@ -143,6 +232,8 @@ export function ReplayMarketViewContent({
                         ]} /></>}
                 </section>
             </div>
+            <MarkerInspector marker={resolveSelectedMarker(markerModel, selectedMarkerId)}
+                marketContext={model.marketContext} />
             <details className="mi-advanced-disclosure mi-market-view__analysis-details">
                 <summary>Market Analysis Details（市場分析詳細）</summary>
                 <section aria-labelledby="mi-market-metrics-title" className="mi-market-view__card mi-market-view__metrics">
@@ -182,16 +273,38 @@ export function ReplayMarketViewContent({
 }
 
 export default function ReplayMarketView() {
-    const { replayEngine } = useMarketIntelligence();
+    const { marketContext, normalizedMarketModel: providedMarketModel, replayEngine } = useMarketIntelligence();
     const [displayMode, setDisplayMode] = useState("BOTH");
     const [rowLimit, setRowLimit] = useState(20);
-    const [tradeRowLimit, setTradeRowLimit] = useState(50);
-    const model = buildReplayMarketViewModel(replayEngine);
+    const [tradeRowLimit, setTradeRowLimit] = useState(20);
+    const normalizedMarketModel = providedMarketModel ?? (isReplayMarketContextActive(replayEngine)
+        ? normalizeReplayMarketModel({ replayEngine })
+        : createDashboardContextMarketModel(marketContext));
+    const model = buildReplayMarketViewModel(replayEngine, normalizedMarketModel);
+    const markerModel = buildReplayMarkerOverlayModel(replayEngine, model);
+    const contextKey = model.marketContext.key;
+    const [markerUi, setMarkerUi] = useState({
+        contextKey, expandedMarkerGroupKey: null, selectedMarkerId: null,
+    });
+    const reconciledSelection = reconcileMarkerUiSelection({ currentContextKey: contextKey,
+        expandedMarkerGroupKey: markerUi.expandedMarkerGroupKey, markerModel,
+        previousContextKey: markerUi.contextKey, selectedMarkerId: markerUi.selectedMarkerId });
+    if (markerUi.contextKey !== contextKey
+        || markerUi.selectedMarkerId !== reconciledSelection.selectedMarkerId
+        || markerUi.expandedMarkerGroupKey !== reconciledSelection.expandedMarkerGroupKey) {
+        setMarkerUi({ contextKey, ...reconciledSelection });
+    }
+    const handleGroupToggle = (key) => setMarkerUi((current) => ({ ...current,
+        expandedMarkerGroupKey: current.expandedMarkerGroupKey === key ? null : key }));
+    const handleMarkerSelect = (id) => setMarkerUi((current) => ({ ...current, selectedMarkerId: id }));
     return <ReplayMarketViewContent model={model}
+        expandedMarkerGroupKey={reconciledSelection.expandedMarkerGroupKey}
         displayMode={displayMode}
-        markerModel={buildReplayMarkerOverlayModel(replayEngine, model)}
+        markerModel={markerModel}
+        onMarkerGroupToggle={handleGroupToggle}
+        onMarkerSelect={handleMarkerSelect}
         onDisplayModeChange={setDisplayMode}
         onRowLimitChange={setRowLimit}
         onTradeRowLimitChange={setTradeRowLimit}
-        rowLimit={rowLimit} tradeRowLimit={tradeRowLimit} />;
+        rowLimit={rowLimit} selectedMarkerId={reconciledSelection.selectedMarkerId} tradeRowLimit={tradeRowLimit} />;
 }

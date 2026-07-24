@@ -5,12 +5,13 @@ import { bilingual } from "./marketIntelligenceLabels.js";
 export function ReplayTimelineView({ model }) {
     const summary = model.summary;
     return (
-        <section aria-labelledby="mi-replay-timeline-title" className="mi-replay-timeline">
+        <section aria-labelledby="mi-replay-timeline-title"
+            className={`mi-replay-timeline${model.isEmpty ? " mi-replay-timeline--empty" : ""}`}>
             <header className="mi-replay-timeline__header">
                 <div>
                     <h2 id="mi-replay-timeline-title">{bilingual("replayTimeline")}</h2>
                 </div>
-                <span className="mi-status-label">QUALITY {model.dataQuality}</span>
+                {!model.isEmpty && <span className="mi-status-label">QUALITY {model.dataQuality}</span>}
             </header>
 
             {!model.isEmpty && <dl className="mi-replay-timeline__summary">
@@ -23,7 +24,7 @@ export function ReplayTimelineView({ model }) {
 
             {model.isEmpty ? (
                 <div className="mi-replay-timeline__empty">
-                    <strong>NO TIMELINE EVENTS（タイムラインイベントなし）</strong>
+                    <strong>NO TIMELINE EVENTS</strong>
                 </div>
             ) : (
                 <div className="mi-replay-timeline__body">

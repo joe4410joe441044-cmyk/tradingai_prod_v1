@@ -1,8 +1,10 @@
 const skeletonRows = [
-    ["Detector Summary", "Feature Snapshot"],
-    ["Strategy", "AI Review"],
+    ["Detector Summary", "AI Review"],
+    ["Strategy", "Feature Snapshot"],
     ["Governance", "EXECUTION / POSITION"],
 ];
+const priorityClass = (title) => title === "Feature Snapshot" ? " mi-ai-intelligence__section--muted"
+    : ["AI Review", "EXECUTION / POSITION"].includes(title) ? " mi-ai-intelligence__section--priority" : "";
 
 export default function AIIntelligenceWorkspace({ finalDecision }) {
     return (
@@ -15,7 +17,8 @@ export default function AIIntelligenceWorkspace({ finalDecision }) {
                 {finalDecision}
                 <div className="mi-ai-intelligence__sections">
                     {skeletonRows.flat().map((title) => (
-                        <section aria-label={title} className="mi-placeholder-card mi-ai-intelligence__section" key={title}>
+                        <section aria-label={title}
+                            className={`mi-placeholder-card mi-ai-intelligence__section${priorityClass(title)}`} key={title}>
                             <h3>{title}</h3>
                         </section>
                     ))}

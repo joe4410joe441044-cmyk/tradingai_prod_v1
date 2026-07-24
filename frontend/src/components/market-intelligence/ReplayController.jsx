@@ -40,7 +40,8 @@ export function ReplayControllerView({
     );
 
     return (
-        <section aria-labelledby="mi-replay-controller-title" className="mi-replay-controller">
+        <section aria-labelledby="mi-replay-controller-title"
+            className={`mi-replay-controller${isEmpty ? " mi-replay-controller--empty" : ""}`}>
             <div className="mi-replay-controller__heading">
                 <div>
                     <h2 id="mi-replay-controller-title">{bilingual("replayController")}</h2>

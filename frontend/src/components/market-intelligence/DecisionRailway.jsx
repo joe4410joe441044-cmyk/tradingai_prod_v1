@@ -5,16 +5,17 @@ import { bilingual } from "./marketIntelligenceLabels.js";
 const stationValue = (model, stationId, label) => model.stations.find(({ id }) => id === stationId)
     ?.secondaryValues.find((value) => value.label === label)?.value ?? "—";
 
-export const DecisionFinalSummary = ({ model }) => {
+export const DecisionFinalSummary = ({ hasError = false, hasReplay = false, model }) => {
     const hasDecision = model.hasData && !["—", "UNKNOWN"].includes(model.finalDecision.ai);
+    const emptyTitle = hasError ? "UNKNOWN" : hasReplay ? "NO DECISION AT CURRENT CURSOR" : "NO DECISION DATA";
     return (
     <section aria-labelledby="mi-final-decision-title" className="mi-final-decision">
         <header>
             <div><h2 id="mi-final-decision-title">{bilingual("aiFinalDecision")}</h2></div>
-            <strong>{model.finalDecision.ai}</strong>
+            <strong>{hasDecision || hasError ? model.finalDecision.ai : "—"}</strong>
         </header>
-        {!hasDecision ? <p className="mi-final-decision__empty"><strong>UNKNOWN（未判定）</strong>
-            <span>Decision is not available at the current cursor.（現在のカーソルでは判断情報がありません）</span></p> : <>
+        {!hasDecision ? <p className="mi-final-decision__empty"><strong>{emptyTitle}</strong>
+            {!hasReplay && !hasError && <span>Load a replay to inspect the AI decision.</span>}</p> : <>
             <dl className="mi-decision-railway__final mi-decision-railway__final--primary">
                 <div><dt>{bilingual("finalDirection")}</dt><dd>{model.finalDecision.ai}</dd></div>
                 <div><dt>{bilingual("confidence")}</dt><dd>{stationValue(model, "ai-review", "Confidence")}</dd></div>
@@ -42,7 +43,7 @@ export function DecisionRailwayView({ model, showSummary = true }) {
                     <h2 id="mi-decision-railway-title">{bilingual("decisionRailway")}</h2>
                     <p>Python Analysis → Strategy → AI Review → Governance → Execution</p>
                 </div>
-                <span className="mi-status-label">QUALITY {model.dataQuality}</span>
+                {model.hasData && <span className="mi-status-label">QUALITY {model.dataQuality}</span>}
             </header>
 
             {showSummary && <dl className="mi-decision-railway__final">
@@ -103,7 +104,9 @@ export function DecisionRailwayView({ model, showSummary = true }) {
 
 export function DecisionRailwaySummary() {
     const { replayEngine } = useMarketIntelligence();
-    return <DecisionFinalSummary model={buildDecisionRailwayModel(replayEngine)} />;
+    const hasError = replayEngine?.machine?.state === "ERROR" || Boolean(replayEngine?.engineError);
+    return <DecisionFinalSummary hasError={hasError} hasReplay={Boolean(replayEngine?.dataset)}
+        model={buildDecisionRailwayModel(replayEngine)} />;
 }
 
 export default function DecisionRailway({ showSummary = true }) {

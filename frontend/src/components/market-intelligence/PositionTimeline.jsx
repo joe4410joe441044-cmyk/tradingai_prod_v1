@@ -3,10 +3,10 @@ import { useMarketIntelligence } from "../../state/market-intelligence/MarketInt
 
 export function PositionTimelineView({ model }) {
     return (
-        <section aria-labelledby="mi-timeline-title" className="mi-timeline">
+        <section aria-labelledby="mi-timeline-title" className={`mi-timeline${model.isEmpty ? " mi-timeline--empty" : ""}`}>
             <h2 id="mi-timeline-title">POSITION TIMELINE</h2>
             <div className="mi-timeline__track">
-                {model.isEmpty ? <p>NO POSITION EVENTS（ポジションイベントなし）</p> : <ol>
+                {model.isEmpty ? <p>NO POSITION EVENTS</p> : <ol>
                     {model.items.map((item) => <li aria-current={item === model.items.at(-1) ? "step" : undefined}
                         key={item.id}>
                         <strong>{item.phase} · {item.eventType}</strong>

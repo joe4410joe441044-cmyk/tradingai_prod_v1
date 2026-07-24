@@ -63,7 +63,8 @@ test("initial timeline renders a compact accessible empty state", async () => {
     const nodes = descendants(view);
     const allText = nodes.map(textOf).join(" ");
     assert.match(allText, /REPLAY TIMELINE/);
-    assert.match(allText, /NO TIMELINE EVENTS（タイムラインイベントなし）/);
+    assert.match(allText, /NO TIMELINE EVENTS/);
+    assert.doesNotMatch(allText, /QUALITY UNKNOWN/);
     assert.doesNotMatch(allText, /Total Events0/);
     assert.equal(nodes.some(({ props }) => props?.className === "mi-replay-timeline__summary"), false);
     assert.equal(nodes.some(({ type }) => type === "button"), false);
