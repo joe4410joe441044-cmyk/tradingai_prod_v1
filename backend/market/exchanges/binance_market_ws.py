@@ -11,6 +11,8 @@ from backend.utils.log_buffer import add_log, ws_debug
 
 class OrderBookWS:
 
+    MARKET_TYPE = "SPOT"
+
     def __init__(
         self,
         symbol,
@@ -477,6 +479,10 @@ class OrderBookWS:
                 self.original_symbol,
                 {
                     "symbol": self.original_symbol,
+                    "exchange_symbol": self.original_symbol,
+                    "market_type": self.MARKET_TYPE,
+                    "market_timestamp": time.time(),
+                    "sequence": self.last_sequence_end,
                     "bids": dict(self.bids),
                     "asks": dict(self.asks),
                     "best_bid": self.best_bid,

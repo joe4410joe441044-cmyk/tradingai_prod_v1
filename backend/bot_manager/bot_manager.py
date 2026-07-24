@@ -169,6 +169,12 @@ class BotManager:
 
         self.last_update_time = 0
 
+        # This is the scalar Browser market contract authority. The exchange
+        # callback replaces it atomically from one accepted book snapshot.
+        self.market_snapshot_lock = threading.Lock()
+        self.market_snapshot = None
+        self.market_type = None
+
         # Debug-only PriceProvider observation counter.
         self.provider_update_count = 0
 
@@ -1833,6 +1839,10 @@ class BotManager:
 
             self.last_update_time = 0
 
+            with self.market_snapshot_lock:
+                self.market_snapshot = None
+                self.market_type = None
+
             self.latest_runtime_result = None
 
             self.last_order_time = 0
@@ -2206,6 +2216,8 @@ class BotManager:
                         time.time()
                     )
 
+                    self._store_market_snapshot(data)
+
                     # ============================================
                     # RUNTIME PIPELINE
                     # ============================================
@@ -2410,6 +2422,12 @@ class BotManager:
                     on_update=on_update,
                     runtime_id=self.active_runtime_id
                 )
+            )
+
+            self.market_type = getattr(
+                self.ws,
+                "MARKET_TYPE",
+                None,
             )
 
             ws_debug(
@@ -7034,6 +7052,9 @@ class BotManager:
 
             self.last_update_time = 0
 
+            with self.market_snapshot_lock:
+                self.market_snapshot = None
+
             self.pending_order = False
 
             self.exchange_client_ready = False
@@ -7077,6 +7098,45 @@ class BotManager:
     # RESULT
     # =========================
 
+    def _store_market_snapshot(self, data):
+
+        order_book = data.get("order_book")
+        if not isinstance(order_book, dict):
+            order_book = {
+                "timestamp": None,
+                "sequence": None,
+                "depth": 0,
+                "bids": [],
+                "asks": [],
+                "dataQuality": "UNAVAILABLE",
+                "syncState": "UNAVAILABLE",
+            }
+
+        market_snapshot = {
+            "exchange": self.exchange_name,
+            "marketType": data.get("market_type"),
+            "exchangeSymbol": data.get("exchange_symbol"),
+            "timestamp": data.get("market_timestamp"),
+            "sequence": data.get("sequence"),
+            "price": data.get("price"),
+            "bestBid": data.get("best_bid"),
+            "bestAsk": data.get("best_ask"),
+            "spread": data.get("spread"),
+            "dataQuality": "VALID",
+            "orderBook": deepcopy(order_book),
+        }
+
+        if order_book.get("dataQuality") != "VALID":
+            market_snapshot["dataQuality"] = order_book.get(
+                "dataQuality",
+                "INVALID",
+            )
+
+        with self.market_snapshot_lock:
+            self.market_snapshot = deepcopy(
+                market_snapshot
+            )
+
     def get_result(self):
 
         stale_seconds = 0
@@ -7092,6 +7152,55 @@ class BotManager:
             not self._running
             or stale_seconds > 5
         )
+
+        with self.market_snapshot_lock:
+            market_payload = deepcopy(
+                self.market_snapshot
+            )
+
+        if market_payload is None:
+            market_payload = {
+                "exchange": self.exchange_name,
+                "marketType": self.market_type,
+                "exchangeSymbol": self.orderbook_symbol,
+                "timestamp": None,
+                "sequence": None,
+                "price": None,
+                "bestBid": None,
+                "bestAsk": None,
+                "spread": None,
+                "dataQuality": "UNAVAILABLE",
+                "orderBook": {
+                    "timestamp": None,
+                    "sequence": None,
+                    "depth": 0,
+                    "bids": [],
+                    "asks": [],
+                    "dataQuality": "UNAVAILABLE",
+                    "syncState": "UNAVAILABLE",
+                },
+            }
+        elif not self._running:
+            market_payload["dataQuality"] = "UNAVAILABLE"
+            market_payload["orderBook"] = {
+                "timestamp": None,
+                "sequence": None,
+                "depth": 0,
+                "bids": [],
+                "asks": [],
+                "dataQuality": "UNAVAILABLE",
+                "syncState": "UNAVAILABLE",
+            }
+        elif market_stale:
+            market_payload["dataQuality"] = "STALE"
+            market_payload.setdefault("orderBook", {
+                "timestamp": None,
+                "sequence": None,
+                "depth": 0,
+                "bids": [],
+                "asks": [],
+                "syncState": "UNAVAILABLE",
+            })["dataQuality"] = "STALE"
 
         safe_price = (
             float(self.last_price)
@@ -7324,6 +7433,8 @@ class BotManager:
             "last_update": snapshot.get("last_update") or 0.0,
 
             "price": safe_price,
+
+            "market": market_payload,
 
             "marketReady": self.market_ready,
 

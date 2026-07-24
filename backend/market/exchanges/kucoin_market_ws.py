@@ -6,6 +6,7 @@ import threading
 import time
 import requests
 import uuid
+import math
 
 from backend.utils.log_buffer import add_log, logger, ws_debug
 
@@ -34,6 +35,9 @@ def normalize_futures_symbol(symbol):
 
 
 class OrderBookWS:
+
+    MARKET_TYPE = "FUTURES"
+    BROWSER_BOOK_DEPTH = 20
 
     def normalize_symbol(self, symbol):
 
@@ -439,6 +443,52 @@ class OrderBookWS:
             "droppedOldDiffCount": self.dropped_old_diff_count,
         }
 
+    def _browser_book_snapshot_locked(self, timestamp):
+
+        bids = sorted(
+            self.bids.items(),
+            key=lambda level: level[0],
+            reverse=True,
+        )[:self.BROWSER_BOOK_DEPTH]
+        asks = sorted(
+            self.asks.items(),
+            key=lambda level: level[0],
+        )[:self.BROWSER_BOOK_DEPTH]
+
+        def valid_level(level):
+            price, size = level
+            return (
+                math.isfinite(price)
+                and math.isfinite(size)
+                and price > 0
+                and size >= 0
+            )
+
+        valid = (
+            bool(bids)
+            and bool(asks)
+            and self.last_sequence_end is not None
+            and all(valid_level(level) for level in bids)
+            and all(valid_level(level) for level in asks)
+            and bids[0][0] < asks[0][0]
+        )
+
+        return {
+            "timestamp": timestamp,
+            "sequence": self.last_sequence_end,
+            "depth": max(len(bids), len(asks)),
+            "bids": [
+                {"price": price, "size": size}
+                for price, size in bids
+            ],
+            "asks": [
+                {"price": price, "size": size}
+                for price, size in asks
+            ],
+            "dataQuality": "VALID" if valid else "INVALID",
+            "syncState": "SYNCED" if valid else "UNSYNCED",
+        }
+
     def get_orderbook_debug(self):
 
         with self._orderbook_lock:
@@ -463,12 +513,20 @@ class OrderBookWS:
                 self.last_ws_receive_time = time.time()
                 self.ws_update_count += 1
                 debug = self._get_orderbook_debug_locked()
+                order_book = self._browser_book_snapshot_locked(
+                    self.last_price_update
+                )
                 payload = {
                     "symbol": self.original_symbol,
+                    "exchange_symbol": self.symbol,
+                    "market_type": self.MARKET_TYPE,
+                    "market_timestamp": self.last_price_update,
+                    "sequence": self.last_sequence_end,
                     "best_bid": self.best_bid,
                     "best_ask": self.best_ask,
                     "spread": self.spread,
                     "price": self.last_price,
+                    "order_book": order_book,
                     "bids": dict(self.bids),
                     "asks": dict(self.asks),
                     "price_path_debug": {
