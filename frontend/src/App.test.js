@@ -13,8 +13,9 @@ const loadApp = async () => {
     const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source));
     const temporary = await mkdtemp(join(directory, ".app-integration-test-"));
     const output = join(temporary, "App.mjs");
-    const reactStub = moduleUrl("export const useEffect=(callback)=>callback();export const useState=(initializer)=>[typeof initializer==='function'?initializer():initializer,()=>{}]");
-    const navigationStub = moduleUrl("export default()=>({type:'nav',props:{children:'NAVIGATION'}})");
+    const reactStub = moduleUrl("export const useEffect=(callback)=>callback();export const useState=(initializer)=>{if(globalThis.__appState===undefined)globalThis.__appState=typeof initializer==='function'?initializer():initializer;return[globalThis.__appState,(value)=>{globalThis.__appState=typeof value==='function'?value(globalThis.__appState):value}]}");
+    const navigationStub = moduleUrl("export default (props)=>({type:'nav',props:{...props,children:'NAVIGATION'}})");
+    const advisorStub = moduleUrl("export default()=>({type:'main',props:{children:'AI ADVISOR PAGE'}})");
     const dashboardStub = moduleUrl("export default()=>({type:'main',props:{children:'DASHBOARD PAGE'}})");
     const marketStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET INTELLIGENCE PAGE'}})");
     const dashboardMarketProviderStub = moduleUrl(
@@ -23,6 +24,7 @@ const loadApp = async () => {
     const runtimeStub = moduleUrl("export const startWebSocketRuntime=()=>{}");
     const code = transformed.code.replace('from "react";', `from "${reactStub}";`)
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
+        .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
         .replace('from "./pages/MarketIntelligencePage";', `from "${marketStub}";`)
         .replace('from "./state/dashboard-market/DashboardMarketContext";', `from "${dashboardMarketProviderStub}";`)
@@ -43,13 +45,29 @@ const textOf = (node) => {
     return textOf(node.props?.children);
 };
 
-test("App selects Dashboard initially and MARKET INTELLIGENCE by path", async () => {
+test("App selects each primary page and preserves unknown-path fallback", async () => {
+    globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/" } };
     let module = await loadApp();
-    assert.match(textOf(module.default()), /DASHBOARD PAGE/);
-    assert.doesNotMatch(textOf(module.default()), /MARKET INTELLIGENCE PAGE/);
+    let text = textOf(module.default());
+    assert.match(text, /DASHBOARD PAGE/);
+    assert.doesNotMatch(text, /MARKET INTELLIGENCE PAGE/);
 
+    globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/market-intelligence" } };
     module = await loadApp();
-    assert.match(textOf(module.default()), /MARKET INTELLIGENCE PAGE/);
+    text = textOf(module.default());
+    assert.match(text, /MARKET INTELLIGENCE PAGE/);
+
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/ai-advisor" } };
+    module = await loadApp();
+    text = textOf(module.default());
+    assert.match(text, /AI ADVISOR PAGE/);
+
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/unknown" } };
+    module = await loadApp();
+    text = textOf(module.default());
+    assert.match(text, /DASHBOARD PAGE/);
 });

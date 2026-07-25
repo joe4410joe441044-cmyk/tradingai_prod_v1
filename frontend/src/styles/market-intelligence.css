@@ -22,12 +22,15 @@
     align-items: stretch;
     gap: 4px;
     padding: 0 14px;
+    overflow-x: auto;
     border-bottom: 1px solid var(--mi-border);
     background: #080e19;
     font-family: var(--mi-font-ui);
+    white-space: nowrap;
 }
 
 .market-intelligence .mi-app-navigation__item {
+    flex: 0 0 auto;
     padding: 0 14px;
     border: 0;
     border-bottom: 2px solid transparent;

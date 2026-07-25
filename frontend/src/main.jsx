@@ -8,6 +8,7 @@ import "./App.css";
 import "./index.css";
 import "./styles/dashboard.css";
 import "./styles/market-intelligence.css";
+import "./styles/ai-advisor.css";
 
 const rootElement = document.getElementById("root");
 

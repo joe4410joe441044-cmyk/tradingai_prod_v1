@@ -2,10 +2,12 @@ import { useEffect } from "react";
 
 const DASHBOARD_PATH = "/";
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
+const AI_ADVISOR_PATH = "/ai-advisor";
 
 const APP_PATHS = new Set([
     DASHBOARD_PATH,
     MARKET_INTELLIGENCE_PATH,
+    AI_ADVISOR_PATH,
 ]);
 
 const resolveAppPath = (pathname) => (
@@ -15,6 +17,7 @@ const resolveAppPath = (pathname) => (
 const NAVIGATION_ITEMS = [
     { label: "DASHBOARD", path: DASHBOARD_PATH },
     { label: "MARKET INTELLIGENCE", path: MARKET_INTELLIGENCE_PATH },
+    { label: "AI ADVISOR", path: AI_ADVISOR_PATH },
 ];
 
 export default function AppNavigation({ currentPath, onPathChange }) {

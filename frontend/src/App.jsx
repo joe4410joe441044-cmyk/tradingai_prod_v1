@@ -3,18 +3,24 @@ import { useEffect, useState } from "react";
 import "./App.css";
 
 import AppNavigation from "./components/AppNavigation";
+import AIAdvisorPage from "./pages/AIAdvisorPage";
 import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import { startWebSocketRuntime } from "./runtime/websocketRuntime";
 
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
+const AI_ADVISOR_PATH = "/ai-advisor";
 
-const resolveAppPath = (pathname) => (
-    pathname === MARKET_INTELLIGENCE_PATH
-        ? MARKET_INTELLIGENCE_PATH
-        : "/"
-);
+const resolveAppPath = (pathname) => {
+    if (pathname === MARKET_INTELLIGENCE_PATH) {
+        return MARKET_INTELLIGENCE_PATH;
+    }
+    if (pathname === AI_ADVISOR_PATH) {
+        return AI_ADVISOR_PATH;
+    }
+    return "/";
+};
 
 /* =================================================
    APP
@@ -27,7 +33,9 @@ export default function App() {
 
     const CurrentPage = currentPath === MARKET_INTELLIGENCE_PATH
         ? MarketIntelligencePage
-        : Dashboard;
+        : currentPath === AI_ADVISOR_PATH
+            ? AIAdvisorPage
+            : Dashboard;
 
     useEffect(() => {
         startWebSocketRuntime();

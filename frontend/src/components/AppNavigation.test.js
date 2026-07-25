@@ -28,7 +28,7 @@ const descendants = (node) => {
     return [node, ...descendants(node.props?.children)];
 };
 
-test("navigation switches both pages, exposes active state, and calls no trading API", async () => {
+test("navigation switches all pages, exposes active state, and calls no trading API", async () => {
     const listeners = new Map();
     let fetchCalls = 0;
     globalThis.fetch = () => { fetchCalls += 1; };
@@ -47,6 +47,7 @@ test("navigation switches both pages, exposes active state, and calls no trading
     let buttons = nodes.filter(({ type }) => type === "button");
     assert.equal(buttons[0].props["aria-current"], "page");
     assert.equal(buttons[1].props["aria-current"], undefined);
+    assert.equal(buttons[2].props["aria-current"], undefined);
     buttons[1].props.onClick();
     assert.equal(paths.at(-1), "/market-intelligence");
 
@@ -54,6 +55,16 @@ test("navigation switches both pages, exposes active state, and calls no trading
     buttons = nodes.filter(({ type }) => type === "button");
     assert.equal(buttons[1].props["aria-current"], "page");
     assert.match(buttons[1].props.className, /--active/);
+    buttons[2].props.onClick();
+    assert.equal(paths.at(-1), "/ai-advisor");
+
+    nodes = descendants(AppNavigation({ currentPath: "/ai-advisor", onPathChange: (path) => paths.push(path) }));
+    buttons = nodes.filter(({ type }) => type === "button");
+    assert.equal(buttons.length, 3);
+    assert.equal(buttons[0].props["aria-current"], undefined);
+    assert.equal(buttons[1].props["aria-current"], undefined);
+    assert.equal(buttons[2].props["aria-current"], "page");
+    assert.match(buttons[2].props.className, /--active/);
     buttons[0].props.onClick();
     assert.equal(paths.at(-1), "/");
     assert.equal(fetchCalls, 0);
