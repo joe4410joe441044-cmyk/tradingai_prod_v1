@@ -99,3 +99,6 @@ site-packages/
 *.bak_*
 *.bak_step*
 *.before_*
+
+# Local credentials must never be tracked
+/token_chatID_BinanceAPI.txt
