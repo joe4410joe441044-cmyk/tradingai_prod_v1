@@ -4,7 +4,7 @@ import {
     telemetryStore,
     updateMarketTelemetry,
     updateRuntimeTelemetry,
-} from "../store/telemetryStore";
+} from "../store/telemetryStore.js";
 
 window.telemetryStore =
     telemetryStore;
@@ -24,6 +24,10 @@ let reconnectAttempts = 0;
 
 let reconnectInProgress = false;
 
+let runtimeStopped = true;
+
+const intentionallyClosedSockets = new WeakSet();
+
 let heartbeatInterval = null;
 
 let staleCheckInterval = null;
@@ -37,7 +41,9 @@ CONFIG
 ====================================
 */
 
-const WS_URL = import.meta.env.VITE_WS_URL || `${
+const RUNTIME_ENV = import.meta.env || {};
+
+const WS_URL = RUNTIME_ENV.VITE_WS_URL || `${
     window.location.protocol === "https:" ? "wss" : "ws"
 }://${window.location.host}/ws`;
 
@@ -147,6 +153,8 @@ START RUNTIME
 
 export function startWebSocketRuntime() {
 
+    runtimeStopped = false;
+
     /*
     Prevent duplicate runtime
     */
@@ -227,7 +235,17 @@ function connectWebSocket() {
     ====================================
     */
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+
+        const closedSocket = event.currentTarget;
+        const intentionallyClosed = intentionallyClosedSockets.has(closedSocket);
+        if (intentionallyClosed) {
+            intentionallyClosedSockets.delete(closedSocket);
+        }
+        if (closedSocket !== ws) {
+            return;
+        }
+        ws = null;
 
         console.log(
             "[WS] Disconnected"
@@ -239,7 +257,9 @@ function connectWebSocket() {
             ConnectionState.DISCONNECTED
         );
 
-        scheduleReconnect();
+        if (!runtimeStopped && !intentionallyClosed) {
+            scheduleReconnect();
+        }
 
     };
 
@@ -569,6 +589,10 @@ RECONNECT LOGIC
 
 function scheduleReconnect() {
 
+    if (runtimeStopped) {
+        return;
+    }
+
     /*
     Duplicate reconnect suppression
     */
@@ -615,6 +639,11 @@ function scheduleReconnect() {
 
     reconnectTimeout =
         setTimeout(() => {
+
+            if (runtimeStopped) {
+                reconnectInProgress = false;
+                return;
+            }
 
             reconnectInProgress =
                 false;
@@ -785,6 +814,8 @@ STOP RUNTIME
 
 export function stopWebSocketRuntime() {
 
+    runtimeStopped = true;
+
     cleanupWatchdogs();
 
     reconnectInProgress =
@@ -796,7 +827,9 @@ export function stopWebSocketRuntime() {
         ws
     ) {
 
+        intentionallyClosedSockets.add(ws);
         ws.close();
+        ws = null;
 
     }
 

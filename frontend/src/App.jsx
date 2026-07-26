@@ -7,7 +7,10 @@ import AIAdvisorPage from "./pages/AIAdvisorPage";
 import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
-import { startWebSocketRuntime } from "./runtime/websocketRuntime";
+import {
+    startWebSocketRuntime,
+    stopWebSocketRuntime,
+} from "./runtime/websocketRuntime";
 
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
 const AI_ADVISOR_PATH = "/ai-advisor";
@@ -36,10 +39,16 @@ export default function App() {
         : currentPath === AI_ADVISOR_PATH
             ? AIAdvisorPage
             : Dashboard;
+    const advisorActive = currentPath === AI_ADVISOR_PATH;
 
     useEffect(() => {
+        if (advisorActive) {
+            stopWebSocketRuntime();
+            return;
+        }
         startWebSocketRuntime();
-    }, []);
+        return () => stopWebSocketRuntime();
+    }, [advisorActive]);
 
     return (
         <DashboardMarketContextProvider>

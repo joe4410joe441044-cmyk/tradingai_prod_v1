@@ -1,0 +1,201 @@
+export const ADVISOR_CONVERSATION_PATH = "/api/ai-advisor/conversation";
+export const ADVISOR_CONVERSATION_STATUS_PATH =
+    "/api/ai-advisor/conversation/status";
+export const ADVISOR_BROWSER_TIMEOUT_MS = 36_000;
+
+export class AdvisorBrowserGatewayError extends Error {
+    constructor(code, message, { retryable = false, httpStatus = null } = {}) {
+        super(message);
+        this.name = "AdvisorBrowserGatewayError";
+        this.code = code;
+        this.retryable = retryable === true;
+        this.httpStatus = httpStatus;
+    }
+}
+
+const ERROR_CODES = Object.freeze({
+    AUTHENTICATION_REQUIRED: "AUTHENTICATION_REQUIRED",
+    AUTHORIZATION_DENIED: "ACCESS_DENIED",
+    REQUEST_TOO_LARGE: "REQUEST_INVALID",
+    REQUEST_INVALID: "REQUEST_INVALID",
+    RATE_LIMIT_EXCEEDED: "RATE_LIMITED",
+    CONCURRENCY_LIMIT_EXCEEDED: "CONCURRENCY_LIMITED",
+    ENDPOINT_TIMEOUT: "TIMED_OUT",
+    ENDPOINT_DISABLED: "ENDPOINT_UNAVAILABLE",
+    ADVISOR_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
+    INTERNAL_ERROR: "INTERNAL_FAILURE",
+    ADVISOR_PROVIDER_FAILURE: "PROVIDER_UNAVAILABLE",
+    ADVISOR_PROVIDER_RESPONSE_INVALID: "INVALID_PROVIDER_RESPONSE",
+    ADVISOR_PARSE_FAILURE: "INVALID_PROVIDER_RESPONSE",
+    ADVISOR_RESPONSE_INVALID: "INVALID_PROVIDER_RESPONSE",
+});
+const STATUS_VALUES = new Set([
+    "AVAILABLE", "OFFLINE", "UNAVAILABLE", "AUTHENTICATION_REQUIRED",
+]);
+const isRecord = (value) => (
+    value !== null && typeof value === "object" && !Array.isArray(value)
+);
+
+const safeError = (body, status) => {
+    const wireCode = isRecord(body) ? body.errorCode || body.failureCode : null;
+    return new AdvisorBrowserGatewayError(
+        ERROR_CODES[wireCode]
+            || (status === 502
+                ? "INVALID_PROVIDER_RESPONSE"
+                : "UNKNOWN_SAFE_FAILURE"),
+        "The advisor request could not be completed.",
+        { retryable: body?.retryable === true, httpStatus: status },
+    );
+};
+
+async function parseJson(response) {
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+function validateResponse(body) {
+    const envelope = body?.advisorResponse;
+    if (!isRecord(body)
+        || body.status !== "SUCCEEDED"
+        || !isRecord(envelope)
+        || envelope.responseVersion !== "1.0"
+        || typeof envelope.requestId !== "string"
+        || typeof envelope.summary !== "string"
+        || !["VALID", "VALID_WITH_WARNINGS", "REJECTED"].includes(envelope.status)) {
+        throw new AdvisorBrowserGatewayError(
+            "INVALID_PROVIDER_RESPONSE",
+            "The advisor returned an invalid response.",
+        );
+    }
+    if (envelope.groundedClaims !== undefined) {
+        if (!Array.isArray(envelope.groundedClaims)
+            || !Array.isArray(envelope.citations)
+            || !Array.isArray(envelope.limitations)) {
+            throw new AdvisorBrowserGatewayError(
+                "INVALID_PROVIDER_RESPONSE",
+                "The advisor returned invalid grounding.",
+            );
+        }
+        const citationIds = new Set(
+            envelope.citations.map((citation) => citation?.sourceId),
+        );
+        for (const claim of envelope.groundedClaims) {
+            if (!["FACT", "INTERPRETATION", "INFERENCE", "UNKNOWN"].includes(
+                claim?.claimType,
+            ) || typeof claim?.text !== "string"
+                || !Array.isArray(claim?.citationSourceIds)
+                || (claim.claimType !== "UNKNOWN"
+                    && claim.citationSourceIds.length === 0)
+                || !claim.citationSourceIds.every((id) => citationIds.has(id))) {
+                throw new AdvisorBrowserGatewayError(
+                    "INVALID_PROVIDER_RESPONSE",
+                    "The advisor returned invalid grounding.",
+                );
+            }
+        }
+        for (const citation of envelope.citations) {
+            if (typeof citation?.displayTitle !== "string"
+                || citation.displayTitle.startsWith("/")
+                || /https?:\/\//i.test(citation.displayTitle)
+                || typeof citation?.version !== "string") {
+                throw new AdvisorBrowserGatewayError(
+                    "INVALID_PROVIDER_RESPONSE",
+                    "The advisor returned an invalid citation.",
+                );
+            }
+        }
+    }
+    return Object.freeze({ ...envelope });
+}
+
+export function createAdvisorBrowserGatewayClient({
+    fetchImpl = globalThis.fetch,
+    timeoutMs = ADVISOR_BROWSER_TIMEOUT_MS,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+} = {}) {
+    async function request(path, options, callerSignal) {
+        const controller = new AbortController();
+        let timedOut = false;
+        const abort = () => controller.abort();
+        if (callerSignal?.aborted) controller.abort();
+        callerSignal?.addEventListener("abort", abort, { once: true });
+        const timer = setTimer(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
+        try {
+            if (controller.signal.aborted) {
+                throw new AdvisorBrowserGatewayError("CANCELLED", "Request cancelled.");
+            }
+            return await fetchImpl(path, {
+                ...options,
+                credentials: "same-origin",
+                headers: {
+                    Accept: "application/json",
+                    "X-TradingAI-Client": "web",
+                    ...options.headers,
+                },
+                signal: controller.signal,
+            });
+        } catch (error) {
+            if (timedOut) {
+                throw new AdvisorBrowserGatewayError("TIMED_OUT", "Request timed out.");
+            }
+            if (callerSignal?.aborted || error?.name === "AbortError") {
+                throw new AdvisorBrowserGatewayError("CANCELLED", "Request cancelled.");
+            }
+            if (error instanceof AdvisorBrowserGatewayError) throw error;
+            throw new AdvisorBrowserGatewayError(
+                "ENDPOINT_UNAVAILABLE",
+                "AI Advisor is unavailable.",
+                { retryable: true },
+            );
+        } finally {
+            clearTimer(timer);
+            callerSignal?.removeEventListener("abort", abort);
+        }
+    }
+
+    return Object.freeze({
+        async getStatus({ signal } = {}) {
+            const response = await request(
+                ADVISOR_CONVERSATION_STATUS_PATH,
+                { method: "GET" },
+                signal,
+            );
+            const body = await parseJson(response);
+            if (!response.ok) throw safeError(body, response.status);
+            if (!isRecord(body) || !STATUS_VALUES.has(body.status)) {
+                throw new AdvisorBrowserGatewayError(
+                    "INVALID_PROVIDER_RESPONSE",
+                    "Advisor status was invalid.",
+                );
+            }
+            return body.status;
+        },
+        async requestAdvice(prompt, { signal } = {}) {
+            if (typeof prompt !== "string") {
+                throw new AdvisorBrowserGatewayError(
+                    "REQUEST_INVALID",
+                    "The request is invalid.",
+                );
+            }
+            const response = await request(
+                ADVISOR_CONVERSATION_PATH,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt }),
+                },
+                signal,
+            );
+            const body = await parseJson(response);
+            if (!response.ok) throw safeError(body, response.status);
+            return validateResponse(body);
+        },
+    });
+}

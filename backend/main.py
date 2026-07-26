@@ -36,6 +36,24 @@ from backend.utils.log_buffer import (
 )
 from backend.bot_manager.bot_manager import get_existing_bot_manager
 from backend.api.runtime import router as runtime_api_router
+from backend.api.ai_advisor import create_advice_router, create_runtime_router
+from backend.ai_advisor.credential_loader import EnvironmentCredentialLoader
+from backend.ai_advisor.production_composition import (
+    build_ai_advisor_production_composition,
+)
+from backend.ai_advisor.production_config_loader import (
+    EnvironmentProductionConfigLoader,
+)
+from backend.ai_advisor.api_rate_limit import (
+    AdvisorConcurrencyLimiter,
+    AdvisorRateLimiter,
+)
+from backend.ai_advisor.browser_gateway import (
+    AdvisorGatewayPreflightDenyMiddleware,
+    AdvisorBrowserGatewayComposition,
+    create_browser_gateway_router,
+    load_browser_gateway_config,
+)
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -1297,6 +1315,69 @@ app.include_router(
 app.include_router(
     runtime_api_router
 )
+
+_ai_advisor_production = build_ai_advisor_production_composition(
+    config_loader=EnvironmentProductionConfigLoader(),
+    authentication_credential_loader=EnvironmentCredentialLoader(
+        ("AI_ADVISOR_AUTH_TOKEN",),
+    ),
+    provider_credential_loader=EnvironmentCredentialLoader(
+        ("OPENAI_API_KEY",),
+    ),
+    allowed_authentication_credential_ids=(
+        "AI_ADVISOR_AUTH_TOKEN",
+    ),
+    allowed_provider_credential_ids=(
+        "OPENAI_API_KEY",
+    ),
+)
+
+app.include_router(
+    create_runtime_router(
+        _ai_advisor_production.apiComposition,
+    ),
+    prefix="/api/ai-advisor",
+)
+
+app.include_router(
+    create_advice_router(
+        _ai_advisor_production.apiComposition,
+    ),
+    prefix="/api/ai-advisor",
+)
+
+_ai_advisor_browser_config = load_browser_gateway_config()
+app.include_router(
+    create_browser_gateway_router(
+        AdvisorBrowserGatewayComposition(
+            config=_ai_advisor_browser_config,
+            service=_ai_advisor_production.apiComposition.service,
+            rateLimiter=AdvisorRateLimiter(
+                limit=_ai_advisor_production.apiComposition.config.rateLimitRequests,
+                window_seconds=(
+                    _ai_advisor_production.apiComposition.config.rateLimitWindowSeconds
+                ),
+                clock=time.monotonic,
+            ),
+            concurrencyLimiter=AdvisorConcurrencyLimiter(
+                limit=_ai_advisor_production.apiComposition.config.concurrencyLimit,
+                acquire_timeout_seconds=(
+                    _ai_advisor_production.apiComposition.config
+                    .concurrencyAcquireTimeoutSeconds
+                ),
+            ),
+            externalStatus=(
+                "AVAILABLE"
+                if (
+                    _ai_advisor_production.operationalStatus.networkReady is True
+                    and _ai_advisor_production.operationalStatus.providerReady is True
+                )
+                else "OFFLINE"
+            ),
+        )
+    )
+)
+app.add_middleware(AdvisorGatewayPreflightDenyMiddleware)
 
 # ------------------------------------------------------------
 # BOT

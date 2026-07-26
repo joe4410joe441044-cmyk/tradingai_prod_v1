@@ -1,10 +1,28 @@
+import AdvisorRuntimeStatus from "../components/ai-advisor/AdvisorRuntimeStatus";
+import AdvisorConversation from "../components/ai-advisor/AdvisorConversation";
+import useAdvisorRuntime from "../features/ai-advisor/runtime/useAdvisorRuntime";
+
 export default function AIAdvisorPage() {
+    const runtime = useAdvisorRuntime();
+    const runtimeLabel = runtime.connectionState === "CONNECTED"
+        ? "Connected"
+        : runtime.connectionState === "REFRESHING"
+            ? "Refreshing"
+            : runtime.connectionState === "DEGRADED"
+                ? "Degraded"
+                : "Not Connected";
+    const apiLabel = runtime.data
+        ? "Ready"
+        : runtime.connectionState === "DISCONNECTED"
+            ? "Unavailable"
+            : "Connecting";
+
     return (
         <main className="ai-advisor-page">
             <header className="ai-advisor-page__header">
                 <div className="ai-advisor-page__heading">
                     <h1>AI ADVISOR</h1>
-                    <p>TradingAI Knowledge, Runtime &amp; Development Intelligence</p>
+                    <p>TradingAI Intelligent Assistant</p>
                 </div>
 
                 <div
@@ -17,11 +35,13 @@ export default function AIAdvisorPage() {
                     <span className="ai-advisor-page__status">
                         <strong>AI Provider</strong> Not Configured
                     </span>
-                    <span className="ai-advisor-page__status">
-                        <strong>API</strong> Disabled
+                    <span className={`ai-advisor-page__status ${
+                        runtime.data ? "ai-advisor-page__status--ready" : ""
+                    }`}>
+                        <strong>API</strong> {apiLabel}
                     </span>
                     <span className="ai-advisor-page__status">
-                        <strong>Runtime</strong> Not Connected
+                        <strong>Runtime</strong> {runtimeLabel}
                     </span>
                     <span className="ai-advisor-page__status">
                         <strong>Knowledge</strong> Not Indexed
@@ -47,24 +67,15 @@ export default function AIAdvisorPage() {
                 <section className="ai-advisor-page__panel ai-advisor-page__advisor">
                     <h2>ADVISOR WORKSPACE</h2>
                     <div className="ai-advisor-page__advisor-content">
-                        <div className="ai-advisor-page__welcome">
-                            <strong>Platform Ready</strong>
-                            <p>
-                                TradingAI Advisor is ready for future provider,
-                                knowledge and runtime integration.
-                            </p>
-                            <p>No AI provider is currently configured.</p>
-                        </div>
-
-                        <div className="ai-advisor-page__prompt-row">
-                            <input
-                                aria-label="AI Advisor prompt"
-                                disabled
-                                placeholder="Connect an AI provider to start a conversation"
-                                type="text"
-                            />
-                            <button disabled type="button">Send</button>
-                        </div>
+                        <AdvisorRuntimeStatus
+                            connectionState={runtime.connectionState}
+                            data={runtime.data}
+                            error={runtime.error}
+                            lastSuccessfulAt={runtime.lastSuccessfulAt}
+                            loading={runtime.loading}
+                            onRetry={runtime.retry}
+                        />
+                        <AdvisorConversation />
                     </div>
                 </section>
 
@@ -83,9 +94,9 @@ export default function AIAdvisorPage() {
                         <section>
                             <h3>RUNTIME</h3>
                             <dl>
-                                <div><dt>Status</dt><dd>Not Connected</dd></div>
-                                <div><dt>Bot Runtime</dt><dd>Not Connected</dd></div>
-                                <div><dt>Telemetry</dt><dd>Not Connected</dd></div>
+                                <div><dt>Status</dt><dd>{runtimeLabel}</dd></div>
+                                <div><dt>Bot Runtime</dt><dd>{runtime.data?.bot.state || "—"}</dd></div>
+                                <div><dt>Freshness</dt><dd>{runtime.data?.runtime.freshness || "—"}</dd></div>
                             </dl>
                         </section>
 

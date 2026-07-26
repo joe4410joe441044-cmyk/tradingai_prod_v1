@@ -21,7 +21,10 @@ const loadApp = async () => {
     const dashboardMarketProviderStub = moduleUrl(
         "export const DashboardMarketContextProvider=({children})=>children",
     );
-    const runtimeStub = moduleUrl("export const startWebSocketRuntime=()=>{}");
+    const runtimeStub = moduleUrl(
+        "export const startWebSocketRuntime=()=>{globalThis.__wsStarts=(globalThis.__wsStarts||0)+1};"
+        + "export const stopWebSocketRuntime=()=>{globalThis.__wsStops=(globalThis.__wsStops||0)+1};",
+    );
     const code = transformed.code.replace('from "react";', `from "${reactStub}";`)
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
         .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
@@ -46,6 +49,8 @@ const textOf = (node) => {
 };
 
 test("App selects each primary page and preserves unknown-path fallback", async () => {
+    globalThis.__wsStarts = 0;
+    globalThis.__wsStops = 0;
     globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/" } };
     let module = await loadApp();
@@ -64,10 +69,25 @@ test("App selects each primary page and preserves unknown-path fallback", async 
     module = await loadApp();
     text = textOf(module.default());
     assert.match(text, /AI ADVISOR PAGE/);
+    assert.equal(globalThis.__wsStarts, 2);
+    assert.equal(globalThis.__wsStops, 1);
 
     globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/unknown" } };
     module = await loadApp();
     text = textOf(module.default());
     assert.match(text, /DASHBOARD PAGE/);
+});
+
+test("AI Advisor route explicitly stops the global trading WebSocket", async () => {
+    const source = await readFile(new URL("./App.jsx", import.meta.url), "utf8");
+    const runtimeSource = await readFile(
+        new URL("./runtime/websocketRuntime.js", import.meta.url),
+        "utf8",
+    );
+
+    assert.match(source, /advisorActive = currentPath === AI_ADVISOR_PATH/);
+    assert.match(source, /stopWebSocketRuntime\(\)/);
+    assert.match(runtimeSource, /runtimeStopped = true/);
+    assert.match(runtimeSource, /if \(!runtimeStopped && !intentionallyClosed\)/);
 });

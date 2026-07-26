@@ -1,0 +1,58 @@
+{
+  "manifestVersion": "ai-advisor-approved-knowledge-candidate/v1",
+  "approvalStatus": "CANDIDATE",
+  "runtimeActivationAllowed": false,
+  "externalTransmissionAllowed": false,
+  "generatedAgainstHead": "7a936851bd44bdc5adf004ed8437b7849f9e70c6",
+  "eligibleSources": [],
+  "ineligibleCandidates": [
+    {
+      "sourceId": "ai-advisor-role-permission-safety",
+      "documentId": "ai-advisor-role-permission-safety",
+      "displayTitle": "AI Advisor Role, Permission and Safety Boundary Specification",
+      "version": "UNVERIFIED",
+      "relativePath": "docs/ai_advisor/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md",
+      "authority": "NORMATIVE",
+      "contentHash": null,
+      "committedAtHead": false,
+      "externalTransmissionAllowed": false,
+      "approvalStatus": "INELIGIBLE_UNCOMMITTED"
+    },
+    {
+      "sourceId": "ai-advisor-master",
+      "documentId": "ai-advisor-master",
+      "displayTitle": "AI Advisor Master Specification",
+      "version": "UNVERIFIED",
+      "relativePath": "docs/09_AI_Advisor_Master_Specification.md",
+      "authority": "NORMATIVE",
+      "contentHash": null,
+      "committedAtHead": false,
+      "externalTransmissionAllowed": false,
+      "approvalStatus": "INELIGIBLE_UNCOMMITTED"
+    },
+    {
+      "sourceId": "tradingai-platform-master",
+      "documentId": "tradingai-platform-master",
+      "displayTitle": "TradingAI Platform Master Specification",
+      "version": "UNVERIFIED",
+      "relativePath": "docs/00_TradingAI_Platform_Master_Specification.md",
+      "authority": "NORMATIVE",
+      "contentHash": null,
+      "committedAtHead": false,
+      "externalTransmissionAllowed": false,
+      "approvalStatus": "INELIGIBLE_UNCOMMITTED"
+    },
+    {
+      "sourceId": "ai-advisor-browser-provider-contract",
+      "documentId": "ai-advisor-browser-provider-contract",
+      "displayTitle": "AI Advisor Browser and Provider Production Runbook",
+      "version": "UNVERIFIED",
+      "relativePath": "docs/ai_advisor/AI_ADV_1F_BATCH2_PRODUCTION_RUNBOOK.md",
+      "authority": "APPROVED_REFERENCE",
+      "contentHash": null,
+      "committedAtHead": false,
+      "externalTransmissionAllowed": false,
+      "approvalStatus": "INELIGIBLE_UNCOMMITTED"
+    }
+  ]
+}

@@ -15,8 +15,38 @@ const loadPage = async () => {
     );
     const temporary = await mkdtemp(join(directory, ".ai-advisor-page-test-"));
     const output = join(temporary, "AIAdvisorPage.mjs");
+    const hook = join(temporary, "useAdvisorRuntime.mjs");
+    const runtimeStatus = join(temporary, "AdvisorRuntimeStatus.mjs");
+    const conversation = join(temporary, "AdvisorConversation.mjs");
     try {
-        await writeFile(output, transformed.code);
+        await writeFile(hook, [
+            "export default () => ({",
+            "data:null,connectionState:'LOADING',loading:true,error:null,",
+            "lastSuccessfulAt:null,retry:()=>{}",
+            "});",
+        ].join(""));
+        await writeFile(
+            runtimeStatus,
+            "export default()=>({type:'section',props:{children:'RUNTIME STATUS Loading runtime status'}});",
+        );
+        await writeFile(
+            conversation,
+            "export default()=>({type:'section',props:{children:'Advisor Availability AUTHENTICATION_REQUIRED Read-only advisor Conversation Thread Prompt Input Send Cancel Clear Safe Failure'}});",
+        );
+        const code = transformed.code
+            .replace(
+                'from "../features/ai-advisor/runtime/useAdvisorRuntime";',
+                `from "${pathToFileURL(hook).href}";`,
+            )
+            .replace(
+                'from "../components/ai-advisor/AdvisorRuntimeStatus";',
+                `from "${pathToFileURL(runtimeStatus).href}";`,
+            )
+            .replace(
+                'from "../components/ai-advisor/AdvisorConversation";',
+                `from "${pathToFileURL(conversation).href}";`,
+            );
+        await writeFile(output, code);
         return await import(`${pathToFileURL(output).href}?test=ai-advisor`);
     } finally {
         await rm(temporary, { recursive: true, force: true });
@@ -37,7 +67,7 @@ const descendants = (node) => {
     return [node, ...descendants(node.props?.children)];
 };
 
-test("AI Advisor renders a static, interaction-free platform shell", async () => {
+test("AI Advisor preserves its shell and mounts read-only runtime status", async () => {
     let fetchCalls = 0;
     globalThis.fetch = () => { fetchCalls += 1; };
     const { default: AIAdvisorPage } = await loadPage();
@@ -46,12 +76,12 @@ test("AI Advisor renders a static, interaction-free platform shell", async () =>
     const nodes = descendants(page);
 
     assert.match(text, /AI ADVISOR/);
-    assert.match(text, /TradingAI Knowledge, Runtime & Development Intelligence/);
+    assert.match(text, /TradingAI Intelligent Assistant/);
     assert.match(text, /Platform Ready/);
     assert.match(text, /AI Provider/);
     assert.match(text, /Not Configured/);
     assert.match(text, /API/);
-    assert.match(text, /Disabled/);
+    assert.match(text, /Connecting/);
     assert.match(text, /Runtime/);
     assert.match(text, /Not Connected/);
     assert.match(text, /Knowledge/);
@@ -67,22 +97,19 @@ test("AI Advisor renders a static, interaction-free platform shell", async () =>
         assert.match(text, new RegExp(heading));
     }
 
-    const input = nodes.find(({ type }) => type === "input");
-    const button = nodes.find(({ type }) => type === "button");
     const statusGroup = nodes.find(({ props }) => (
         props?.["aria-label"] === "AI Advisor system status"
     ));
 
-    assert.equal(input.props.disabled, true);
-    assert.equal(input.props["aria-label"], "AI Advisor prompt");
-    assert.equal(button.props.disabled, true);
-    assert.equal(button.props.type, "button");
-    assert.match(textOf(button), /Send/);
     assert.ok(statusGroup);
     assert.equal(fetchCalls, 0);
+    assert.match(text, /RUNTIME STATUS/);
+    assert.match(text, /AUTHENTICATION_REQUIRED/);
+    assert.match(text, /Read-only advisor/);
+    assert.match(text, /Send Cancel Clear Safe Failure/);
 });
 
-test("AI Advisor source contains no runtime, API, or persistence integration", async () => {
+test("AI Advisor source has no direct fetch, mutation, or persistence integration", async () => {
     const source = await readFile(new URL("./AIAdvisorPage.jsx", import.meta.url), "utf8");
 
     for (const forbidden of [
@@ -90,11 +117,15 @@ test("AI Advisor source contains no runtime, API, or persistence integration", a
         "axios",
         "WebSocket",
         "startWebSocketRuntime",
-        "botStatus",
+        "botStart",
+        "botStop",
+        "governance",
         "OpenAI",
         "localStorage",
         "sessionStorage",
     ]) {
         assert.doesNotMatch(source, new RegExp(forbidden.replace("(", "\\(")));
     }
+    assert.match(source, /useAdvisorRuntime/);
+    assert.match(source, /AdvisorRuntimeStatus/);
 });

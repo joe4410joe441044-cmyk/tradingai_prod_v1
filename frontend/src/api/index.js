@@ -2,9 +2,11 @@
 // API BASE
 // ==========================
 
+const API_ENV = import.meta.env || {};
+
 const API_BASE =
   (
-    import.meta.env.VITE_API_BASE ||
+    API_ENV.VITE_API_BASE ||
     "/api"
   ).replace(/\/$/, "");
 
@@ -56,6 +58,9 @@ export const API = {
       )}`
     ),
 
+  aiAdvisorRuntime: () =>
+    join("/ai-advisor/conversation/runtime"),
+
   // ==========================
   // LOGS
   // ==========================
@@ -98,7 +103,7 @@ export const API = {
 
 const WS_BASE =
 
-  import.meta.env.VITE_WS_BASE ||
+  API_ENV.VITE_WS_BASE ||
 
   `${
     window.location.protocol ===
