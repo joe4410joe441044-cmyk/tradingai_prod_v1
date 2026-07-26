@@ -6,7 +6,6 @@ from Bot.core.trade_core import TradeCore
 from Bot.strategies.fvg_strategy import FVGStrategy
 from Bot.engine.execution_engine import ExecutionEngine
 from Bot.wrappers.strategy_wrapper import StrategyWrapper
-from Bot.utils.telegram_notifier import TelegramNotifier
 from Bot.utils.logger import BotLogger
 
 # =========================
@@ -14,31 +13,29 @@ from Bot.utils.logger import BotLogger
 # =========================
 from backend.api_ai import set_trade_core
 
-
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
-CHAT_ID = "1040943428"
 LIVE_MODE = False
+TELEGRAM_INTEGRATION_ENABLED = False
 
 
 # =========================
 # INIT
 # =========================
 def initialize_bot():
-
     logger = BotLogger("logs").get_logger()
-    notifier = TelegramNotifier(TOKEN, CHAT_ID)
+    notifier = None
 
     logger.info("Bot initialization started")
 
     execution_engine = ExecutionEngine(
         live=LIVE_MODE,
         logger=logger,
-        notifier=notifier
+        notifier=notifier,
     )
 
     trade_core = TradeCore(
         execution_engine=execution_engine,
-        logger=logger
+        logger=logger,
     )
 
     # =========================
@@ -56,7 +53,7 @@ def initialize_bot():
     fvg = FVGStrategy(
         trade_core=trade_core,
         logger=logger,
-        notifier=notifier
+        notifier=notifier,
     )
 
     wrapper = StrategyWrapper()
@@ -66,7 +63,7 @@ def initialize_bot():
         strategy_wrapper=wrapper,
         trade_core=trade_core,
         ws_url=WS_URL,
-        debug=False
+        debug=False,
     )
 
     logger.info("Bot initialization completed")
@@ -78,14 +75,14 @@ def initialize_bot():
 # MONITOR（改善版）
 # =========================
 async def monitor_positions(trade_core, logger):
-
     logger.info("🔥 MONITOR STARTED")
 
     while True:
         try:
             open_positions = [
-                p for p in trade_core.positions.values()
-                if p.status == "OPEN"
+                position
+                for position in trade_core.positions.values()
+                if position.status == "OPEN"
             ]
 
             logger.info(f"[MONITOR] open_positions={len(open_positions)}")
@@ -94,8 +91,8 @@ async def monitor_positions(trade_core, logger):
             if len(open_positions) > 5:
                 logger.warning("⚠️ TOO MANY POSITIONS!")
 
-        except Exception as e:
-            logger.error(f"[MONITOR ERROR] {e}")
+        except Exception as error:
+            logger.error(f"[MONITOR ERROR] {error}")
 
         await asyncio.sleep(5)
 
@@ -104,8 +101,10 @@ async def monitor_positions(trade_core, logger):
 # MAIN LOOP（耐障害化）
 # =========================
 async def main():
+    if TELEGRAM_INTEGRATION_ENABLED is False:
+        return 0
 
-    logger = None  # ← FATALエラー防止用
+    logger = None
 
     while True:
         try:
@@ -118,16 +117,16 @@ async def main():
 
             tasks = [
                 asyncio.create_task(market_engine.run_websocket()),
-                asyncio.create_task(monitor_positions(trade_core, logger))
+                asyncio.create_task(monitor_positions(trade_core, logger)),
             ]
 
             await asyncio.gather(*tasks)
 
-        except Exception as e:
+        except Exception as error:
             if logger:
-                logger.error(f"[FATAL ERROR] restarting bot: {e}")
+                logger.error(f"[FATAL ERROR] restarting bot: {error}")
             else:
-                print(f"[FATAL ERROR] restarting bot: {e}")
+                print(f"[FATAL ERROR] restarting bot: {error}")
 
             await asyncio.sleep(3)
 
@@ -136,4 +135,4 @@ async def main():
 # ENTRY
 # =========================
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

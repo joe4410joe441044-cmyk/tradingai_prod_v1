@@ -17,7 +17,6 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# ▼ Telegram 環境変数（ダブルクォーテーションで囲む）
 Environment="TELEGRAM_CHAT_ID=1040943428"
 
 [Install]
