@@ -1,0 +1,20 @@
+[Unit]
+Description=TradingAI AI Advisor isolated one-shot smoke test (example only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=joe4410joe
+WorkingDirectory=/home/joe4410joe/tradingai_prod_v1
+ExecStart=/home/joe4410joe/tradingai_prod_v1/venv/bin/python -m backend.ai_advisor.isolated_smoke_runner --mode LIVE_ONE_SHOT
+LoadCredentialEncrypted=AI_ADVISOR_AUTH_TOKEN:@AUTH_CREDENTIAL_SOURCE@
+LoadCredentialEncrypted=OPENAI_API_KEY:@OPENAI_CREDENTIAL_SOURCE@
+StandardInput=tty
+TTYPath=@OPERATOR_TTY@
+Restart=no
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+# Example only. Do not install or enable this template with placeholders.
