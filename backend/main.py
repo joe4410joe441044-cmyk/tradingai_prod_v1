@@ -34,7 +34,10 @@ from backend.utils.log_buffer import (
     logger,
     runtime_debug,
 )
-from backend.bot_manager.bot_manager import get_existing_bot_manager
+from backend.bot_manager.bot_manager import (
+    get_bot_manager,
+    get_existing_bot_manager,
+)
 from backend.api.runtime import router as runtime_api_router
 from backend.api.ai_advisor import create_advice_router, create_runtime_router
 from backend.ai_advisor.credential_loader import EnvironmentCredentialLoader
@@ -53,6 +56,22 @@ from backend.ai_advisor.browser_gateway import (
     AdvisorBrowserGatewayComposition,
     create_browser_gateway_router,
     load_browser_gateway_config,
+)
+from backend.money_management.loss_application_registration import (
+    shutdown_money_management_application,
+    startup_money_management_application,
+)
+from backend.money_management.loss_runtime_hook import (
+    register_money_management_runtime_hook,
+    unregister_money_management_runtime_hook,
+)
+from backend.money_management.loss_execution_integration import (
+    register_money_management_execution_entry_gate,
+    unregister_money_management_execution_entry_gate,
+)
+from backend.money_management.loss_http_api import (
+    register_money_management_http_boundary,
+    unregister_money_management_http_boundary,
 )
 
 # ============================================================
@@ -1184,13 +1203,28 @@ def health():
 async def startup_event():
     add_log("🔥 API STARTED")
     add_log("🧠 Production Execution Cognition Runtime Active")
+    startup_money_management_application(app, logger=logger)
+    register_money_management_runtime_hook(
+        app,
+        get_bot_manager,
+        logger=logger,
+    )
+    register_money_management_http_boundary(app)
+    register_money_management_execution_entry_gate(
+        app,
+        get_bot_manager,
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    unregister_money_management_execution_entry_gate(app)
+    unregister_money_management_http_boundary(app)
+    unregister_money_management_runtime_hook(app, logger=logger)
     bot_manager = get_existing_bot_manager()
     if bot_manager is None:
         add_log("SHUTDOWN_SNAPSHOT_NOT_AVAILABLE: BOT_MANAGER_UNAVAILABLE")
+        shutdown_money_management_application(app, logger=logger)
         return
 
     try:
@@ -1239,6 +1273,8 @@ async def shutdown_event():
     except Exception as exc:
         logger.error("SNAPSHOT_PERSIST_FAILED during shutdown: %s", exc)
 
+    shutdown_money_management_application(app, logger=logger)
+
 
 # ============================================================
 # CORS
@@ -1274,6 +1310,9 @@ from backend.api import risk as risk_api
 from backend.api import websocket as websocket_api
 from backend.api import result as result_api
 from backend.api import symbol as symbol_api
+from backend.api.money_management import (
+    router as money_management_router,
+)
 
 from backend.api.trade_preview import (
     router as preview_router
@@ -1314,6 +1353,10 @@ app.include_router(
 
 app.include_router(
     runtime_api_router
+)
+
+app.include_router(
+    money_management_router
 )
 
 _ai_advisor_production = build_ai_advisor_production_composition(

@@ -1,5 +1,7 @@
 import json
 import unittest
+from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 import backend.config as backend_config
@@ -13,6 +15,15 @@ from backend.market.exchanges.binance_market_ws import (
 from backend.market.exchanges.kucoin_market_ws import (
     OrderBookWS as KuCoinFuturesOrderBookWS,
     normalize_futures_symbol,
+)
+from backend.money_management.loss_execution_guard_models import (
+    LossExecutionEntryDecision,
+    LossExecutionOperation,
+)
+from backend.money_management.loss_execution_integration import (
+    LossExecutionAdmissionReason,
+    LossExecutionAdmissionResult,
+    LossExecutionIntent,
 )
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.runtime.ExecutionRuntime import ExecutionRuntime
@@ -66,6 +77,32 @@ class FakeLiveExchange:
 
 
 class ExchangeOrderBookSourceTest(unittest.TestCase):
+
+    @staticmethod
+    def _allow_money_management_entry(intent):
+        if (
+            not isinstance(intent, LossExecutionIntent)
+            or intent.has_position is not False
+            or not isinstance(intent.requested_quantity, Decimal)
+            or intent.requested_quantity <= 0
+        ):
+            raise ValueError("valid new-entry intent required")
+        operation = {
+            "BUY": LossExecutionOperation.NEW_BUY,
+            "SELL": LossExecutionOperation.NEW_SELL,
+        }.get(intent.requested_side)
+        if operation is None:
+            raise ValueError("valid new-entry side required")
+        return LossExecutionAdmissionResult(
+            operation=operation,
+            decision=LossExecutionEntryDecision.ALLOW,
+            allowed=True,
+            reason=LossExecutionAdmissionReason.ENTRY_ALLOWED,
+            generated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            revision=1,
+            sequence=1,
+            accepted=True,
+        )
 
     @staticmethod
     def _start_config(**overrides):
@@ -437,6 +474,9 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         engine = ExecutionEngine(
             portfolio=PortfolioManager(1000),
             price_manager=price_manager,
+        )
+        engine.set_execution_entry_guard(
+            self._allow_money_management_entry
         )
         engine.symbol = "XRPUSDT"
         engine.set_config({

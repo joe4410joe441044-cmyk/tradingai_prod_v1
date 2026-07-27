@@ -18,6 +18,7 @@ const loadApp = async () => {
     const advisorStub = moduleUrl("export default()=>({type:'main',props:{children:'AI ADVISOR PAGE'}})");
     const dashboardStub = moduleUrl("export default()=>({type:'main',props:{children:'DASHBOARD PAGE'}})");
     const marketStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET INTELLIGENCE PAGE'}})");
+    const moneyManagementStub = moduleUrl("export default()=>({type:'main',props:{children:'MONEY MANAGEMENT PAGE'}})");
     const dashboardMarketProviderStub = moduleUrl(
         "export const DashboardMarketContextProvider=({children})=>children",
     );
@@ -30,6 +31,7 @@ const loadApp = async () => {
         .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
         .replace('from "./pages/MarketIntelligencePage";', `from "${marketStub}";`)
+        .replace('from "./pages/MoneyManagementPage";', `from "${moneyManagementStub}";`)
         .replace('from "./state/dashboard-market/DashboardMarketContext";', `from "${dashboardMarketProviderStub}";`)
         .replace('from "./runtime/websocketRuntime";', `from "${runtimeStub}";`)
         .replace('import "./App.css";', "");
@@ -71,6 +73,13 @@ test("App selects each primary page and preserves unknown-path fallback", async 
     assert.match(text, /AI ADVISOR PAGE/);
     assert.equal(globalThis.__wsStarts, 2);
     assert.equal(globalThis.__wsStops, 1);
+
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/money-management" } };
+    module = await loadApp();
+    text = textOf(module.default());
+    assert.match(text, /MONEY MANAGEMENT PAGE/);
+    assert.equal(globalThis.__wsStarts, 3);
 
     globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/unknown" } };

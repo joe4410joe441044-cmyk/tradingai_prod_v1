@@ -33,6 +33,7 @@ import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from types import MappingProxyType
 from dotenv import load_dotenv
 
 from backend.utils.log_buffer import (
@@ -69,6 +70,10 @@ from backend.execution.kucoin_trade import (
     KucoinTradeClient
 )
 
+from backend.money_management.loss_authoritative_runtime_metrics import (
+    AuthoritativeLossRuntimeMetricsState,
+)
+
 from Bot.engine.execution_engine import (
     ExecutionEngine
 )
@@ -96,6 +101,11 @@ class BotManager:
         # shutdown() delegates to stop(), so a plain Lock would deadlock.
         self.shutdown_lock = threading.RLock()
         self.stopped_paper_durable_rebind_lock = threading.Lock()
+        self.money_management_runtime_hook_lock = threading.RLock()
+        self.money_management_runtime_hook = None
+        self.money_management_execution_guard_lock = threading.RLock()
+        self.money_management_execution_guard = None
+        self.money_management_runtime_baseline_session = None
 
         # ============================================
         # COOLDOWN
@@ -210,6 +220,11 @@ class BotManager:
         self.account_refresh_interval = 30
         self.account_stale_after = 90
         self.runtime_instance_id = str(uuid.uuid4())
+        self.money_management_runtime_metrics = (
+            AuthoritativeLossRuntimeMetricsState(
+                self.runtime_instance_id
+            )
+        )
         self.stopped_paper_durable_snapshot_path = (
             self._default_stopped_paper_durable_snapshot_path()
         )
@@ -2076,6 +2091,9 @@ class BotManager:
                 notifier=None,
                 price_manager=self.ob_manager
             )
+            self.engine.set_execution_entry_guard(
+                self._dispatch_money_management_execution_entry_guard
+            )
 
             if runtime_registry.trading_runtime:
 
@@ -2412,10 +2430,75 @@ class BotManager:
 
                     if self.engine:
 
+                        money_management_before = (
+                            self._money_management_runtime_event_signature()
+                        )
+
                         self.engine.on_price(
                             self.symbol,
                             price
                         )
+
+                        money_management_after = (
+                            self._money_management_runtime_event_signature()
+                        )
+
+                        money_management_event = (
+                            self._classify_money_management_runtime_event(
+                                money_management_before,
+                                money_management_after,
+                            )
+                        )
+
+                        money_management_event_key = (
+                            f"{self.runtime_instance_id}:"
+                            f"{current_session}:"
+                            f"{self.update_id}:"
+                            f"{money_management_event or 'OBSERVATION'}"
+                        )
+                        money_management_metrics = (
+                            self._observe_money_management_runtime_metrics(
+                                money_management_before,
+                                money_management_event,
+                                money_management_event_key,
+                            )
+                        )
+
+                        baseline_event = (
+                            money_management_event is None
+                            and money_management_metrics is not None
+                            and money_management_metrics.is_complete
+                            and self.money_management_runtime_baseline_session
+                            != current_session
+                        )
+                        if baseline_event:
+                            money_management_event = "BALANCE_UPDATE"
+                            money_management_event_key = (
+                                f"{self.runtime_instance_id}:"
+                                f"{current_session}:BASELINE:"
+                                f"{money_management_event}"
+                            )
+
+                        if money_management_event is not None:
+
+                            hook_result = (
+                                self._notify_money_management_runtime_event(
+                                    money_management_event,
+                                    money_management_event_key,
+                                )
+                            )
+                            if (
+                                baseline_event
+                                and getattr(
+                                    getattr(hook_result, "status", None),
+                                    "value",
+                                    None,
+                                )
+                                in ("DISPATCHED", "DUPLICATE")
+                            ):
+                                self.money_management_runtime_baseline_session = (
+                                    current_session
+                                )
 
                     signal = None
 
@@ -2866,6 +2949,211 @@ class BotManager:
     # =========================
     # STOP
     # =========================
+
+    def set_money_management_runtime_hook(self, callback):
+
+        """Install or clear one application-owned runtime callback."""
+
+        if callback is not None and not callable(callback):
+            return False
+
+        with self.money_management_runtime_hook_lock:
+            self.money_management_runtime_hook = callback
+
+        return True
+
+    def set_money_management_execution_entry_guard(self, callback):
+
+        """Install or clear the application-owned new-entry gate."""
+
+        if callback is not None and not callable(callback):
+            return False
+
+        with self.money_management_execution_guard_lock:
+            self.money_management_execution_guard = callback
+
+        return True
+
+    def _dispatch_money_management_execution_entry_guard(self, intent):
+
+        with self.money_management_execution_guard_lock:
+            callback = self.money_management_execution_guard
+
+        if callback is None:
+            return None
+
+        try:
+            return callback(intent)
+        except Exception:
+            logger.warning(
+                "Money Management execution entry guard failed"
+            )
+            return None
+
+    def initialize_money_management_runtime_metrics(
+        self,
+        persisted_state,
+        state_source,
+        as_of,
+    ):
+
+        """Restore the existing MM checkpoint through its read-only boundary."""
+
+        return self.money_management_runtime_metrics.restore(
+            persisted_state,
+            state_source,
+            as_of,
+        )
+
+    def _notify_money_management_runtime_event(
+        self,
+        event_type,
+        event_key,
+    ):
+
+        with self.money_management_runtime_hook_lock:
+            if self.lifecycle_state != "RUNNING":
+                return None
+            callback = self.money_management_runtime_hook
+
+        if callback is None:
+            return None
+
+        try:
+            return callback(event_type, event_key)
+        except Exception:
+            logger.warning(
+                "Money Management runtime hook callback failed: %s",
+                event_type,
+            )
+            return None
+
+    def _money_management_runtime_event_signature(self):
+
+        engine = self.engine
+        if engine is None:
+            return None
+
+        try:
+            return {
+                "balance": getattr(engine, "balance", None),
+                "realizedPnl": getattr(engine, "pnl", None),
+                "position": deepcopy(
+                    getattr(engine, "actual_position", None)
+                ),
+            }
+        except Exception:
+            return None
+
+    @staticmethod
+    def _classify_money_management_runtime_event(before, after):
+
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            return None
+
+        before_position = before.get("position")
+        after_position = after.get("position")
+
+        if before_position is not None and after_position is None:
+            return "TRADE_CLOSE"
+
+        if before_position != after_position:
+            return "POSITION_UPDATE"
+
+        if (
+            before.get("balance") != after.get("balance")
+            or before.get("realizedPnl") != after.get("realizedPnl")
+        ):
+            return "BALANCE_UPDATE"
+
+        return None
+
+    def get_runtime_metrics_snapshot(self):
+
+        """Return a scalar-only, read-only copy of current runtime telemetry."""
+
+        with self.shutdown_lock:
+            pending_order_count = (
+                (1 if self.pending_order else 0)
+                if type(self.pending_order) is bool
+                else None
+            )
+            metrics = self.money_management_runtime_metrics.snapshot()
+            return MappingProxyType(
+                metrics.to_runtime_mapping(pending_order_count)
+            )
+
+    def _observe_money_management_runtime_metrics(
+        self,
+        before,
+        event_type,
+        event_key,
+    ):
+
+        engine = self.engine
+        if engine is None:
+            return None
+
+        mode = str(getattr(engine, "mode", "") or "").strip().lower()
+        if mode == "paper":
+            snapshot = self._capture_account_snapshot()
+            observed_at = datetime.now(timezone.utc)
+            position = snapshot.get("position")
+            realized_pnl = snapshot.get("realizedPnl")
+            unrealized_pnl = snapshot.get("unrealizedPnl")
+            peak_equity = getattr(engine, "peak_equity", None)
+            realized_before = (
+                before.get("realizedPnl")
+                if isinstance(before, dict)
+                else None
+            )
+            observation_source_state = self.lifecycle_state
+        else:
+            snapshot = deepcopy(
+                self.real_account_snapshot
+                if isinstance(self.real_account_snapshot, dict)
+                else {}
+            )
+            last_sync = snapshot.get("lastSync")
+            observed_at = (
+                datetime.fromtimestamp(last_sync, tz=timezone.utc)
+                if isinstance(last_sync, (int, float))
+                and not isinstance(last_sync, bool)
+                and math.isfinite(last_sync)
+                and last_sync >= 0
+                else datetime.now(timezone.utc)
+            )
+            position = snapshot.get("positions")
+            realized_pnl = None
+            unrealized_pnl = None
+            peak_equity = None
+            realized_before = None
+            observation_source_state = (
+                self.lifecycle_state
+                if snapshot.get("authenticated") is True
+                and snapshot.get("stale") is not True
+                else "UNAVAILABLE"
+            )
+
+        return self.money_management_runtime_metrics.observe(
+            as_of=observed_at,
+            session_id=self.session_id,
+            balance=snapshot.get("balance"),
+            equity=snapshot.get("equity"),
+            available_balance=snapshot.get("availableBalance"),
+            realized_pnl=realized_pnl,
+            unrealized_pnl=unrealized_pnl,
+            position=position,
+            mark_price=getattr(engine, "latest_price", None),
+            engine_peak_equity=peak_equity,
+            close_event_id=(
+                event_key
+                if event_type == "TRADE_CLOSE"
+                else None
+            ),
+            realized_pnl_before=realized_before,
+            source_state=observation_source_state,
+        )
 
     def _capture_account_snapshot(self):
 
@@ -6832,6 +7120,9 @@ class BotManager:
                 ))
 
             if engine_mode == "paper":
+                money_management_before = (
+                    self._money_management_runtime_event_signature()
+                )
                 try:
                     flatten_result = engine.flatten_paper_position(
                         reason="EMERGENCY_FLATTEN"
@@ -6849,6 +7140,32 @@ class BotManager:
                 position_remaining = self._emergency_position_remaining(
                     flatten_result
                 )
+
+                money_management_after = (
+                    self._money_management_runtime_event_signature()
+                )
+                money_management_event = (
+                    self._classify_money_management_runtime_event(
+                        money_management_before,
+                        money_management_after,
+                    )
+                )
+                money_management_event_key = (
+                    f"{self.runtime_instance_id}:"
+                    f"{self.session_id}:EMERGENCY:"
+                    f"{operation.get('operation_id')}:"
+                    f"{money_management_event or 'OBSERVATION'}"
+                )
+                self._observe_money_management_runtime_metrics(
+                    money_management_before,
+                    money_management_event,
+                    money_management_event_key,
+                )
+                if money_management_event is not None:
+                    self._notify_money_management_runtime_event(
+                        money_management_event,
+                        money_management_event_key,
+                    )
 
                 if flatten_completed:
                     return finalize(self._emergency_response(

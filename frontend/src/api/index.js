@@ -89,6 +89,19 @@ export const API = {
     join("/bot/summary"),
 
   // ==========================
+  // MONEY MANAGEMENT
+  // ==========================
+
+  moneyManagementStatus: () =>
+    join("/money-management/status"),
+
+  moneyManagementConfiguration: () =>
+    join("/money-management/configuration"),
+
+  moneyManagementRecovery: () =>
+    join("/money-management/recovery"),
+
+  // ==========================
   // PNL
   // ==========================
 
@@ -105,12 +118,14 @@ const WS_BASE =
 
   API_ENV.VITE_WS_BASE ||
 
-  `${
+  (typeof window !== "undefined"
+    ? `${
     window.location.protocol ===
     "https:"
       ? "wss"
       : "ws"
-  }://${window.location.host}`;
+  }://${window.location.host}`
+    : "ws://localhost");
 
 // ==========================
 // WEBSOCKET LAYER

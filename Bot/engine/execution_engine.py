@@ -8,11 +8,22 @@ from backend.utils.log_buffer import (
     runtime_debug,
     ws_debug,
 )
+from backend.money_management.loss_execution_guard_models import (
+    LossExecutionEntryDecision,
+    LossExecutionOperation,
+)
+from backend.money_management.loss_execution_integration import (
+    LossExecutionAdmissionResult,
+    LossExecutionIntent,
+)
 
 import backend.config as backend_config
 import copy
 import math
+import threading
 import time
+from datetime import datetime, timezone
+from decimal import Decimal
 
 
 def adjust_qty_to_step(qty, step_size):
@@ -75,6 +86,11 @@ class ExecutionEngine:
 
         # duplicate prevention
         self.pending_order = False
+        self.execution_entry_guard_lock = threading.RLock()
+        self.execution_entry_guard = None
+        self.execution_entry_admission_lock = threading.RLock()
+        self.execution_entry_admission_in_progress = False
+        self.last_money_management_guard = None
 
         # realtime freshness
         self.last_market_update = 0
@@ -1086,6 +1102,127 @@ class ExecutionEngine:
     # SIGNAL ENTRYPOINT
     # =====================================
 
+    def set_execution_entry_guard(self, callback):
+
+        if callback is not None and not callable(callback):
+            return False
+
+        with self.execution_entry_guard_lock:
+            self.execution_entry_guard = callback
+
+        return True
+
+    @staticmethod
+    def _entry_rejection(reason, guard_result=None):
+
+        result = {
+            "success": False,
+            "status": "rejected",
+            "submitted": False,
+            "accepted": False,
+            "orderCreated": False,
+            "providerCall": False,
+            "exchangeCall": False,
+            "reason": str(reason),
+        }
+        if isinstance(guard_result, LossExecutionAdmissionResult):
+            result.update({
+                "operation": (
+                    guard_result.operation.value
+                    if guard_result.operation
+                    else None
+                ),
+                "decision": guard_result.decision.value,
+                "generatedAt": (
+                    guard_result.generated_at
+                    .isoformat()
+                    .replace("+00:00", "Z")
+                ),
+                "revision": guard_result.revision,
+                "sequence": guard_result.sequence,
+            })
+        return result
+
+    def _evaluate_execution_entry_guard(self, order):
+
+        side = order.get("side")
+        expected_operation = {
+            "BUY": LossExecutionOperation.NEW_BUY,
+            "SELL": LossExecutionOperation.NEW_SELL,
+        }.get(side)
+        if expected_operation is None:
+            return False, self._entry_rejection(
+                "EXECUTION_INTENT_INVALID"
+            )
+        try:
+            quantity = Decimal(str(order.get("qty")))
+            intent = LossExecutionIntent(
+                side,
+                quantity,
+                self.actual_position is not None,
+            )
+        except (TypeError, ValueError, ArithmeticError):
+            return False, self._entry_rejection(
+                "EXECUTION_INTENT_INVALID"
+            )
+
+        with self.execution_entry_guard_lock:
+            callback = self.execution_entry_guard
+
+        if callback is None:
+            return False, self._entry_rejection(
+                "MONEY_MANAGEMENT_UNKNOWN"
+            )
+        try:
+            result = callback(intent)
+        except Exception:
+            return False, self._entry_rejection(
+                "MONEY_MANAGEMENT_UNKNOWN"
+            )
+
+        now = datetime.now(timezone.utc)
+        valid = (
+            isinstance(result, LossExecutionAdmissionResult)
+            and result.operation is expected_operation
+            and type(result.allowed) is bool
+            and result.allowed
+            == (result.decision is LossExecutionEntryDecision.ALLOW)
+            and result.generated_at <= now
+            and (
+                result.revision is None
+                and result.sequence is None
+                or (
+                    type(result.revision) is int
+                    and result.revision >= 1
+                    and type(result.sequence) is int
+                    and result.sequence >= 1
+                )
+            )
+            and (
+                not result.allowed
+                or (
+                    result.revision is not None
+                    and result.sequence is not None
+                )
+            )
+            and result.submitted is False
+            and result.order_created is False
+            and result.provider_call is False
+            and result.exchange_call is False
+        )
+        if not valid:
+            return False, self._entry_rejection(
+                "MONEY_MANAGEMENT_GUARD_INVALID"
+            )
+
+        self.last_money_management_guard = result.to_dict()
+        if not result.allowed:
+            return False, self._entry_rejection(
+                result.reason.value,
+                result,
+            )
+        return True, None
+
     def submit_signal(self, signal):
 
         if not signal:
@@ -1121,7 +1258,7 @@ class ExecutionEngine:
 
         self.last_signal_time = time.time()
 
-        self.try_entry(signal)
+        return self.try_entry(signal)
 
     # =====================================
     # PRICE
@@ -1409,6 +1546,21 @@ class ExecutionEngine:
     # =====================================
 
     def try_entry(self, signal):
+
+        with self.execution_entry_admission_lock:
+            if self.execution_entry_admission_in_progress:
+                return self._entry_rejection(
+                    "EXECUTION_ENTRY_IN_PROGRESS"
+                )
+            self.execution_entry_admission_in_progress = True
+
+        try:
+            return self._try_entry_candidate(signal)
+        finally:
+            with self.execution_entry_admission_lock:
+                self.execution_entry_admission_in_progress = False
+
+    def _try_entry_candidate(self, signal):
         runtime_debug(
             "ExecutionEngine try_entry engine_id=%s symbol=%s signal=%s",
             self.engine_id,
@@ -1589,11 +1741,54 @@ class ExecutionEngine:
 
         add_log(f"🟡 ORDER: {order}")
 
+        live_order_allowed = None
+        if self.mode != "paper" and not self.config["dry_run"]:
+            live_order_allowed = self._live_order_allowed()
+            if not live_order_allowed:
+                add_log(
+                    "LIVE ORDER BLOCKED: LIVE_NOT_READY",
+                    "warning",
+                )
+                runtime_debug(
+                    "Live order blocked reasons=%s",
+                    self.last_live_block_reasons,
+                )
+                if hasattr(self.exchange, "set_live_order_gate"):
+                    self.exchange.set_live_order_gate(
+                        False,
+                        self.last_live_block_reasons,
+                    )
+                return
+
+        guard_allowed, guard_rejection = (
+            self._evaluate_execution_entry_guard(order)
+        )
+        if not guard_allowed:
+            self.last_order_blocked_reason = guard_rejection.get(
+                "reason"
+            )
+            runtime_debug(
+                "ExecutionEngine entry rejected operation=%s "
+                "decision=%s reason=%s revision=%s sequence=%s mode=%s",
+                guard_rejection.get("operation"),
+                guard_rejection.get("decision"),
+                guard_rejection.get("reason"),
+                guard_rejection.get("revision"),
+                guard_rejection.get("sequence"),
+                self.mode,
+            )
+            return guard_rejection
+
         # =====================================
         # EXECUTION LOCK
         # =====================================
 
-        self.pending_order = True
+        with self.execution_entry_admission_lock:
+            if self.pending_order or self.actual_position is not None:
+                return self._entry_rejection(
+                    "EXECUTION_STATE_CHANGED"
+                )
+            self.pending_order = True
 
         try:
 
@@ -1637,7 +1832,7 @@ class ExecutionEngine:
 
                     return
 
-                if not self._live_order_allowed():
+                if live_order_allowed is not True:
 
                     add_log(
                         "🛑 LIVE ORDER BLOCKED: LIVE_NOT_READY",

@@ -9,6 +9,7 @@ import "./index.css";
 import "./styles/dashboard.css";
 import "./styles/market-intelligence.css";
 import "./styles/ai-advisor.css";
+import "./styles/money-management.css";
 
 const rootElement = document.getElementById("root");
 

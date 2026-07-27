@@ -1,0 +1,527 @@
+import threading
+import unittest
+from dataclasses import FrozenInstanceError
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+
+from backend.money_management.loss_governance_projection_dispatcher import (
+    LossGovernanceProjectionDispatcher,
+)
+from backend.money_management.enums import RiskState
+from backend.money_management.loss_application_models import (
+    ApplicationLifecycleState,
+)
+from backend.money_management.loss_http_api import (
+    MoneyManagementApiBoundaryException,
+    MoneyManagementHttpBoundary,
+    register_money_management_http_boundary,
+    unregister_money_management_http_boundary,
+)
+from backend.money_management.loss_runtime_event_models import (
+    LossRuntimeEventType,
+)
+from backend.money_management.loss_runtime_hook import (
+    MoneyManagementRuntimeHook,
+    MoneyManagementRuntimeHookRegistration,
+)
+from backend.money_management.loss_runtime_metrics_models import (
+    LossRuntimeDataQuality,
+    LossRuntimeMetricsReadResult,
+    LossRuntimeMetricsReadStatus,
+)
+from backend.money_management.loss_runtime_update_dispatcher import (
+    LossRuntimeDispatchStatus,
+    LossRuntimeUpdateDispatcher,
+)
+from backend.money_management.loss_reason_models import (
+    BlockReason,
+    HoldReason,
+    LossReasonContract,
+    ReasonCode,
+    RecommendedAction,
+    WarningReason,
+)
+from backend.money_management.loss_runtime_integration_models import (
+    GovernanceProjection,
+)
+from tests.test_money_management_loss_governance_projection_dispatcher import (
+    runtime_snapshot,
+)
+from tests.test_money_management_loss_runtime_update_dispatcher import (
+    NOW,
+    Lifecycle,
+    Source,
+    app_with,
+    metrics,
+    request,
+)
+
+
+class Clock:
+    def __init__(self, value=NOW + timedelta(seconds=2)):
+        self.value = value
+        self.lock = threading.Lock()
+
+    def __call__(self):
+        with self.lock:
+            self.value += timedelta(microseconds=1)
+            return self.value
+
+
+def ready_boundary(*, publish=True):
+    clock = Clock()
+    lifecycle = Lifecycle()
+    dispatcher = LossRuntimeUpdateDispatcher(Source([metrics()]))
+    app = app_with(lifecycle)
+    applied = dispatcher.dispatch(
+        app,
+        request(),
+        LossRuntimeEventType.BALANCE_UPDATE,
+    )
+    hook = MoneyManagementRuntimeHook(
+        app,
+        dispatcher,
+        timestamp_source=clock,
+    )
+    hook.record_evaluation_status(applied.status)
+    bot = SimpleNamespace(
+        set_money_management_runtime_hook=lambda callback: True
+    )
+    app.state.money_management_runtime_hook = (
+        MoneyManagementRuntimeHookRegistration(hook, bot, clock())
+    )
+    if publish:
+        LossGovernanceProjectionDispatcher(
+            timestamp_source=clock
+        ).dispatch(app)
+    boundary = MoneyManagementHttpBoundary(
+        app,
+        dispatcher,
+        timestamp_source=clock,
+    )
+    return boundary, app, dispatcher, lifecycle, clock
+
+
+class MoneyManagementStatusApiTests(unittest.TestCase):
+    def test_status_is_typed_precise_and_matches_entry_projection(self):
+        boundary, _, _, _, _ = ready_boundary()
+        status = boundary.get_status()
+        payload = status.to_dict()
+        self.assertTrue(status.available)
+        self.assertTrue(status.execution_entry_allowed)
+        self.assertEqual(status.risk_state, "NORMAL")
+        self.assertEqual(payload["metrics"]["equity"], "1000")
+        self.assertEqual(payload["metrics"]["drawdownPercent"], "0")
+        self.assertEqual(payload["revision"], 2)
+        self.assertEqual(payload["sequence"], 2)
+        self.assertTrue(payload["generatedAt"].endswith("Z"))
+        with self.assertRaises(FrozenInstanceError):
+            status.available = False
+
+    def test_status_without_projection_fails_closed_and_does_not_refresh(self):
+        boundary, _, dispatcher, lifecycle, _ = ready_boundary(publish=False)
+        before = lifecycle.snapshot
+        source_calls = dispatcher._metrics_source.calls
+        first = boundary.get_status()
+        second = boundary.get_status()
+        self.assertFalse(first.available)
+        self.assertFalse(first.execution_entry_allowed)
+        self.assertEqual(first.risk_state, "UNKNOWN")
+        self.assertEqual(first.projection_status, "UNKNOWN")
+        self.assertIs(lifecycle.snapshot, before)
+        self.assertEqual(dispatcher._metrics_source.calls, source_calls)
+        self.assertEqual(first.revision, second.revision)
+        self.assertEqual(first.sequence, second.sequence)
+
+    def test_status_never_exposes_raw_runtime_or_secret_fields(self):
+        boundary, _, _, _, _ = ready_boundary()
+        rendered = repr(boundary.get_status().to_dict())
+        for forbidden in (
+            "apiKey",
+            "credential",
+            "rawSnapshot",
+            "positionObject",
+            "authorization",
+            "/home/",
+        ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_status_projects_all_existing_risk_states(self):
+        boundary, app, _, lifecycle, clock = ready_boundary()
+        cases = (
+            (
+                RiskState.NORMAL,
+                RecommendedAction.CONTINUE,
+                (),
+                (),
+                (),
+                GovernanceProjection.CONTINUE,
+                True,
+            ),
+            (
+                RiskState.CAUTION,
+                RecommendedAction.CONTINUE,
+                (WarningReason.DAILY_LOSS_WARNING,),
+                (),
+                (),
+                GovernanceProjection.CONTINUE,
+                True,
+            ),
+            (
+                RiskState.DEFENSIVE,
+                RecommendedAction.HOLD_NEW_ENTRIES,
+                (
+                    WarningReason.DAILY_LOSS_WARNING,
+                    WarningReason.WEEKLY_LOSS_WARNING,
+                ),
+                (HoldReason.MULTIPLE_LOSS_WARNINGS,),
+                (),
+                GovernanceProjection.HOLD_NEW_ENTRIES,
+                False,
+            ),
+            (
+                RiskState.LOCKED,
+                RecommendedAction.BLOCK_EXECUTION,
+                (),
+                (),
+                (BlockReason.DAILY_LOSS_BLOCK,),
+                GovernanceProjection.BLOCK_EXECUTION,
+                False,
+            ),
+        )
+        for index, (
+            risk,
+            action,
+            warnings,
+            holds,
+            blocks,
+            projection,
+            allowed,
+        ) in enumerate(cases, start=10):
+            with self.subTest(risk=risk):
+                last_reason = LossReasonContract(
+                    "money-management-loss-reason/v1",
+                    NOW,
+                    risk,
+                    action,
+                    ReasonCode.DAILY_LOSS_BLOCK
+                    if risk is RiskState.LOCKED
+                    else ReasonCode.MULTIPLE_LOSS_WARNINGS
+                    if risk is RiskState.DEFENSIVE
+                    else ReasonCode.DAILY_LOSS_WARNING
+                    if risk is RiskState.CAUTION
+                    else ReasonCode.NONE,
+                    warnings,
+                    holds,
+                    blocks,
+                    (),
+                    (),
+                    (),
+                    risk is RiskState.LOCKED,
+                )
+                lifecycle.snapshot = runtime_snapshot(
+                    projection,
+                    last_reason=last_reason,
+                    revision=index,
+                    sequence=index,
+                )
+                LossGovernanceProjectionDispatcher(
+                    timestamp_source=clock
+                ).dispatch(app)
+                status = boundary.get_status()
+                self.assertEqual(status.risk_state, risk.value)
+                self.assertEqual(status.recommended_action, action.value)
+                self.assertEqual(status.execution_entry_allowed, allowed)
+
+        lifecycle.state = ApplicationLifecycleState.RECOVERY_REQUIRED
+        lifecycle.snapshot = runtime_snapshot(
+            GovernanceProjection.RECOVERY_REQUIRED,
+            recovery=True,
+            revision=20,
+            sequence=20,
+        )
+        LossGovernanceProjectionDispatcher(
+            timestamp_source=clock
+        ).dispatch(app)
+        recovery = boundary.get_status()
+        self.assertFalse(recovery.execution_entry_allowed)
+        self.assertTrue(recovery.recovery_required)
+        self.assertEqual(recovery.projection_status, "RECOVERY_REQUIRED")
+
+
+class MoneyManagementConfigurationApiTests(unittest.TestCase):
+    def test_get_preserves_decimal_and_zero_is_not_unknown(self):
+        boundary, _, _, _, _ = ready_boundary()
+        payload = boundary.get_configuration().to_dict()
+        self.assertEqual(payload["dailyWarningPercent"], "1.00")
+        self.assertEqual(payload["maximumDrawdownPercent"], "5.00")
+        self.assertEqual(payload["source"], "DEFAULT")
+
+    def test_atomic_update_rechecks_revision_and_reevaluates(self):
+        boundary, _, _, lifecycle, _ = ready_boundary()
+        before_sequence = lifecycle.snapshot.sequence
+        result = boundary.update_configuration(
+            {
+                "dailyWarningPercent": "0.50",
+                "dailyBlockPercent": "1.25",
+                "expectedRevision": 1,
+            }
+        )
+        self.assertTrue(result.applied)
+        self.assertTrue(result.reevaluated)
+        self.assertEqual(
+            result.configuration.daily_warning_percent,
+            Decimal("0.50"),
+        )
+        self.assertEqual(result.configuration.revision, 2)
+        self.assertEqual(lifecycle.snapshot.sequence, before_sequence + 1)
+        self.assertTrue(result.status.execution_entry_allowed)
+
+    def test_invalid_update_never_partially_applies(self):
+        boundary, _, _, _, _ = ready_boundary()
+        before = boundary.get_configuration()
+        cases = (
+            {},
+            {"unknown": "1"},
+            {"enabled": "false"},
+            {"dailyWarningPercent": True},
+            {"dailyWarningPercent": 1},
+            {"dailyWarningPercent": "NaN"},
+            {"dailyWarningPercent": "Infinity"},
+            {"dailyWarningPercent": "-1"},
+            {"dailyWarningPercent": ""},
+            {
+                "dailyWarningPercent": "4",
+                "dailyBlockPercent": "3",
+            },
+            {"expectedRevision": True},
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                with self.assertRaises(MoneyManagementApiBoundaryException):
+                    boundary.update_configuration(payload)
+                self.assertEqual(boundary.get_configuration(), before)
+
+    def test_revision_conflict_is_safe_and_non_mutating(self):
+        boundary, _, _, _, _ = ready_boundary()
+        before = boundary.get_configuration()
+        with self.assertRaises(MoneyManagementApiBoundaryException) as raised:
+            boundary.update_configuration(
+                {
+                    "dailyWarningPercent": "0.75",
+                    "expectedRevision": 99,
+                }
+            )
+        self.assertEqual(
+            raised.exception.error.code,
+            "CONFIGURATION_REVISION_CONFLICT",
+        )
+        self.assertEqual(boundary.get_configuration(), before)
+
+    def test_disabled_is_fail_closed_and_can_be_reenabled(self):
+        boundary, _, _, _, _ = ready_boundary()
+        disabled = boundary.update_configuration(
+            {"enabled": False, "expectedRevision": 1}
+        )
+        self.assertTrue(disabled.applied)
+        self.assertFalse(disabled.status.execution_entry_allowed)
+        self.assertEqual(
+            disabled.status.safe_reason,
+            "MONEY_MANAGEMENT_DISABLED",
+        )
+        enabled = boundary.update_configuration(
+            {"enabled": True, "expectedRevision": 2}
+        )
+        self.assertTrue(enabled.applied)
+        self.assertTrue(enabled.reevaluated)
+        self.assertTrue(enabled.status.execution_entry_allowed)
+
+    def test_concurrent_expected_revision_allows_one_atomic_update(self):
+        boundary, _, _, _, _ = ready_boundary()
+        results = []
+
+        def update(value):
+            try:
+                results.append(
+                    boundary.update_configuration(
+                        {
+                            "dailyWarningPercent": value,
+                            "expectedRevision": 1,
+                        }
+                    )
+                )
+            except MoneyManagementApiBoundaryException as error:
+                results.append(error.error.code)
+
+        threads = [
+            threading.Thread(target=update, args=("0.75",)),
+            threading.Thread(target=update, args=("0.80",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(
+            sum(not isinstance(item, str) for item in results),
+            1,
+        )
+        self.assertIn("CONFIGURATION_REVISION_CONFLICT", results)
+
+
+class MoneyManagementRecoveryApiTests(unittest.TestCase):
+    def test_normal_recovery_is_idempotent_without_revision_change(self):
+        boundary, _, _, lifecycle, _ = ready_boundary()
+        before = (lifecycle.snapshot.revision, lifecycle.snapshot.sequence)
+        first = boundary.recover()
+        second = boundary.recover()
+        self.assertTrue(first.accepted)
+        self.assertTrue(first.recovered)
+        self.assertEqual(first.safe_reason, "ALREADY_EVALUATED")
+        self.assertEqual(
+            (lifecycle.snapshot.revision, lifecycle.snapshot.sequence),
+            before,
+        )
+        self.assertEqual(first, second)
+
+    def test_missing_projection_recovers_using_cached_metrics_only(self):
+        boundary, _, dispatcher, lifecycle, _ = ready_boundary(publish=False)
+        source_calls = dispatcher._metrics_source.calls
+        before = lifecycle.snapshot.sequence
+        result = boundary.recover()
+        self.assertTrue(result.accepted)
+        self.assertTrue(result.recovered)
+        self.assertTrue(result.execution_entry_allowed)
+        self.assertEqual(lifecycle.snapshot.sequence, before + 1)
+        self.assertEqual(dispatcher._metrics_source.calls, source_calls)
+
+    def test_partial_metrics_do_not_recover_or_mutate_runtime(self):
+        partial = metrics(data_quality=LossRuntimeDataQuality.PARTIAL)
+        source = Source(
+            [
+                LossRuntimeMetricsReadResult(
+                    LossRuntimeMetricsReadStatus.PARTIAL,
+                    partial,
+                    ("required runtime metrics missing",),
+                )
+            ]
+        )
+        lifecycle = Lifecycle()
+        dispatcher = LossRuntimeUpdateDispatcher(source)
+        app = app_with(lifecycle)
+        dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        hook = MoneyManagementRuntimeHook(app, dispatcher)
+        app.state.money_management_runtime_hook = (
+            MoneyManagementRuntimeHookRegistration(
+                hook,
+                SimpleNamespace(
+                    set_money_management_runtime_hook=lambda callback: True
+                ),
+                NOW,
+            )
+        )
+        boundary = MoneyManagementHttpBoundary(
+            app,
+            dispatcher,
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+        )
+        before = lifecycle.snapshot
+        result = boundary.recover()
+        self.assertTrue(result.accepted)
+        self.assertFalse(result.recovered)
+        self.assertEqual(
+            result.safe_reason,
+            "AUTHORITATIVE_METRICS_INCOMPLETE",
+        )
+        self.assertIs(lifecycle.snapshot, before)
+
+    def test_recovery_never_resets_loss_metrics(self):
+        boundary, _, _, lifecycle, _ = ready_boundary(publish=False)
+        before = lifecycle.snapshot.state
+        boundary.recover()
+        after = lifecycle.snapshot.state
+        self.assertEqual(
+            before.daily_state.net_realized_pnl,
+            after.daily_state.net_realized_pnl,
+        )
+        self.assertEqual(
+            before.drawdown_state.high_water_mark,
+            after.drawdown_state.high_water_mark,
+        )
+
+    def test_concurrent_recovery_is_rejected_without_deadlock(self):
+        boundary, _, _, _, _ = ready_boundary(publish=False)
+        entered = threading.Event()
+        release = threading.Event()
+        original = boundary._reevaluate
+
+        def delayed(*args):
+            entered.set()
+            release.wait(timeout=2)
+            return original(*args)
+
+        boundary._reevaluate = delayed
+        results = []
+        first = threading.Thread(
+            target=lambda: results.append(boundary.recover())
+        )
+        first.start()
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            boundary.recover()
+        except MoneyManagementApiBoundaryException as error:
+            results.append(error.error.code)
+        release.set()
+        first.join(timeout=2)
+        self.assertFalse(first.is_alive())
+        self.assertIn("RECOVERY_ALREADY_RUNNING", results)
+
+
+class MoneyManagementHttpRegistrationTests(unittest.TestCase):
+    def test_registration_is_idempotent_and_unregistration_is_safe(self):
+        boundary, app, _, _, _ = ready_boundary()
+        app.state.money_management_http_boundary = None
+        first = register_money_management_http_boundary(app)
+        second = register_money_management_http_boundary(app)
+        self.assertIs(first, second)
+        self.assertIsNotNone(first)
+        self.assertTrue(unregister_money_management_http_boundary(app))
+        self.assertFalse(unregister_money_management_http_boundary(app))
+
+    def test_main_registers_exact_routes_and_preserves_global_cors(self):
+        root = Path(__file__).resolve().parents[1]
+        main_source = (root / "backend" / "main.py").read_text(
+            encoding="utf-8"
+        )
+        router_source = (
+            root / "backend" / "api" / "money_management.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "register_money_management_http_boundary(app)",
+            main_source,
+        )
+        self.assertIn(
+            "unregister_money_management_http_boundary(app)",
+            main_source,
+        )
+        self.assertIn("money_management_router", main_source)
+        self.assertIn(
+            'prefix="/api/money-management"',
+            router_source,
+        )
+        for declaration in (
+            '@router.get("/status")',
+            '@router.get("/configuration")',
+            '@router.put("/configuration")',
+            '@router.post("/recovery")',
+        ):
+            self.assertEqual(router_source.count(declaration), 1)
+        self.assertNotIn("CORSMiddleware", router_source)
+
+
+if __name__ == "__main__":
+    unittest.main()
