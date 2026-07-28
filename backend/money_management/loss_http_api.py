@@ -1,7 +1,7 @@
 """MM-5A3 safe HTTP-facing status, configuration, and recovery boundary."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -15,6 +15,7 @@ from .loss_application_models import (
 )
 from .loss_application_registration import (
     MoneyManagementApplicationRegistration,
+    MoneyManagementConfigProvider,
     MoneyManagementSafeApplicationStatus,
 )
 from .loss_governance_projection_dispatcher import (
@@ -130,6 +131,7 @@ class MoneyManagementMetricsResponse:
     weekly_trade_count: Optional[int]
     monthly_trade_count: Optional[int]
     open_exposure: Optional[Decimal]
+    exposure_limit: Optional[Decimal]
     generated_at: Optional[datetime]
 
     def to_dict(self):
@@ -147,6 +149,7 @@ class MoneyManagementMetricsResponse:
             "weeklyTradeCount": self.weekly_trade_count,
             "monthlyTradeCount": self.monthly_trade_count,
             "openExposure": _serialize(self.open_exposure),
+            "exposureLimit": _serialize(self.exposure_limit),
             "metricsGeneratedAt": _serialize(self.generated_at),
         }
 
@@ -162,6 +165,7 @@ class MoneyManagementConfigurationResponse:
     monthly_warning_percent: Decimal
     monthly_block_percent: Decimal
     maximum_drawdown_percent: Decimal
+    total_exposure_percent: Optional[Decimal]
     revision: int
     source: str
     updated_at: datetime
@@ -178,6 +182,9 @@ class MoneyManagementConfigurationResponse:
             "monthlyBlockPercent": _serialize(self.monthly_block_percent),
             "maximumDrawdownPercent": _serialize(
                 self.maximum_drawdown_percent
+            ),
+            "totalExposurePercent": _serialize(
+                self.total_exposure_percent
             ),
             "revision": self.revision,
             "source": self.source,
@@ -289,7 +296,13 @@ _CONFIG_FIELDS = {
     "monthlyBlockPercent": "monthly_block_pct",
     "maximumDrawdownPercent": "maximum_drawdown_pct",
 }
-_REQUEST_FIELDS = frozenset((*_CONFIG_FIELDS, "enabled", "expectedRevision"))
+_BASE_CONFIG_FIELD = "totalExposurePercent"
+_REQUEST_FIELDS = frozenset((
+    *_CONFIG_FIELDS,
+    _BASE_CONFIG_FIELD,
+    "enabled",
+    "expectedRevision",
+))
 
 
 def _strict_decimal(name, value):
@@ -348,6 +361,15 @@ class MoneyManagementHttpBoundary:
             self._base_registration is not None
             and self._base_registration.safe_status.enabled
         )
+        self._base_config_provider = (
+            self._base_registration.base_config_provider
+            if self._base_registration is not None
+            and isinstance(
+                self._base_registration.base_config_provider,
+                MoneyManagementConfigProvider,
+            )
+            else None
+        )
         self._configuration = (
             dispatcher.get_configuration()
             if dispatcher is not None
@@ -393,6 +415,11 @@ class MoneyManagementHttpBoundary:
         source,
         updated_at,
     ):
+        base_config = (
+            self._base_config_provider.get_config()
+            if self._base_config_provider is not None
+            else None
+        )
         return MoneyManagementConfigurationResponse(
             self._dispatcher is not None and self._base_registration is not None,
             enabled,
@@ -403,6 +430,9 @@ class MoneyManagementHttpBoundary:
             configuration.monthly_warning_pct,
             configuration.monthly_block_pct,
             configuration.maximum_drawdown_pct,
+            base_config.total_exposure_pct
+            if base_config is not None
+            else None,
             revision,
             source,
             updated_at,
@@ -419,7 +449,7 @@ class MoneyManagementHttpBoundary:
             )
 
     @staticmethod
-    def _metrics_response(result):
+    def _metrics_response(result, exposure_limit=None):
         status = (
             result.status.value
             if isinstance(result, LossRuntimeMetricsReadResult)
@@ -451,6 +481,7 @@ class MoneyManagementHttpBoundary:
             metrics.trade_count_weekly if metrics else None,
             metrics.trade_count_monthly if metrics else None,
             metrics.open_exposure if metrics else None,
+            exposure_limit,
             metrics.captured_at if metrics else None,
         )
 
@@ -504,6 +535,11 @@ class MoneyManagementHttpBoundary:
             if isinstance(metrics_result, LossRuntimeMetricsReadResult)
             else None
         )
+        base_config = (
+            self._base_config_provider.get_config()
+            if self._base_config_provider is not None
+            else None
+        )
         metrics_fresh = bool(
             isinstance(metrics, LossRuntimeMetrics)
             and metrics.data_quality is LossRuntimeDataQuality.COMPLETE
@@ -540,6 +576,7 @@ class MoneyManagementHttpBoundary:
             and metrics_fresh
             and projection_fresh
             and revisions_match
+            and base_config is not None
         )
         decision = (
             runtime_snapshot.state.last_decision
@@ -571,6 +608,8 @@ class MoneyManagementHttpBoundary:
         elif not metrics_fresh:
             safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
         elif not projection_fresh or not revisions_match:
+            safe_reason = "INTERNAL_STATE_UNAVAILABLE"
+        elif base_config is None:
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"
         risk_state = (
             decision.decision_state.value
@@ -634,7 +673,12 @@ class MoneyManagementHttpBoundary:
             if isinstance(public, LossGovernancePublicSnapshot)
             else None,
             config_revision,
-            self._metrics_response(metrics_result),
+            self._metrics_response(
+                metrics_result,
+                base_config.total_exposure_pct
+                if base_config is not None
+                else None,
+            ),
             configuration,
         )
 
@@ -687,7 +731,25 @@ class MoneyManagementHttpBoundary:
                 "CONFIGURATION_INVALID",
                 "Configuration percentage is invalid.",
             )
-        return expected, enabled if "enabled" in payload else None, normalized
+        base_update = None
+        if _BASE_CONFIG_FIELD in payload:
+            try:
+                base_update = _strict_decimal(
+                    _BASE_CONFIG_FIELD,
+                    payload[_BASE_CONFIG_FIELD],
+                )
+            except ValueError:
+                self._error(
+                    422,
+                    "CONFIGURATION_INVALID",
+                    "Configuration percentage is invalid.",
+                )
+        return (
+            expected,
+            enabled if "enabled" in payload else None,
+            normalized,
+            base_update,
+        )
 
     def _set_application_enabled(self, enabled):
         state = getattr(self._app, "state", None)
@@ -724,6 +786,7 @@ class MoneyManagementHttpBoundary:
                 None,
                 None,
             ),
+            source.base_config_provider,
         )
         setattr(state, "money_management", disabled)
         return True
@@ -753,7 +816,12 @@ class MoneyManagementHttpBoundary:
         return result, projected
 
     def update_configuration(self, payload):
-        expected, enabled_update, normalized = self._normalize_update(payload)
+        (
+            expected,
+            enabled_update,
+            normalized,
+            base_update,
+        ) = self._normalize_update(payload)
         now = self._now()
         with self._lock:
             if (
@@ -809,9 +877,37 @@ class MoneyManagementHttpBoundary:
                     "CONFIGURATION_INVALID",
                     "Configuration thresholds are inconsistent.",
                 )
+            current_base_config = (
+                self._base_config_provider.get_config()
+                if self._base_config_provider is not None
+                else None
+            )
+            if base_update is not None and current_base_config is None:
+                self._error(
+                    503,
+                    "MONEY_MANAGEMENT_NOT_REGISTERED",
+                    "Money Management base configuration is unavailable.",
+                    True,
+                )
+            try:
+                base_candidate = (
+                    replace(
+                        current_base_config,
+                        total_exposure_pct=base_update,
+                    )
+                    if base_update is not None
+                    else current_base_config
+                )
+            except (TypeError, ValueError):
+                self._error(
+                    422,
+                    "CONFIGURATION_INVALID",
+                    "Base configuration is inconsistent.",
+                )
             if (
                 candidate == self._configuration
                 and target_enabled == self._enabled
+                and base_candidate == current_base_config
             ):
                 status = self.get_status()
                 return MoneyManagementConfigurationUpdateResponse(
@@ -834,6 +930,13 @@ class MoneyManagementHttpBoundary:
                     True,
                 )
             self._configuration = candidate
+            if (
+                base_update is not None
+                and self._base_config_provider is not None
+            ):
+                self._base_config_provider.update_total_exposure_pct(
+                    base_update
+                )
             self._enabled = target_enabled
             self._configuration_revision += 1
             revision = self._configuration_revision

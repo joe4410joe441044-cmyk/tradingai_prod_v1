@@ -1,6 +1,6 @@
 import threading
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +12,10 @@ from backend.money_management.loss_governance_projection_dispatcher import (
 from backend.money_management.enums import RiskState
 from backend.money_management.loss_application_models import (
     ApplicationLifecycleState,
+)
+from backend.money_management.loss_application_registration import (
+    MoneyManagementConfigProvider,
+    build_default_money_management_config,
 )
 from backend.money_management.loss_http_api import (
     MoneyManagementApiBoundaryException,
@@ -75,6 +79,12 @@ def ready_boundary(*, publish=True):
     lifecycle = Lifecycle()
     dispatcher = LossRuntimeUpdateDispatcher(Source([metrics()]))
     app = app_with(lifecycle)
+    app.state.money_management = replace(
+        app.state.money_management,
+        base_config_provider=MoneyManagementConfigProvider(
+            build_default_money_management_config()
+        ),
+    )
     applied = dispatcher.dispatch(
         app,
         request(),
@@ -114,6 +124,7 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(status.risk_state, "NORMAL")
         self.assertEqual(payload["metrics"]["equity"], "1000")
         self.assertEqual(payload["metrics"]["availableCapital"], "900")
+        self.assertEqual(payload["metrics"]["exposureLimit"], "20")
         self.assertEqual(payload["metrics"]["drawdownPercent"], "0")
         self.assertEqual(payload["revision"], 2)
         self.assertEqual(payload["sequence"], 2)
@@ -131,7 +142,30 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
 
         self.assertIsNone(response.available_capital)
         self.assertIsNone(response.to_dict()["availableCapital"])
+        self.assertIsNone(response.exposure_limit)
+        self.assertIsNone(response.to_dict()["exposureLimit"])
         self.assertEqual(response.to_dict()["equity"], "1000")
+
+    def test_status_without_base_config_is_diagnostic_and_null(self):
+        _, app, dispatcher, _, clock = ready_boundary()
+        app.state.money_management = replace(
+            app.state.money_management,
+            base_config_provider=None,
+        )
+        boundary = MoneyManagementHttpBoundary(
+            app,
+            dispatcher,
+            timestamp_source=clock,
+        )
+        status = boundary.get_status()
+
+        self.assertFalse(status.available)
+        self.assertEqual(status.safe_reason, "INTERNAL_STATE_UNAVAILABLE")
+        self.assertIn(
+            "INTERNAL_STATE_UNAVAILABLE",
+            status.diagnostic_reasons,
+        )
+        self.assertIsNone(status.to_dict()["metrics"]["exposureLimit"])
 
     def test_status_without_projection_fails_closed_and_does_not_refresh(self):
         boundary, _, dispatcher, lifecycle, _ = ready_boundary(publish=False)
@@ -270,6 +304,7 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         payload = boundary.get_configuration().to_dict()
         self.assertEqual(payload["dailyWarningPercent"], "1.00")
         self.assertEqual(payload["maximumDrawdownPercent"], "5.00")
+        self.assertEqual(payload["totalExposurePercent"], "20")
         self.assertEqual(payload["source"], "DEFAULT")
 
     def test_atomic_update_rechecks_revision_and_reevaluates(self):
@@ -292,6 +327,39 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         self.assertEqual(lifecycle.snapshot.sequence, before_sequence + 1)
         self.assertTrue(result.status.execution_entry_allowed)
 
+    def test_total_exposure_update_uses_same_provider_and_updates_status(self):
+        boundary, app, _, _, _ = ready_boundary()
+        provider = app.state.money_management.base_config_provider
+
+        result = boundary.update_configuration(
+            {
+                "totalExposurePercent": "25.00",
+                "expectedRevision": 1,
+            }
+        )
+
+        self.assertTrue(result.applied)
+        self.assertIs(
+            app.state.money_management.base_config_provider,
+            provider,
+        )
+        self.assertEqual(
+            provider.get_config().total_exposure_pct,
+            Decimal("25.00"),
+        )
+        self.assertEqual(
+            result.configuration.total_exposure_percent,
+            Decimal("25.00"),
+        )
+        self.assertEqual(
+            result.status.to_dict()["metrics"]["exposureLimit"],
+            "25.00",
+        )
+        self.assertEqual(
+            boundary.get_configuration().to_dict()["dailyWarningPercent"],
+            "1.00",
+        )
+
     def test_invalid_update_never_partially_applies(self):
         boundary, _, _, _, _ = ready_boundary()
         before = boundary.get_configuration()
@@ -305,6 +373,11 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
             {"dailyWarningPercent": "Infinity"},
             {"dailyWarningPercent": "-1"},
             {"dailyWarningPercent": ""},
+            {"totalExposurePercent": "NaN"},
+            {"totalExposurePercent": "Infinity"},
+            {"totalExposurePercent": "0"},
+            {"totalExposurePercent": "5"},
+            {"totalExposurePercent": "101"},
             {
                 "dailyWarningPercent": "4",
                 "dailyBlockPercent": "3",

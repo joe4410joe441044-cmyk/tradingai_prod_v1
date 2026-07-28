@@ -47,6 +47,11 @@ export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
     label: "Maximum Drawdown",
     type: "decimal",
   }),
+  Object.freeze({
+    key: "totalExposurePercent",
+    label: "Total Exposure Limit",
+    type: "decimal",
+  }),
 ]);
 
 const VALIDATION_MESSAGES = Object.freeze({

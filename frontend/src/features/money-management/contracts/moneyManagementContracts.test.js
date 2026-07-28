@@ -31,12 +31,14 @@ test("valid status preserves Decimal strings, reason order, and revisions", () =
       dailyPnl: "-12.50",
       equity: null,
       availableCapital: null,
+      exposureLimit: null,
     },
   });
   const status = normalizeMoneyManagementStatus(raw);
   assert.equal(status.metrics.dailyPnl, "-12.50");
   assert.equal(status.metrics.equity, null);
   assert.equal(status.metrics.availableCapital, null);
+  assert.equal(status.metrics.exposureLimit, null);
   assert.deepEqual(status.warningReasons, [
     "WEEKLY_LOSS_WARNING",
     "DAILY_LOSS_WARNING",
@@ -153,6 +155,7 @@ test("configuration normalization and payload retain string decimals", () => {
   );
   assert.equal(payload.dailyWarningPercent, "1.00");
   assert.equal(payload.maximumDrawdownPercent, "5.00");
+  assert.equal(payload.totalExposurePercent, "20.00");
   assert.equal(typeof payload.dailyWarningPercent, "string");
   assert.equal(payload.expectedRevision, 7);
 });

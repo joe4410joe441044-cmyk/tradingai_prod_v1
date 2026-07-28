@@ -1,8 +1,11 @@
 """MM-4G FastAPI registration helpers with safe application-state projection."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from decimal import Decimal
+from threading import RLock
 from typing import Optional
 
+from .enums import MoneyManagementProfile, TradingMode
 from .loss_application_composition import (
     build_loss_limit_application_composition,
 )
@@ -21,6 +24,57 @@ from .loss_application_settings import (
 from .loss_runtime_coordination_models import LossLimitRuntimeStopRequest
 from .loss_runtime_integration_models import RecoveryStatus, StartupMode
 from .loss_runtime_startup_models import LossLimitRuntimeStartupRequest
+from .models import MoneyManagementConfig
+
+
+class MoneyManagementConfigProvider:
+    __slots__ = ("__config", "__lock")
+
+    def __init__(self, config):
+        if not isinstance(config, MoneyManagementConfig):
+            raise TypeError("Money Management base configuration required")
+        self.__config = config
+        self.__lock = RLock()
+
+    def get_config(self):
+        with self.__lock:
+            return self.__config
+
+    def update_total_exposure_pct(self, value):
+        with self.__lock:
+            candidate = replace(
+                self.__config,
+                total_exposure_pct=value,
+            )
+            self.__config = candidate
+            return candidate
+
+
+def build_default_money_management_config():
+    return MoneyManagementConfig(
+        profile=MoneyManagementProfile.CAPITAL_PROTECTION_STANDARD,
+        mode=TradingMode.PAPER,
+        initial_reference_equity=Decimal("1000"),
+        risk_per_trade_pct=Decimal("0.50"),
+        maximum_position_notional=Decimal("100"),
+        maximum_drawdown_pct=Decimal("5"),
+        total_exposure_pct=Decimal("20"),
+        single_symbol_exposure_pct=Decimal("10"),
+        maximum_leverage=Decimal("5"),
+        multi_bot_enabled=False,
+    )
+
+
+def get_money_management_config(app):
+    registration = getattr(
+        getattr(app, "state", None),
+        "money_management",
+        None,
+    )
+    if not isinstance(registration, MoneyManagementApplicationRegistration):
+        return None
+    provider = registration.base_config_provider
+    return provider.get_config() if provider is not None else None
 
 
 @dataclass(frozen=True)
@@ -62,6 +116,10 @@ class MoneyManagementApplicationRegistration:
     startup_status: Optional[LifecycleOperationStatus]
     shutdown_status: Optional[LifecycleOperationStatus]
     safe_status: MoneyManagementSafeApplicationStatus
+    base_config_provider: Optional[MoneyManagementConfigProvider] = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self):
         object.__setattr__(
@@ -77,6 +135,11 @@ class MoneyManagementApplicationRegistration:
             )
         if not isinstance(self.safe_status, MoneyManagementSafeApplicationStatus):
             raise TypeError("safe status required")
+        if self.base_config_provider is not None and not isinstance(
+            self.base_config_provider,
+            MoneyManagementConfigProvider,
+        ):
+            raise TypeError("base config provider invalid")
 
     def to_dict(self):
         return {
@@ -85,6 +148,7 @@ class MoneyManagementApplicationRegistration:
             "startupStatus": self.startup_status.value if self.startup_status else None,
             "shutdownStatus": self.shutdown_status.value if self.shutdown_status else None,
             "safeStatus": self.safe_status.to_dict(),
+            "baseConfigAvailable": self.base_config_provider is not None,
         }
 
 
@@ -149,6 +213,8 @@ def startup_money_management_application(
     configuration=None,
     configuration_resolver=resolve_loss_limit_application_configuration,
     composition_factory=build_loss_limit_application_composition,
+    base_configuration=None,
+    base_configuration_factory=build_default_money_management_config,
     timestamp_source=None,
     logger=None,
 ):
@@ -160,6 +226,15 @@ def startup_money_management_application(
     ):
         return existing
     try:
+        base_config = (
+            base_configuration
+            if base_configuration is not None
+            else base_configuration_factory()
+        )
+        base_config_provider = MoneyManagementConfigProvider(base_config)
+    except Exception:
+        base_config_provider = None
+    try:
         resolved = configuration or configuration_resolver()
         if not isinstance(resolved, LossLimitApplicationConfiguration):
             raise LossLimitApplicationSettingsError("configuration invalid")
@@ -170,6 +245,7 @@ def startup_money_management_application(
             LifecycleOperationStatus.FAILED,
             None,
             _disabled_status(CompositionReadinessStatus.CONFIGURATION_INVALID, True),
+            base_config_provider,
         )
         app.state.money_management = registration
         _safe_log(logger, "warning", "Startup Failed")
@@ -185,6 +261,7 @@ def startup_money_management_application(
             LifecycleOperationStatus.FAILED,
             None,
             _disabled_status(CompositionReadinessStatus.COMPOSITION_FAILED, True),
+            base_config_provider,
         )
         app.state.money_management = registration
         _safe_log(logger, "warning", "Startup Failed")
@@ -204,6 +281,7 @@ def startup_money_management_application(
             startup_status,
             None,
             _disabled_status(composition.status, recovery),
+            base_config_provider,
         )
         app.state.money_management = registration
         event = (
@@ -251,12 +329,18 @@ def startup_money_management_application(
                 None,
                 LifecycleOperationStatus.FAILED.value,
             ),
+            base_config_provider,
         )
         app.state.money_management = registration
         _safe_log(logger, "warning", "Startup Failed")
         return registration
     registration = MoneyManagementApplicationRegistration(
-        composition.status, adapter, startup_status, None, safe_status
+        composition.status,
+        adapter,
+        startup_status,
+        None,
+        safe_status,
+        base_config_provider,
     )
     app.state.money_management = registration
     event = (
@@ -282,6 +366,7 @@ def shutdown_money_management_application(app, timestamp_source=None, logger=Non
             existing.startup_status,
             LifecycleOperationStatus.IDEMPOTENT,
             existing.safe_status,
+            existing.base_config_provider,
         )
         app.state.money_management = registration
         return registration
@@ -322,6 +407,7 @@ def shutdown_money_management_application(app, timestamp_source=None, logger=Non
         existing.startup_status,
         shutdown_status,
         safe_status,
+        existing.base_config_provider,
     )
     app.state.money_management = registration
     event = (

@@ -231,6 +231,11 @@ export function normalizeMoneyManagementMetrics(raw) {
       "metrics.openExposure",
       true,
     ),
+    exposureLimit: decimal(
+      value.exposureLimit,
+      "metrics.exposureLimit",
+      true,
+    ),
     metricsGeneratedAt: utcTimestamp(
       value.metricsGeneratedAt,
       "metrics.metricsGeneratedAt",
@@ -278,6 +283,10 @@ export function normalizeMoneyManagementConfiguration(raw) {
     maximumDrawdownPercent: decimal(
       value.maximumDrawdownPercent,
       "configuration.maximumDrawdownPercent",
+    ),
+    totalExposurePercent: decimal(
+      value.totalExposurePercent,
+      "configuration.totalExposurePercent",
     ),
     revision: positiveInteger(
       value.revision,
@@ -496,6 +505,7 @@ export function configurationDraftFromAuthoritative(configuration) {
     monthlyWarningPercent: configuration.monthlyWarningPercent,
     monthlyBlockPercent: configuration.monthlyBlockPercent,
     maximumDrawdownPercent: configuration.maximumDrawdownPercent,
+    totalExposurePercent: configuration.totalExposurePercent,
   });
 }
 
@@ -507,6 +517,7 @@ const PERCENTAGE_FIELDS = Object.freeze([
   "monthlyWarningPercent",
   "monthlyBlockPercent",
   "maximumDrawdownPercent",
+  "totalExposurePercent",
 ]);
 
 export function validateMoneyManagementConfigurationDraft(
@@ -602,6 +613,7 @@ export function buildMoneyManagementConfigurationPayload(
     monthlyWarningPercent: draft.monthlyWarningPercent,
     monthlyBlockPercent: draft.monthlyBlockPercent,
     maximumDrawdownPercent: draft.maximumDrawdownPercent,
+    totalExposurePercent: draft.totalExposurePercent,
     expectedRevision,
   });
 }

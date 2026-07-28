@@ -9,6 +9,7 @@ export function validConfiguration(overrides = {}) {
     monthlyWarningPercent: "3.50",
     monthlyBlockPercent: "4.00",
     maximumDrawdownPercent: "5.00",
+    totalExposurePercent: "20.00",
     revision: 7,
     source: "DEFAULT",
     updatedAt: "2026-07-26T12:00:00Z",
@@ -31,6 +32,7 @@ export function validMetrics(overrides = {}) {
     weeklyTradeCount: 5,
     monthlyTradeCount: 8,
     openExposure: "200.00",
+    exposureLimit: "25.00",
     metricsGeneratedAt: "2026-07-26T12:00:00Z",
     ...overrides,
   };

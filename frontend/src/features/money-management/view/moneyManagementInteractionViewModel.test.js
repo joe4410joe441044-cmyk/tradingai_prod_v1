@@ -16,6 +16,7 @@ const configuration = Object.freeze({
   monthlyWarningPercent: "5.0000",
   monthlyBlockPercent: "6.0000",
   maximumDrawdownPercent: "7.0000",
+  totalExposurePercent: "20.0000",
   revision: 12,
   source: "DEFAULT",
   updatedAt: "2026-07-26T14:32:08Z",
@@ -30,6 +31,7 @@ const draft = Object.freeze({
   monthlyWarningPercent: "5.0000",
   monthlyBlockPercent: "6.0000",
   maximumDrawdownPercent: "7.0000",
+  totalExposurePercent: "20.0000",
 });
 
 const safeStatus = Object.freeze({
@@ -60,6 +62,7 @@ test("configuration fields exactly match the backend editable contract", () => {
       "monthlyWarningPercent",
       "monthlyBlockPercent",
       "maximumDrawdownPercent",
+      "totalExposurePercent",
     ],
   );
 });

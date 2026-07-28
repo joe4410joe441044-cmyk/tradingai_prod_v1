@@ -27,6 +27,7 @@ const status = (overrides = {}) => ({
     weeklyPnl: "12.5000",
     monthlyPnl: "40.0000",
     openExposure: "0.00000001",
+    exposureLimit: "25.0000",
   },
   projectionStatus: "ALLOW",
   recommendedAction: "CONTINUE",
@@ -34,6 +35,7 @@ const status = (overrides = {}) => ({
   warningReasons: [],
   configuration: {
     maximumDrawdownPercent: "5.0000",
+    totalExposurePercent: "20.0000",
   },
   ...overrides,
 });
@@ -163,6 +165,8 @@ test("null metrics remain unavailable and never become zero", () => {
 
 test("actual Backend metrics are mapped without invented projections", () => {
   const model = createMoneyManagementViewModel(readyInput());
+  assert.equal(model.exposure[1].value.text, "25.0000");
+  assert.equal(model.exposure[1].value.unit, "%");
   assert.equal(model.capital[0].value.text, "9007199254740993.123456789");
   assert.equal(model.capital[1].value.text, "8007199254740993.123456789");
   assert.equal(model.performance[0].value.text, "-1234.5000");
@@ -171,6 +175,21 @@ test("actual Backend metrics are mapped without invented projections", () => {
   assert.equal(model.statistics[2].value.text, "Not reported");
   assert.equal(model.projection.current.text, "ALLOW");
   assert.match(model.projection.description, /later phase/);
+});
+
+test("unknown Exposure Limit remains unavailable", () => {
+  const model = createMoneyManagementViewModel(readyInput({
+    status: status({
+      metrics: {
+        ...status().metrics,
+        exposureLimit: null,
+      },
+    }),
+  }));
+
+  assert.equal(model.exposure[1].value.text, "—");
+  assert.equal(model.exposure[1].value.unavailable, true);
+  assert.equal(model.exposure[1].value.unit, null);
 });
 
 test("unknown Available Capital remains unavailable", () => {

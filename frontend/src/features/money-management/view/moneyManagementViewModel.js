@@ -381,7 +381,10 @@ export function createMoneyManagementViewModel(input = {}) {
         "Current Exposure",
         displayDecimal(metrics?.openExposure),
       ),
-      row("Exposure Limit", unavailableValue()),
+      row(
+        "Exposure Limit",
+        displayDecimal(metrics?.exposureLimit, "%"),
+      ),
       row("Exposure Utilization", unavailableValue()),
       row("Open Position State", unavailableValue("Not reported")),
     ]),

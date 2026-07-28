@@ -1,11 +1,13 @@
 import unittest
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 from backend.money_management.loss_application_models import *
 from backend.money_management.loss_application_registration import *
 from backend.money_management.loss_application_settings import *
+from backend.money_management.loss_models import LossLimitConfig
 
 
 NOW = datetime(2026, 1, 5, 12, tzinfo=timezone.utc)
@@ -85,6 +87,68 @@ def composition(adapter):
 
 
 class ApplicationRegistrationTests(unittest.TestCase):
+    def test_base_config_provider_is_application_scoped_and_read_only(self):
+        app = application()
+        configured = MoneyManagementConfig(
+            MoneyManagementProfile.CAPITAL_PROTECTION_STANDARD,
+            TradingMode.PAPER,
+            Decimal("1000"),
+            Decimal("0.50"),
+            Decimal("100"),
+            Decimal("5"),
+            Decimal("25.00"),
+            Decimal("10"),
+            Decimal("5"),
+            False,
+        )
+        registration = startup_money_management_application(
+            app,
+            configuration=LossLimitApplicationConfiguration(),
+            base_configuration=configured,
+        )
+
+        first = get_money_management_config(app)
+        second = get_money_management_config(app)
+        self.assertIs(first, configured)
+        self.assertIs(second, first)
+        self.assertEqual(first.total_exposure_pct, Decimal("25.00"))
+        self.assertNotIsInstance(first, LossLimitConfig)
+        self.assertIs(registration.base_config_provider.get_config(), first)
+        with self.assertRaises(AttributeError):
+            registration.base_config_provider._config = configured
+        updated = registration.base_config_provider.update_total_exposure_pct(
+            Decimal("30.00")
+        )
+        self.assertEqual(updated.total_exposure_pct, Decimal("30.00"))
+        self.assertIs(
+            registration.base_config_provider,
+            app.state.money_management.base_config_provider,
+        )
+
+    def test_base_config_provider_unregistered_and_invalid_states_are_explicit(self):
+        app = application()
+        self.assertIsNone(get_money_management_config(app))
+        startup_money_management_application(
+            app,
+            configuration=LossLimitApplicationConfiguration(),
+            base_configuration_factory=lambda: object(),
+        )
+        self.assertIsNone(get_money_management_config(app))
+        first_app = application()
+        second_app = application()
+        startup_money_management_application(
+            first_app,
+            configuration=LossLimitApplicationConfiguration(),
+        )
+        startup_money_management_application(
+            second_app,
+            configuration=LossLimitApplicationConfiguration(),
+        )
+        self.assertIsNot(
+            get_money_management_config(first_app),
+            get_money_management_config(second_app),
+        )
+
     def test_settings_default_disabled_and_strict_booleans(self):
         self.assertFalse(
             resolve_loss_limit_application_configuration(environ={}).enabled
@@ -155,6 +219,10 @@ class ApplicationRegistrationTests(unittest.TestCase):
             timestamp_source=lambda: NOW,
         )
         self.assertIs(first, second)
+        self.assertIs(
+            first.base_config_provider,
+            second.base_config_provider,
+        )
         self.assertEqual(len(factory_calls), 1)
         self.assertEqual(len(adapter.startups), 1)
         self.assertTrue(first.safe_status.runtime_available)
