@@ -8,18 +8,12 @@ export default function MoneyManagementHeader({
     onRefresh,
     refresh,
 }) {
+    const updatedTime = header.updated.replace(/^Updated\s+/i, "");
     return (
-        <header className="mi-header mm-header">
-            <div>
-                <h1 className="mi-header__title">Money Management</h1>
-                <p className="mi-header__subtitle">
-                    Capital Protection &amp; Risk Management Engine
-                </p>
-            </div>
-
+        <header className="mm-status-bar">
             <div
-                aria-label="Money Management status and controls"
-                className="mi-header__badges"
+                aria-label="Money Management status bar"
+                className="mm-status-bar__controls"
             >
                 <MoneyManagementStatusBadge
                     text={header.mode.text}
@@ -34,9 +28,9 @@ export default function MoneyManagementHeader({
                     label={refresh.label}
                     onRefresh={onRefresh}
                 />
-                <span className="mi-status-label mi-status-label--muted">
-                    {header.updated}
-                </span>
+                <time className="mm-status-bar__time">
+                    {updatedTime}
+                </time>
             </div>
         </header>
     );

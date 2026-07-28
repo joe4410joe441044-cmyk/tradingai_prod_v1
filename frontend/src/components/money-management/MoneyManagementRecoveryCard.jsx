@@ -1,6 +1,9 @@
 import { useState } from "react";
 
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
+import {
+    formatMoneyManagementOperationalText,
+} from "./MoneyManagementPrimitives";
 
 export default function MoneyManagementRecoveryCard({
     interaction,
@@ -23,15 +26,27 @@ export default function MoneyManagementRecoveryCard({
             <dl className="mm-metric-list">
                 <div className="mm-metric-row">
                     <dt>Recovery Availability</dt>
-                    <dd>{recovery.availability}</dd>
+                    <dd>
+                        {formatMoneyManagementOperationalText(
+                            recovery.availability,
+                        )}
+                    </dd>
                 </div>
                 <div className="mm-metric-row">
                     <dt>Current Risk State</dt>
-                    <dd>{recovery.currentRiskState}</dd>
+                    <dd>
+                        {formatMoneyManagementOperationalText(
+                            recovery.currentRiskState,
+                        )}
+                    </dd>
                 </div>
                 <div className="mm-metric-row">
                     <dt>Entry Permission</dt>
-                    <dd>{recovery.entryPermission}</dd>
+                    <dd>
+                        {formatMoneyManagementOperationalText(
+                            recovery.entryPermission,
+                        )}
+                    </dd>
                 </div>
                 <div className="mm-metric-row">
                     <dt>Recovery Preconditions</dt>

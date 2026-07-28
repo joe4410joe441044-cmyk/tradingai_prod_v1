@@ -2,6 +2,9 @@ import { useState } from "react";
 
 import { previewMoneyManagementPositionSize } from "../../features/money-management";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
+import {
+    formatMoneyManagementOperationalText,
+} from "./MoneyManagementPrimitives";
 
 const initialDraft = Object.freeze({
     symbol: "",
@@ -101,7 +104,13 @@ export default function MoneyManagementPositionSizingCard({ viewModel }) {
                     </div>
                     <div className="mm-metric-row">
                         <dt>Calculation Status</dt>
-                        <dd>{result.calculationAllowed ? "AVAILABLE" : "UNAVAILABLE"}</dd>
+                        <dd>
+                            {formatMoneyManagementOperationalText(
+                                result.calculationAllowed
+                                    ? "AVAILABLE"
+                                    : "UNAVAILABLE",
+                            )}
+                        </dd>
                     </div>
                 </dl>
             )}

@@ -1,19 +1,40 @@
 .market-intelligence .mm-page {
     display: grid;
-    gap: 14px;
+    gap: 8px;
+    font-family:
+        var(--mi-font-ui),
+        "Yu Gothic UI",
+        "Yu Gothic",
+        Meiryo,
+        "Noto Sans JP",
+        sans-serif;
 }
 
-.market-intelligence .mm-header {
-    margin-bottom: 0;
-}
-
-.market-intelligence .mm-header .mi-header__badges {
+.market-intelligence .mm-status-bar {
+    display: flex;
+    min-height: 36px;
     align-items: center;
+    justify-content: flex-end;
+}
+
+.market-intelligence .mm-status-bar__controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.market-intelligence .mm-status-bar__time {
+    min-width: 58px;
+    color: var(--mi-text-muted);
+    font: 600 10px/1 var(--mi-font-mono);
+    letter-spacing: 0.04em;
+    text-align: right;
 }
 
 .market-intelligence .mm-page__state {
     margin: 0;
-    padding: 10px 14px;
+    padding: 6px 10px;
     border: 1px solid var(--mi-border);
     border-radius: 6px;
     background: var(--mi-surface);
@@ -38,7 +59,7 @@
 .market-intelligence .mm-card-column {
     display: grid;
     min-width: 0;
-    gap: 14px;
+    gap: 8px;
 }
 
 .market-intelligence .mm-summary {
@@ -51,14 +72,30 @@
 }
 
 .market-intelligence .mm-bottom {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .market-intelligence .mm-card {
     display: flex;
-    min-height: 160px;
+    min-height: 132px;
     flex-direction: column;
     overflow: hidden;
+}
+
+.market-intelligence .mm-card > .mi-panel__title {
+    padding: 8px 10px;
+    font-family:
+        var(--mi-font-ui),
+        "Yu Gothic UI",
+        Meiryo,
+        "Noto Sans JP",
+        sans-serif;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.market-intelligence .mm-card > .mi-panel__content {
+    padding: 8px 10px;
 }
 
 .market-intelligence .mm-card__body {
@@ -70,7 +107,7 @@
 .market-intelligence .mm-card__body--content {
     align-content: start;
     justify-items: stretch;
-    gap: 12px;
+    gap: 8px;
 }
 
 .market-intelligence .mm-card__placeholder {
@@ -90,7 +127,7 @@
 }
 
 .market-intelligence .mm-header__refresh {
-    min-width: 78px;
+    min-width: 66px;
     justify-content: center;
     background: transparent;
     opacity: 1;
@@ -148,6 +185,27 @@
     overflow-wrap: anywhere;
 }
 
+.market-intelligence .mm-status-bar .mi-status-label {
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 9px;
+    font-family:
+        var(--mi-font-mono),
+        "Yu Gothic UI",
+        Meiryo,
+        "Noto Sans Mono CJK JP",
+        monospace;
+}
+
+.market-intelligence .mm-metric-row dd > span {
+    font-family:
+        var(--mi-font-mono),
+        "Yu Gothic UI",
+        Meiryo,
+        "Noto Sans Mono CJK JP",
+        monospace;
+}
+
 .market-intelligence .mm-status-badge--safe,
 .market-intelligence .mm-metric-row .mm-value--safe {
     color: var(--status-color-green);
@@ -179,7 +237,7 @@
     grid-template-columns: minmax(0, 1fr) minmax(110px, auto);
     gap: 12px;
     align-items: baseline;
-    padding: 7px 0;
+    padding: 5px 0;
     border-bottom: 1px solid var(--mi-border-soft);
 }
 
@@ -225,7 +283,7 @@
 }
 
 .market-intelligence .mm-card--risk-state {
-    min-height: 520px;
+    min-height: 0;
 }
 
 .market-intelligence .mm-card--configuration,
@@ -236,19 +294,19 @@
 .market-intelligence .mm-configuration-meta {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 6px;
     width: 100%;
     box-sizing: border-box;
     margin: 0;
-    padding-bottom: 10px;
+    padding-bottom: 6px;
     border-bottom: 1px solid var(--mi-border-soft);
 }
 
 .market-intelligence .mm-configuration-meta > div {
     display: grid;
     min-width: 0;
-    gap: 5px;
-    padding: 9px 10px;
+    gap: 3px;
+    padding: 6px 8px;
     border: 1px solid var(--mi-border-soft);
     border-radius: 6px;
     background: var(--mi-surface-raised);
@@ -280,14 +338,14 @@
 .market-intelligence .mm-configuration-fields {
     display: grid;
     width: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
 }
 
 .market-intelligence .mm-configuration-field {
     display: grid;
     min-width: 0;
-    gap: 6px;
+    gap: 4px;
 }
 
 .market-intelligence .mm-configuration-field > span {
@@ -301,8 +359,8 @@
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    min-height: 36px;
-    padding: 8px 9px;
+    min-height: 32px;
+    padding: 6px 8px;
     border: 1px solid var(--mi-border);
     border-radius: 5px;
     background: var(--mi-surface);
@@ -357,18 +415,18 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
 }
 
 .market-intelligence .mm-interaction-form {
     display: grid;
     width: 100%;
-    gap: 12px;
+    gap: 8px;
 }
 
 .market-intelligence .mm-history-filter {
-    flex: 1 1 150px;
+    flex: 1 1 130px;
 }
 
 .market-intelligence .mm-history-filter:last-of-type {
@@ -377,8 +435,8 @@
 
 .market-intelligence .mm-action-row button,
 .market-intelligence .mm-card--recovery > .mm-card__body > button {
-    min-height: 36px;
-    padding: 8px 12px;
+    min-height: 32px;
+    padding: 6px 10px;
     border: 1px solid var(--mi-border);
     border-radius: 5px;
     background: var(--mi-surface);
@@ -410,7 +468,7 @@
     width: 100%;
     box-sizing: border-box;
     margin: 0;
-    padding: 10px;
+    padding: 7px 8px;
     border: 1px solid var(--mi-border);
     border-radius: 6px;
     color: var(--mi-text-muted);
@@ -435,7 +493,7 @@
 .market-intelligence .mm-runtime-timeline {
     display: grid;
     width: 100%;
-    gap: 8px;
+    gap: 6px;
     box-sizing: border-box;
     margin: 0;
     padding: 0;
@@ -445,8 +503,8 @@
 .market-intelligence .mm-runtime-timeline li {
     display: grid;
     min-width: 0;
-    gap: 4px;
-    padding: 10px;
+    gap: 3px;
+    padding: 7px 8px;
     border: 1px solid var(--mi-border-soft);
     border-radius: 6px;
     background: var(--mi-surface-raised);
@@ -463,13 +521,13 @@
     display: grid;
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 8px;
 }
 
 .market-intelligence .mm-history-charts section,
 .market-intelligence .mm-card--simulation section {
     min-width: 0;
-    padding: 10px;
+    padding: 7px;
     border: 1px solid var(--mi-border-soft);
     border-radius: 6px;
     background: var(--mi-surface-raised);
@@ -477,7 +535,7 @@
 
 .market-intelligence .mm-history-charts h3,
 .market-intelligence .mm-card--simulation section h3 {
-    margin: 0 0 8px;
+    margin: 0 0 5px;
     color: var(--mi-text);
     font-size: 10px;
     letter-spacing: 0.05em;
@@ -508,9 +566,9 @@
 .market-intelligence .mm-recovery-result {
     display: grid;
     width: 100%;
-    gap: 8px;
+    gap: 6px;
     box-sizing: border-box;
-    padding: 10px;
+    padding: 7px 8px;
     border: 1px solid var(--mi-border);
     border-radius: 6px;
     color: var(--mi-text-muted);
@@ -557,18 +615,18 @@
     display: grid;
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 6px;
 }
 
 .market-intelligence .mm-reason-group {
     min-width: 0;
-    padding: 10px;
+    padding: 7px 8px;
     border: 1px solid var(--mi-border-soft);
     border-radius: 6px;
 }
 
 .market-intelligence .mm-reason-group h3 {
-    margin: 0 0 8px;
+    margin: 0 0 5px;
     color: var(--mi-text-muted);
     font-size: 10px;
     letter-spacing: 0.05em;
@@ -576,7 +634,7 @@
 
 .market-intelligence .mm-reason-group ul {
     display: grid;
-    gap: 5px;
+    gap: 3px;
     margin: 0;
     padding-left: 16px;
 }
@@ -609,7 +667,7 @@
     }
 
     .market-intelligence .mm-configuration-fields {
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .market-intelligence .mm-history-charts {
@@ -618,14 +676,10 @@
 }
 
 @media (max-width: 760px) {
-    .market-intelligence .mm-header {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .market-intelligence .mm-header .mi-header__badges {
+    .market-intelligence .mm-status-bar__controls {
+        flex-wrap: wrap;
         width: 100%;
-        justify-content: flex-start;
+        justify-content: flex-end;
     }
 
     .market-intelligence .mm-header__refresh-error {
@@ -636,7 +690,8 @@
 
     .market-intelligence .mm-summary,
     .market-intelligence .mm-bottom,
-    .market-intelligence .mm-configuration-meta {
+    .market-intelligence .mm-configuration-meta,
+    .market-intelligence .mm-configuration-fields {
         grid-template-columns: minmax(0, 1fr);
     }
 

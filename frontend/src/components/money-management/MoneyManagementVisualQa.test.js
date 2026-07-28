@@ -58,7 +58,9 @@ test("polished controls retain accessible native semantics", async () => {
   assert.match(recovery, /aria-label="Confirm recovery evaluation"/);
   assert.match(refresh, /aria-busy/);
   assert.match(refresh, /role="alert"/);
-  assert.match(header, /aria-label="Money Management status and controls"/);
+  assert.match(header, /aria-label="Money Management status bar"/);
+  assert.match(header, /<time className="mm-status-bar__time">/);
+  assert.doesNotMatch(header, /mi-header__title|mi-header__subtitle/);
 });
 
 test("interactive Money Management cards use the existing form and action styles", async () => {

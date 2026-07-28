@@ -129,18 +129,16 @@ test("CardShell supports one header, loading, content, and placeholder states", 
     assert.doesNotMatch(source, /button|input|select|textarea|canvas|svg/iu);
 });
 
-test("header and responsive layout retain the existing console classes", async () => {
+test("compact status bar and responsive layout retain console primitives", async () => {
     const [header, styles] = await Promise.all([
         readSource(
             "../components/money-management/MoneyManagementHeader.jsx",
         ),
         readSource("../styles/money-management.css"),
     ]);
-    assert.match(header, /Money Management/);
-    assert.match(
-        header,
-        /Capital Protection &amp; Risk Management Engine/,
-    );
+    assert.match(header, /mm-status-bar/);
+    assert.doesNotMatch(header, /Capital Protection/);
+    assert.doesNotMatch(header, /mi-header__title|mi-header__subtitle/);
     for (const expected of [
         "MoneyManagementStatusBadge",
         "header.mode",
@@ -153,8 +151,6 @@ test("header and responsive layout retain the existing console classes", async (
     }
     for (const reused of [
         "mi-page",
-        "mi-header",
-        "mi-status-label",
         "mi-panel",
         "mi-panel__title",
         "mi-panel__content",

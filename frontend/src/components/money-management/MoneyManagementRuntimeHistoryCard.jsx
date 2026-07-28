@@ -170,7 +170,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
                 Actual Paper/Runtime Money Management events. Simulation
                 projections are never included.
             </p>
-            <div className="mm-action-row">
+            <div className="mm-action-row mm-history-toolbar">
                 <label className="mm-configuration-field mm-history-filter">
                     <span>Event Type</span>
                     <select

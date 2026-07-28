@@ -1,3 +1,20 @@
+const OPERATIONAL_TEXT = Object.freeze({
+    ACTIVE: "ACTIVE（稼働中）",
+    AVAILABLE: "AVAILABLE（利用可能）",
+    "ENTRY BLOCKED": "ENTRY BLOCKED（新規エントリー禁止）",
+    "ENTRY ALLOWED": "ENTRY ALLOWED（新規エントリー許可）",
+    "FAIL CLOSED": "FAIL CLOSED（安全停止）",
+    READY: "READY（準備完了）",
+    RUNNING: "RUNNING（稼働中）",
+    UNAVAILABLE: "UNAVAILABLE（利用不可）",
+    UNKNOWN: "UNKNOWN（不明）",
+    "UNKNOWN MODE": "UNKNOWN MODE（モード不明）",
+});
+
+export function formatMoneyManagementOperationalText(text) {
+    return OPERATIONAL_TEXT[text] ?? text;
+}
+
 export function MoneyManagementStatusBadge({
     text,
     variant = "muted",
@@ -10,7 +27,7 @@ export function MoneyManagementStatusBadge({
                 `mm-status-badge--${variant}`,
             ].join(" ")}
         >
-            {text}
+            {formatMoneyManagementOperationalText(text)}
         </span>
     );
 }
@@ -33,7 +50,11 @@ export function MoneyManagementMetricRows({
                                 : "",
                         ].filter(Boolean).join(" ")}
                     >
-                        <span>{row.value.text}</span>
+                        <span>
+                            {formatMoneyManagementOperationalText(
+                                row.value.text,
+                            )}
+                        </span>
                         {row.value.unit && (
                             <small>{row.value.unit}</small>
                         )}

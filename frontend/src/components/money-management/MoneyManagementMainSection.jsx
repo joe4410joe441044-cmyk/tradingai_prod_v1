@@ -29,7 +29,6 @@ export default function MoneyManagementMainSection({
                     isRecovering={moneyManagement.isRecovering}
                     onRecover={moneyManagement.recover}
                 />
-                <MoneyManagementPositionSizingCard viewModel={viewModel} />
             </div>
             <div
                 aria-label="Performance and projection"
@@ -38,6 +37,7 @@ export default function MoneyManagementMainSection({
                 <PerformanceCard viewModel={viewModel} />
                 <StatisticsCard viewModel={viewModel} />
                 <ProjectionCard viewModel={viewModel} />
+                <MoneyManagementPositionSizingCard viewModel={viewModel} />
             </div>
         </section>
     );
