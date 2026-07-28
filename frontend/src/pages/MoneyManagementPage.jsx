@@ -45,7 +45,9 @@ export default function MoneyManagementPage() {
                 moneyManagement={moneyManagement}
                 viewModel={viewModel}
             />
-            <MoneyManagementBottomSection />
+            <MoneyManagementBottomSection
+                configuration={moneyManagement.configuration}
+            />
         </main>
     );
 }

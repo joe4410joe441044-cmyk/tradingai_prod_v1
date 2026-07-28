@@ -217,6 +217,74 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
             Decimal("100"),
         )
 
+    def test_simulation_is_deterministic_and_runtime_read_only(self):
+        boundary, app, _, lifecycle, _ = ready_boundary()
+        before_snapshot = lifecycle.snapshot
+        before_config = (
+            app.state.money_management.base_config_provider.get_config()
+        )
+        payload = {
+            "initialCapital": "1000",
+            "numberOfTrades": 20,
+            "winRatePercent": "55",
+            "averageWinPercent": "1.50",
+            "averageLossPercent": "1.00",
+            "riskPerTradePercent": "0.50",
+            "maximumDrawdownPercent": "5.00",
+            "compoundingEnabled": True,
+            "feesPercent": "0.06",
+            "slippagePercent": "0.02",
+            "scenario": "EXPECTED_SEQUENCE",
+        }
+
+        first = boundary.simulate(payload)
+        second = boundary.simulate(payload)
+
+        self.assertEqual(first, second)
+        self.assertTrue(first["calculationAllowed"])
+        self.assertEqual(
+            [point["tradeNumber"] for point in first["projection"]],
+            list(range(1, len(first["projection"]) + 1)),
+        )
+        self.assertFalse(first["runtimeMutated"])
+        self.assertFalse(first["orderCreated"])
+        self.assertIs(lifecycle.snapshot, before_snapshot)
+        self.assertIs(
+            app.state.money_management.base_config_provider.get_config(),
+            before_config,
+        )
+
+    def test_simulation_validation_and_trade_limit_are_safe(self):
+        boundary, _, _, _, _ = ready_boundary()
+        invalid = {
+            "initialCapital": "NaN",
+            "numberOfTrades": 1,
+            "winRatePercent": "50",
+            "averageWinPercent": "1",
+            "averageLossPercent": "1",
+            "riskPerTradePercent": "0.50",
+            "maximumDrawdownPercent": "5",
+            "compoundingEnabled": True,
+            "feesPercent": "0",
+            "slippagePercent": "0",
+            "scenario": "EXPECTED_SEQUENCE",
+        }
+        with self.assertRaises(MoneyManagementApiBoundaryException) as error:
+            boundary.simulate(invalid)
+        self.assertEqual(error.exception.error.status_code, 422)
+        self.assertEqual(
+            error.exception.error.code, "SIMULATION_INPUT_INVALID"
+        )
+
+        invalid["initialCapital"] = "1000"
+        invalid["numberOfTrades"] = 1001
+        with self.assertRaises(MoneyManagementApiBoundaryException) as error:
+            boundary.simulate(invalid)
+        self.assertEqual(
+            error.exception.error.code,
+            "SIMULATION_TRADE_LIMIT_EXCEEDED",
+        )
+
     def test_incomplete_runtime_metrics_are_null_unknown(self):
         result = LossRuntimeMetricsReadResult(
             LossRuntimeMetricsReadStatus.PARTIAL,

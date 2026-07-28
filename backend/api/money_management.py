@@ -184,3 +184,34 @@ async def preview_money_management_position_size(request: Request):
             "Money Management position size preview failed.",
             True,
         )
+
+
+@router.post("/simulation")
+async def simulate_money_management(request: Request):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(
+            503,
+            "MONEY_MANAGEMENT_UNAVAILABLE",
+            "Money Management simulation is unavailable.",
+            True,
+        )
+    try:
+        payload = await request.json()
+    except Exception:
+        return _safe_error(
+            400,
+            "SIMULATION_INPUT_INVALID",
+            "Request body must contain valid JSON.",
+        )
+    try:
+        return boundary.simulate(payload)
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(
+            503,
+            "INTERNAL_STATE_UNAVAILABLE",
+            "Money Management simulation failed.",
+            True,
+        )

@@ -55,3 +55,29 @@ test("position size preview is explicit and has no order action", async () => {
     /Number\(|parseFloat\(|parseInt\(|valueAsNumber|Math\.round\(/,
   );
 });
+
+test("simulation renders deterministic inputs, summary, and two charts", async () => {
+  const source = await readSource("MoneyManagementSimulationCard.jsx");
+  for (const label of [
+    "Initial Capital",
+    "Number of Trades",
+    "Win Rate",
+    "Average Win",
+    "Average Loss",
+    "Risk per Trade",
+    "Maximum Drawdown",
+    "Fees",
+    "Slippage",
+    "Compounding",
+    "Scenario",
+    "Final Capital",
+    "Recovery Required",
+    "Capital Curve",
+    "Drawdown Curve",
+  ]) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.match(source, /Not calculated/);
+  assert.match(source, /No projection data/);
+  assert.match(source, /do not modify configuration or create orders/);
+});

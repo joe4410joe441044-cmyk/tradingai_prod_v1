@@ -253,6 +253,42 @@ explicit exchange contract multiplier and quantity step. The preview never creat
 submits an order. Runtime recommended size remains null when no authoritative
 entry/stop candidate exists.
 
+### Deterministic Simulation and Projection
+
+`POST /api/money-management/simulation` is analysis-only. It does not update
+configuration, runtime snapshots, risk reservations, positions, orders, or
+runtime history. Supported scenarios are `EXPECTED_SEQUENCE`,
+`WORST_LOSS_STREAK`, `ALL_WINS`, `ALL_LOSSES`, `ALTERNATING`, and explicit
+`CUSTOM_SEQUENCE`. Expected wins use a deterministic percentage accumulator;
+Monte Carlo and unseeded randomness are not used.
+
+```text
+riskBase = compounding ? currentCapital : initialCapital
+riskAmount = riskBase * riskPerTradePercent / 100
+rewardMultiple = averageWinPercent / averageLossPercent
+grossWin = riskAmount * rewardMultiple
+grossLoss = -riskAmount
+positionNotional = existing Position Sizing Calculator result
+cost = positionNotional * (feesPercent + slippagePercent) / 100
+netTradeResult = grossResult - cost
+```
+
+`averageLossPercent` is the projected stop distance. Position sizing reuses the
+active maximum-position, total-exposure, and single-symbol limits. Each point
+contains trade number, capital, peak, drawdown, risk, position notional, net
+result, cumulative P/L, and status. Maximum drawdown produces `LOCKED` and
+stops later projected trades. Capital at or below zero is `RUINED`, distinct
+from `LOCKED`.
+
+```text
+lossFraction = (peakCapital - finalCapital) / peakCapital
+recoveryRequiredPercent = lossFraction / (1 - lossFraction) * 100
+```
+
+At complete loss recovery is null with `RECOVERY_UNDEFINED`. Requests are
+limited to 1,000 trades. Capital and drawdown charts represent only returned
+simulation projection, never runtime Timeline or a future guarantee.
+
 
 ## D19--D25: Consecutive Loss, Cooldown, and Recovery
 

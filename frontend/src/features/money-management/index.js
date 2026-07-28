@@ -2,6 +2,7 @@ export {
   getMoneyManagementConfiguration,
   getMoneyManagementStatus,
   previewMoneyManagementPositionSize,
+  simulateMoneyManagement,
   requestMoneyManagementRecovery,
   updateMoneyManagementConfiguration,
 } from "./api/moneyManagementApi.js";

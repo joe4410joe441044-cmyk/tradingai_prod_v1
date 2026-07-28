@@ -165,3 +165,12 @@ export function previewMoneyManagementPositionSize(payload, options = {}) {
     payload,
   });
 }
+
+export function simulateMoneyManagement(payload, options = {}) {
+  return requestJson(API.moneyManagementSimulation(), {
+    ...options,
+    operation: "SIMULATE",
+    method: "POST",
+    payload,
+  });
+}

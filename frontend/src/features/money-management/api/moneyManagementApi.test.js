@@ -6,6 +6,7 @@ import {
   getMoneyManagementStatus,
   previewMoneyManagementPositionSize,
   requestMoneyManagementRecovery,
+  simulateMoneyManagement,
   updateMoneyManagementConfiguration,
 } from "./moneyManagementApi.js";
 import {
@@ -24,12 +25,15 @@ function response(body, status = 200) {
   };
 }
 
-test("five API functions use the exact Money Management endpoints", async () => {
+test("six API functions use the exact Money Management endpoints", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith("/position-size/preview")) {
       return response({ calculationAllowed: true });
+    }
+    if (url.endsWith("/simulation")) {
+      return response({ calculationAllowed: true, projection: [] });
     }
     if (url.endsWith("/status")) return response(validStatus());
     if (url.endsWith("/recovery")) return response(validRecoveryResponse());
@@ -52,6 +56,10 @@ test("five API functions use the exact Money Management endpoints", async () => 
     { entryPrice: "1.00" },
     { fetchImpl, timeoutMs: null },
   );
+  await simulateMoneyManagement(
+    { initialCapital: "1000", numberOfTrades: 10 },
+    { fetchImpl, timeoutMs: null },
+  );
   assert.deepEqual(
     calls.map(({ url, options }) => [url, options.method]),
     [
@@ -60,6 +68,7 @@ test("five API functions use the exact Money Management endpoints", async () => 
       ["/api/money-management/configuration", "PUT"],
       ["/api/money-management/recovery", "POST"],
       ["/api/money-management/position-size/preview", "POST"],
+      ["/api/money-management/simulation", "POST"],
     ],
   );
   assert.equal(

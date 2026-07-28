@@ -52,6 +52,12 @@ from .position_risk import (
     calculate_position_size,
     calculate_risk_budget,
 )
+from .simulation import (
+    MAX_SIMULATION_TRADES,
+    MoneyManagementSimulationInput,
+    SimulationScenario,
+    run_simulation,
+)
 
 
 APPLICATION_STATE_ATTRIBUTE = "money_management_http_boundary"
@@ -375,6 +381,18 @@ def _strict_positive_decimal(name, value):
     return result
 
 
+def _strict_nonnegative_percentage(name, value):
+    if isinstance(value, bool) or not isinstance(value, (str, Decimal)):
+        raise ValueError(f"{name} must be a decimal string")
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(value.strip())
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{name} must be a valid decimal") from None
+    if not result.is_finite() or result < 0 or result > Decimal("100"):
+        raise ValueError(f"{name} must be between 0 and 100")
+    return result
+
+
 class MoneyManagementHttpBoundary:
     """Application-scoped HTTP service with no network or filesystem access."""
 
@@ -656,6 +674,140 @@ class MoneyManagementHttpBoundary:
         return {
             **result.to_dict(),
             "symbol": symbol.strip(),
+            "orderCreated": False,
+        }
+
+    def simulate(self, payload):
+        if not isinstance(payload, Mapping):
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Simulation request must be a JSON object.",
+            )
+        allowed = frozenset((
+            "initialCapital",
+            "numberOfTrades",
+            "winRatePercent",
+            "averageWinPercent",
+            "averageLossPercent",
+            "riskPerTradePercent",
+            "maximumDrawdownPercent",
+            "compoundingEnabled",
+            "feesPercent",
+            "slippagePercent",
+            "scenario",
+            "customSequence",
+        ))
+        if set(payload) - allowed:
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Simulation request contains unsupported fields.",
+            )
+        count = payload.get("numberOfTrades")
+        if type(count) is not int or count <= 0:
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Number of trades must be a positive integer.",
+            )
+        if count > MAX_SIMULATION_TRADES:
+            self._error(
+                422,
+                "SIMULATION_TRADE_LIMIT_EXCEEDED",
+                "Simulation trade limit exceeded.",
+            )
+        compounding = payload.get("compoundingEnabled")
+        if type(compounding) is not bool:
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Compounding must be a strict boolean.",
+            )
+        try:
+            decimals = {
+                "initial_capital": _strict_positive_decimal(
+                    "initialCapital", payload.get("initialCapital")
+                ),
+                "win_rate_percent": _strict_nonnegative_percentage(
+                    "winRatePercent", payload.get("winRatePercent")
+                ),
+                "average_win_percent": _strict_nonnegative_percentage(
+                    "averageWinPercent", payload.get("averageWinPercent")
+                ),
+                "average_loss_percent": _strict_decimal(
+                    "averageLossPercent", payload.get("averageLossPercent")
+                ),
+                "risk_per_trade_percent": _strict_decimal(
+                    "riskPerTradePercent",
+                    payload.get("riskPerTradePercent"),
+                ),
+                "maximum_drawdown_percent": _strict_decimal(
+                    "maximumDrawdownPercent",
+                    payload.get("maximumDrawdownPercent"),
+                ),
+                "fees_percent": _strict_nonnegative_percentage(
+                    "feesPercent", payload.get("feesPercent")
+                ),
+                "slippage_percent": _strict_nonnegative_percentage(
+                    "slippagePercent", payload.get("slippagePercent")
+                ),
+            }
+            scenario = SimulationScenario(payload.get("scenario"))
+        except (TypeError, ValueError):
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Simulation inputs are invalid.",
+            )
+        config = (
+            self._base_config_provider.get_config()
+            if self._base_config_provider is not None
+            else None
+        )
+        if config is None:
+            self._error(
+                503,
+                "MONEY_MANAGEMENT_UNAVAILABLE",
+                "Money Management configuration is unavailable.",
+                True,
+            )
+        if decimals["risk_per_trade_percent"] > config.risk_per_trade_pct:
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Risk per trade exceeds active configuration.",
+            )
+        custom = payload.get("customSequence", ())
+        if not isinstance(custom, (list, tuple)):
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Custom sequence must be an array.",
+            )
+        try:
+            value = MoneyManagementSimulationInput(
+                number_of_trades=count,
+                compounding_enabled=compounding,
+                maximum_position_notional=config.maximum_position_notional,
+                total_exposure_percent=config.total_exposure_pct,
+                single_symbol_exposure_percent=(
+                    config.single_symbol_exposure_pct
+                ),
+                scenario=scenario,
+                custom_sequence=tuple(custom),
+                **decimals,
+            )
+            result = run_simulation(value)
+        except (TypeError, ValueError):
+            self._error(
+                422,
+                "SIMULATION_INPUT_INVALID",
+                "Simulation inputs are inconsistent.",
+            )
+        return {
+            **result.to_dict(),
+            "runtimeMutated": False,
             "orderCreated": False,
         }
 
