@@ -160,6 +160,12 @@ export default function MoneyManagementRuntimeHistoryCard() {
                 riskUtilization: event.metrics?.riskUtilization ?? null,
             }))
     ), [events]);
+    const hasChartData = chartData.some((point) => (
+        point.equity !== null ||
+        point.drawdownPercent !== null ||
+        point.exposureUtilization !== null ||
+        point.riskUtilization !== null
+    ));
 
     return (
         <MoneyManagementCardShell
@@ -167,8 +173,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
             title="Runtime History"
         >
             <p className="mm-card__data-note">
-                Actual Paper/Runtime Money Management events. Simulation
-                projections are never included.
+                Runtime events only（実行イベントのみ）— Simulation excluded.
             </p>
             <div className="mm-action-row mm-history-toolbar">
                 <label className="mm-configuration-field mm-history-filter">
@@ -205,7 +210,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
                     </select>
                 </label>
                 <button disabled={loading} onClick={() => load()} type="button">
-                    Refresh
+                    Refresh（更新）
                 </button>
             </div>
             {error && <p className="mm-operation-notice mm-operation-notice--danger" role="alert">{error}</p>}
@@ -213,7 +218,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
                 <p className="mm-card__placeholder">Loading runtime history</p>
             ) : events.length === 0 ? (
                 <p className="mm-card__placeholder">
-                    No runtime history recorded yet.
+                    No runtime history yet（実行履歴データはまだありません）
                 </p>
             ) : (
                 <>
@@ -235,32 +240,34 @@ export default function MoneyManagementRuntimeHistoryCard() {
                     )}
                 </>
             )}
-            <div className="mm-history-charts">
-                <HistoryChart
-                    data={chartData}
-                    metric="equity"
-                    title="Capital / Equity History"
-                    unit=" USDT"
-                />
-                <HistoryChart
-                    data={chartData}
-                    metric="drawdownPercent"
-                    title="Drawdown History"
-                    unit="%"
-                />
-                <HistoryChart
-                    data={chartData}
-                    metric="exposureUtilization"
-                    title="Exposure Utilization History"
-                    unit="%"
-                />
-                <HistoryChart
-                    data={chartData}
-                    metric="riskUtilization"
-                    title="Risk Utilization History"
-                    unit="%"
-                />
-            </div>
+            {hasChartData && (
+                <div className="mm-history-charts">
+                    <HistoryChart
+                        data={chartData}
+                        metric="equity"
+                        title="Capital / Equity History"
+                        unit=" USDT"
+                    />
+                    <HistoryChart
+                        data={chartData}
+                        metric="drawdownPercent"
+                        title="Drawdown History"
+                        unit="%"
+                    />
+                    <HistoryChart
+                        data={chartData}
+                        metric="exposureUtilization"
+                        title="Exposure Utilization History"
+                        unit="%"
+                    />
+                    <HistoryChart
+                        data={chartData}
+                        metric="riskUtilization"
+                        title="Risk Utilization History"
+                        unit="%"
+                    />
+                </div>
+            )}
         </MoneyManagementCardShell>
     );
 }

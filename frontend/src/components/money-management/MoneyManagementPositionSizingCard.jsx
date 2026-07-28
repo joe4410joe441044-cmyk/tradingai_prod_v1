@@ -115,7 +115,7 @@ export default function MoneyManagementPositionSizingCard({ viewModel }) {
                 </dl>
             )}
             <p className="mm-card__data-note">
-                Preview only. No order is created or submitted.
+                Preview only（確認のみ）— No order is created.
             </p>
         </MoneyManagementCardShell>
     );

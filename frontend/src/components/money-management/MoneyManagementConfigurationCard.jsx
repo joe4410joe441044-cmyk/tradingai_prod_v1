@@ -88,6 +88,8 @@ export default function MoneyManagementConfigurationCard({
     const configuration = interaction.configuration;
     const editingDisabled =
         configuration.draftStatus === "SAVING CONFIGURATION";
+    const showDisabledReason = configuration.saveDisabledReason &&
+        !configuration.saveDisabledReason.includes("no unsaved changes");
 
     const change = (patch) => {
         setFeedback(null);
@@ -160,7 +162,7 @@ export default function MoneyManagementConfigurationCard({
                     Save Configuration
                 </button>
             </div>
-            {configuration.saveDisabledReason && (
+            {showDisabledReason && (
                 <p className="mm-disabled-reason">
                     {configuration.saveDisabledReason}
                 </p>

@@ -244,8 +244,8 @@ export default function MoneyManagementSimulationCard({ configuration }) {
                 </>
             )}
             <p className="mm-card__data-note">
-                Deterministic analysis only. Results are not runtime history
-                and do not modify configuration or create orders.
+                Deterministic preview only（決定論的な試算のみ）— No runtime
+                or order changes.
             </p>
         </MoneyManagementCardShell>
     );

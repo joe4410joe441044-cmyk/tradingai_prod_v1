@@ -39,7 +39,9 @@ test("responsive rules protect cards, inputs, values, and header controls", asyn
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /overflow-wrap: anywhere/);
   assert.match(styles, /min-width: 0/);
-  assert.match(styles, /min-height: 36px/);
+  assert.match(styles, /min-height: 34px/);
+  assert.match(styles, /--mm-card-gap/);
+  assert.match(styles, /align-items: start/);
   assert.match(styles, /grid-template-columns: minmax\(0, 1fr\)/);
 });
 

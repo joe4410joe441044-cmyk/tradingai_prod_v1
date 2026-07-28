@@ -4,14 +4,9 @@ import {
     MoneyManagementStatusBadge,
 } from "./MoneyManagementPrimitives";
 
-const cardNote = (viewModel) => (
-    viewModel.lastKnown ? "Last known value" : null
-);
-
 export function PerformanceCard({ viewModel }) {
     return (
         <MoneyManagementCardShell
-            dataNote={cardNote(viewModel)}
             loading={viewModel.state === "LOADING"}
             title="Performance"
         >
@@ -23,7 +18,6 @@ export function PerformanceCard({ viewModel }) {
 export function StatisticsCard({ viewModel }) {
     return (
         <MoneyManagementCardShell
-            dataNote={cardNote(viewModel)}
             loading={viewModel.state === "LOADING"}
             title="Statistics"
         >

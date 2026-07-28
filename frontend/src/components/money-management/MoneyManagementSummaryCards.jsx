@@ -4,18 +4,18 @@ import {
     MoneyManagementStatusBadge,
 } from "./MoneyManagementPrimitives";
 
-const cardNote = (viewModel) => (
-    viewModel.lastKnown ? "Last known value" : null
-);
-
 export function RuntimeSummaryCard({ viewModel }) {
+    const runtimeRows = viewModel.runtime
+        .filter((row) => row.label !== "Updated")
+        .map((row) => row.label === "Polling"
+            ? { ...row, label: "Status Polling" }
+            : row);
     return (
         <MoneyManagementCardShell
-            dataNote={cardNote(viewModel)}
             loading={viewModel.state === "LOADING"}
             title="Runtime"
         >
-            <MoneyManagementMetricRows rows={viewModel.runtime} />
+            <MoneyManagementMetricRows rows={runtimeRows} />
         </MoneyManagementCardShell>
     );
 }
@@ -40,7 +40,6 @@ export function RiskSummaryCard({ viewModel }) {
 export function ExposureSummaryCard({ viewModel }) {
     return (
         <MoneyManagementCardShell
-            dataNote={cardNote(viewModel)}
             loading={viewModel.state === "LOADING"}
             title="Exposure"
         >
@@ -52,7 +51,6 @@ export function ExposureSummaryCard({ viewModel }) {
 export function CapitalSummaryCard({ viewModel }) {
     return (
         <MoneyManagementCardShell
-            dataNote={cardNote(viewModel)}
             loading={viewModel.state === "LOADING"}
             title="Capital"
         >

@@ -48,7 +48,7 @@ test("position size preview is explicit and has no order action", async () => {
   assert.match(source, /quantityStep/);
   assert.match(source, /contractMultiplier/);
   assert.match(source, /Recommended Notional/);
-  assert.match(source, /Preview only\. No order is created or submitted\./);
+  assert.match(source, /Preview only（確認のみ）— No order is created\./);
   assert.doesNotMatch(source, /submitOrder|createOrder|placeOrder/);
   assert.doesNotMatch(
     source,
@@ -79,7 +79,10 @@ test("simulation renders deterministic inputs, summary, and two charts", async (
   }
   assert.match(source, /Not calculated/);
   assert.match(source, /No projection data/);
-  assert.match(source, /do not modify configuration or create orders/);
+  assert.match(
+    source,
+    /Deterministic preview only（決定論的な試算のみ）— No runtime\s+or order changes\./,
+  );
 });
 
 test("runtime history has filters, pagination, empty state, and four charts", async () => {
@@ -91,7 +94,7 @@ test("runtime history has filters, pagination, empty state, and four charts", as
     "Display Count",
     "Load More",
     "Refresh",
-    "No runtime history recorded yet.",
+    "No runtime history yet（実行履歴データはまだありません）",
     "Capital / Equity History",
     "Drawdown History",
     "Exposure Utilization History",
@@ -100,5 +103,9 @@ test("runtime history has filters, pagination, empty state, and four charts", as
     assert.match(source, new RegExp(label.replace(/[/.]/g, "\\$&")));
   }
   assert.match(source, /connectNulls=\{false\}/);
-  assert.match(source, /Simulation\s+projections are never included/);
+  assert.match(
+    source,
+    /Runtime events only（実行イベントのみ）— Simulation excluded\./,
+  );
+  assert.match(source, /hasChartData/);
 });

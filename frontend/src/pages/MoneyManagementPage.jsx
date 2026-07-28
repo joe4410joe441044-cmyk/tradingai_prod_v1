@@ -15,9 +15,6 @@ export default function MoneyManagementPage() {
     const viewModel = createMoneyManagementViewModel(moneyManagement);
     const interaction =
         createMoneyManagementInteractionViewModel(moneyManagement);
-    const bannerRole = viewModel.state === "UNAVAILABLE"
-        ? "alert"
-        : "status";
 
     return (
         <main className="mi-page mm-page">
@@ -27,13 +24,13 @@ export default function MoneyManagementPage() {
                 refresh={interaction.refresh}
             />
 
-            {viewModel.banner && (
+            {viewModel.banner && viewModel.state !== "UNAVAILABLE" && (
                 <p
                     className={[
                         "mm-page__state",
                         `mm-page__state--${viewModel.state.toLowerCase()}`,
                     ].join(" ")}
-                    role={bannerRole}
+                    role="status"
                 >
                     {viewModel.banner}
                 </p>

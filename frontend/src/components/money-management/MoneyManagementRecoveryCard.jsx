@@ -36,7 +36,9 @@ export default function MoneyManagementRecoveryCard({
                     <dt>Current Risk State</dt>
                     <dd>
                         {formatMoneyManagementOperationalText(
-                            recovery.currentRiskState,
+                            recovery.currentRiskState === "UNKNOWN"
+                                ? "—"
+                                : recovery.currentRiskState,
                         )}
                     </dd>
                 </div>
@@ -50,7 +52,11 @@ export default function MoneyManagementRecoveryCard({
                 </div>
                 <div className="mm-metric-row">
                     <dt>Recovery Preconditions</dt>
-                    <dd>{recovery.preconditions}</dd>
+                    <dd>
+                        {recovery.preconditions === "Not reported"
+                            ? "—"
+                            : recovery.preconditions}
+                    </dd>
                 </div>
             </dl>
             {recovery.errorCode === "RECOVERY_CONFLICT" ? (
@@ -131,11 +137,6 @@ export default function MoneyManagementRecoveryCard({
                         ? "RECOVERY IN PROGRESS"
                         : "Run Recovery Evaluation"}
                 </button>
-            )}
-            {recovery.disabledReason && (
-                <p className="mm-disabled-reason">
-                    {recovery.disabledReason}
-                </p>
             )}
         </MoneyManagementCardShell>
     );

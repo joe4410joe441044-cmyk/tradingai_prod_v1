@@ -11,7 +11,9 @@ export default function MoneyManagementRiskStateCard({ viewModel }) {
         {
             label: "Recommended Action",
             value: {
-                text: risk.recommendedAction,
+                text: risk.recommendedAction === "UNKNOWN"
+                    ? "—"
+                    : risk.recommendedAction,
                 unavailable: risk.recommendedAction === "UNKNOWN",
                 unit: null,
             },
@@ -38,14 +40,6 @@ export default function MoneyManagementRiskStateCard({ viewModel }) {
             value: {
                 text: risk.primaryReason,
                 unavailable: false,
-                unit: null,
-            },
-        },
-        {
-            label: "Status Updated",
-            value: {
-                text: risk.updated,
-                unavailable: risk.updated === "—",
                 unit: null,
             },
         },
