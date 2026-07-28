@@ -95,6 +95,10 @@ const DIAGNOSTIC_REASONS = new Set([
   "POSITION_STATE_UNAVAILABLE",
   "EXPOSURE_METRICS_INCOMPLETE",
   "RISK_UTILIZATION_UNAVAILABLE",
+  "RISK_LIMIT_UNAVAILABLE",
+  "CURRENT_POSITION_RISK_UNAVAILABLE",
+  "RESERVED_RISK_UNAVAILABLE",
+  "POSITION_SIZE_INPUT_INCOMPLETE",
 ]);
 
 export class MoneyManagementContractError extends TypeError {
@@ -263,6 +267,20 @@ export function normalizeMoneyManagementMetrics(raw) {
       "metrics.riskUtilization",
       true,
     ),
+    riskLimitAmount: decimal(value.riskLimitAmount, "metrics.riskLimitAmount", true),
+    currentRiskAmount: decimal(value.currentRiskAmount, "metrics.currentRiskAmount", true),
+    reservedRiskAmount: decimal(value.reservedRiskAmount, "metrics.reservedRiskAmount", true),
+    riskBudgetRemaining: decimal(value.riskBudgetRemaining, "metrics.riskBudgetRemaining", true),
+    recommendedPositionNotional: decimal(
+      value.recommendedPositionNotional,
+      "metrics.recommendedPositionNotional",
+      true,
+    ),
+    recommendedPositionQuantity: decimal(
+      value.recommendedPositionQuantity,
+      "metrics.recommendedPositionQuantity",
+      true,
+    ),
     metricsGeneratedAt: utcTimestamp(
       value.metricsGeneratedAt,
       "metrics.metricsGeneratedAt",
@@ -314,6 +332,18 @@ export function normalizeMoneyManagementConfiguration(raw) {
     totalExposurePercent: decimal(
       value.totalExposurePercent,
       "configuration.totalExposurePercent",
+    ),
+    riskPerTradePercent: decimal(
+      value.riskPerTradePercent,
+      "configuration.riskPerTradePercent",
+    ),
+    maximumPositionNotional: decimal(
+      value.maximumPositionNotional,
+      "configuration.maximumPositionNotional",
+    ),
+    singleSymbolExposurePercent: decimal(
+      value.singleSymbolExposurePercent,
+      "configuration.singleSymbolExposurePercent",
     ),
     revision: positiveInteger(
       value.revision,
@@ -533,6 +563,9 @@ export function configurationDraftFromAuthoritative(configuration) {
     monthlyBlockPercent: configuration.monthlyBlockPercent,
     maximumDrawdownPercent: configuration.maximumDrawdownPercent,
     totalExposurePercent: configuration.totalExposurePercent,
+    riskPerTradePercent: configuration.riskPerTradePercent,
+    maximumPositionNotional: configuration.maximumPositionNotional,
+    singleSymbolExposurePercent: configuration.singleSymbolExposurePercent,
   });
 }
 
@@ -545,6 +578,8 @@ const PERCENTAGE_FIELDS = Object.freeze([
   "monthlyBlockPercent",
   "maximumDrawdownPercent",
   "totalExposurePercent",
+  "riskPerTradePercent",
+  "singleSymbolExposurePercent",
 ]);
 
 export function validateMoneyManagementConfigurationDraft(
@@ -565,6 +600,18 @@ export function validateMoneyManagementConfigurationDraft(
     if (!isBackendPercentage(draft[field])) {
       errors[field] = "INVALID_PERCENTAGE";
     }
+  }
+  if (
+    !errors.riskPerTradePercent &&
+    compareDecimalStrings(draft.riskPerTradePercent, "1") > 0
+  ) {
+    errors.riskPerTradePercent = "RISK_PERCENT_EXCEEDS_MAXIMUM";
+  }
+  if (
+    !isStrictDecimalString(draft.maximumPositionNotional) ||
+    compareDecimalStrings(draft.maximumPositionNotional, "0") <= 0
+  ) {
+    errors.maximumPositionNotional = "INVALID_POSITIVE_DECIMAL";
   }
   for (const [warning, block] of [
     ["dailyWarningPercent", "dailyBlockPercent"],
@@ -641,6 +688,9 @@ export function buildMoneyManagementConfigurationPayload(
     monthlyBlockPercent: draft.monthlyBlockPercent,
     maximumDrawdownPercent: draft.maximumDrawdownPercent,
     totalExposurePercent: draft.totalExposurePercent,
+    riskPerTradePercent: draft.riskPerTradePercent,
+    maximumPositionNotional: draft.maximumPositionNotional,
+    singleSymbolExposurePercent: draft.singleSymbolExposurePercent,
     expectedRevision,
   });
 }

@@ -40,3 +40,18 @@ test("manual refresh control reports safe failure and disables duplicates", asyn
   assert.match(source, /Entry is blocked/);
   assert.match(source, /role="alert"/);
 });
+
+test("position size preview is explicit and has no order action", async () => {
+  const source = await readSource("MoneyManagementPositionSizingCard.jsx");
+  assert.match(source, /Calculate Position Size/);
+  assert.match(source, /effectiveCostPercent/);
+  assert.match(source, /quantityStep/);
+  assert.match(source, /contractMultiplier/);
+  assert.match(source, /Recommended Notional/);
+  assert.match(source, /Preview only\. No order is created or submitted\./);
+  assert.doesNotMatch(source, /submitOrder|createOrder|placeOrder/);
+  assert.doesNotMatch(
+    source,
+    /Number\(|parseFloat\(|parseInt\(|valueAsNumber|Math\.round\(/,
+  );
+});

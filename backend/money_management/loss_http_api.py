@@ -47,6 +47,11 @@ from .loss_runtime_update_dispatcher import (
     LossRuntimeDispatchStatus,
     LossRuntimeUpdateDispatcher,
 )
+from .position_risk import (
+    PositionSizingInput,
+    calculate_position_size,
+    calculate_risk_budget,
+)
 
 
 APPLICATION_STATE_ATTRIBUTE = "money_management_http_boundary"
@@ -135,6 +140,12 @@ class MoneyManagementMetricsResponse:
     exposure_utilization: Optional[Decimal]
     open_position_state: str
     risk_utilization: Optional[Decimal]
+    risk_limit_amount: Optional[Decimal]
+    current_risk_amount: Optional[Decimal]
+    reserved_risk_amount: Optional[Decimal]
+    risk_budget_remaining: Optional[Decimal]
+    recommended_position_notional: Optional[Decimal]
+    recommended_position_quantity: Optional[Decimal]
     generated_at: Optional[datetime]
 
     def to_dict(self):
@@ -156,6 +167,16 @@ class MoneyManagementMetricsResponse:
             "exposureUtilization": _serialize(self.exposure_utilization),
             "openPositionState": self.open_position_state,
             "riskUtilization": _serialize(self.risk_utilization),
+            "riskLimitAmount": _serialize(self.risk_limit_amount),
+            "currentRiskAmount": _serialize(self.current_risk_amount),
+            "reservedRiskAmount": _serialize(self.reserved_risk_amount),
+            "riskBudgetRemaining": _serialize(self.risk_budget_remaining),
+            "recommendedPositionNotional": _serialize(
+                self.recommended_position_notional
+            ),
+            "recommendedPositionQuantity": _serialize(
+                self.recommended_position_quantity
+            ),
             "metricsGeneratedAt": _serialize(self.generated_at),
         }
 
@@ -172,6 +193,9 @@ class MoneyManagementConfigurationResponse:
     monthly_block_percent: Decimal
     maximum_drawdown_percent: Decimal
     total_exposure_percent: Optional[Decimal]
+    risk_per_trade_percent: Optional[Decimal]
+    maximum_position_notional: Optional[Decimal]
+    single_symbol_exposure_percent: Optional[Decimal]
     revision: int
     source: str
     updated_at: datetime
@@ -191,6 +215,15 @@ class MoneyManagementConfigurationResponse:
             ),
             "totalExposurePercent": _serialize(
                 self.total_exposure_percent
+            ),
+            "riskPerTradePercent": _serialize(
+                self.risk_per_trade_percent
+            ),
+            "maximumPositionNotional": _serialize(
+                self.maximum_position_notional
+            ),
+            "singleSymbolExposurePercent": _serialize(
+                self.single_symbol_exposure_percent
             ),
             "revision": self.revision,
             "source": self.source,
@@ -302,10 +335,15 @@ _CONFIG_FIELDS = {
     "monthlyBlockPercent": "monthly_block_pct",
     "maximumDrawdownPercent": "maximum_drawdown_pct",
 }
-_BASE_CONFIG_FIELD = "totalExposurePercent"
+_BASE_CONFIG_FIELDS = {
+    "totalExposurePercent": "total_exposure_pct",
+    "riskPerTradePercent": "risk_per_trade_pct",
+    "maximumPositionNotional": "maximum_position_notional",
+    "singleSymbolExposurePercent": "single_symbol_exposure_pct",
+}
 _REQUEST_FIELDS = frozenset((
     *_CONFIG_FIELDS,
-    _BASE_CONFIG_FIELD,
+    *_BASE_CONFIG_FIELDS,
     "enabled",
     "expectedRevision",
 ))
@@ -322,6 +360,18 @@ def _strict_decimal(name, value):
         raise ValueError(f"{name} must be a valid decimal") from None
     if not result.is_finite() or result <= 0 or result > Decimal("100"):
         raise ValueError(f"{name} is outside the supported percentage range")
+    return result
+
+
+def _strict_positive_decimal(name, value):
+    if isinstance(value, bool) or not isinstance(value, (str, Decimal)):
+        raise ValueError(f"{name} must be a decimal string")
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(value.strip())
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{name} must be a valid decimal") from None
+    if not result.is_finite() or result <= 0:
+        raise ValueError(f"{name} must be positive")
     return result
 
 
@@ -439,6 +489,15 @@ class MoneyManagementHttpBoundary:
             base_config.total_exposure_pct
             if base_config is not None
             else None,
+            base_config.risk_per_trade_pct
+            if base_config is not None
+            else None,
+            base_config.maximum_position_notional
+            if base_config is not None
+            else None,
+            base_config.single_symbol_exposure_pct
+            if base_config is not None
+            else None,
             revision,
             source,
             updated_at,
@@ -454,8 +513,156 @@ class MoneyManagementHttpBoundary:
                 self._configuration_updated_at,
             )
 
+    def preview_position_size(self, payload):
+        if not isinstance(payload, Mapping):
+            self._error(
+                422,
+                "POSITION_SIZE_INPUT_INVALID",
+                "Position size request must be a JSON object.",
+            )
+        allowed = frozenset((
+            "entryPrice",
+            "stopLossPercent",
+            "effectiveCostPercent",
+            "riskPercent",
+            "quantityStep",
+            "contractMultiplier",
+            "symbol",
+        ))
+        if set(payload) - allowed:
+            self._error(
+                422,
+                "POSITION_SIZE_INPUT_INVALID",
+                "Position size request contains unsupported fields.",
+            )
+        symbol = payload.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            self._error(
+                422,
+                "POSITION_SIZE_INPUT_INVALID",
+                "Symbol is required.",
+            )
+        try:
+            entry_price = _strict_positive_decimal(
+                "entryPrice", payload.get("entryPrice")
+            )
+            stop_loss = _strict_decimal(
+                "stopLossPercent", payload.get("stopLossPercent")
+            )
+            effective_cost = _strict_positive_decimal(
+                "effectiveCostPercent",
+                payload.get("effectiveCostPercent"),
+            )
+            quantity_step = _strict_positive_decimal(
+                "quantityStep", payload.get("quantityStep")
+            )
+            contract_multiplier = _strict_positive_decimal(
+                "contractMultiplier", payload.get("contractMultiplier")
+            )
+        except ValueError:
+            self._error(
+                422,
+                "POSITION_SIZE_INPUT_INVALID",
+                "Position size inputs are invalid.",
+            )
+        config = (
+            self._base_config_provider.get_config()
+            if self._base_config_provider is not None
+            else None
+        )
+        dispatcher = self._dispatcher
+        metrics_result = (
+            dispatcher.get_last_metrics_result()
+            if dispatcher is not None
+            else None
+        )
+        metrics = (
+            metrics_result.metrics
+            if isinstance(metrics_result, LossRuntimeMetricsReadResult)
+            and isinstance(metrics_result.metrics, LossRuntimeMetrics)
+            else None
+        )
+        if config is None or metrics is None:
+            self._error(
+                503,
+                "POSITION_SIZE_INPUT_INCOMPLETE",
+                "Authoritative position size inputs are unavailable.",
+                True,
+            )
+        risk_percent = config.risk_per_trade_pct
+        if "riskPercent" in payload:
+            try:
+                risk_percent = _strict_decimal(
+                    "riskPercent", payload["riskPercent"]
+                )
+            except ValueError:
+                self._error(
+                    422,
+                    "POSITION_SIZE_INPUT_INVALID",
+                    "Risk percent is invalid.",
+                )
+        if risk_percent > config.risk_per_trade_pct:
+            self._error(
+                422,
+                "POSITION_SIZE_INPUT_INVALID",
+                "Risk percent exceeds active configuration.",
+            )
+        capital = metrics.available_balance
+        exposure = metrics.open_exposure
+        risk_budget = calculate_risk_budget(
+            capital,
+            config.risk_per_trade_pct,
+            Decimal("0") if metrics.position_count == 0 else None,
+            Decimal("0") if metrics.pending_order_count == 0 else None,
+        )
+        if (
+            capital is None
+            or exposure is None
+            or risk_budget.risk_budget_remaining is None
+        ):
+            self._error(
+                503,
+                "POSITION_SIZE_INPUT_INCOMPLETE",
+                "Authoritative capital or risk budget is unavailable.",
+                True,
+            )
+        total_limit = (
+            metrics.equity * config.total_exposure_pct / Decimal("100")
+            if metrics.equity is not None
+            else None
+        )
+        if total_limit is None:
+            self._error(
+                503,
+                "POSITION_SIZE_INPUT_INCOMPLETE",
+                "Authoritative exposure limit is unavailable.",
+                True,
+            )
+        result = calculate_position_size(PositionSizingInput(
+            entry_price=entry_price,
+            stop_loss_percent=stop_loss,
+            effective_cost_percent=effective_cost,
+            risk_percent=risk_percent,
+            risk_base_capital=capital,
+            maximum_position_notional=config.maximum_position_notional,
+            total_exposure_remaining=max(
+                total_limit - exposure, Decimal("0")
+            ),
+            available_capital=capital,
+            quantity_step=quantity_step,
+            contract_multiplier=contract_multiplier,
+            risk_budget_remaining=risk_budget.risk_budget_remaining,
+        ))
+        return {
+            **result.to_dict(),
+            "symbol": symbol.strip(),
+            "orderCreated": False,
+        }
+
     @staticmethod
-    def _metrics_response(result, exposure_limit=None):
+    def _metrics_response(
+        result, exposure_limit=None, risk_per_trade_percent=None
+    ):
         status = (
             result.status.value
             if isinstance(result, LossRuntimeMetricsReadResult)
@@ -491,6 +698,22 @@ class MoneyManagementHttpBoundary:
             and metrics.position_count > 0
             else "UNKNOWN"
         )
+        current_risk = (
+            Decimal("0")
+            if metrics is not None and metrics.position_count == 0
+            else None
+        )
+        reserved_risk = (
+            Decimal("0")
+            if metrics is not None and metrics.pending_order_count == 0
+            else None
+        )
+        risk_budget = calculate_risk_budget(
+            metrics.available_balance if metrics is not None else None,
+            risk_per_trade_percent,
+            current_risk,
+            reserved_risk,
+        )
         return MoneyManagementMetricsResponse(
             status,
             metrics.equity if metrics else None,
@@ -514,6 +737,12 @@ class MoneyManagementHttpBoundary:
             exposure_limit,
             exposure_utilization,
             open_position_state,
+            risk_budget.risk_utilization,
+            risk_budget.risk_limit_amount,
+            risk_budget.current_risk_amount,
+            risk_budget.reserved_risk_amount,
+            risk_budget.risk_budget_remaining,
+            None,
             None,
             metrics.captured_at if metrics else None,
         )
@@ -666,12 +895,35 @@ class MoneyManagementHttpBoundary:
             base_config.total_exposure_pct
             if base_config is not None
             else None,
+            base_config.risk_per_trade_pct
+            if base_config is not None
+            else None,
         )
         if metrics_response.exposure_utilization is None:
             diagnostics.append("EXPOSURE_METRICS_INCOMPLETE")
         if metrics_response.open_position_state == "UNKNOWN":
             diagnostics.append("POSITION_STATE_UNAVAILABLE")
-        diagnostics.append("RISK_UTILIZATION_UNAVAILABLE")
+        risk_budget = calculate_risk_budget(
+            metrics.available_balance
+            if isinstance(metrics, LossRuntimeMetrics)
+            else None,
+            base_config.risk_per_trade_pct
+            if base_config is not None
+            else None,
+            Decimal("0")
+            if isinstance(metrics, LossRuntimeMetrics)
+            and metrics.position_count == 0
+            else None,
+            Decimal("0")
+            if isinstance(metrics, LossRuntimeMetrics)
+            and metrics.pending_order_count == 0
+            else None,
+        )
+        diagnostics.extend(
+            reason for reason in risk_budget.diagnostics
+            if reason not in diagnostics
+        )
+        diagnostics.append("POSITION_SIZE_INPUT_INCOMPLETE")
         blocks = list(
             _values(decision.block_reasons) if decision is not None else ()
         )
@@ -770,19 +1022,30 @@ class MoneyManagementHttpBoundary:
                 "CONFIGURATION_INVALID",
                 "Configuration percentage is invalid.",
             )
-        base_update = None
-        if _BASE_CONFIG_FIELD in payload:
-            try:
-                base_update = _strict_decimal(
-                    _BASE_CONFIG_FIELD,
-                    payload[_BASE_CONFIG_FIELD],
-                )
-            except ValueError:
-                self._error(
-                    422,
-                    "CONFIGURATION_INVALID",
-                    "Configuration percentage is invalid.",
-                )
+        base_update = {}
+        try:
+            for external, internal in _BASE_CONFIG_FIELDS.items():
+                if external in payload:
+                    parser = (
+                        _strict_positive_decimal
+                        if external == "maximumPositionNotional"
+                        else _strict_decimal
+                    )
+                    base_update[internal] = parser(
+                        external, payload[external]
+                    )
+        except ValueError:
+            self._error(
+                422,
+                "CONFIGURATION_INVALID",
+                "Base configuration value is invalid.",
+            )
+        if base_update.get("risk_per_trade_pct", Decimal("0")) > Decimal("1"):
+            self._error(
+                422,
+                "CONFIGURATION_INVALID",
+                "Risk per trade must not exceed 1 percent.",
+            )
         return (
             expected,
             enabled if "enabled" in payload else None,
@@ -921,7 +1184,7 @@ class MoneyManagementHttpBoundary:
                 if self._base_config_provider is not None
                 else None
             )
-            if base_update is not None and current_base_config is None:
+            if base_update and current_base_config is None:
                 self._error(
                     503,
                     "MONEY_MANAGEMENT_NOT_REGISTERED",
@@ -930,11 +1193,8 @@ class MoneyManagementHttpBoundary:
                 )
             try:
                 base_candidate = (
-                    replace(
-                        current_base_config,
-                        total_exposure_pct=base_update,
-                    )
-                    if base_update is not None
+                    replace(current_base_config, **base_update)
+                    if base_update
                     else current_base_config
                 )
             except (TypeError, ValueError):
@@ -970,12 +1230,10 @@ class MoneyManagementHttpBoundary:
                 )
             self._configuration = candidate
             if (
-                base_update is not None
+                base_update
                 and self._base_config_provider is not None
             ):
-                self._base_config_provider.update_total_exposure_pct(
-                    base_update
-                )
+                self._base_config_provider.replace_config(base_candidate)
             self._enabled = target_enabled
             self._configuration_revision += 1
             revision = self._configuration_revision

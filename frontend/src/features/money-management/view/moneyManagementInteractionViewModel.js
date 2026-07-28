@@ -52,11 +52,28 @@ export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
     label: "Total Exposure Limit",
     type: "decimal",
   }),
+  Object.freeze({
+    key: "riskPerTradePercent",
+    label: "Risk Per Trade",
+    type: "decimal",
+  }),
+  Object.freeze({
+    key: "maximumPositionNotional",
+    label: "Maximum Position Notional",
+    type: "decimal",
+  }),
+  Object.freeze({
+    key: "singleSymbolExposurePercent",
+    label: "Single Symbol Exposure",
+    type: "decimal",
+  }),
 ]);
 
 const VALIDATION_MESSAGES = Object.freeze({
   INVALID_BOOLEAN: "A boolean value is required.",
   INVALID_PERCENTAGE: "Enter a decimal greater than 0 and at most 100.",
+  INVALID_POSITIVE_DECIMAL: "Enter a decimal greater than 0.",
+  RISK_PERCENT_EXCEEDS_MAXIMUM: "Risk per trade must not exceed 1%.",
   WARNING_MUST_BE_BELOW_BLOCK:
     "Warning must be below the corresponding block value.",
   DAILY_BLOCK_MUST_BE_BELOW_WEEKLY:

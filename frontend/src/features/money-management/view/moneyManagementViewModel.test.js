@@ -31,6 +31,12 @@ const status = (overrides = {}) => ({
     exposureUtilization: "12.5000",
     openPositionState: "OPEN",
     riskUtilization: null,
+    riskLimitAmount: "10.00",
+    currentRiskAmount: "4.00",
+    reservedRiskAmount: "1.00",
+    riskBudgetRemaining: "5.00",
+    recommendedPositionNotional: null,
+    recommendedPositionQuantity: null,
   },
   projectionStatus: "ALLOW",
   recommendedAction: "CONTINUE",
@@ -213,6 +219,10 @@ test("runtime metric values and unknowns use safe existing displays", () => {
   assert.equal(populated.exposure[2].value.text, "42.50");
   assert.equal(populated.exposure[3].value.text, "FLAT");
   assert.equal(populated.statistics[4].value.text, "37.25");
+  assert.equal(populated.riskSummary.rows[3].value.text, "10.00");
+  assert.equal(populated.riskSummary.rows[4].value.text, "4.00");
+  assert.equal(populated.riskSummary.rows[5].value.text, "1.00");
+  assert.equal(populated.riskSummary.rows[6].value.text, "5.00");
 
   const unknown = createMoneyManagementViewModel(readyInput({
     status: status({

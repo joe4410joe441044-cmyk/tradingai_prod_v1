@@ -169,6 +169,54 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["openPositionState"], "OPEN")
         self.assertIsNone(payload["metrics"]["riskUtilization"])
 
+    def test_flat_runtime_projects_authoritative_zero_risk_budget(self):
+        boundary, _, _, _, _ = ready_boundary(
+            runtime_metrics=metrics(pending_order_count=0)
+        )
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertEqual(payload["metrics"]["riskLimitAmount"], "4.50")
+        self.assertEqual(payload["metrics"]["currentRiskAmount"], "0")
+        self.assertEqual(payload["metrics"]["reservedRiskAmount"], "0")
+        self.assertEqual(payload["metrics"]["riskBudgetRemaining"], "4.50")
+        self.assertEqual(payload["metrics"]["riskUtilization"], "0")
+        self.assertNotIn(
+            "RISK_UTILIZATION_UNAVAILABLE",
+            payload["diagnosticReasons"],
+        )
+
+    def test_position_size_preview_is_read_only_and_uses_runtime_limits(self):
+        boundary, app, _, lifecycle, _ = ready_boundary(
+            runtime_metrics=metrics(pending_order_count=0)
+        )
+        before = lifecycle.snapshot
+
+        payload = boundary.preview_position_size({
+            "symbol": "XRPUSDTM",
+            "entryPrice": "0.50",
+            "stopLossPercent": "1.00",
+            "effectiveCostPercent": "0.20",
+            "riskPercent": "0.50",
+            "quantityStep": "0.001",
+            "contractMultiplier": "1",
+        })
+
+        self.assertTrue(payload["calculationAllowed"])
+        self.assertEqual(payload["riskAmount"], "4.50")
+        self.assertEqual(payload["finalPositionNotional"], "100")
+        self.assertEqual(payload["positionQuantity"], "200")
+        self.assertEqual(payload["appliedLimits"], [
+            "MAXIMUM_POSITION_NOTIONAL",
+        ])
+        self.assertFalse(payload["orderCreated"])
+        self.assertIs(lifecycle.snapshot, before)
+        self.assertEqual(
+            app.state.money_management.base_config_provider
+            .get_config().maximum_position_notional,
+            Decimal("100"),
+        )
+
     def test_incomplete_runtime_metrics_are_null_unknown(self):
         result = LossRuntimeMetricsReadResult(
             LossRuntimeMetricsReadStatus.PARTIAL,
@@ -412,6 +460,25 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
             boundary.get_configuration().to_dict()["dailyWarningPercent"],
             "1.00",
         )
+
+    def test_position_risk_configuration_fields_update_atomically(self):
+        boundary, app, _, _, _ = ready_boundary()
+
+        result = boundary.update_configuration({
+            "riskPerTradePercent": "0.40",
+            "maximumPositionNotional": "80",
+            "singleSymbolExposurePercent": "8",
+            "expectedRevision": 1,
+        })
+        config = app.state.money_management.base_config_provider.get_config()
+
+        self.assertEqual(config.risk_per_trade_pct, Decimal("0.40"))
+        self.assertEqual(config.maximum_position_notional, Decimal("80"))
+        self.assertEqual(config.single_symbol_exposure_pct, Decimal("8"))
+        rendered = result.configuration.to_dict()
+        self.assertEqual(rendered["riskPerTradePercent"], "0.40")
+        self.assertEqual(rendered["maximumPositionNotional"], "80")
+        self.assertEqual(rendered["singleSymbolExposurePercent"], "8")
 
     def test_invalid_update_never_partially_applies(self):
         boundary, _, _, _, _ = ready_boundary()

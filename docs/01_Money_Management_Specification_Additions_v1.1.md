@@ -228,6 +228,31 @@ requiredMargin = approvedNotional / leverage
 
 Invalid/missing equity, entry, stop, cost assumption, effective fraction, quantity step, minimum-order compliance, or any hard-limit breach produces zero approved size. Missing runtime data produces `INSUFFICIENT_DATA`.
 
+### Runtime risk budget and read-only preview
+
+The authoritative risk base is current `available_balance`; unknown capital
+must not fall back to equity. The active `risk_per_trade_pct` defines
+`riskLimitAmount = available_balance * risk_per_trade_pct / 100`.
+`totalUsedRisk = currentRiskAmount + reservedRiskAmount`,
+`riskBudgetRemaining = max(riskLimitAmount - totalUsedRisk, 0)`, and
+`riskUtilization = totalUsedRisk / riskLimitAmount * 100`.
+
+An empty position/order set authoritatively contributes zero. An open position
+without its protective stop, or pending orders without reserved-risk data,
+produce null current/reserved risk and explicit diagnostics; exposure or margin
+must never substitute for risk.
+
+`POST /api/money-management/position-size/preview` is a deterministic,
+read-only calculation boundary. It requires explicit entry price, stop-loss
+percent, effective round-trip cost percent, contract multiplier, quantity
+step, and symbol. Risk
+percent defaults to the active configuration and cannot exceed it. Final
+notional is capped by maximum position notional, remaining total exposure,
+available capital, and remaining risk budget. Quantity is rounded down to the
+explicit exchange contract multiplier and quantity step. The preview never creates, reserves, or
+submits an order. Runtime recommended size remains null when no authoritative
+entry/stop candidate exists.
+
 
 ## D19--D25: Consecutive Loss, Cooldown, and Recovery
 

@@ -6,6 +6,7 @@ import {
 } from "./MoneyManagementMetricsCards";
 import MoneyManagementRiskStateCard from "./MoneyManagementRiskStateCard";
 import MoneyManagementRecoveryCard from "./MoneyManagementRecoveryCard";
+import MoneyManagementPositionSizingCard from "./MoneyManagementPositionSizingCard";
 
 export default function MoneyManagementMainSection({
     interaction,
@@ -28,6 +29,7 @@ export default function MoneyManagementMainSection({
                     isRecovering={moneyManagement.isRecovering}
                     onRecover={moneyManagement.recover}
                 />
+                <MoneyManagementPositionSizingCard viewModel={viewModel} />
             </div>
             <div
                 aria-label="Performance and projection"

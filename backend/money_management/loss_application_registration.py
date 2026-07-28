@@ -49,6 +49,13 @@ class MoneyManagementConfigProvider:
             self.__config = candidate
             return candidate
 
+    def replace_config(self, config):
+        if not isinstance(config, MoneyManagementConfig):
+            raise TypeError("Money Management base configuration required")
+        with self.__lock:
+            self.__config = config
+            return config
+
 
 def build_default_money_management_config():
     return MoneyManagementConfig(

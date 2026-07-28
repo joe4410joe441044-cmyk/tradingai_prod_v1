@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   getMoneyManagementConfiguration,
   getMoneyManagementStatus,
+  previewMoneyManagementPositionSize,
   requestMoneyManagementRecovery,
   updateMoneyManagementConfiguration,
 } from "./moneyManagementApi.js";
@@ -23,10 +24,13 @@ function response(body, status = 200) {
   };
 }
 
-test("four API functions use the exact Money Management endpoints", async () => {
+test("five API functions use the exact Money Management endpoints", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
+    if (url.endsWith("/position-size/preview")) {
+      return response({ calculationAllowed: true });
+    }
     if (url.endsWith("/status")) return response(validStatus());
     if (url.endsWith("/recovery")) return response(validRecoveryResponse());
     if (options.method === "PUT") return response(validUpdateResponse());
@@ -44,6 +48,10 @@ test("four API functions use the exact Money Management endpoints", async () => 
     timeoutMs: null,
   });
   await requestMoneyManagementRecovery({ fetchImpl, timeoutMs: null });
+  await previewMoneyManagementPositionSize(
+    { entryPrice: "1.00" },
+    { fetchImpl, timeoutMs: null },
+  );
   assert.deepEqual(
     calls.map(({ url, options }) => [url, options.method]),
     [
@@ -51,6 +59,7 @@ test("four API functions use the exact Money Management endpoints", async () => 
       ["/api/money-management/configuration", "GET"],
       ["/api/money-management/configuration", "PUT"],
       ["/api/money-management/recovery", "POST"],
+      ["/api/money-management/position-size/preview", "POST"],
     ],
   );
   assert.equal(

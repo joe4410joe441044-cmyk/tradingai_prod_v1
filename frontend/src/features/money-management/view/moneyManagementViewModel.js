@@ -374,6 +374,22 @@ export function createMoneyManagementViewModel(input = {}) {
           variant: entryPermission.variant,
         }),
         row("Primary Reason", displayValue(primaryReason(reasons))),
+        row(
+          "Risk Limit",
+          displayDecimal(metrics?.riskLimitAmount, "USDT"),
+        ),
+        row(
+          "Current Risk",
+          displayDecimal(metrics?.currentRiskAmount, "USDT"),
+        ),
+        row(
+          "Reserved Risk",
+          displayDecimal(metrics?.reservedRiskAmount, "USDT"),
+        ),
+        row(
+          "Risk Budget Remaining",
+          displayDecimal(metrics?.riskBudgetRemaining, "USDT"),
+        ),
       ]),
     }),
     exposure: Object.freeze([
@@ -402,6 +418,16 @@ export function createMoneyManagementViewModel(input = {}) {
       ),
       row("Cash Flow", cashFlowState(reasons)),
       row("Capital State", capitalState(reasons)),
+    ]),
+    positionSizing: Object.freeze([
+      row(
+        "Recommended Notional",
+        displayDecimal(metrics?.recommendedPositionNotional, "USDT"),
+      ),
+      row(
+        "Recommended Quantity",
+        displayDecimal(metrics?.recommendedPositionQuantity),
+      ),
     ]),
     riskState: Object.freeze({
       state: Object.freeze({

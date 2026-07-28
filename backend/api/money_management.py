@@ -153,3 +153,34 @@ def recover_money_management(request: Request):
             "Money Management recovery failed.",
             True,
         )
+
+
+@router.post("/position-size/preview")
+async def preview_money_management_position_size(request: Request):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(
+            503,
+            "MONEY_MANAGEMENT_UNAVAILABLE",
+            "Money Management position size preview is unavailable.",
+            True,
+        )
+    try:
+        payload = await request.json()
+    except Exception:
+        return _safe_error(
+            400,
+            "POSITION_SIZE_INPUT_INVALID",
+            "Request body must contain valid JSON.",
+        )
+    try:
+        return boundary.preview_position_size(payload)
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(
+            503,
+            "INTERNAL_STATE_UNAVAILABLE",
+            "Money Management position size preview failed.",
+            True,
+        )

@@ -156,3 +156,12 @@ export function requestMoneyManagementRecovery(options = {}) {
     method: "POST",
   });
 }
+
+export function previewMoneyManagementPositionSize(payload, options = {}) {
+  return requestJson(API.moneyManagementPositionSizePreview(), {
+    ...options,
+    operation: "PREVIEW_POSITION_SIZE",
+    method: "POST",
+    payload,
+  });
+}

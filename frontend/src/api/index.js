@@ -101,6 +101,9 @@ export const API = {
   moneyManagementRecovery: () =>
     join("/money-management/recovery"),
 
+  moneyManagementPositionSizePreview: () =>
+    join("/money-management/position-size/preview"),
+
   // ==========================
   // PNL
   // ==========================
