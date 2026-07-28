@@ -74,10 +74,12 @@ class Clock:
             return self.value
 
 
-def ready_boundary(*, publish=True):
+def ready_boundary(*, publish=True, runtime_metrics=None):
     clock = Clock()
     lifecycle = Lifecycle()
-    dispatcher = LossRuntimeUpdateDispatcher(Source([metrics()]))
+    dispatcher = LossRuntimeUpdateDispatcher(
+        Source([runtime_metrics if runtime_metrics is not None else metrics()])
+    )
     app = app_with(lifecycle)
     app.state.money_management = replace(
         app.state.money_management,
@@ -125,6 +127,13 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["equity"], "1000")
         self.assertEqual(payload["metrics"]["availableCapital"], "900")
         self.assertEqual(payload["metrics"]["exposureLimit"], "20")
+        self.assertEqual(payload["metrics"]["exposureUtilization"], "0")
+        self.assertEqual(payload["metrics"]["openPositionState"], "FLAT")
+        self.assertIsNone(payload["metrics"]["riskUtilization"])
+        self.assertIn(
+            "RISK_UTILIZATION_UNAVAILABLE",
+            payload["diagnosticReasons"],
+        )
         self.assertEqual(payload["metrics"]["drawdownPercent"], "0")
         self.assertEqual(payload["revision"], 2)
         self.assertEqual(payload["sequence"], 2)
@@ -146,6 +155,40 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertIsNone(response.to_dict()["exposureLimit"])
         self.assertEqual(response.to_dict()["equity"], "1000")
 
+    def test_runtime_metrics_project_exposure_and_open_position_state(self):
+        boundary, _, _, _, _ = ready_boundary(
+            runtime_metrics=metrics(
+                open_exposure=Decimal("50"),
+                position_count=2,
+            )
+        )
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertEqual(payload["metrics"]["exposureUtilization"], "25.00")
+        self.assertEqual(payload["metrics"]["openPositionState"], "OPEN")
+        self.assertIsNone(payload["metrics"]["riskUtilization"])
+
+    def test_incomplete_runtime_metrics_are_null_unknown(self):
+        result = LossRuntimeMetricsReadResult(
+            LossRuntimeMetricsReadStatus.PARTIAL,
+            metrics(
+                open_exposure=None,
+                position_count=None,
+                data_quality=LossRuntimeDataQuality.PARTIAL,
+            ),
+            ("runtime metrics incomplete",),
+        )
+
+        response = MoneyManagementHttpBoundary._metrics_response(
+            result,
+            Decimal("20"),
+        )
+
+        self.assertIsNone(response.exposure_utilization)
+        self.assertEqual(response.open_position_state, "UNKNOWN")
+        self.assertIsNone(response.risk_utilization)
+
     def test_status_without_base_config_is_diagnostic_and_null(self):
         _, app, dispatcher, _, clock = ready_boundary()
         app.state.money_management = replace(
@@ -163,6 +206,10 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(status.safe_reason, "INTERNAL_STATE_UNAVAILABLE")
         self.assertIn(
             "INTERNAL_STATE_UNAVAILABLE",
+            status.diagnostic_reasons,
+        )
+        self.assertIn(
+            "EXPOSURE_METRICS_INCOMPLETE",
             status.diagnostic_reasons,
         )
         self.assertIsNone(status.to_dict()["metrics"]["exposureLimit"])
@@ -328,7 +375,9 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         self.assertTrue(result.status.execution_entry_allowed)
 
     def test_total_exposure_update_uses_same_provider_and_updates_status(self):
-        boundary, app, _, _, _ = ready_boundary()
+        boundary, app, _, _, _ = ready_boundary(
+            runtime_metrics=metrics(open_exposure=Decimal("50"))
+        )
         provider = app.state.money_management.base_config_provider
 
         result = boundary.update_configuration(
@@ -354,6 +403,10 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         self.assertEqual(
             result.status.to_dict()["metrics"]["exposureLimit"],
             "25.00",
+        )
+        self.assertEqual(
+            result.status.to_dict()["metrics"]["exposureUtilization"],
+            "20.0",
         )
         self.assertEqual(
             boundary.get_configuration().to_dict()["dailyWarningPercent"],

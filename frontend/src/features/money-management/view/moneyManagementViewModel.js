@@ -385,8 +385,14 @@ export function createMoneyManagementViewModel(input = {}) {
         "Exposure Limit",
         displayDecimal(metrics?.exposureLimit, "%"),
       ),
-      row("Exposure Utilization", unavailableValue()),
-      row("Open Position State", unavailableValue("Not reported")),
+      row(
+        "Exposure Utilization",
+        displayDecimal(metrics?.exposureUtilization, "%"),
+      ),
+      row(
+        "Open Position State",
+        displayValue(metrics?.openPositionState),
+      ),
     ]),
     capital: Object.freeze([
       row("Equity", displayDecimal(metrics?.equity, "USDT")),
@@ -430,7 +436,10 @@ export function createMoneyManagementViewModel(input = {}) {
       ),
       row("Loss Period", unavailableValue("Not reported")),
       row("Consecutive Losses", unavailableValue()),
-      row("Risk Utilization", unavailableValue()),
+      row(
+        "Risk Utilization",
+        displayDecimal(metrics?.riskUtilization, "%"),
+      ),
       row("Metric Quality", displayValue(metricQuality(metrics))),
     ]),
     projection: Object.freeze({

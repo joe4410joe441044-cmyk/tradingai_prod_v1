@@ -132,6 +132,9 @@ class MoneyManagementMetricsResponse:
     monthly_trade_count: Optional[int]
     open_exposure: Optional[Decimal]
     exposure_limit: Optional[Decimal]
+    exposure_utilization: Optional[Decimal]
+    open_position_state: str
+    risk_utilization: Optional[Decimal]
     generated_at: Optional[datetime]
 
     def to_dict(self):
@@ -150,6 +153,9 @@ class MoneyManagementMetricsResponse:
             "monthlyTradeCount": self.monthly_trade_count,
             "openExposure": _serialize(self.open_exposure),
             "exposureLimit": _serialize(self.exposure_limit),
+            "exposureUtilization": _serialize(self.exposure_utilization),
+            "openPositionState": self.open_position_state,
+            "riskUtilization": _serialize(self.risk_utilization),
             "metricsGeneratedAt": _serialize(self.generated_at),
         }
 
@@ -461,6 +467,30 @@ class MoneyManagementHttpBoundary:
             and isinstance(result.metrics, LossRuntimeMetrics)
             else None
         )
+        exposure_limit_amount = (
+            metrics.equity * exposure_limit / Decimal("100")
+            if metrics is not None
+            and metrics.equity is not None
+            and exposure_limit is not None
+            else None
+        )
+        exposure_utilization = (
+            metrics.open_exposure / exposure_limit_amount * Decimal("100")
+            if metrics is not None
+            and metrics.open_exposure is not None
+            and exposure_limit_amount is not None
+            and exposure_limit_amount > 0
+            else None
+        )
+        open_position_state = (
+            "FLAT"
+            if metrics is not None and metrics.position_count == 0
+            else "OPEN"
+            if metrics is not None
+            and metrics.position_count is not None
+            and metrics.position_count > 0
+            else "UNKNOWN"
+        )
         return MoneyManagementMetricsResponse(
             status,
             metrics.equity if metrics else None,
@@ -482,6 +512,9 @@ class MoneyManagementHttpBoundary:
             metrics.trade_count_monthly if metrics else None,
             metrics.open_exposure if metrics else None,
             exposure_limit,
+            exposure_utilization,
+            open_position_state,
+            None,
             metrics.captured_at if metrics else None,
         )
 
@@ -628,6 +661,17 @@ class MoneyManagementHttpBoundary:
         )
         if safe_reason is not None and safe_reason not in diagnostics:
             diagnostics.append(safe_reason)
+        metrics_response = self._metrics_response(
+            metrics_result,
+            base_config.total_exposure_pct
+            if base_config is not None
+            else None,
+        )
+        if metrics_response.exposure_utilization is None:
+            diagnostics.append("EXPOSURE_METRICS_INCOMPLETE")
+        if metrics_response.open_position_state == "UNKNOWN":
+            diagnostics.append("POSITION_STATE_UNAVAILABLE")
+        diagnostics.append("RISK_UTILIZATION_UNAVAILABLE")
         blocks = list(
             _values(decision.block_reasons) if decision is not None else ()
         )
@@ -673,12 +717,7 @@ class MoneyManagementHttpBoundary:
             if isinstance(public, LossGovernancePublicSnapshot)
             else None,
             config_revision,
-            self._metrics_response(
-                metrics_result,
-                base_config.total_exposure_pct
-                if base_config is not None
-                else None,
-            ),
+            metrics_response,
             configuration,
         )
 

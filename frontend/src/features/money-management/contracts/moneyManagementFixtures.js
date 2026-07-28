@@ -33,6 +33,9 @@ export function validMetrics(overrides = {}) {
     monthlyTradeCount: 8,
     openExposure: "200.00",
     exposureLimit: "25.00",
+    exposureUtilization: "80.00",
+    openPositionState: "OPEN",
+    riskUtilization: null,
     metricsGeneratedAt: "2026-07-26T12:00:00Z",
     ...overrides,
   };

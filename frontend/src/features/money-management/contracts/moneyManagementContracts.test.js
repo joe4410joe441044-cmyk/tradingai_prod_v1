@@ -32,6 +32,9 @@ test("valid status preserves Decimal strings, reason order, and revisions", () =
       equity: null,
       availableCapital: null,
       exposureLimit: null,
+      exposureUtilization: null,
+      openPositionState: "UNKNOWN",
+      riskUtilization: null,
     },
   });
   const status = normalizeMoneyManagementStatus(raw);
@@ -39,6 +42,9 @@ test("valid status preserves Decimal strings, reason order, and revisions", () =
   assert.equal(status.metrics.equity, null);
   assert.equal(status.metrics.availableCapital, null);
   assert.equal(status.metrics.exposureLimit, null);
+  assert.equal(status.metrics.exposureUtilization, null);
+  assert.equal(status.metrics.openPositionState, "UNKNOWN");
+  assert.equal(status.metrics.riskUtilization, null);
   assert.deepEqual(status.warningReasons, [
     "WEEKLY_LOSS_WARNING",
     "DAILY_LOSS_WARNING",

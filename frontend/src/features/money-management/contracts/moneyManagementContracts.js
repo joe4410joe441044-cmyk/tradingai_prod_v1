@@ -52,6 +52,14 @@ export const MONEY_MANAGEMENT_PROJECTION_STATUS = Object.freeze([
   "UNKNOWN",
 ]);
 
+export const MONEY_MANAGEMENT_OPEN_POSITION_STATE = Object.freeze([
+  "FLAT",
+  "OPEN",
+  "LONG",
+  "SHORT",
+  "UNKNOWN",
+]);
+
 const WARNING_REASONS = new Set([
   "DAILY_LOSS_WARNING",
   "WEEKLY_LOSS_WARNING",
@@ -84,6 +92,9 @@ const DIAGNOSTIC_REASONS = new Set([
   "MONEY_MANAGEMENT_UNAVAILABLE",
   "AUTHORITATIVE_METRICS_INCOMPLETE",
   "INTERNAL_STATE_UNAVAILABLE",
+  "POSITION_STATE_UNAVAILABLE",
+  "EXPOSURE_METRICS_INCOMPLETE",
+  "RISK_UTILIZATION_UNAVAILABLE",
 ]);
 
 export class MoneyManagementContractError extends TypeError {
@@ -234,6 +245,22 @@ export function normalizeMoneyManagementMetrics(raw) {
     exposureLimit: decimal(
       value.exposureLimit,
       "metrics.exposureLimit",
+      true,
+    ),
+    exposureUtilization: decimal(
+      value.exposureUtilization,
+      "metrics.exposureUtilization",
+      true,
+    ),
+    openPositionState: enumValue(
+      value.openPositionState,
+      MONEY_MANAGEMENT_OPEN_POSITION_STATE,
+      "openPositionState",
+      diagnostics,
+    ),
+    riskUtilization: decimal(
+      value.riskUtilization,
+      "metrics.riskUtilization",
       true,
     ),
     metricsGeneratedAt: utcTimestamp(

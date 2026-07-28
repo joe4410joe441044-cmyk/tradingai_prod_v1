@@ -28,6 +28,9 @@ const status = (overrides = {}) => ({
     monthlyPnl: "40.0000",
     openExposure: "0.00000001",
     exposureLimit: "25.0000",
+    exposureUtilization: "12.5000",
+    openPositionState: "OPEN",
+    riskUtilization: null,
   },
   projectionStatus: "ALLOW",
   recommendedAction: "CONTINUE",
@@ -167,12 +170,16 @@ test("actual Backend metrics are mapped without invented projections", () => {
   const model = createMoneyManagementViewModel(readyInput());
   assert.equal(model.exposure[1].value.text, "25.0000");
   assert.equal(model.exposure[1].value.unit, "%");
+  assert.equal(model.exposure[2].value.text, "12.5000");
+  assert.equal(model.exposure[2].value.unit, "%");
+  assert.equal(model.exposure[3].value.text, "OPEN");
   assert.equal(model.capital[0].value.text, "9007199254740993.123456789");
   assert.equal(model.capital[1].value.text, "8007199254740993.123456789");
   assert.equal(model.performance[0].value.text, "-1234.5000");
   assert.equal(model.performance[3].value.text, "0.00000001");
   assert.equal(model.statistics[1].value.text, "5.0000");
   assert.equal(model.statistics[2].value.text, "Not reported");
+  assert.equal(model.statistics[4].value.text, "—");
   assert.equal(model.projection.current.text, "ALLOW");
   assert.match(model.projection.description, /later phase/);
 });
@@ -190,6 +197,36 @@ test("unknown Exposure Limit remains unavailable", () => {
   assert.equal(model.exposure[1].value.text, "—");
   assert.equal(model.exposure[1].value.unavailable, true);
   assert.equal(model.exposure[1].value.unit, null);
+});
+
+test("runtime metric values and unknowns use safe existing displays", () => {
+  const populated = createMoneyManagementViewModel(readyInput({
+    status: status({
+      metrics: {
+        ...status().metrics,
+        exposureUtilization: "42.50",
+        openPositionState: "FLAT",
+        riskUtilization: "37.25",
+      },
+    }),
+  }));
+  assert.equal(populated.exposure[2].value.text, "42.50");
+  assert.equal(populated.exposure[3].value.text, "FLAT");
+  assert.equal(populated.statistics[4].value.text, "37.25");
+
+  const unknown = createMoneyManagementViewModel(readyInput({
+    status: status({
+      metrics: {
+        ...status().metrics,
+        exposureUtilization: null,
+        openPositionState: "UNKNOWN",
+        riskUtilization: null,
+      },
+    }),
+  }));
+  assert.equal(unknown.exposure[2].value.text, "—");
+  assert.equal(unknown.exposure[3].value.text, "UNKNOWN");
+  assert.equal(unknown.statistics[4].value.text, "—");
 });
 
 test("unknown Available Capital remains unavailable", () => {
