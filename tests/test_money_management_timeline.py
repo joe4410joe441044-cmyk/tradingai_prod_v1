@@ -172,6 +172,8 @@ class TimelineRecorderTests(unittest.TestCase):
             revision="9",
             open_exposure=Decimal("10"),
             position_count=1,
+            position_side="LONG",
+            current_risk_amount=Decimal("2"),
             pending_order_count=1,
         )
         self.recorder.record_runtime(
@@ -191,6 +193,15 @@ class TimelineRecorderTests(unittest.TestCase):
         self.assertIn("RISK_BUDGET_CHANGED", types)
         self.assertIn("POSITION_STATE_CHANGED", types)
         self.assertIn("DIAGNOSTIC_RAISED", types)
+        runtime_event = next(
+            event
+            for event in self.store.query(limit=100).events
+            if event.event_type
+            is MoneyManagementTimelineEventType.RUNTIME_METRICS_UPDATED
+            and event.metrics["openPositionState"] == "LONG"
+        )
+        self.assertEqual(runtime_event.metrics["currentRiskAmount"], "2")
+        self.assertIsNone(runtime_event.metrics["reservedRiskAmount"])
 
         self.recorder.record_runtime(base, self.config, "NORMAL")
         types = [

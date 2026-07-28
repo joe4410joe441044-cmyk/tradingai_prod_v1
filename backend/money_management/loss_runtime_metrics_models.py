@@ -104,6 +104,9 @@ class LossRuntimeMetrics:
     session_id: Optional[int] = None
     metrics_revision: Optional[int] = None
     data_quality: LossRuntimeDataQuality = LossRuntimeDataQuality.COMPLETE
+    position_side: Optional[str] = None
+    current_risk_amount: Optional[Decimal] = None
+    reserved_risk_amount: Optional[Decimal] = None
 
     def __post_init__(self):
         object.__setattr__(
@@ -127,6 +130,8 @@ class LossRuntimeMetrics:
             "peak_equity",
             "open_exposure",
             "margin_used",
+            "current_risk_amount",
+            "reserved_risk_amount",
         ):
             _decimal(name, getattr(self, name), optional=True, nonnegative=True)
         for name in (
@@ -167,6 +172,8 @@ class LossRuntimeMetrics:
         object.__setattr__(
             self, "source_state", _text("source_state", self.source_state)
         )
+        if self.position_side not in (None, "LONG", "SHORT", "OPEN"):
+            raise ValueError("position_side invalid")
         object.__setattr__(
             self,
             "cash_flow_state",

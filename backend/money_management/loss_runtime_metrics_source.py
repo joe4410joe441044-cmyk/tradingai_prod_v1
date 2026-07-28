@@ -123,6 +123,13 @@ def _normalize(raw):
         session_id=_count(raw, "sessionId"),
         metrics_revision=_count(raw, "metricsRevision"),
         data_quality=quality,
+        position_side=raw.get("positionSide"),
+        current_risk_amount=_decimal(
+            raw, "currentRiskAmount", nonnegative=True
+        ),
+        reserved_risk_amount=_decimal(
+            raw, "reservedRiskAmount", nonnegative=True
+        ),
     )
     if missing:
         return metrics, LossRuntimeMetricsReadStatus.PARTIAL, "required runtime metrics missing"

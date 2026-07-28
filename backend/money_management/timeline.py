@@ -398,8 +398,16 @@ def timeline_metrics(metrics, config):
         if metrics.open_exposure is not None
         and exposure_limit is not None and exposure_limit > 0 else None
     )
-    current = Decimal("0") if metrics.position_count == 0 else None
-    reserved = Decimal("0") if metrics.pending_order_count == 0 else None
+    current = (
+        Decimal("0")
+        if metrics.position_count == 0
+        else metrics.current_risk_amount
+    )
+    reserved = (
+        Decimal("0")
+        if metrics.pending_order_count == 0
+        else metrics.reserved_risk_amount
+    )
     risk = calculate_risk_budget(
         metrics.available_balance,
         config.risk_per_trade_pct
@@ -419,7 +427,14 @@ def timeline_metrics(metrics, config):
         "positionCount": metrics.position_count,
         "openPositionState": (
             "FLAT" if metrics.position_count == 0
-            else "OPEN" if metrics.position_count is not None else "UNKNOWN"
+            else metrics.position_side
+            if metrics.position_count is not None
+            and metrics.position_count > 0
+            and metrics.position_side in ("LONG", "SHORT", "OPEN")
+            else "OPEN"
+            if metrics.position_count is not None
+            and metrics.position_count > 0
+            else "UNKNOWN"
         ),
         "riskLimitAmount": risk.risk_limit_amount,
         "currentRiskAmount": risk.current_risk_amount,

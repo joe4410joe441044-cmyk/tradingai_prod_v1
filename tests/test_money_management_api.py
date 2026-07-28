@@ -174,6 +174,29 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["openPositionState"], "OPEN")
         self.assertIsNone(payload["metrics"]["riskUtilization"])
 
+    def test_runtime_projects_position_side_and_protective_stop_risk(self):
+        boundary, _, _, _, _ = ready_boundary(
+            runtime_metrics=metrics(
+                open_exposure=Decimal("24"),
+                position_count=1,
+                position_side="LONG",
+                current_risk_amount=Decimal("2"),
+                pending_order_count=0,
+                reserved_risk_amount=Decimal("0"),
+            )
+        )
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertEqual(payload["metrics"]["openPositionState"], "LONG")
+        self.assertEqual(payload["metrics"]["currentRiskAmount"], "2")
+        self.assertEqual(payload["metrics"]["reservedRiskAmount"], "0")
+        self.assertEqual(payload["metrics"]["riskBudgetRemaining"], "2.50")
+        self.assertEqual(
+            payload["metrics"]["riskUtilization"],
+            "44.44444444444444444444444444",
+        )
+
     def test_flat_runtime_projects_authoritative_zero_risk_budget(self):
         boundary, _, _, _, _ = ready_boundary(
             runtime_metrics=metrics(pending_order_count=0)

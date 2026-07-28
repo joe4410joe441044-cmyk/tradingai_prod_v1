@@ -357,6 +357,46 @@ Before production deployment, the frontend is built only to a temporary
 directory and previewed on loopback; production `frontend/dist`, systemd,
 Nginx, and running services remain unchanged.
 
+### Runtime authority integration
+
+Money Management consumes runtime observations through the scalar-only,
+read-only boundary
+`ExecutionEngine -> BotManager.get_runtime_metrics_snapshot() ->
+BotManagerLossRuntimeMetricsSource`. It never retains an Execution object and
+does not invoke order, strategy, emergency, or state-transition methods.
+
+The account authority supplies balance, equity, available balance, realized
+and unrealized PnL. The Bot Manager accumulator supplies UTC period PnL/trade
+counts and high-water-mark drawdown. The Execution Engine's confirmed
+`actual_position` supplies side, quantity, mark notional, entry price, and the
+active `sl` value. A single BUY/LONG position maps to LONG and a single
+SELL/SHORT position maps to SHORT; no position maps to FLAT. Multiple or
+unrecognized confirmed positions map to OPEN, never to a guessed direction.
+
+Current position risk is calculated only when the confirmed position has a
+recognized side, positive entry price and quantity, and a positive protective
+stop on the loss side of entry. It is the absolute entry-to-stop distance
+multiplied by absolute coin quantity. Missing, malformed, or directionally
+invalid stop data keeps current risk null.
+
+Pending-order authority currently proves only whether a pending order exists.
+No immutable pending-order quantity, entry, and protective-stop reservation
+contract exists. Therefore no pending order proves reserved risk zero, while
+an existing or unknown pending order keeps reserved risk null. Creating a
+reserved-risk amount from the configured risk percentage or intended order
+size is prohibited.
+
+Runtime History records applied runtime observations and derives
+POSITION_STATE_CHANGED, EXPOSURE_STATE_CHANGED, RISK_BUDGET_CHANGED,
+LOSS_STATE_CHANGED, lock/unlock, and diagnostic transitions. Configuration
+and recovery changes use their dedicated event types. Simulation and GET
+requests never create history events.
+
+Runtime activation remains an explicit operations decision through the
+existing strict Money Management settings and persistence boundary. This
+integration does not enable LIVE, start Paper execution, or change Execution,
+Strategy, Emergency, or Simulation state.
+
 
 ## D19--D25: Consecutive Loss, Cooldown, and Recovery
 

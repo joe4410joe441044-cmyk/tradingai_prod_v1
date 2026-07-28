@@ -403,6 +403,58 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         )
         self.assertEqual(snapshot.open_exposure, D("50"))
         self.assertEqual(snapshot.position_count, 2)
+        self.assertEqual(snapshot.position_side, "OPEN")
+
+    def test_paper_position_side_and_protective_stop_are_authoritative(self):
+        long = observe(
+            self.new_state(),
+            position={
+                "side": "BUY",
+                "coin_qty": D("2"),
+                "entry_price": D("10"),
+                "sl": D("9"),
+            },
+            mark_price=D("12"),
+        )
+        self.assertEqual(long.position_side, "LONG")
+        self.assertEqual(long.current_risk_amount, D("2"))
+
+        short = observe(
+            self.new_state(),
+            position={
+                "side": "SELL",
+                "qty": D("3"),
+                "multiplier": D("2"),
+                "entry_price": D("10"),
+                "sl": D("11.5"),
+            },
+            mark_price=D("8"),
+        )
+        self.assertEqual(short.position_side, "SHORT")
+        self.assertEqual(short.current_risk_amount, D("9.0"))
+
+    def test_position_without_valid_protective_stop_keeps_risk_unknown(self):
+        for position in (
+            {
+                "side": "BUY",
+                "coin_qty": D("2"),
+                "entry_price": D("10"),
+            },
+            {
+                "side": "BUY",
+                "coin_qty": D("2"),
+                "entry_price": D("10"),
+                "sl": D("11"),
+            },
+        ):
+            with self.subTest(position=position):
+                snapshot = observe(
+                    self.new_state(),
+                    position=position,
+                    mark_price=D("12"),
+                )
+                self.assertEqual(snapshot.position_side, "LONG")
+                self.assertIsNone(snapshot.current_risk_amount)
 
     def test_unknown_mark_does_not_fallback_to_entry_price(self):
         snapshot = observe(

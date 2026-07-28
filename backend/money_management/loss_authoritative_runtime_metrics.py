@@ -96,6 +96,8 @@ class AuthoritativeLossRuntimeMetrics:
     source_state: str
     available: bool
     observation_valid: bool
+    position_side: Optional[str] = None
+    current_risk_amount: Optional[Decimal] = None
 
     def __post_init__(self):
         for name in (
@@ -105,6 +107,7 @@ class AuthoritativeLossRuntimeMetrics:
             "peak_equity",
             "current_drawdown_amount",
             "open_exposure",
+            "current_risk_amount",
         ):
             _decimal(name, getattr(self, name), optional=True, nonnegative=True)
         for name in (
@@ -140,6 +143,8 @@ class AuthoritativeLossRuntimeMetrics:
             raise ValueError("source_state required")
         if type(self.available) is not bool or type(self.observation_valid) is not bool:
             raise TypeError("availability flags must be bool")
+        if self.position_side not in (None, "LONG", "SHORT", "OPEN"):
+            raise ValueError("position_side invalid")
 
     def to_dict(self):
         return {
@@ -200,6 +205,13 @@ class AuthoritativeLossRuntimeMetrics:
             "tradeCountWeekly": self.trade_count_weekly,
             "tradeCountMonthly": self.trade_count_monthly,
             "pendingOrderCount": pending_order_count,
+            "positionSide": self.position_side,
+            "currentRiskAmount": self.current_risk_amount,
+            # The existing pending-order authority is boolean-only. Absence
+            # proves zero reserved risk; presence does not prove an amount.
+            "reservedRiskAmount": (
+                Decimal("0") if pending_order_count == 0 else None
+            ),
             "marginUsed": None,
             "cashFlowState": None,
             "runtimeInstanceId": self.runtime_instance_id,
@@ -243,6 +255,8 @@ class AuthoritativeLossRuntimeMetricsState:
         self._monthly_key = None
         self._open_exposure = None
         self._position_count = None
+        self._position_side = None
+        self._current_risk_amount = None
         self._seen_close_events = set()
 
     @staticmethod
@@ -318,11 +332,14 @@ class AuthoritativeLossRuntimeMetricsState:
     @staticmethod
     def _position_metrics(position, mark_price):
         if position is None:
-            return Decimal("0"), 0
+            return Decimal("0"), 0, None, Decimal("0")
         positions = position if isinstance(position, (list, tuple)) else (position,)
         if not positions or any(not isinstance(item, dict) for item in positions):
-            return None, None
+            return None, None, None, None
         total = Decimal("0")
+        total_risk = Decimal("0")
+        sides = set()
+        risk_available = True
         for item in positions:
             item_mark = (
                 mark_price
@@ -331,7 +348,7 @@ class AuthoritativeLossRuntimeMetricsState:
             )
             mark = _runtime_decimal(item_mark, nonnegative=True)
             if mark is None or mark <= 0:
-                return None, len(positions)
+                return None, len(positions), None, None
             quantity = _runtime_decimal(item.get("coin_qty"))
             if quantity is None:
                 contracts = _runtime_decimal(item.get("qty"))
@@ -339,10 +356,58 @@ class AuthoritativeLossRuntimeMetricsState:
                     item.get("multiplier"), nonnegative=True
                 )
                 if contracts is None or multiplier is None:
-                    return None, len(positions)
+                    return None, len(positions), None, None
                 quantity = contracts * multiplier
-            total += abs(quantity * mark)
-        return total, len(positions)
+            quantity = abs(quantity)
+            total += quantity * mark
+            raw_side = str(item.get("side", "") or "").strip().upper()
+            side = (
+                "LONG" if raw_side in ("BUY", "LONG")
+                else "SHORT" if raw_side in ("SELL", "SHORT")
+                else None
+            )
+            if side is not None:
+                sides.add(side)
+            entry = _runtime_decimal(
+                item.get("entry_price", item.get("entryPrice")),
+                nonnegative=True,
+            )
+            stop = _runtime_decimal(
+                item.get(
+                    "sl",
+                    item.get(
+                        "stop_loss",
+                        item.get("stopLoss", item.get("stop_loss_price")),
+                    ),
+                ),
+                nonnegative=True,
+            )
+            protective = bool(
+                entry is not None
+                and entry > 0
+                and stop is not None
+                and stop > 0
+                and side is not None
+                and (
+                    (side == "LONG" and stop < entry)
+                    or (side == "SHORT" and stop > entry)
+                )
+            )
+            if protective:
+                total_risk += abs(entry - stop) * quantity
+            else:
+                risk_available = False
+        position_side = (
+            next(iter(sides))
+            if len(sides) == 1 and len(positions) == 1
+            else "OPEN"
+        )
+        return (
+            total,
+            len(positions),
+            position_side,
+            total_risk if risk_available else None,
+        )
 
     def observe(
         self,
@@ -393,9 +458,12 @@ class AuthoritativeLossRuntimeMetricsState:
             self._available_balance = normalized_available
             self._realized_pnl = normalized_realized
             self._unrealized_pnl = normalized_unrealized
-            self._open_exposure, self._position_count = self._position_metrics(
-                position, mark_price
-            )
+            (
+                self._open_exposure,
+                self._position_count,
+                self._position_side,
+                self._current_risk_amount,
+            ) = self._position_metrics(position, mark_price)
             engine_peak = _runtime_decimal(
                 engine_peak_equity, nonnegative=True
             )
@@ -489,6 +557,8 @@ class AuthoritativeLossRuntimeMetricsState:
             self._source_state,
             self._source_state == "RUNNING" and self._observed,
             self._observation_valid,
+            self._position_side,
+            self._current_risk_amount,
         )
 
     def snapshot(self):

@@ -873,6 +873,11 @@ class MoneyManagementHttpBoundary:
         open_position_state = (
             "FLAT"
             if metrics is not None and metrics.position_count == 0
+            else metrics.position_side
+            if metrics is not None
+            and metrics.position_count is not None
+            and metrics.position_count > 0
+            and metrics.position_side in ("LONG", "SHORT", "OPEN")
             else "OPEN"
             if metrics is not None
             and metrics.position_count is not None
@@ -882,11 +887,15 @@ class MoneyManagementHttpBoundary:
         current_risk = (
             Decimal("0")
             if metrics is not None and metrics.position_count == 0
+            else metrics.current_risk_amount
+            if metrics is not None
             else None
         )
         reserved_risk = (
             Decimal("0")
             if metrics is not None and metrics.pending_order_count == 0
+            else metrics.reserved_risk_amount
+            if metrics is not None
             else None
         )
         risk_budget = calculate_risk_budget(
