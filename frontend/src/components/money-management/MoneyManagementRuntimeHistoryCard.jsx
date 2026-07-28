@@ -171,8 +171,8 @@ export default function MoneyManagementRuntimeHistoryCard() {
                 projections are never included.
             </p>
             <div className="mm-action-row">
-                <label>
-                    Event Type
+                <label className="mm-configuration-field mm-history-filter">
+                    <span>Event Type</span>
                     <select
                         onChange={(event) => setEventType(event.target.value)}
                         value={eventType}
@@ -184,8 +184,8 @@ export default function MoneyManagementRuntimeHistoryCard() {
                         ))}
                     </select>
                 </label>
-                <label>
-                    State
+                <label className="mm-configuration-field mm-history-filter">
+                    <span>State</span>
                     <input
                         onChange={(event) => setState(event.target.value)}
                         placeholder="All states"
@@ -193,8 +193,8 @@ export default function MoneyManagementRuntimeHistoryCard() {
                         value={state}
                     />
                 </label>
-                <label>
-                    Display Count
+                <label className="mm-configuration-field mm-history-filter">
+                    <span>Display Count</span>
                     <select
                         onChange={(event) => setLimit(event.target.value)}
                         value={limit}
@@ -208,7 +208,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
                     Refresh
                 </button>
             </div>
-            {error && <p role="alert">{error}</p>}
+            {error && <p className="mm-operation-notice mm-operation-notice--danger" role="alert">{error}</p>}
             {loading && events.length === 0 ? (
                 <p className="mm-card__placeholder">Loading runtime history</p>
             ) : events.length === 0 ? (
@@ -223,13 +223,15 @@ export default function MoneyManagementRuntimeHistoryCard() {
                         ))}
                     </ol>
                     {hasMore && (
-                        <button
-                            disabled={loading}
-                            onClick={() => load({ append: true })}
-                            type="button"
-                        >
-                            Load More
-                        </button>
+                        <div className="mm-action-row">
+                            <button
+                                disabled={loading}
+                                onClick={() => load({ append: true })}
+                                type="button"
+                            >
+                                Load More
+                            </button>
+                        </div>
                     )}
                 </>
             )}

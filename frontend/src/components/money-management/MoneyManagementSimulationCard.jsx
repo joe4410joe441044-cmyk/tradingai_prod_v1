@@ -135,7 +135,7 @@ export default function MoneyManagementSimulationCard({ configuration }) {
             className="mm-card--simulation"
             title="Simulation"
         >
-            <form onSubmit={run}>
+            <form className="mm-interaction-form" onSubmit={run}>
                 <div className="mm-configuration-fields">
                     {fields.map(([key, label]) => (
                         <label className="mm-configuration-field" key={key}>
@@ -202,11 +202,13 @@ export default function MoneyManagementSimulationCard({ configuration }) {
                         </label>
                     )}
                 </div>
-                <button disabled={loading} type="submit">
-                    {loading ? "Simulating" : "Run Simulation"}
-                </button>
+                <div className="mm-action-row">
+                    <button disabled={loading} type="submit">
+                        {loading ? "Simulating" : "Run Simulation"}
+                    </button>
+                </div>
             </form>
-            {error && <p role="alert">{error}</p>}
+            {error && <p className="mm-operation-notice mm-operation-notice--danger" role="alert">{error}</p>}
             {!summary ? (
                 <p className="mm-card__placeholder">Not calculated</p>
             ) : (

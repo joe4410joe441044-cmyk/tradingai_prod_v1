@@ -13,6 +13,16 @@ const initialDraft = Object.freeze({
     contractMultiplier: "",
 });
 
+const fields = [
+    ["symbol", "Symbol"],
+    ["entryPrice", "Entry Price"],
+    ["stopLossPercent", "Stop Loss"],
+    ["effectiveCostPercent", "Fees + Slippage"],
+    ["riskPercent", "Risk"],
+    ["quantityStep", "Quantity Step"],
+    ["contractMultiplier", "Contract Multiplier"],
+];
+
 export default function MoneyManagementPositionSizingCard({ viewModel }) {
     const [draft, setDraft] = useState(initialDraft);
     const [result, setResult] = useState(null);
@@ -46,28 +56,32 @@ export default function MoneyManagementPositionSizingCard({ viewModel }) {
                     </div>
                 ))}
             </dl>
-            <form onSubmit={calculate}>
-                {Object.keys(initialDraft).map((key) => (
-                    <label className="mm-configuration-field" key={key}>
-                        <span>{key}</span>
-                        <input
-                            autoComplete="off"
-                            inputMode={key === "symbol" ? "text" : "decimal"}
-                            onChange={(event) => setDraft({
-                                ...draft,
-                                [key]: event.target.value,
-                            })}
-                            required
-                            type="text"
-                            value={draft[key]}
-                        />
-                    </label>
-                ))}
-                <button disabled={loading} type="submit">
-                    {loading ? "Calculating" : "Calculate Position Size"}
-                </button>
+            <form className="mm-interaction-form" onSubmit={calculate}>
+                <div className="mm-configuration-fields">
+                    {fields.map(([key, label]) => (
+                        <label className="mm-configuration-field" key={key}>
+                            <span>{label}</span>
+                            <input
+                                autoComplete="off"
+                                inputMode={key === "symbol" ? "text" : "decimal"}
+                                onChange={(event) => setDraft({
+                                    ...draft,
+                                    [key]: event.target.value,
+                                })}
+                                required
+                                type="text"
+                                value={draft[key]}
+                            />
+                        </label>
+                    ))}
+                </div>
+                <div className="mm-action-row">
+                    <button disabled={loading} type="submit">
+                        {loading ? "Calculating" : "Calculate Position Size"}
+                    </button>
+                </div>
             </form>
-            {error && <p role="alert">{error}</p>}
+            {error && <p className="mm-operation-notice mm-operation-notice--danger" role="alert">{error}</p>}
             {result && (
                 <dl aria-live="polite" className="mm-metric-list">
                     <div className="mm-metric-row">

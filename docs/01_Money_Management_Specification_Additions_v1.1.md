@@ -326,6 +326,37 @@ empty array. Frontend analysis charts use at most 500 fetched points and render
 equity, drawdown, exposure utilization, and risk utilization with null values
 as gaps. State-transition markers remain distinct from Simulation charts.
 
+### Final integrated implementation and deployment boundary
+
+The implemented HTTP surface is `GET /status`, `GET /configuration`,
+`PUT /configuration`, `POST /recovery`, `POST /position-size/preview`,
+`POST /simulation`, and `GET /history`, all below
+`/api/money-management`. Decimal values remain strings, unavailable runtime
+values remain null, and unsupported states fail closed as `UNKNOWN`.
+
+`MoneyManagementConfigProvider` owns the application-scoped base
+configuration; `LossLimitConfig` remains limited to loss thresholds.
+`LossRuntimeMetrics` and authoritative position/order snapshots supply runtime
+facts. Position sizing is deterministic and read-only. Simulation is a
+separate hypothetical boundary and cannot mutate runtime or Timeline.
+Timeline/history contains only confirmed runtime and configuration changes.
+
+Protective-stop data and reserved-risk data are not currently guaranteed by
+the runtime contract. When either authority is missing, current or reserved
+risk, remaining budget, and utilization stay null as applicable, the UI shows
+an em dash, and diagnostics describe the missing authority. Exposure or
+position notional is never substituted. Future work must extend the
+position/order runtime contracts; this implementation does not alter the
+Execution Engine or order flow.
+
+The Money Management page includes status, editable configuration with
+revision control, recovery evaluation, position-size preview, deterministic
+simulation, runtime Timeline/history, and four runtime charts. Loading, error,
+empty, and unknown states use the shared TradingAI console design system.
+Before production deployment, the frontend is built only to a temporary
+directory and previewed on loopback; production `frontend/dist`, systemd,
+Nginx, and running services remain unchanged.
+
 
 ## D19--D25: Consecutive Loss, Cooldown, and Recovery
 
