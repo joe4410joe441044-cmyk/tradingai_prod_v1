@@ -21,8 +21,8 @@ const textOf = (node) => {
     return textOf(node.props?.children);
 };
 
-test("Money Management shell defines the complete 13-card layout", () => {
-    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 13);
+test("Money Management shell defines the complete 17-card layout", () => {
+    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 17);
     assert.deepEqual(MONEY_MANAGEMENT_CARD_TITLES, [
         "Runtime",
         "Risk",
@@ -34,19 +34,24 @@ test("Money Management shell defines the complete 13-card layout", () => {
         "Performance",
         "Statistics",
         "Projection",
+        "Equity Curve",
+        "Cumulative Realized P&L",
+        "Drawdown",
+        "Risk / Exposure",
         "Timeline",
         "History",
         "Future Chart",
     ]);
-    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 13);
+    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 17);
 });
 
-test("page composes Header, Summary, Main, Bottom, and the data hook", async () => {
+test("page composes Header, Summary, Main, Analytics, Bottom, and the data hook", async () => {
     const source = await readSource("./MoneyManagementPage.jsx");
     for (const expected of [
         "MoneyManagementHeader",
         "MoneyManagementSummarySection",
         "MoneyManagementMainSection",
+        "MoneyManagementAnalyticsSection",
         "MoneyManagementBottomSection",
         "useMoneyManagement",
         "createMoneyManagementViewModel",
@@ -57,7 +62,7 @@ test("page composes Header, Summary, Main, Bottom, and the data hook", async () 
     assert.doesNotMatch(source, /console\.|canvas|<svg|<table|<form/iu);
 });
 
-test("page render keeps Header, Summary, Main, and Bottom order", async (context) => {
+test("page render keeps Header, Summary, Main, Analytics, and Bottom order", async (context) => {
     let transformWithOxc;
     try {
         ({ transformWithOxc } = await import("vite"));
@@ -85,6 +90,7 @@ test("page render keeps Header, Summary, Main, and Bottom order", async (context
         ["MoneyManagementHeader", "HEADER"],
         ["MoneyManagementSummarySection", "SUMMARY"],
         ["MoneyManagementMainSection", "MAIN"],
+        ["MoneyManagementAnalyticsSection", "ANALYTICS"],
         ["MoneyManagementBottomSection", "BOTTOM"],
     ]) {
         code = code.replace(
@@ -109,7 +115,7 @@ test("page render keeps Header, Summary, Main, and Bottom order", async (context
         const text = textOf(module.default());
         assert.equal(
             text.replace(/\s+/gu, " ").trim(),
-            "HEADER SUMMARY MAIN BOTTOM",
+            "HEADER SUMMARY MAIN ANALYTICS BOTTOM",
         );
     } finally {
         await rm(temporary, { recursive: true, force: true });

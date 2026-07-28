@@ -1,14 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-    CartesianGrid,
-    Line,
-    LineChart,
-    ReferenceDot,
-    ResponsiveContainer,
-    Tooltip,
-    XAxis,
-    YAxis,
-} from "recharts";
+import { useEffect, useState } from "react";
 
 import { getMoneyManagementHistory } from "../../features/money-management";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
@@ -28,46 +18,6 @@ const EVENT_TYPES = [
     "DIAGNOSTIC_RAISED",
     "DIAGNOSTIC_CLEARED",
 ];
-
-function HistoryChart({ data, metric, title, unit = null }) {
-    const available = data.some((point) => point[metric] !== null);
-    if (!available) {
-        return <p className="mm-card__placeholder">{title}: No data</p>;
-    }
-    return (
-        <section aria-label={title}>
-            <h3>{title}</h3>
-            <ResponsiveContainer height={200} width="100%">
-                <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="timestamp" minTickGap={24} />
-                    <YAxis domain={["auto", "auto"]} unit={unit} />
-                    <Tooltip />
-                    <Line
-                        connectNulls={false}
-                        dataKey={metric}
-                        dot={false}
-                        isAnimationActive={false}
-                        type="monotone"
-                    />
-                    {data
-                        .filter((point) => (
-                            point.transition && point[metric] !== null
-                        ))
-                        .map((point) => (
-                            <ReferenceDot
-                                key={`${metric}-${point.sequence}`}
-                                label={point.state}
-                                r={3}
-                                x={point.timestamp}
-                                y={point[metric]}
-                            />
-                        ))}
-                </LineChart>
-            </ResponsiveContainer>
-        </section>
-    );
-}
 
 function EventRow({ event }) {
     const groups = event.changes?.reasonGroups ?? {};
@@ -138,34 +88,6 @@ export default function MoneyManagementRuntimeHistoryCard() {
     useEffect(() => {
         load();
     }, [eventType, state, limit]);
-
-    const chartData = useMemo(() => (
-        [...events]
-            .sort((left, right) => left.sequence - right.sequence)
-            .slice(-500)
-            .map((event) => ({
-                sequence: event.sequence,
-                timestamp: event.timestamp,
-                state: event.state,
-                transition: [
-                    "LOSS_STATE_CHANGED",
-                    "RECOVERY_STATE_CHANGED",
-                    "MONEY_MANAGEMENT_LOCKED",
-                    "MONEY_MANAGEMENT_UNLOCKED",
-                ].includes(event.eventType),
-                equity: event.metrics?.equity ?? null,
-                drawdownPercent: event.metrics?.drawdownPercent ?? null,
-                exposureUtilization:
-                    event.metrics?.exposureUtilization ?? null,
-                riskUtilization: event.metrics?.riskUtilization ?? null,
-            }))
-    ), [events]);
-    const hasChartData = chartData.some((point) => (
-        point.equity !== null ||
-        point.drawdownPercent !== null ||
-        point.exposureUtilization !== null ||
-        point.riskUtilization !== null
-    ));
 
     return (
         <MoneyManagementCardShell
@@ -239,34 +161,6 @@ export default function MoneyManagementRuntimeHistoryCard() {
                         </div>
                     )}
                 </>
-            )}
-            {hasChartData && (
-                <div className="mm-history-charts">
-                    <HistoryChart
-                        data={chartData}
-                        metric="equity"
-                        title="Capital / Equity History"
-                        unit=" USDT"
-                    />
-                    <HistoryChart
-                        data={chartData}
-                        metric="drawdownPercent"
-                        title="Drawdown History"
-                        unit="%"
-                    />
-                    <HistoryChart
-                        data={chartData}
-                        metric="exposureUtilization"
-                        title="Exposure Utilization History"
-                        unit="%"
-                    />
-                    <HistoryChart
-                        data={chartData}
-                        metric="riskUtilization"
-                        title="Risk Utilization History"
-                        unit="%"
-                    />
-                </div>
             )}
         </MoneyManagementCardShell>
     );

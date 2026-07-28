@@ -87,6 +87,27 @@ class TimelineStoreTests(unittest.TestCase):
         self.assertEqual(event.sequence, 2)
         self.assertEqual(len(restored.query().events), 2)
 
+    def test_reload_normalizes_pre_analytics_metrics_to_null(self):
+        store = MoneyManagementTimelineStore(self.directory)
+        event = self.append(store)
+        target = self.directory / TIMELINE_FILENAME
+        value = event.to_dict()
+        for key in ("realizedPnl", "unrealizedPnl", "peakEquity"):
+            value["metrics"].pop(key)
+        target.write_text(
+            json.dumps(value, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(target, 0o600)
+
+        restored = MoneyManagementTimelineStore(self.directory)
+        metrics = restored.query(limit=1).events[0].metrics
+
+        self.assertIsNone(metrics["realizedPnl"])
+        self.assertIsNone(metrics["unrealizedPnl"])
+        self.assertIsNone(metrics["peakEquity"])
+        self.assertEqual(set(metrics), set(METRIC_FIELDS))
+
     def test_retention_keeps_latest_and_deduplicates_consecutive_events(self):
         store = MoneyManagementTimelineStore(self.directory, maximum_events=3)
         first = self.append(store)
@@ -202,6 +223,18 @@ class TimelineRecorderTests(unittest.TestCase):
         )
         self.assertEqual(runtime_event.metrics["currentRiskAmount"], "2")
         self.assertIsNone(runtime_event.metrics["reservedRiskAmount"])
+        self.assertEqual(
+            runtime_event.metrics["realizedPnl"],
+            format(changed.realized_pnl, "f"),
+        )
+        self.assertEqual(
+            runtime_event.metrics["unrealizedPnl"],
+            format(changed.unrealized_pnl, "f"),
+        )
+        self.assertEqual(
+            runtime_event.metrics["peakEquity"],
+            format(changed.peak_equity, "f"),
+        )
 
         self.recorder.record_runtime(base, self.config, "NORMAL")
         types = [

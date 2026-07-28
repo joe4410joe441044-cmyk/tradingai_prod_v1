@@ -85,7 +85,7 @@ test("simulation renders deterministic inputs, summary, and two charts", async (
   );
 });
 
-test("runtime history has filters, pagination, empty state, and four charts", async () => {
+test("runtime history focuses on filters, pagination, and event state", async () => {
   const source = await readSource("MoneyManagementRuntimeHistoryCard.jsx");
   for (const label of [
     "Runtime History",
@@ -95,17 +95,30 @@ test("runtime history has filters, pagination, empty state, and four charts", as
     "Load More",
     "Refresh",
     "No runtime history yet（実行履歴データはまだありません）",
-    "Capital / Equity History",
-    "Drawdown History",
-    "Exposure Utilization History",
-    "Risk Utilization History",
   ]) {
     assert.match(source, new RegExp(label.replace(/[/.]/g, "\\$&")));
   }
-  assert.match(source, /connectNulls=\{false\}/);
   assert.match(
     source,
     /Runtime events only（実行イベントのみ）— Simulation excluded\./,
   );
-  assert.match(source, /hasChartData/);
+  assert.doesNotMatch(source, /LineChart|ResponsiveContainer|hasChartData/);
+});
+
+test("analytics section renders four history-backed Recharts", async () => {
+  const source = await readSource("MoneyManagementAnalyticsSection.jsx");
+  for (const label of [
+    "Analytics",
+    "Equity Curve",
+    "Cumulative Realized P&L",
+    "Drawdown",
+    "Risk / Exposure",
+    "No data",
+  ]) {
+    assert.match(source, new RegExp(label.replace(/[/.]/g, "\\$&")));
+  }
+  assert.match(source, /getMoneyManagementHistory/);
+  assert.match(source, /connectNulls=\{false\}/);
+  assert.match(source, /event\.metrics\?\.realizedPnl \?\? null/);
+  assert.doesNotMatch(source, /Math\.random|parseFloat|Number\(/);
 });

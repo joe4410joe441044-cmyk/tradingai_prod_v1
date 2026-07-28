@@ -1,4 +1,5 @@
 import MoneyManagementBottomSection from "../components/money-management/MoneyManagementBottomSection";
+import MoneyManagementAnalyticsSection from "../components/money-management/MoneyManagementAnalyticsSection";
 import MoneyManagementHeader from "../components/money-management/MoneyManagementHeader";
 import MoneyManagementMainSection from "../components/money-management/MoneyManagementMainSection";
 import MoneyManagementSummarySection from "../components/money-management/MoneyManagementSummarySection";
@@ -42,6 +43,7 @@ export default function MoneyManagementPage() {
                 moneyManagement={moneyManagement}
                 viewModel={viewModel}
             />
+            <MoneyManagementAnalyticsSection />
             <MoneyManagementBottomSection
                 configuration={moneyManagement.configuration}
             />

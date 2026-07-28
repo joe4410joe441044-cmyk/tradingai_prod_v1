@@ -17,6 +17,13 @@ export const MONEY_MANAGEMENT_MAIN_RIGHT_CARDS = Object.freeze([
     "Projection",
 ]);
 
+export const MONEY_MANAGEMENT_ANALYTICS_CARDS = Object.freeze([
+    "Equity Curve",
+    "Cumulative Realized P&L",
+    "Drawdown",
+    "Risk / Exposure",
+]);
+
 export const MONEY_MANAGEMENT_BOTTOM_CARDS = Object.freeze([
     "Timeline",
     "History",
@@ -27,5 +34,6 @@ export const MONEY_MANAGEMENT_CARD_TITLES = Object.freeze([
     ...MONEY_MANAGEMENT_SUMMARY_CARDS,
     ...MONEY_MANAGEMENT_MAIN_LEFT_CARDS,
     ...MONEY_MANAGEMENT_MAIN_RIGHT_CARDS,
+    ...MONEY_MANAGEMENT_ANALYTICS_CARDS,
     ...MONEY_MANAGEMENT_BOTTOM_CARDS,
 ]);

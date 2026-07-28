@@ -459,6 +459,42 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
                 "HISTORY_QUERY_INVALID",
             )
 
+    def test_history_serializes_extended_analytics_metrics(self):
+        _, app, dispatcher, _, clock = ready_boundary()
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = MoneyManagementTimelineRecorder(
+                MoneyManagementTimelineStore(Path(directory)),
+                clock,
+            )
+            boundary = MoneyManagementHttpBoundary(
+                app,
+                dispatcher,
+                timestamp_source=clock,
+                timeline_recorder=recorder,
+            )
+            observed = metrics()
+            recorder.record_runtime(
+                observed,
+                build_default_money_management_config(),
+                "NORMAL",
+            )
+
+            rendered = boundary.get_history(limit=1).to_dict()
+            history_metrics = rendered["events"][0]["metrics"]
+
+            self.assertEqual(
+                history_metrics["realizedPnl"],
+                format(observed.realized_pnl, "f"),
+            )
+            self.assertEqual(
+                history_metrics["unrealizedPnl"],
+                format(observed.unrealized_pnl, "f"),
+            )
+            self.assertEqual(
+                history_metrics["peakEquity"],
+                format(observed.peak_equity, "f"),
+            )
+
     def test_status_projects_all_existing_risk_states(self):
         boundary, app, _, lifecycle, clock = ready_boundary()
         cases = (

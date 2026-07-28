@@ -66,19 +66,21 @@ test("polished controls retain accessible native semantics", async () => {
 });
 
 test("interactive Money Management cards use the existing form and action styles", async () => {
-  const [styles, sizing, simulation, history] = await Promise.all([
+  const [styles, sizing, simulation, history, analytics] = await Promise.all([
     readSource("../../styles/money-management.css"),
     readSource("./MoneyManagementPositionSizingCard.jsx"),
     readSource("./MoneyManagementSimulationCard.jsx"),
     readSource("./MoneyManagementRuntimeHistoryCard.jsx"),
+    readSource("./MoneyManagementAnalyticsSection.jsx"),
   ]);
   assert.match(styles, /\.mm-interaction-form/);
   assert.match(styles, /\.mm-configuration-field select/);
   assert.match(styles, /\.mm-runtime-timeline/);
-  assert.match(styles, /\.mm-history-charts/);
+  assert.match(styles, /\.mm-analytics/);
   assert.match(sizing, /className="mm-interaction-form"/);
   assert.match(sizing, /className="mm-action-row"/);
   assert.match(sizing, /\["entryPrice", "Entry Price"\]/);
   assert.match(simulation, /className="mm-interaction-form"/);
   assert.match(history, /mm-history-filter/);
+  assert.match(analytics, /ResponsiveContainer/);
 });

@@ -25,6 +25,9 @@ DEFAULT_HISTORY_LIMIT = 100
 METRIC_FIELDS = (
     "equity",
     "availableCapital",
+    "realizedPnl",
+    "unrealizedPnl",
+    "peakEquity",
     "openExposure",
     "exposureLimit",
     "exposureUtilization",
@@ -182,11 +185,20 @@ def _event_from_dict(value):
     }
     if not isinstance(value, dict) or set(value) != expected:
         raise ValueError("event shape invalid")
+    metrics = value["metrics"]
+    if not isinstance(metrics, dict):
+        raise ValueError("event metrics invalid")
+    # Timeline records written before the analytics contract extension do not
+    # contain these fields. Preserve their meaning as unavailable.
+    metrics = {
+        key: metrics.get(key)
+        for key in METRIC_FIELDS
+    }
     timestamp = datetime.fromisoformat(value["timestamp"].replace("Z", "+00:00"))
     return MoneyManagementTimelineEvent(
         value["eventId"], timestamp, value["sequence"], value["eventType"],
         value["source"], value["state"], value["previousState"],
-        tuple(value["reasonCodes"]), value["metrics"],
+        tuple(value["reasonCodes"]), metrics,
         value["configurationVersion"], tuple(value["diagnostics"]),
         value["correlationId"], value["changes"],
     )
@@ -418,6 +430,9 @@ def timeline_metrics(metrics, config):
     values = {
         "equity": metrics.equity,
         "availableCapital": metrics.available_balance,
+        "realizedPnl": metrics.realized_pnl,
+        "unrealizedPnl": metrics.unrealized_pnl,
+        "peakEquity": metrics.peak_equity,
         "openExposure": metrics.open_exposure,
         "exposureLimit": (
             config.total_exposure_pct
