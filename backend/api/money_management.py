@@ -18,6 +18,42 @@ router = APIRouter(
 )
 
 
+@router.get("/history")
+def get_money_management_history(
+    request: Request,
+    limit: int = 100,
+    before: str = None,
+    after: str = None,
+    eventType: str = None,
+    state: str = None,
+):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(
+            503,
+            "MONEY_MANAGEMENT_UNAVAILABLE",
+            "Money Management history is unavailable.",
+            True,
+        )
+    try:
+        return boundary.get_history(
+            limit=limit,
+            before=before,
+            after=after,
+            event_type=eventType,
+            state=state,
+        ).to_dict()
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(
+            503,
+            "INTERNAL_STATE_UNAVAILABLE",
+            "Money Management history is unavailable.",
+            True,
+        )
+
+
 def _safe_error(status_code, code, message, retryable=False):
     return JSONResponse(
         status_code=status_code,

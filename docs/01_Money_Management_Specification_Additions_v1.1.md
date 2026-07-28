@@ -289,6 +289,43 @@ At complete loss recovery is null with `RECOVERY_UNDEFINED`. Requests are
 limited to 1,000 trades. Capital and drawdown charts represent only returned
 simulation projection, never runtime Timeline or a future guarantee.
 
+### Durable Runtime Timeline and History
+
+The Money Management Timeline records only confirmed Paper/Runtime changes.
+Simulation projections and status reads never write Timeline events. Event
+types cover application start, configuration and runtime metric updates, loss
+and recovery state transitions, exposure/risk-budget/position changes,
+lock/unlock, and diagnostic raised/cleared transitions.
+
+Each immutable event contains a random opaque event ID, UTC timestamp,
+monotonic sequence, type, source, current/previous state, priority-ordered
+block/hold/warning reason codes, available metric snapshot, configuration
+version, diagnostics, correlation ID, and a minimal change set. Unknown metrics
+remain null. Consecutive events with equal normalized type, snapshot, reasons,
+configuration version, and changes are not appended.
+
+Runtime events are recorded only after an applied Loss Runtime Hook update.
+Configuration events are recorded only after successful atomic configuration
+replacement; recovery events require an actual state change. A GET status,
+GET history, or Simulation request cannot generate an event.
+
+The durable format is permission-restricted JSON Lines at
+`logs/runtime/money_management_timeline.jsonl`. Writes use no-follow append,
+flush, and fsync. Retention preserves the newest 5,000 events and rewrites
+through an exclusive temporary file plus atomic replace. Startup restores the
+latest retained events and deduplication state without regenerating them.
+Malformed lines are skipped and counted while valid lines remain available.
+Absolute directory validation, parent/target symlink rejection, strict event
+shape, and a fixed filename prevent path traversal or credential capture.
+
+`GET /api/money-management/history` is read-only. It returns newest-first
+events with `limit` (default 100, maximum 500), opaque sequence cursor
+pagination through `before`/`after`, and exact `eventType`/`state` filters.
+Invalid cursors, filters, and limits are rejected. Empty history returns an
+empty array. Frontend analysis charts use at most 500 fetched points and render
+equity, drawdown, exposure utilization, and risk utilization with null values
+as gaps. State-transition markers remain distinct from Simulation charts.
+
 
 ## D19--D25: Consecutive Loss, Cooldown, and Recovery
 

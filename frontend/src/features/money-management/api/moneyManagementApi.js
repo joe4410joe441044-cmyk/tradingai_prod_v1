@@ -174,3 +174,17 @@ export function simulateMoneyManagement(payload, options = {}) {
     payload,
   });
 }
+
+export function getMoneyManagementHistory(query = {}, options = {}) {
+  const parameters = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined && value !== "") {
+      parameters.set(key, String(value));
+    }
+  }
+  const suffix = parameters.size > 0 ? `?${parameters.toString()}` : "";
+  return requestJson(`${API.moneyManagementHistory()}${suffix}`, {
+    ...options,
+    operation: "GET_HISTORY",
+  });
+}

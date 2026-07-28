@@ -107,6 +107,9 @@ export const API = {
   moneyManagementSimulation: () =>
     join("/money-management/simulation"),
 
+  moneyManagementHistory: () =>
+    join("/money-management/history"),
+
   // ==========================
   // PNL
   // ==========================

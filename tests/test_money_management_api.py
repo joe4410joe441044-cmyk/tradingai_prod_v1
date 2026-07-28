@@ -1,4 +1,5 @@
 import threading
+import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
@@ -38,6 +39,10 @@ from backend.money_management.loss_runtime_metrics_models import (
 from backend.money_management.loss_runtime_update_dispatcher import (
     LossRuntimeDispatchStatus,
     LossRuntimeUpdateDispatcher,
+)
+from backend.money_management.timeline import (
+    MoneyManagementTimelineRecorder,
+    MoneyManagementTimelineStore,
 )
 from backend.money_management.loss_reason_models import (
     BlockReason,
@@ -357,6 +362,79 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
             "/home/",
         ):
             self.assertNotIn(forbidden, rendered)
+
+    def test_status_and_simulation_reads_do_not_create_history(self):
+        _, app, dispatcher, _, clock = ready_boundary()
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = MoneyManagementTimelineRecorder(
+                MoneyManagementTimelineStore(Path(directory)),
+                clock,
+            )
+            boundary = MoneyManagementHttpBoundary(
+                app,
+                dispatcher,
+                timestamp_source=clock,
+                timeline_recorder=recorder,
+            )
+            boundary.get_status()
+            boundary.get_status()
+            boundary.simulate({
+                "initialCapital": "1000",
+                "numberOfTrades": 2,
+                "winRatePercent": "50",
+                "averageWinPercent": "1",
+                "averageLossPercent": "1",
+                "riskPerTradePercent": "0.50",
+                "maximumDrawdownPercent": "5",
+                "compoundingEnabled": True,
+                "feesPercent": "0",
+                "slippagePercent": "0",
+                "scenario": "ALTERNATING",
+            })
+
+            self.assertEqual(boundary.get_history().events, ())
+
+    def test_history_query_and_configuration_event_are_read_only(self):
+        _, app, dispatcher, lifecycle, clock = ready_boundary()
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = MoneyManagementTimelineRecorder(
+                MoneyManagementTimelineStore(Path(directory)),
+                clock,
+            )
+            boundary = MoneyManagementHttpBoundary(
+                app,
+                dispatcher,
+                timestamp_source=clock,
+                timeline_recorder=recorder,
+            )
+            before = lifecycle.snapshot
+            result = boundary.update_configuration({
+                "dailyWarningPercent": "0.75",
+                "expectedRevision": 1,
+            })
+            history = boundary.get_history(
+                limit=1,
+                event_type="CONFIGURATION_UPDATED",
+            )
+
+            self.assertTrue(result.applied)
+            self.assertEqual(len(history.events), 1)
+            self.assertIn(
+                "loss.daily_warning_pct",
+                history.events[0].changes,
+            )
+            after_update = lifecycle.snapshot
+            boundary.get_history(limit=1)
+            self.assertIs(lifecycle.snapshot, after_update)
+            self.assertIsNotNone(before)
+            with self.assertRaises(
+                MoneyManagementApiBoundaryException
+            ) as error:
+                boundary.get_history(before="../1")
+            self.assertEqual(
+                error.exception.error.code,
+                "HISTORY_QUERY_INVALID",
+            )
 
     def test_status_projects_all_existing_risk_states(self):
         boundary, app, _, lifecycle, clock = ready_boundary()
@@ -759,12 +837,17 @@ class MoneyManagementHttpRegistrationTests(unittest.TestCase):
     def test_registration_is_idempotent_and_unregistration_is_safe(self):
         boundary, app, _, _, _ = ready_boundary()
         app.state.money_management_http_boundary = None
-        first = register_money_management_http_boundary(app)
-        second = register_money_management_http_boundary(app)
-        self.assertIs(first, second)
-        self.assertIsNotNone(first)
-        self.assertTrue(unregister_money_management_http_boundary(app))
-        self.assertFalse(unregister_money_management_http_boundary(app))
+        with tempfile.TemporaryDirectory() as directory:
+            first = register_money_management_http_boundary(
+                app, timeline_directory=Path(directory)
+            )
+            second = register_money_management_http_boundary(
+                app, timeline_directory=Path(directory)
+            )
+            self.assertIs(first, second)
+            self.assertIsNotNone(first)
+            self.assertTrue(unregister_money_management_http_boundary(app))
+            self.assertFalse(unregister_money_management_http_boundary(app))
 
     def test_main_registers_exact_routes_and_preserves_global_cors(self):
         root = Path(__file__).resolve().parents[1]

@@ -6,6 +6,9 @@ import { MONEY_MANAGEMENT_BOTTOM_CARDS } from "./moneyManagementLayout";
 const MoneyManagementSimulationCard = lazy(
     () => import("./MoneyManagementSimulationCard"),
 );
+const MoneyManagementRuntimeHistoryCard = lazy(
+    () => import("./MoneyManagementRuntimeHistoryCard"),
+);
 
 export default function MoneyManagementBottomSection({ configuration }) {
     return (
@@ -22,8 +25,19 @@ export default function MoneyManagementBottomSection({ configuration }) {
                     configuration={configuration}
                 />
             </Suspense>
+            <Suspense
+                fallback={(
+                    <MoneyManagementCardShell loading title="Runtime History" />
+                )}
+            >
+                <MoneyManagementRuntimeHistoryCard />
+            </Suspense>
             {MONEY_MANAGEMENT_BOTTOM_CARDS
-                .filter((title) => title !== "Future Chart")
+                .filter((title) => ![
+                    "Timeline",
+                    "History",
+                    "Future Chart",
+                ].includes(title))
                 .map((title) => (
                 <MoneyManagementCardShell key={title} title={title} />
             ))}

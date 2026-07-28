@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from threading import RLock
 from typing import Optional, Tuple
+from pathlib import Path
 
 from .enums import RiskState
 from .loss_application_models import (
@@ -57,6 +58,11 @@ from .simulation import (
     MoneyManagementSimulationInput,
     SimulationScenario,
     run_simulation,
+)
+from .timeline import (
+    MoneyManagementHistoryResult,
+    MoneyManagementTimelineRecorder,
+    MoneyManagementTimelineStore,
 )
 
 
@@ -402,6 +408,7 @@ class MoneyManagementHttpBoundary:
         dispatcher=None,
         timestamp_source=None,
         maximum_metrics_age=DEFAULT_MAXIMUM_METRICS_AGE,
+        timeline_recorder=None,
     ):
         if dispatcher is not None and not isinstance(
             dispatcher, LossRuntimeUpdateDispatcher
@@ -420,6 +427,11 @@ class MoneyManagementHttpBoundary:
         if not callable(self._timestamp_source):
             raise TypeError("timestamp source required")
         self._maximum_metrics_age = maximum_metrics_age
+        if timeline_recorder is not None and not isinstance(
+            timeline_recorder, MoneyManagementTimelineRecorder
+        ):
+            raise TypeError("timeline recorder invalid")
+        self._timeline_recorder = timeline_recorder
         self._projection_dispatcher = LossGovernanceProjectionDispatcher(
             timestamp_source=self._timestamp_source
         )
@@ -454,6 +466,23 @@ class MoneyManagementHttpBoundary:
         self._configuration_updated_at = self._now()
         self._recovery_in_progress = False
         self._lock = RLock()
+
+    def get_history(self, **query):
+        if self._timeline_recorder is None:
+            return MoneyManagementHistoryResult((), False, None)
+        try:
+            return self._timeline_recorder.store.query(**query)
+        except (TypeError, ValueError):
+            self._error(
+                422,
+                "HISTORY_QUERY_INVALID",
+                "History query is invalid.",
+            )
+
+    @property
+    def configuration_revision(self):
+        with self._lock:
+            return self._configuration_revision
 
     def _now(self):
         return _utc("timestamp", self._timestamp_source())
@@ -1336,6 +1365,7 @@ class MoneyManagementHttpBoundary:
                 if self._base_config_provider is not None
                 else None
             )
+            previous_configuration = self._configuration
             if base_update and current_base_config is None:
                 self._error(
                     503,
@@ -1405,6 +1435,18 @@ class MoneyManagementHttpBoundary:
             )
         )
         status = self.get_status()
+        if self._timeline_recorder is not None:
+            try:
+                self._timeline_recorder.record_configuration(
+                    before=previous_configuration,
+                    after=candidate,
+                    base_before=current_base_config,
+                    base_after=base_candidate,
+                    version=revision,
+                    correlation_id=f"configuration-{revision}",
+                )
+            except Exception:
+                pass
         return MoneyManagementConfigurationUpdateResponse(
             True,
             reevaluated,
@@ -1516,6 +1558,19 @@ class MoneyManagementHttpBoundary:
             recovered = bool(
                 succeeded and current.execution_entry_allowed
             )
+            if (
+                self._timeline_recorder is not None
+                and previous.risk_state != current.risk_state
+            ):
+                try:
+                    self._timeline_recorder.record_recovery(
+                        previous_state=previous.risk_state,
+                        current_state=current.risk_state,
+                        version=current.configuration_revision,
+                        correlation_id=f"recovery-{revision}",
+                    )
+                except Exception:
+                    pass
             return MoneyManagementRecoveryResponse(
                 True,
                 recovered,
@@ -1538,6 +1593,7 @@ class MoneyManagementHttpBoundary:
 def register_money_management_http_boundary(
     app,
     timestamp_source=None,
+    timeline_directory=None,
 ):
     state = getattr(app, "state", None)
     if state is None:
@@ -1556,11 +1612,41 @@ def register_money_management_http_boundary(
         else None
     )
     try:
+        timeline_directory = timeline_directory or (
+            Path(__file__).resolve().parents[2] / "logs" / "runtime"
+        )
+        timeline_store = MoneyManagementTimelineStore(timeline_directory)
+        timeline_recorder = MoneyManagementTimelineRecorder(
+            timeline_store,
+            timestamp_source=timestamp_source,
+        )
         boundary = MoneyManagementHttpBoundary(
             app,
             dispatcher,
             timestamp_source=timestamp_source,
+            timeline_recorder=timeline_recorder,
         )
+        lifecycle_state = getattr(
+            getattr(
+                getattr(state, "money_management", None),
+                "safe_status",
+                None,
+            ),
+            "lifecycle_state",
+            None,
+        )
+        timeline_recorder.record_started(
+            lifecycle_state.value
+            if lifecycle_state is not None
+            else "UNAVAILABLE"
+        )
+        if isinstance(
+            hook_registration, MoneyManagementRuntimeHookRegistration
+        ):
+            hook_registration.hook.attach_timeline_recorder(
+                timeline_recorder,
+                lambda: boundary.configuration_revision,
+            )
     except Exception:
         return None
     setattr(state, APPLICATION_STATE_ATTRIBUTE, boundary)

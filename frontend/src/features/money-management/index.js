@@ -1,5 +1,6 @@
 export {
   getMoneyManagementConfiguration,
+  getMoneyManagementHistory,
   getMoneyManagementStatus,
   previewMoneyManagementPositionSize,
   simulateMoneyManagement,

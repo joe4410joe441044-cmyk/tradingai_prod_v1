@@ -81,3 +81,24 @@ test("simulation renders deterministic inputs, summary, and two charts", async (
   assert.match(source, /No projection data/);
   assert.match(source, /do not modify configuration or create orders/);
 });
+
+test("runtime history has filters, pagination, empty state, and four charts", async () => {
+  const source = await readSource("MoneyManagementRuntimeHistoryCard.jsx");
+  for (const label of [
+    "Runtime History",
+    "Event Type",
+    "State",
+    "Display Count",
+    "Load More",
+    "Refresh",
+    "No runtime history recorded yet.",
+    "Capital / Equity History",
+    "Drawdown History",
+    "Exposure Utilization History",
+    "Risk Utilization History",
+  ]) {
+    assert.match(source, new RegExp(label.replace(/[/.]/g, "\\$&")));
+  }
+  assert.match(source, /connectNulls=\{false\}/);
+  assert.match(source, /Simulation\s+projections are never included/);
+});

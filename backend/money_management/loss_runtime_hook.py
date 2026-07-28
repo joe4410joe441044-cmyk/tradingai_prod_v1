@@ -132,6 +132,8 @@ class MoneyManagementRuntimeHook:
         self._active = True
         self._last_event_key = None
         self._last_dispatch_status = None
+        self._timeline_recorder = None
+        self._timeline_configuration_version_source = None
         self._lock = RLock()
 
     @property
@@ -157,6 +159,23 @@ class MoneyManagementRuntimeHook:
             raise TypeError("runtime dispatch status required")
         with self._lock:
             self._last_dispatch_status = status
+
+    def attach_timeline_recorder(
+        self, recorder, configuration_version_source=None
+    ):
+        if not callable(getattr(recorder, "record_runtime", None)):
+            raise TypeError("timeline recorder required")
+        if (
+            configuration_version_source is not None
+            and not callable(configuration_version_source)
+        ):
+            raise TypeError("configuration version source invalid")
+        with self._lock:
+            self._timeline_recorder = recorder
+            self._timeline_configuration_version_source = (
+                configuration_version_source
+            )
+            return recorder
 
     def stop(self):
         with self._lock:
@@ -284,6 +303,76 @@ class MoneyManagementRuntimeHook:
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,
             ):
+                if (
+                    result.status is LossRuntimeDispatchStatus.APPLIED
+                    and self._timeline_recorder is not None
+                ):
+                    try:
+                        metrics_result = self._dispatcher.get_last_metrics_result()
+                        metrics = getattr(metrics_result, "metrics", None)
+                        config_provider = registration.base_config_provider
+                        config = (
+                            config_provider.get_config()
+                            if config_provider is not None else None
+                        )
+                        snapshot = registration.lifecycle_adapter.get_snapshot()
+                        decision = getattr(
+                            getattr(snapshot, "state", None),
+                            "last_decision",
+                            None,
+                        )
+                        state = getattr(
+                            getattr(decision, "decision_state", None),
+                            "value",
+                            "UNKNOWN",
+                        )
+                        diagnostics = tuple(
+                            item.value for item in getattr(
+                                decision, "diagnostic_reasons", ()
+                            )
+                        )
+                        block_reasons = tuple(
+                            item.value for item in getattr(
+                                decision, "block_reasons", ()
+                            )
+                        )
+                        hold_reasons = tuple(
+                            item.value for item in getattr(
+                                decision, "hold_reasons", ()
+                            )
+                        )
+                        warning_reasons = tuple(
+                            item.value for item in getattr(
+                                decision, "warning_reasons", ()
+                            )
+                        )
+                        self._timeline_recorder.record_runtime(
+                            metrics,
+                            config,
+                            state,
+                            diagnostics,
+                            event_key,
+                            configuration_version=(
+                                self._timeline_configuration_version_source()
+                                if self._timeline_configuration_version_source
+                                is not None
+                                else 0
+                            ),
+                            reason_codes=(
+                                block_reasons
+                                + hold_reasons
+                                + warning_reasons
+                            ),
+                            reason_groups={
+                                "block": block_reasons,
+                                "hold": hold_reasons,
+                                "warning": warning_reasons,
+                            },
+                        )
+                    except Exception:
+                        _safe_log(
+                            self._logger, "warning", "Timeline Record Failed"
+                        )
                 _safe_log(self._logger, "debug", "Dispatched")
                 return MoneyManagementRuntimeHookResult(
                     MoneyManagementRuntimeHookStatus.DISPATCHED,
