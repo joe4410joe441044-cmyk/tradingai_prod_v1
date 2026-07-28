@@ -113,12 +113,25 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertTrue(status.execution_entry_allowed)
         self.assertEqual(status.risk_state, "NORMAL")
         self.assertEqual(payload["metrics"]["equity"], "1000")
+        self.assertEqual(payload["metrics"]["availableCapital"], "900")
         self.assertEqual(payload["metrics"]["drawdownPercent"], "0")
         self.assertEqual(payload["revision"], 2)
         self.assertEqual(payload["sequence"], 2)
         self.assertTrue(payload["generatedAt"].endswith("Z"))
         with self.assertRaises(FrozenInstanceError):
             status.available = False
+
+    def test_status_serializes_unknown_available_capital_as_null(self):
+        result = LossRuntimeMetricsReadResult(
+            LossRuntimeMetricsReadStatus.PARTIAL,
+            metrics(available_balance=None, data_quality=LossRuntimeDataQuality.PARTIAL),
+            ("runtime metrics incomplete",),
+        )
+        response = MoneyManagementHttpBoundary._metrics_response(result)
+
+        self.assertIsNone(response.available_capital)
+        self.assertIsNone(response.to_dict()["availableCapital"])
+        self.assertEqual(response.to_dict()["equity"], "1000")
 
     def test_status_without_projection_fails_closed_and_does_not_refresh(self):
         boundary, _, dispatcher, lifecycle, _ = ready_boundary(publish=False)

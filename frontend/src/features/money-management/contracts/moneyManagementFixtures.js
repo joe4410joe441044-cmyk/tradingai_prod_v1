@@ -20,6 +20,7 @@ export function validMetrics(overrides = {}) {
   return {
     status: "AVAILABLE",
     equity: "1000.25",
+    availableCapital: "900.25",
     peakEquity: "1025.40",
     drawdownAmount: "25.15",
     drawdownPercent: "2.4527",

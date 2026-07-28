@@ -119,6 +119,7 @@ class MoneyManagementApiBoundaryException(Exception):
 class MoneyManagementMetricsResponse:
     status: str
     equity: Optional[Decimal]
+    available_capital: Optional[Decimal]
     peak_equity: Optional[Decimal]
     drawdown_amount: Optional[Decimal]
     drawdown_percent: Optional[Decimal]
@@ -135,6 +136,7 @@ class MoneyManagementMetricsResponse:
         return {
             "status": self.status,
             "equity": _serialize(self.equity),
+            "availableCapital": _serialize(self.available_capital),
             "peakEquity": _serialize(self.peak_equity),
             "drawdownAmount": _serialize(self.drawdown_amount),
             "drawdownPercent": _serialize(self.drawdown_percent),
@@ -432,6 +434,7 @@ class MoneyManagementHttpBoundary:
         return MoneyManagementMetricsResponse(
             status,
             metrics.equity if metrics else None,
+            metrics.available_balance if metrics else None,
             metrics.peak_equity if metrics else None,
             (
                 metrics.peak_equity - metrics.equity

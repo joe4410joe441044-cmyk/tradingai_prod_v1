@@ -30,11 +30,13 @@ test("valid status preserves Decimal strings, reason order, and revisions", () =
       ...validStatus().metrics,
       dailyPnl: "-12.50",
       equity: null,
+      availableCapital: null,
     },
   });
   const status = normalizeMoneyManagementStatus(raw);
   assert.equal(status.metrics.dailyPnl, "-12.50");
   assert.equal(status.metrics.equity, null);
+  assert.equal(status.metrics.availableCapital, null);
   assert.deepEqual(status.warningReasons, [
     "WEEKLY_LOSS_WARNING",
     "DAILY_LOSS_WARNING",

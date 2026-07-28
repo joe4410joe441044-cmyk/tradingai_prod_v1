@@ -387,7 +387,10 @@ export function createMoneyManagementViewModel(input = {}) {
     ]),
     capital: Object.freeze([
       row("Equity", displayDecimal(metrics?.equity, "USDT")),
-      row("Available Capital", unavailableValue()),
+      row(
+        "Available Capital",
+        displayDecimal(metrics?.availableCapital, "USDT"),
+      ),
       row("Cash Flow", cashFlowState(reasons)),
       row("Capital State", capitalState(reasons)),
     ]),

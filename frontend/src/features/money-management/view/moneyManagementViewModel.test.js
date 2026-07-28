@@ -19,6 +19,7 @@ const status = (overrides = {}) => ({
   metrics: {
     status: "AVAILABLE",
     equity: "9007199254740993.123456789",
+    availableCapital: "8007199254740993.123456789",
     peakEquity: "9007199254741000.00000000",
     drawdownAmount: "6.876543211",
     drawdownPercent: "0.00000001",
@@ -163,12 +164,27 @@ test("null metrics remain unavailable and never become zero", () => {
 test("actual Backend metrics are mapped without invented projections", () => {
   const model = createMoneyManagementViewModel(readyInput());
   assert.equal(model.capital[0].value.text, "9007199254740993.123456789");
+  assert.equal(model.capital[1].value.text, "8007199254740993.123456789");
   assert.equal(model.performance[0].value.text, "-1234.5000");
   assert.equal(model.performance[3].value.text, "0.00000001");
   assert.equal(model.statistics[1].value.text, "5.0000");
   assert.equal(model.statistics[2].value.text, "Not reported");
   assert.equal(model.projection.current.text, "ALLOW");
   assert.match(model.projection.description, /later phase/);
+});
+
+test("unknown Available Capital remains unavailable", () => {
+  const model = createMoneyManagementViewModel(readyInput({
+    status: status({
+      metrics: {
+        ...status().metrics,
+        availableCapital: null,
+      },
+    }),
+  }));
+
+  assert.equal(model.capital[1].value.text, "—");
+  assert.equal(model.capital[1].value.unavailable, true);
 });
 
 test("header exposes connection, polling, updated time, and unknown mode safely", () => {

@@ -195,6 +195,11 @@ export function normalizeMoneyManagementMetrics(raw) {
   return Object.freeze({
     status,
     equity: decimal(value.equity, "metrics.equity", true),
+    availableCapital: decimal(
+      value.availableCapital,
+      "metrics.availableCapital",
+      true,
+    ),
     peakEquity: decimal(value.peakEquity, "metrics.peakEquity", true),
     drawdownAmount: decimal(
       value.drawdownAmount,
