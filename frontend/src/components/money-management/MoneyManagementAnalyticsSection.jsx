@@ -11,9 +11,14 @@ import {
 } from "recharts";
 
 import { getMoneyManagementHistory } from "../../features/money-management";
+import {
+    filterMoneyManagementAnalyticsEvents,
+    loadMoneyManagementAnalyticsHistory,
+    MONEY_MANAGEMENT_ANALYTICS_PERIOD,
+} from "../../features/money-management/analytics/moneyManagementAnalytics.js";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
 
-const ANALYTICS_LIMIT = 500;
+const PERIODS = Object.values(MONEY_MANAGEMENT_ANALYTICS_PERIOD);
 
 function AnalyticsChart({ data, lines, loading, title, unit = null }) {
     if (loading) {
@@ -78,6 +83,9 @@ function AnalyticsChart({ data, lines, loading, title, unit = null }) {
 
 export default function MoneyManagementAnalyticsSection() {
     const [events, setEvents] = useState([]);
+    const [period, setPeriod] = useState(
+        MONEY_MANAGEMENT_ANALYTICS_PERIOD.THIRTY_DAYS,
+    );
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -85,18 +93,16 @@ export default function MoneyManagementAnalyticsSection() {
         const controller = new AbortController();
         const load = async () => {
             try {
-                const response = await getMoneyManagementHistory(
-                    { limit: ANALYTICS_LIMIT },
-                    { signal: controller.signal },
-                );
+                const history = await loadMoneyManagementAnalyticsHistory({
+                    client: getMoneyManagementHistory,
+                    signal: controller.signal,
+                });
                 if (!controller.signal.aborted) {
-                    setEvents(Array.isArray(response.events)
-                        ? response.events
-                        : []);
+                    setEvents(history);
                 }
-            } catch (failure) {
+            } catch {
                 if (!controller.signal.aborted) {
-                    setError(failure?.code ?? "HISTORY_UNAVAILABLE");
+                    setError(true);
                 }
             } finally {
                 if (!controller.signal.aborted) setLoading(false);
@@ -106,8 +112,12 @@ export default function MoneyManagementAnalyticsSection() {
         return () => controller.abort();
     }, []);
 
+    const filteredEvents = useMemo(
+        () => filterMoneyManagementAnalyticsEvents(events, period),
+        [events, period],
+    );
     const data = useMemo(() => (
-        [...events]
+        [...filteredEvents]
             .sort((left, right) => left.sequence - right.sequence)
             .map((event) => ({
                 sequence: event.sequence,
@@ -126,64 +136,96 @@ export default function MoneyManagementAnalyticsSection() {
                     event.metrics?.exposureUtilization ?? null,
                 riskUtilization: event.metrics?.riskUtilization ?? null,
             }))
-    ), [events]);
+    ), [filteredEvents]);
+    const hasAnalytics = data.some((point) => (
+        point.equity !== null ||
+        point.realizedPnl !== null ||
+        point.drawdownPercent !== null ||
+        point.exposureUtilization !== null ||
+        point.riskUtilization !== null
+    ));
 
     return (
         <section aria-label="Money Management Analytics">
-            <h2 className="mm-section-title">Analytics</h2>
+            <div className="mm-analytics-header">
+                <h2 className="mm-section-title">Analytics</h2>
+                <div
+                    aria-label="Analytics period"
+                    className="mm-analytics-periods"
+                    role="group"
+                >
+                    {PERIODS.map((value) => (
+                        <button
+                            aria-pressed={period === value}
+                            key={value}
+                            onClick={() => setPeriod(value)}
+                            type="button"
+                        >
+                            {value}
+                        </button>
+                    ))}
+                </div>
+            </div>
             {error && (
                 <p
                     className="mm-operation-notice mm-operation-notice--danger"
                     role="alert"
                 >
-                    {error}
+                    Analytics unavailable
                 </p>
             )}
-            <div className="mm-analytics">
-                <AnalyticsChart
-                    data={data}
-                    loading={loading}
-                    lines={[{ metric: "equity", name: "Equity" }]}
-                    title="Equity Curve"
-                    unit=" USDT"
-                />
-                <AnalyticsChart
-                    data={data}
-                    loading={loading}
-                    lines={[{
-                        metric: "realizedPnl",
-                        name: "Cumulative Realized P&L",
-                    }]}
-                    title="Cumulative Realized P&L"
-                    unit=" USDT"
-                />
-                <AnalyticsChart
-                    data={data}
-                    loading={loading}
-                    lines={[{
-                        metric: "drawdownPercent",
-                        name: "Drawdown",
-                    }]}
-                    title="Drawdown"
-                    unit="%"
-                />
-                <AnalyticsChart
-                    data={data}
-                    loading={loading}
-                    lines={[
-                        {
-                            metric: "riskUtilization",
-                            name: "Risk Utilization",
-                        },
-                        {
-                            metric: "exposureUtilization",
-                            name: "Exposure Utilization",
-                        },
-                    ]}
-                    title="Risk / Exposure"
-                    unit="%"
-                />
-            </div>
+            {!error && !loading && !hasAnalytics && (
+                <p className="mm-card__placeholder">
+                    No runtime analytics yet
+                </p>
+            )}
+            {!error && (loading || hasAnalytics) && (
+                <div className="mm-analytics">
+                    <AnalyticsChart
+                        data={data}
+                        loading={loading}
+                        lines={[{ metric: "equity", name: "Equity" }]}
+                        title="Equity Curve"
+                        unit=" USDT"
+                    />
+                    <AnalyticsChart
+                        data={data}
+                        loading={loading}
+                        lines={[{
+                            metric: "realizedPnl",
+                            name: "Cumulative Realized P&L",
+                        }]}
+                        title="Cumulative Realized P&L"
+                        unit=" USDT"
+                    />
+                    <AnalyticsChart
+                        data={data}
+                        loading={loading}
+                        lines={[{
+                            metric: "drawdownPercent",
+                            name: "Drawdown",
+                        }]}
+                        title="Drawdown"
+                        unit="%"
+                    />
+                    <AnalyticsChart
+                        data={data}
+                        loading={loading}
+                        lines={[
+                            {
+                                metric: "riskUtilization",
+                                name: "Risk Utilization",
+                            },
+                            {
+                                metric: "exposureUtilization",
+                                name: "Exposure Utilization",
+                            },
+                        ]}
+                        title="Risk / Exposure"
+                        unit="%"
+                    />
+                </div>
+            )}
         </section>
     );
 }

@@ -78,10 +78,29 @@
 }
 
 .market-intelligence .mm-section-title {
-    margin: 0 0 var(--mm-card-gap);
+    margin: 0;
     color: var(--mi-text);
     font-size: 12px;
     letter-spacing: 0.06em;
+}
+
+.market-intelligence .mm-analytics-header {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--mm-card-gap);
+    margin-bottom: var(--mm-card-gap);
+}
+
+.market-intelligence .mm-analytics-periods {
+    display: flex;
+    gap: 4px;
+}
+
+.market-intelligence .mm-analytics-periods button[aria-pressed="true"] {
+    border-color: var(--status-color-blue);
+    color: var(--status-color-blue);
 }
 
 .market-intelligence .mm-analytics {
@@ -685,6 +704,19 @@
 }
 
 @media (max-width: 760px) {
+    .market-intelligence .mm-analytics-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .market-intelligence .mm-analytics-periods {
+        width: 100%;
+    }
+
+    .market-intelligence .mm-analytics-periods button {
+        flex: 1 1 0;
+    }
+
     .market-intelligence .mm-status-bar__controls {
         flex-wrap: wrap;
         width: 100%;

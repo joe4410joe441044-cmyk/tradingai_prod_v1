@@ -106,7 +106,16 @@ test("runtime history focuses on filters, pagination, and event state", async ()
 });
 
 test("analytics section renders four history-backed Recharts", async () => {
-  const source = await readSource("MoneyManagementAnalyticsSection.jsx");
+  const source = [
+    await readSource("MoneyManagementAnalyticsSection.jsx"),
+    await readFile(
+      new URL(
+        "../../features/money-management/analytics/moneyManagementAnalytics.js",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ].join("\n");
   for (const label of [
     "Analytics",
     "Equity Curve",
@@ -114,10 +123,18 @@ test("analytics section renders four history-backed Recharts", async () => {
     "Drawdown",
     "Risk / Exposure",
     "No data",
+    "No runtime analytics yet",
+    "Analytics unavailable",
+    "7D",
+    "30D",
+    "ALL",
   ]) {
     assert.match(source, new RegExp(label.replace(/[/.]/g, "\\$&")));
   }
   assert.match(source, /getMoneyManagementHistory/);
+  assert.match(source, /loadMoneyManagementAnalyticsHistory/);
+  assert.match(source, /filterMoneyManagementAnalyticsEvents/);
+  assert.match(source, /aria-pressed=\{period === value\}/);
   assert.match(source, /connectNulls=\{false\}/);
   assert.match(source, /event\.metrics\?\.realizedPnl \?\? null/);
   assert.doesNotMatch(source, /Math\.random|parseFloat|Number\(/);

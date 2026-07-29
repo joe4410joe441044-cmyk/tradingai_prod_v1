@@ -77,6 +77,8 @@ test("interactive Money Management cards use the existing form and action styles
   assert.match(styles, /\.mm-configuration-field select/);
   assert.match(styles, /\.mm-runtime-timeline/);
   assert.match(styles, /\.mm-analytics/);
+  assert.match(styles, /\.mm-analytics-periods/);
+  assert.match(styles, /button\[aria-pressed="true"\]/);
   assert.match(sizing, /className="mm-interaction-form"/);
   assert.match(sizing, /className="mm-action-row"/);
   assert.match(sizing, /\["entryPrice", "Entry Price"\]/);
