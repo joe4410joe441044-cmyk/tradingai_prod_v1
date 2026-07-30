@@ -16,6 +16,12 @@ from backend.ai_advisor.mock_provider import (
     MockProviderFixture,
 )
 from backend.ai_advisor.advisor_service import AdvisorService
+from backend.ai_advisor.provider_failure_observation import (
+    ProviderFailureStage,
+    RecordingProviderFailureObservationSink,
+    ResponseTopLevelType,
+    ResponseValidationCode,
+)
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
     AdvisorServiceFailureCode,
@@ -82,7 +88,12 @@ def service_input(request=None, **overrides):
     return AdvisorServiceInput(**values)
 
 
-def service(response_text=None, provider=None, provider_config=None):
+def service(
+    response_text=None,
+    provider=None,
+    provider_config=None,
+    failure_sink=None,
+):
     provider = provider or MockAdvisorProvider(
         MockProviderFixture(responseText=response_text or fixture_text())
     )
@@ -91,6 +102,11 @@ def service(response_text=None, provider=None, provider_config=None):
         providerConfig=provider_config or config(),
         modelPolicy=model_policy(),
         capabilities=capabilities(),
+        **(
+            {"failureObservationSink": failure_sink}
+            if failure_sink is not None
+            else {}
+        ),
     )
 
 
@@ -219,11 +235,57 @@ class AdvisorServiceTest(unittest.TestCase):
         self.assertNotIn("raw provider metadata", result.model_dump_json())
 
     def test_parser_failure_mapping_without_json_repair(self):
-        result = service("{").generate_response(service_input())
+        sink = RecordingProviderFailureObservationSink()
+        result = service("{", failure_sink=sink).generate_response(service_input())
         self.assert_failure(
             result,
             AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE,
         )
+        observation = sink.observation
+        self.assertIsNotNone(observation)
+        self.assertEqual(
+            observation.failureStage,
+            ProviderFailureStage.RESPONSE_VALIDATION,
+        )
+        self.assertFalse(observation.parseSucceeded)
+        self.assertEqual(
+            observation.validationCode,
+            ResponseValidationCode.JSON_DECODE_FAILED,
+        )
+        self.assertEqual(
+            observation.topLevelType,
+            ResponseTopLevelType.UNKNOWN,
+        )
+        self.assertEqual(observation.httpStatus, 502)
+        rendered = observation.model_dump_json()
+        self.assertNotIn("responseText", rendered)
+        self.assertNotIn("rawResponse", rendered)
+
+    def test_semantic_rejection_does_not_emit_parser_observation(self):
+        sink = RecordingProviderFailureObservationSink()
+        payload = candidate_payload()
+        payload["summary"] = "I executed the trade."
+        result = service(
+            fixture_text(payload),
+            failure_sink=sink,
+        ).generate_response(service_input())
+        self.assertEqual(result.status, AdvisorServiceStatus.SUCCEEDED)
+        self.assertEqual(result.response.status.value, "REJECTED")
+        self.assertIsNone(sink.observation)
+
+    def test_parser_observation_sink_failure_preserves_safe_failure(self):
+        class RaisingSink:
+            def observe(self, observation):
+                raise RuntimeError("sk-test-sink-secret")
+
+        result = service("{", failure_sink=RaisingSink()).generate_response(
+            service_input()
+        )
+        self.assert_failure(
+            result,
+            AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE,
+        )
+        self.assertNotIn("sk-test-sink-secret", result.model_dump_json())
 
     def test_response_validation_exception_mapping(self):
         with patch(

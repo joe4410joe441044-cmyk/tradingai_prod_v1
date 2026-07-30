@@ -1,17 +1,29 @@
 # AI Advisor Exact Release Manifest Candidate
 
-- Manifest ID: `AI-ADV-EXACT-RC-20260726-01`
-- Base HEAD: `7a936851bd44bdc5adf004ed8437b7849f9e70c6`
-- Generated at: `2026-07-26T06:52:15Z`
+- Manifest ID: `AI-ADV-EXACT-RC-20260730-02`
+- Repository: `/home/joe4410joe/tradingai_prod_v1`
+- Branch: `main`
+- Base HEAD: `20e7cdcae0dfc457040a793e222b71e0ac5eb192`
+- Base versus `origin/main`: ahead 0 / behind 0
+- Generated at: `2026-07-30`
 - Scope: exact manifest only
-- Status: candidate; not staged, committed, pushed, deployed or activated
+- Working tree: dirty; 34 dirty paths exist, but they are not all release content
+- Status: implementation complete; candidate not staged, committed, pushed,
+  deployed, live-validated, or activated
+- Live Validation 03: `INCONCLUSIVE / EXECUTION_PROCEDURE_GAP`
+- `IMPLEMENTATION_COMPLETE`: `YES`
+- `LIVE_VALIDATED`: `NO`
+- `PRODUCTION_ACTIVATED`: `NO`
+- New Live execution: not authorized; a new explicit approval is required
 
 All paths in this manifest are repository-relative. No wildcard or directory
 path represents release authorization.
 
 ## Exclusive required files
 
-Every file below is `Untracked / New / AI_ADVISOR_EXCLUSIVE / Required`.
+Every file below is `AI_ADVISOR_EXCLUSIVE / Required`. Its current Git state is
+defined by the exact delta tables below. Any required path not present in a
+delta table is `tracked-unchanged`; no path is implicitly `untracked-new`.
 
 ### Backend
 
@@ -42,6 +54,7 @@ backend/ai_advisor/prompt_builder.py
 backend/ai_advisor/prompt_models.py
 backend/ai_advisor/provider_adapter.py
 backend/ai_advisor/provider_config.py
+backend/ai_advisor/provider_failure_observation.py
 backend/ai_advisor/provider_invocation_guard.py
 backend/ai_advisor/provider_models.py
 backend/ai_advisor/provider_registry.py
@@ -86,7 +99,7 @@ frontend/src/features/ai-advisor/runtime/useAdvisorRuntime.js
 frontend/src/features/ai-advisor/runtime/useAdvisorRuntime.test.js
 ```
 
-The following are `Tracked / Modified / AI_ADVISOR_EXCLUSIVE / Required`:
+The following are `tracked-unchanged / AI_ADVISOR_EXCLUSIVE / Required`:
 
 ```text
 frontend/src/pages/AIAdvisorPage.jsx
@@ -99,7 +112,8 @@ component, page, client, model, hook, full Frontend and isolated-build checks.
 
 ### Tests
 
-Every file below is `Untracked / New / AI_ADVISOR_EXCLUSIVE / Required`.
+Every file below is `AI_ADVISOR_EXCLUSIVE / Required`; the exact current state
+is defined by the delta tables.
 
 ```text
 tests/test_ai_advisor_api.py
@@ -119,20 +133,25 @@ tests/test_ai_advisor_production_config.py
 tests/test_ai_advisor_prompt_builder.py
 tests/test_ai_advisor_provider.py
 tests/test_ai_advisor_provider_contract.py
+tests/test_ai_advisor_provider_failure_observation.py
 tests/test_ai_advisor_provider_security.py
 tests/test_ai_advisor_response_security.py
 tests/test_ai_advisor_response_validation.py
 tests/test_ai_advisor_runtime.py
 tests/test_ai_advisor_service.py
 tests/test_ai_advisor_systemd_credential.py
+tests/test_ai_advisor_systemd_unit_contract.py
 ```
 
 ### Documentation
 
-Every file below is `Untracked / New / AI_ADVISOR_EXCLUSIVE / Required`.
+Every file below is `AI_ADVISOR_EXCLUSIVE / Required`; documents with similar
+names remain separate artifacts and are not merged by this manifest.
 
 ```text
 docs/09_AI_Advisor_Master_Specification.md
+docs/01_AI_Advisor_Master_Specification.md
+docs/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md
 docs/ai_advisor/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md
 docs/ai_advisor/AI_ADVISOR_EXACT_RELEASE_MANIFEST_CANDIDATE.md
 docs/ai_advisor/AI_ADVISOR_RELEASE_CONTENT_CANDIDATE.md
@@ -144,54 +163,118 @@ docs/ai_advisor/approved_knowledge_manifest.candidate.json
 docs/ai_advisor/systemd-credential-smoke-runbook.md
 ```
 
+`docs/09_AI_Advisor_Master_Specification.md` is the detailed tracked Advisor
+specification. `docs/01_AI_Advisor_Master_Specification.md` is the current
+top-level design baseline. The root and `docs/ai_advisor/` role/safety
+specifications are distinct current candidate copies and remain separately
+listed pending later document-governance decisions.
+
+### Current required-file state deltas
+
+The following 24 required paths are `tracked-modified`:
+
+```text
+backend/ai_advisor/advisor_service.py
+backend/ai_advisor/isolated_smoke_runner.py
+backend/ai_advisor/openai_sdk_transport.py
+backend/ai_advisor/production_composition.py
+backend/ai_advisor/prompt_builder.py
+backend/ai_advisor/prompt_models.py
+backend/ai_advisor/response_parser.py
+docs/ai_advisor/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md
+docs/ai_advisor/AI_ADVISOR_EXACT_RELEASE_MANIFEST_CANDIDATE.md
+docs/ai_advisor/AI_ADVISOR_RELEASE_CONTENT_CANDIDATE.md
+docs/ai_advisor/AI_ADV_1F_BATCH2_PRODUCTION_RUNBOOK.md
+docs/ai_advisor/FINAL_OFFLINE_PRODUCTION_READINESS_PACKAGE.md
+docs/ai_advisor/PRODUCTION_CONFIGURATION_MATRIX_CANDIDATE.md
+docs/ai_advisor/systemd-credential-smoke-runbook.md
+frontend/src/components/ai-advisor/AdvisorConversation.test.js
+frontend/src/features/ai-advisor/conversation/advisorBrowserGatewayClient.test.js
+tests/test_ai_advisor_isolated_smoke_runner.py
+tests/test_ai_advisor_openai_sdk_compatibility.py
+tests/test_ai_advisor_openai_sdk_transport.py
+tests/test_ai_advisor_production_composition.py
+tests/test_ai_advisor_prompt_builder.py
+tests/test_ai_advisor_response_security.py
+tests/test_ai_advisor_response_validation.py
+tests/test_ai_advisor_service.py
+```
+
+The following required path is `tracked-deleted`; deletion is part of the
+candidate and the obsolete example must not be restored or treated as a current
+unit:
+
+```text
+deploy/systemd/tradingai-ai-advisor-smoke.service.example
+```
+
+The following six required paths are `untracked-new`:
+
+```text
+backend/ai_advisor/provider_failure_observation.py
+deploy/systemd/tradingai-ai-advisor-live-validation.service
+docs/01_AI_Advisor_Master_Specification.md
+docs/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md
+tests/test_ai_advisor_provider_failure_observation.py
+tests/test_ai_advisor_systemd_unit_contract.py
+```
+
+All other paths in the required Backend, Frontend, Tests, Documentation, and
+shared-file lists are `tracked-unchanged`. This yields the exact current
+required set: 110 unique paths total — 24 `tracked-modified`, 1
+`tracked-deleted`, 6 `untracked-new`, and 79 `tracked-unchanged`.
+
+### Required transient unit contract
+
+```text
+deploy/systemd/tradingai-ai-advisor-live-validation.service
+docs/ai_advisor/systemd-credential-smoke-runbook.md
+```
+
 ## Shared required files and hunk ownership
 
 | Relative path | State | Hunks | AI Advisor | Other | Mixed | Separation | Purpose |
 |---|---|---:|---:|---:|---:|---|---|
-| `backend/main.py` | Tracked/Modified | 2 | 2 | 0 | 0 | PATCH_STAGE_SAFE | imports; route/composition registration |
-| `requirements.txt` | Tracked/Modified | 1 | 1 | 0 | 0 | PATCH_STAGE_SAFE | `openai==2.48.0` |
-| `frontend/src/App.jsx` | Tracked/Modified | 4 | 4 | 0 | 0 | PATCH_STAGE_SAFE | Advisor route WebSocket isolation |
-| `frontend/src/App.test.js` | Tracked/Modified | 4 | 4 | 0 | 0 | PATCH_STAGE_SAFE | App isolation coverage |
-| `frontend/src/api/index.js` | Tracked/Modified | 5 | 5 | 0 | 0 | PATCH_STAGE_SAFE | safe env access and coarse runtime path |
-| `frontend/src/runtime/websocketRuntime.js` | Tracked/Modified | 11 | 11 | 0 | 0 | PATCH_STAGE_SAFE | explicit stop/reconnect suppression |
-| `frontend/src/runtime/websocketRuntime.test.js` | Untracked/New | 1 | 1 | 0 | 0 | PATH_STAGE_SAFE | WebSocket isolation regression |
+| `backend/main.py` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | imports; route/composition registration |
+| `requirements.txt` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | `openai==2.48.0` |
+| `frontend/src/App.jsx` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | Advisor route WebSocket isolation |
+| `frontend/src/App.test.js` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | App isolation coverage |
+| `frontend/src/api/index.js` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | safe env access and coarse runtime path |
+| `frontend/src/runtime/websocketRuntime.js` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | explicit stop/reconnect suppression |
+| `frontend/src/runtime/websocketRuntime.test.js` | tracked-unchanged | 0 | 0 | 0 | 0 | PATH_PRESENT | WebSocket isolation regression |
 
-No shared hunk contains Money Management, Execution Marker or Dashboard
-changes. Shared tracked files should nevertheless be staged interactively,
-one reviewed AI Advisor hunk at a time. The untracked shared test can be
-reviewed and staged by its exact path.
+The shared dependencies are already present at Base HEAD and have no current
+working-tree delta. They remain required runtime/test dependencies, but this
+candidate does not stage them as changes.
 
 ## Optional files
 
-Every file below is `Untracked / New / AI_ADVISOR_OPTIONAL / Optional`.
+The following optional deployment examples are `tracked-unchanged` and are
+never auto-installed:
 
 ```text
 deploy/nginx/ai-advisor-browser-gateway.conf.example
-deploy/systemd/tradingai-ai-advisor-smoke.service.example
 deploy/systemd/tradingbot-loopback.override.conf.example
-docs/00_TradingAI_Platform_Master_Specification.md
 ```
 
-The deployment examples are never auto-installed. The Platform Master
-Specification is a candidate cross-platform knowledge source and is kept
-optional to avoid coupling the executable release to broader documentation.
+The Live Validation mirror is not optional in this manifest: it is included in
+the required transient-unit contract above. The previously referenced
+`docs/00_TradingAI_Platform_Master_Specification.md` is absent and is not part
+of this candidate.
 
 ## Explicit exclusions
 
 | Relative path | State | Classification | Dependency conflict |
 |---|---|---|---|
-| `Bot/engine/execution_engine.py` | Tracked/Modified | EXECUTION_MARKER_EXCLUDED | No |
-| `backend/bot_manager/bot_manager.py` | Tracked/Modified | EXECUTION_MARKER_EXCLUDED | No; Advisor imports only its existing committed read accessor |
-| `backend/execution/execution_marker.py` | Untracked/New | EXECUTION_MARKER_EXCLUDED | No |
-| `tests/test_paper_execution_markers.py` | Untracked/New | EXECUTION_MARKER_EXCLUDED | No |
-| `docs/01_Money_Management_Master_Specification.md` | Untracked/New | MONEY_MANAGEMENT_EXCLUDED | No |
-| `docs/01_Money_Management_Specification_Additions_v1.1.md` | Untracked/New | MONEY_MANAGEMENT_EXCLUDED | No |
-| `docs/08_Dashboard_Redesign_Specification.md` | Untracked/New | DASHBOARD_EXCLUDED | No |
-| `frontend/dist/index.html` | Tracked/Modified | BUILD_ARTIFACT_EXCLUDED | No |
+| `backend/utils/log_buffer.py` | tracked-modified | OTHER_WORK_EXCLUDED | No |
+| `docs/01_Market_Recorder_Master_Specification.md` | untracked-new | MARKET_RECORDER_EXCLUDED | No |
+| `frontend/dist/index.html` | tracked-modified | BUILD_ARTIFACT_EXCLUDED | No |
 
-`OTHER_EXISTING_EXCLUDED` and `UNKNOWN_OWNERSHIP` contain zero files.
+Money Management, Market Recorder, Execution Marker, Dashboard, and all paths
+not explicitly listed in this manifest are outside the release boundary.
 No excluded file is required to make the exact AI Advisor candidate internally
-testable.
+testable. The 34 dirty paths are therefore not equivalent to release content.
+No credential value, secret, raw response, or raw journal is release content.
 
 ## Dependency audit
 
@@ -209,10 +292,11 @@ testable.
 
 | Relative path | HEAD | Version | Release inclusion | Candidate source |
 |---|---|---|---|---|
-| `docs/ai_advisor/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md` | Absent | 1.1 | Required | Eligible only after commit |
-| `docs/09_AI_Advisor_Master_Specification.md` | Absent | 0.2 | Required | Eligible only after commit |
-| `docs/00_TradingAI_Platform_Master_Specification.md` | Absent | 1.0 Draft | Optional | Eligible only after separate inclusion and commit |
-| `docs/ai_advisor/AI_ADV_1F_BATCH2_PRODUCTION_RUNBOOK.md` | Absent | Release candidate runbook | Required | Eligible only after commit |
+| `docs/ai_advisor/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md` | tracked-modified | 1.1 | Required | Current candidate |
+| `docs/09_AI_Advisor_Master_Specification.md` | tracked-unchanged | 0.2 | Required | Present at Base HEAD |
+| `docs/01_AI_Advisor_Master_Specification.md` | untracked-new | 1.0 | Required | Current top-level baseline candidate |
+| `docs/01_AI_Advisor_Role_Permission_and_Safety_Boundary_Specification.md` | untracked-new | current copy | Required | Current root-level candidate |
+| `docs/ai_advisor/AI_ADV_1F_BATCH2_PRODUCTION_RUNBOOK.md` | tracked-modified | Release candidate runbook | Required | Current candidate |
 
 After a release commit: re-check the committed HEAD, regenerate content hashes,
 revalidate the knowledge manifest, obtain owner approval, and keep external
@@ -227,6 +311,11 @@ transmission disabled. This candidate does not activate knowledge.
 - Isolated Vite build: passed; tracked distribution not used.
 - Secret scan: passed; test fixtures are synthetic and non-production.
 - `git diff --check`: passed.
+- Production Readiness: passed for preparation; no Production authority.
+- Live Preflight: passed.
+- Live Validation 03: `INCONCLUSIVE / EXECUTION_PROCEDURE_GAP`; not passed and
+  not live-validated.
+- Safe Result Runbook: passed static final review.
 
 ## Commit options
 
@@ -253,14 +342,13 @@ atomic.
 ## Exact staging plan
 
 1. Confirm Base HEAD, zero staged changes and the unchanged dirty inventory.
-2. Review and stage each exact exclusive required path listed above separately.
-3. Review `backend/main.py`, `requirements.txt`, `frontend/src/App.jsx`,
-   `frontend/src/App.test.js`, `frontend/src/api/index.js`, and
-   `frontend/src/runtime/websocketRuntime.js` interactively; accept only the
-   AI Advisor hunks recorded in the shared-hunk table.
-4. Review and stage the exact new path
-   `frontend/src/runtime/websocketRuntime.test.js`.
-5. Stage optional paths only when each is named in the approval.
+2. Review the 24 exact `tracked-modified` paths and stage only the approved
+   candidate content.
+3. Review and stage the one exact `tracked-deleted` path as a deletion; never
+   restore the obsolete unit example.
+4. Review and stage the six exact `untracked-new` required paths.
+5. Do not stage any `tracked-unchanged` dependency. Stage optional paths only
+   when each is separately named in the approval.
 6. Do not use repository-wide, all-change, commit-all or unreviewed directory
    staging.
 7. Verify the staged name list exactly matches the approved manifest subset.

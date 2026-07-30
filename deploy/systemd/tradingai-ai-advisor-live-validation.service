@@ -1,0 +1,52 @@
+# Static verification mirror for the transient unit defined in
+# docs/ai_advisor/systemd-credential-smoke-runbook.md.
+# Do not install, enable, or start this file. The approved operator procedure
+# creates the equivalent non-interactive transient unit with systemd-run.
+[Unit]
+Description=TradingAI AI Advisor isolated one-shot live validation
+StartLimitIntervalSec=86400
+StartLimitBurst=1
+
+[Service]
+Type=oneshot
+User=joe4410joe
+Group=joe4410joe
+WorkingDirectory=/home/joe4410joe/tradingai_prod_v1
+Environment=TRADINGAI_ISOLATED_STDIO_ONLY=true
+ExecStart=/home/joe4410joe/tradingai_prod_v1/venv/bin/python -m backend.ai_advisor.isolated_smoke_runner --mode LIVE_ONE_SHOT --live-one-shot-approval 'AI-ADV-1E9 LIVE TEST APPROVED: ONE REQUEST'
+LoadCredentialEncrypted=AI_ADVISOR_AUTH_TOKEN:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN
+LoadCredentialEncrypted=OPENAI_API_KEY:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Restart=no
+RemainAfterExit=no
+TimeoutStartSec=120
+SuccessExitStatus=0
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/joe4410joe/tradingai_prod_v1
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProcSubset=pid
+ProtectProc=invisible
+
+# Intentionally no installation section, WantedBy, timer, socket, or dependency
+# on tradingbot.service.

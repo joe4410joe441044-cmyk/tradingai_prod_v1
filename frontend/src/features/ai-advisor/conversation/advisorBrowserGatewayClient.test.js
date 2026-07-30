@@ -30,8 +30,10 @@ test("gateway client sends only prompt with same-origin credentials and fixed he
     assert.equal((await client.requestAdvice("Hello")).summary, "Safe answer");
     const [path, options] = calls[0];
     assert.equal(path, ADVISOR_CONVERSATION_PATH);
+    assert.equal(options.method, "POST");
     assert.equal(options.credentials, "same-origin");
     assert.equal(options.headers["X-TradingAI-Client"], "web");
+    assert.equal(options.headers["Content-Type"], "application/json");
     assert.equal("Authorization" in options.headers, false);
     assert.deepEqual(JSON.parse(options.body), { prompt: "Hello" });
     for (const forbidden of [
@@ -51,6 +53,7 @@ test("status uses its fixed same-origin path and validates coarse state", async 
     });
     assert.equal(await client.getStatus(), "AVAILABLE");
     assert.equal(calls[0][0], ADVISOR_CONVERSATION_STATUS_PATH);
+    assert.equal(calls[0][1].method, "GET");
     assert.equal(calls[0][1].credentials, "same-origin");
 });
 
@@ -96,6 +99,54 @@ test("abort and timeout are distinct and never retry", async () => {
 
     const timed = createAdvisorBrowserGatewayClient({ fetchImpl, timeoutMs: 1 });
     await assert.rejects(timed.requestAdvice("Hello"), { code: "TIMED_OUT" });
+});
+
+test("parse and network failures expose only safe errors", async () => {
+    const unparseable = createAdvisorBrowserGatewayClient({
+        fetchImpl: async () => ({
+            ok: false,
+            status: 502,
+            json: async () => {
+                throw new SyntaxError("secret upstream response");
+            },
+        }),
+    });
+    await assert.rejects(
+        unparseable.requestAdvice("Hello"),
+        (error) => error.code === "INVALID_PROVIDER_RESPONSE"
+            && !error.message.includes("secret upstream response"),
+    );
+
+    const networkFailure = createAdvisorBrowserGatewayClient({
+        fetchImpl: async () => {
+            throw new Error("sensitive network detail");
+        },
+    });
+    await assert.rejects(
+        networkFailure.requestAdvice("Hello"),
+        (error) => error.code === "ENDPOINT_UNAVAILABLE"
+            && error.retryable === true
+            && !error.message.includes("sensitive network detail"),
+    );
+});
+
+test("required response fields are validated at runtime", async () => {
+    for (const advisorResponse of [
+        { ...envelope, responseVersion: undefined },
+        { ...envelope, requestId: undefined },
+        { ...envelope, summary: undefined },
+        { ...envelope, status: undefined },
+    ]) {
+        const client = createAdvisorBrowserGatewayClient({
+            fetchImpl: async () => response(200, {
+                status: "SUCCEEDED",
+                advisorResponse,
+            }),
+        });
+        await assert.rejects(client.requestAdvice("Hello"), {
+            code: "INVALID_PROVIDER_RESPONSE",
+        });
+    }
 });
 
 test("missing, fake, path, and URL citations fail closed", async () => {

@@ -13,6 +13,11 @@ from backend.ai_advisor.context_builder import build_freshness
 from backend.ai_advisor.conversation_models import AdvisorFreshnessState
 from backend.ai_advisor.prompt_builder import build_advisor_prompt
 from backend.ai_advisor.prompt_models import AdvisorPromptPolicy
+from backend.ai_advisor.provider_failure_observation import (
+    ResponseContractField,
+    ResponseTopLevelType,
+    ResponseValidationCode,
+)
 from backend.ai_advisor.response_models import (
     MAX_RAW_RESPONSE_CHARACTERS,
     AdvisorForbiddenClaim,
@@ -23,7 +28,10 @@ from backend.ai_advisor.response_models import (
     AdvisorSafetyDisclosure,
     AdvisorUnknownReason,
 )
-from backend.ai_advisor.response_parser import parse_advisor_response
+from backend.ai_advisor.response_parser import (
+    AdvisorResponseParsingError,
+    parse_advisor_response,
+)
 from backend.ai_advisor.response_validation import (
     REJECTED_SUMMARY,
     validate_advisor_response,
@@ -137,6 +145,109 @@ class AdvisorResponseValidationTest(unittest.TestCase):
                 )
         with self.assertRaises(ValidationError):
             raw(responseText="")
+
+    def test_parser_failures_have_only_fixed_allowlisted_diagnostics(self):
+        missing = candidate_payload()
+        missing.pop("summary")
+        unexpected = {**candidate_payload(), "untrusted-secret-key": "secret-value"}
+        wrong_type = {**candidate_payload(), "summary": 7}
+        enum_mismatch = candidate_payload()
+        enum_mismatch["facts"][0]["freshness"] = "FRESH_SECRET_VALUE"
+        null_value = {**candidate_payload(), "summary": None}
+        nested = candidate_payload()
+        nested["facts"][0].pop("factId")
+        constrained = {**candidate_payload(), "summary": ""}
+        cases = (
+            (
+                "not-json-secret",
+                ResponseValidationCode.JSON_DECODE_FAILED,
+                ResponseTopLevelType.UNKNOWN,
+                None,
+                (),
+            ),
+            (
+                '{"summary":"one","summary":"two"}',
+                ResponseValidationCode.DUPLICATE_KEY,
+                ResponseTopLevelType.UNKNOWN,
+                None,
+                (),
+            ),
+            (
+                "[]",
+                ResponseValidationCode.TOP_LEVEL_NOT_OBJECT,
+                ResponseTopLevelType.ARRAY,
+                None,
+                (),
+            ),
+            (
+                json.dumps(missing),
+                ResponseValidationCode.REQUIRED_FIELD_MISSING,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.SUMMARY,
+                (ResponseContractField.SUMMARY,),
+            ),
+            (
+                json.dumps(unexpected),
+                ResponseValidationCode.UNEXPECTED_FIELD,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.UNKNOWN_OR_UNEXPECTED,
+                (),
+            ),
+            (
+                json.dumps(wrong_type),
+                ResponseValidationCode.FIELD_TYPE_INVALID,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.SUMMARY,
+                (),
+            ),
+            (
+                json.dumps(enum_mismatch),
+                ResponseValidationCode.ENUM_VALUE_INVALID,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.FACTS,
+                (),
+            ),
+            (
+                json.dumps(null_value),
+                ResponseValidationCode.NULL_NOT_ALLOWED,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.SUMMARY,
+                (),
+            ),
+            (
+                json.dumps(nested),
+                ResponseValidationCode.NESTED_SCHEMA_INVALID,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.FACTS,
+                (),
+            ),
+            (
+                json.dumps(constrained),
+                ResponseValidationCode.CONSTRAINT_VIOLATION,
+                ResponseTopLevelType.OBJECT,
+                ResponseContractField.SUMMARY,
+                (),
+            ),
+        )
+        for text, code, top_level, invalid_field, missing_fields in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(AdvisorResponseParsingError) as raised:
+                    parse_advisor_response(raw(responseText=text))
+                error = raised.exception
+                self.assertEqual(str(error), "advisor response parsing failed")
+                self.assertFalse(error.diagnostic.parseSucceeded)
+                self.assertEqual(error.diagnostic.validationCode, code)
+                self.assertEqual(error.diagnostic.topLevelType, top_level)
+                self.assertEqual(error.diagnostic.invalidField, invalid_field)
+                self.assertEqual(error.diagnostic.missingFields, missing_fields)
+                rendered = error.diagnostic.model_dump_json()
+                for forbidden in (
+                    "secret-value",
+                    "untrusted-secret-key",
+                    "FRESH_SECRET_VALUE",
+                    "not-json-secret",
+                ):
+                    self.assertNotIn(forbidden, rendered)
 
     def test_validated_response_is_typed_sorted_and_warning_status(self):
         result = validate(raw())

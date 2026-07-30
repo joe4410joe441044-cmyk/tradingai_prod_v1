@@ -29,6 +29,7 @@ from backend.ai_advisor.prompt_models import (
     AdvisorPromptPolicy,
     AdvisorPromptSection,
     AdvisorPromptSectionType,
+    build_response_instruction,
 )
 
 _SECTION_ORDER = (
@@ -260,6 +261,10 @@ def build_advisor_prompt(
     if not request.permissionContext.conversationAllowed:
         raise ValueError("trusted authenticated and authorized context required")
     current_request = _safe_data(request.message)
+    response_instruction = build_response_instruction(
+        request_id=request.requestId,
+        prompt_version=PROMPT_VERSION,
+    )
     warnings = tuple(sorted({warning.value for warning in context.warnings}))
     sections = (
         _section(
@@ -274,7 +279,7 @@ def build_advisor_prompt(
         _section(
             AdvisorPromptSectionType.RESPONSE,
             "Response Contract",
-            RESPONSE_INSTRUCTION,
+            response_instruction,
         ),
         _section(
             AdvisorPromptSectionType.SOURCE_POLICY,
@@ -305,7 +310,7 @@ def build_advisor_prompt(
         systemInstruction=SYSTEM_INSTRUCTION,
         roleInstruction=ROLE_INSTRUCTION,
         permissionInstruction=PERMISSION_INSTRUCTION,
-        responseInstruction=RESPONSE_INSTRUCTION,
+        responseInstruction=response_instruction,
         sourceInstruction=SOURCE_INSTRUCTION,
         contextSections=sections,
         currentRequest=current_request,

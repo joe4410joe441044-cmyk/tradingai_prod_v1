@@ -44,6 +44,10 @@ from backend.ai_advisor.provider_config import (
     ProviderName,
     ProviderResponseFormat,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    NoOpProviderFailureObservationSink,
+    ProviderFailureObservationSink,
+)
 from backend.ai_advisor.provider_models import (
     MAX_PROVIDER_OUTPUT_CHARACTERS,
     PROVIDER_CONFIG_VERSION,
@@ -148,6 +152,7 @@ def _provider_service(
     client_factory: OpenAIClientFactory,
     readiness: ProductionReadiness,
     usage_observation_sink: UsageObservationSink,
+    failure_observation_sink: ProviderFailureObservationSink,
 ):
     connection = ProviderConnectionConfig(
         configVersion=PROVIDER_CONNECTION_CONFIG_VERSION,
@@ -194,6 +199,7 @@ def _provider_service(
         allowNetworkInvocation=configuration.networkInvocationAllowed,
         liveConnectivityGate=live_gate,
         usageObservationSink=usage_observation_sink,
+        failureObservationSink=failure_observation_sink,
     )
     registry = ProviderRegistry(
         {
@@ -230,6 +236,7 @@ def _provider_service(
             supportsImages=False,
             supportsFiles=False,
         ),
+        failureObservationSink=failure_observation_sink,
     )
 
 
@@ -242,6 +249,9 @@ def build_ai_advisor_production_composition(
     allowed_provider_credential_ids: tuple[str, ...],
     client_factory: OpenAIClientFactory | None = None,
     usage_observation_sink: UsageObservationSink = NoOpUsageObservationSink(),
+    failure_observation_sink: ProviderFailureObservationSink = (
+        NoOpProviderFailureObservationSink()
+    ),
     clock: Callable[[], float] = time.monotonic,
 ) -> ProductionCompositionResult:
     loaded = config_loader.load()
@@ -319,6 +329,7 @@ def build_ai_advisor_production_composition(
                 client_factory=client_factory or DefaultOpenAIClientFactory(),
                 readiness=readiness,
                 usage_observation_sink=usage_observation_sink,
+                failure_observation_sink=failure_observation_sink,
             )
         except Exception:
             readiness = ProductionReadiness(

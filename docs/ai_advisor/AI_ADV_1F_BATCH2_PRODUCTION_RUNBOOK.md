@@ -29,6 +29,17 @@ AI_ADVISOR_BROWSER_ALLOWED_ORIGINS=https://approved.example
 
 Do not place provider credentials or bearer tokens in frontend configuration.
 
+## Isolated live-validation boundary
+
+The Browser Gateway and its Production service do not receive live-validation
+credentials. The only credential/unit contract is
+`docs/ai_advisor/systemd-credential-smoke-runbook.md`: encrypted artifacts live
+under `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation`, and the
+only runner is transient `tradingai-ai-advisor-live-validation.service` created
+with `systemd-run --wait --collect`. No persistent unit, daemon reload,
+Production-service restart, or Browser Gateway activation is part of that
+procedure.
+
 ## Offline verification order
 
 1. Validate the candidate Nginx configuration without reloading it.

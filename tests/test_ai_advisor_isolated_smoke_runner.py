@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import socket
+import subprocess
+import time
 import unittest
 from datetime import datetime, timezone
 from io import StringIO
@@ -15,6 +17,7 @@ from backend.ai_advisor.isolated_smoke_runner import (
     CredentialAvailabilityStatus,
     CredentialReferenceStatus,
     CredentialSourceStatus,
+    IsolatedSmokeResult,
     IsolatedSmokeTestRunner,
     SmokePreflightStatus,
     SmokeTestMode,
@@ -23,11 +26,20 @@ from backend.ai_advisor.isolated_smoke_runner import (
     isolated_failure_shutdown_steps,
     isolated_non_secret_environment,
     main,
+    smoke_result_exit_code,
 )
 from backend.ai_advisor.production_config_loader import (
     EnvironmentProductionConfigLoader,
     InjectedProductionConfigLoader,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    ProviderFailureStage,
+    ProviderSafeReason,
+    ResponseContractField,
+    ResponseTopLevelType,
+    ResponseValidationCode,
+)
+from backend.ai_advisor.provider_transport import OpenAITransportTimeout
 from tests.test_ai_advisor_openai_sdk_transport import (
     FakeClient,
     FakeClientFactory,
@@ -122,7 +134,93 @@ def approval():
     return "AI-ADV-1E9 LIVE TEST " + "APPROVED: ONE REQUEST"
 
 
+def smoke_result(
+    *,
+    mode=SmokeTestMode.LIVE_ONE_SHOT,
+    status=SmokePreflightStatus.BLOCKED,
+    composition_built=False,
+    attempted=False,
+    succeeded=False,
+    reason="LIVE_ONE_SHOT_FAILED",
+):
+    return IsolatedSmokeResult(
+        mode=mode,
+        status=status,
+        compositionBuilt=composition_built,
+        liveInvocationAttempted=attempted,
+        invocationSucceeded=succeeded,
+        safeReasons=(reason,),
+    )
+
+
 class IsolatedSmokeRunnerTest(unittest.TestCase):
+    def test_import_uses_stdio_only_without_touching_repository_logging(self):
+        source = """
+import logging.handlers
+import os
+
+def reject_file_logging(*args, **kwargs):
+    raise AssertionError("repository file logging attempted")
+
+os.makedirs = reject_file_logging
+logging.handlers.RotatingFileHandler = reject_file_logging
+import backend.ai_advisor.isolated_smoke_runner
+from backend.utils.log_buffer import logger
+logger.warning("ISOLATED_STDERR_READY")
+print("ISOLATED_IMPORT_READY")
+"""
+        environment = os.environ.copy()
+        environment["TRADINGAI_ISOLATED_STDIO_ONLY"] = "true"
+        completed = subprocess.run(
+            [os.sys.executable, "-c", source],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout.strip(), "ISOLATED_IMPORT_READY")
+        self.assertIn("ISOLATED_STDERR_READY", completed.stderr)
+        self.assertNotIn("repository file logging attempted", completed.stderr)
+
+    def test_normal_import_retains_production_file_logging_default(self):
+        source = """
+import logging
+import logging.handlers
+import os
+
+calls = []
+
+class RecordingHandler(logging.Handler):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        calls.append(("file", args[0]))
+
+os.makedirs = lambda path, exist_ok=False: calls.append(("directory", path))
+logging.handlers.RotatingFileHandler = RecordingHandler
+os.environ.pop("TRADINGAI_ISOLATED_STDIO_ONLY", None)
+import backend.utils.log_buffer
+assert [kind for kind, _ in calls] == ["directory", "file"]
+print("PRODUCTION_FILE_LOGGING_READY")
+"""
+        completed = subprocess.run(
+            [os.sys.executable, "-c", source],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=os.environ.copy(),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(
+            completed.stdout.strip(),
+            "PRODUCTION_FILE_LOGGING_READY",
+        )
+        self.assertEqual(completed.stderr, "")
+
     def test_default_is_dry_run_with_no_credentials_client_or_network(self):
         value, auth, provider, factory, responses = runner()
         with (
@@ -264,6 +362,102 @@ class IsolatedSmokeRunnerTest(unittest.TestCase):
         self.assertEqual(provider_call["timeout"], 30.0)
         self.assertFalse(provider_call["stream"])
         self.assertFalse(provider_call["store"])
+
+    def test_live_failure_projects_only_fixed_observation_fields(self):
+        value, _, provider, factory, responses = runner()
+        responses.exception = OpenAITransportTimeout(
+            "sk-test-DO-NOT-LEAK Authorization: Bearer private"
+        )
+        result = value.run(
+            mode=SmokeTestMode.LIVE_ONE_SHOT,
+            generated_at=NOW,
+            live_approval=approval(),
+        )
+        self.assertFalse(result.invocationSucceeded)
+        self.assertEqual(
+            result.safeReasons,
+            (ProviderSafeReason.LIVE_PROVIDER_TIMEOUT.value,),
+        )
+        self.assertEqual(
+            result.failureStage,
+            ProviderFailureStage.PROVIDER_INVOCATION,
+        )
+        self.assertIsNone(result.httpStatus)
+        self.assertEqual(result.providerRequestUpperBound, 1)
+        self.assertFalse(result.retryPerformed)
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(factory.calls, 1)
+        self.assertEqual(len(responses.calls), 1)
+        rendered = result.model_dump_json()
+        self.assertNotIn("sk-test-DO-NOT-LEAK", rendered)
+        self.assertNotIn("Authorization", rendered)
+        self.assertNotIn("private", rendered)
+
+    def test_live_parser_failure_is_response_contract_classification(self):
+        value, _, provider, factory, responses = runner(
+            response="not json sk-test-DO-NOT-LEAK"
+        )
+        result = value.run(
+            mode=SmokeTestMode.LIVE_ONE_SHOT,
+            generated_at=NOW,
+            live_approval=approval(),
+        )
+        self.assertEqual(
+            result.safeReasons,
+            (
+                ProviderSafeReason
+                .LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED.value,
+            ),
+        )
+        self.assertEqual(
+            result.failureStage,
+            ProviderFailureStage.RESPONSE_VALIDATION,
+        )
+        self.assertEqual(result.httpStatus, 502)
+        self.assertFalse(result.parseSucceeded)
+        self.assertEqual(
+            result.validationCode,
+            ResponseValidationCode.JSON_DECODE_FAILED,
+        )
+        self.assertEqual(result.topLevelType, ResponseTopLevelType.UNKNOWN)
+        self.assertIsNone(result.invalidField)
+        self.assertEqual(result.missingFields, ())
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(factory.calls, 1)
+        self.assertEqual(len(responses.calls), 1)
+        self.assertNotIn(
+            "sk-test-DO-NOT-LEAK",
+            result.model_dump_json(),
+        )
+
+    def test_live_missing_field_projects_only_allowlisted_diagnosis(self):
+        payload = json.loads(response_text())
+        payload.pop("summary")
+        payload["untrusted-extra-secret"] = "sk-test-DO-NOT-LEAK"
+        value, _, provider, factory, responses = runner(
+            response=json.dumps(payload),
+        )
+        result = value.run(
+            mode=SmokeTestMode.LIVE_ONE_SHOT,
+            generated_at=NOW,
+            live_approval=approval(),
+        )
+        self.assertEqual(
+            result.validationCode,
+            ResponseValidationCode.REQUIRED_FIELD_MISSING,
+        )
+        self.assertEqual(result.topLevelType, ResponseTopLevelType.OBJECT)
+        self.assertEqual(result.invalidField, ResponseContractField.SUMMARY)
+        self.assertEqual(
+            result.missingFields,
+            (ResponseContractField.SUMMARY,),
+        )
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(factory.calls, 1)
+        self.assertEqual(len(responses.calls), 1)
+        rendered = result.model_dump_json()
+        self.assertNotIn("untrusted-extra-secret", rendered)
+        self.assertNotIn("sk-test-DO-NOT-LEAK", rendered)
 
     def test_exception_has_no_retry_and_result_is_secret_safe(self):
         value, auth, provider, factory, responses = runner(
@@ -414,7 +608,7 @@ class IsolatedSmokeRunnerTest(unittest.TestCase):
         ):
             exit_code = main([])
         rendered = output.getvalue()
-        self.assertEqual(exit_code, 0)
+        self.assertNotEqual(exit_code, 0)
         self.assertIn('"mode":"DRY_RUN"', rendered)
         self.assertIn('"status":"CREDENTIAL_REFERENCE_NOT_READY"', rendered)
         for forbidden in (
@@ -424,6 +618,262 @@ class IsolatedSmokeRunnerTest(unittest.TestCase):
             "Bearer ",
         ):
             self.assertNotIn(forbidden, rendered)
+
+    def test_cli_live_approval_missing_blocks_without_waiting_or_building(self):
+        output = StringIO()
+        with (
+            patch("sys.stdout", output),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                side_effect=AssertionError("runner must not be built"),
+            ),
+        ):
+            exit_code = main(["--mode", "LIVE_ONE_SHOT"])
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn('"safeReasons":["LIVE_APPROVAL_REQUIRED"]', output.getvalue())
+
+    def test_cli_live_approval_invalid_blocks_before_runner(self):
+        output = StringIO()
+        with (
+            patch("sys.stdout", output),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                side_effect=AssertionError("runner must not be built"),
+            ),
+        ):
+            exit_code = main(
+                [
+                    "--mode",
+                    "LIVE_ONE_SHOT",
+                    "--live-one-shot-approval",
+                    "invalid",
+                ]
+            )
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn('"safeReasons":["LIVE_APPROVAL_REQUIRED"]', output.getvalue())
+
+    def test_cli_empty_and_whitespace_approval_block_without_stdin_or_network(self):
+        class RejectingInput:
+            def read(self, *args, **kwargs):
+                raise AssertionError("stdin read is forbidden")
+
+            def readline(self, *args, **kwargs):
+                raise AssertionError("stdin readline is forbidden")
+
+        invalid_values = (
+            "",
+            " ",
+            approval() + " ",
+            " " + approval(),
+            approval() + "\n",
+        )
+        for invalid in invalid_values:
+            with self.subTest(repr=repr(invalid)):
+                output = StringIO()
+                error = StringIO()
+                started = time.monotonic()
+                with (
+                    patch("sys.stdout", output),
+                    patch("sys.stderr", error),
+                    patch("sys.stdin", RejectingInput()),
+                    patch.object(
+                        IsolatedSmokeTestRunner,
+                        "run",
+                        side_effect=AssertionError(
+                            "runner must not be built"
+                        ),
+                    ),
+                    patch.object(
+                        socket,
+                        "socket",
+                        side_effect=AssertionError("network forbidden"),
+                    ),
+                    patch.object(
+                        socket,
+                        "create_connection",
+                        side_effect=AssertionError("network forbidden"),
+                    ),
+                    patch.object(
+                        socket,
+                        "getaddrinfo",
+                        side_effect=AssertionError("network forbidden"),
+                    ),
+                ):
+                    exit_code = main(
+                        [
+                            "--mode",
+                            "LIVE_ONE_SHOT",
+                            "--live-one-shot-approval",
+                            invalid,
+                        ]
+                    )
+                self.assertLess(time.monotonic() - started, 1.0)
+                self.assertNotEqual(exit_code, 0)
+                self.assertIn(
+                    '"safeReasons":["LIVE_APPROVAL_REQUIRED"]',
+                    output.getvalue(),
+                )
+                self.assertNotIn(approval(), output.getvalue())
+                self.assertNotIn(approval(), error.getvalue())
+
+    def test_cli_exact_single_live_approval_reaches_runner_once(self):
+        output = StringIO()
+        approved = smoke_result(
+            status=SmokePreflightStatus.BLOCKED,
+            reason="KILL_SWITCH_ACTIVE",
+        )
+        with (
+            patch("sys.stdout", output),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                return_value=approved,
+            ) as run,
+        ):
+            exit_code = main(
+                [
+                    "--mode",
+                    "LIVE_ONE_SHOT",
+                    "--live-one-shot-approval",
+                    approval(),
+                ]
+            )
+        self.assertNotEqual(exit_code, 0)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["live_approval"], approval())
+        self.assertNotIn(approval(), output.getvalue())
+
+    def test_cli_duplicate_live_approval_blocks_before_runner(self):
+        output = StringIO()
+        with (
+            patch("sys.stdout", output),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                side_effect=AssertionError("runner must not be built"),
+            ),
+        ):
+            exit_code = main(
+                [
+                    "--mode",
+                    "LIVE_ONE_SHOT",
+                    "--live-one-shot-approval",
+                    approval(),
+                    "--live-one-shot-approval",
+                    approval(),
+                ]
+            )
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn('"safeReasons":["LIVE_APPROVAL_REQUIRED"]', output.getvalue())
+
+    def test_cli_rejects_live_approval_for_non_live_mode(self):
+        output = StringIO()
+        with (
+            patch("sys.stdout", output),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                side_effect=AssertionError("runner must not be built"),
+            ),
+        ):
+            exit_code = main(
+                [
+                    "--mode",
+                    "DRY_RUN",
+                    "--live-one-shot-approval",
+                    approval(),
+                ]
+            )
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn(
+            '"safeReasons":["LIVE_APPROVAL_NOT_ALLOWED"]',
+            output.getvalue(),
+        )
+
+    def test_exit_code_zero_is_limited_to_completed_results(self):
+        completed = (
+            smoke_result(
+                mode=SmokeTestMode.DRY_RUN,
+                status=SmokePreflightStatus.READY_FOR_CONFIGURATION,
+                composition_built=True,
+                reason="DRY_RUN_COMPLETE",
+            ),
+            smoke_result(
+                status=SmokePreflightStatus.READY_FOR_CONFIGURATION,
+                composition_built=True,
+                attempted=True,
+                succeeded=True,
+                reason="LIVE_ONE_SHOT_COMPLETE",
+            ),
+            smoke_result(
+                status=SmokePreflightStatus.READY_FOR_CONFIGURATION,
+                composition_built=True,
+                attempted=True,
+                succeeded=True,
+                reason="USAGE_UNAVAILABLE",
+            ),
+        )
+        for result in completed:
+            with self.subTest(result=result):
+                self.assertEqual(smoke_result_exit_code(result), 0)
+
+        non_successes = (
+            (SmokePreflightStatus.BLOCKED, "LIVE_APPROVAL_REQUIRED"),
+            (SmokePreflightStatus.BLOCKED, "CREDENTIAL_NOT_PRESENT"),
+            (SmokePreflightStatus.BLOCKED, "KILL_SWITCH_ACTIVE"),
+            (SmokePreflightStatus.BLOCKED, "ONE_SHOT_PERMIT_DENIED"),
+            (SmokePreflightStatus.BLOCKED, "TIMEOUT"),
+            (SmokePreflightStatus.BLOCKED, "PROVIDER_FAILED"),
+            (SmokePreflightStatus.BLOCKED, "VALIDATION_FAILED"),
+            (SmokePreflightStatus.BLOCKED, "MALFORMED_RESPONSE"),
+            (SmokePreflightStatus.CONFIGURATION_INVALID, "CONFIGURATION_INVALID"),
+            (
+                SmokePreflightStatus.CREDENTIAL_REFERENCE_NOT_READY,
+                "CREDENTIAL_REFERENCE_NOT_READY",
+            ),
+            (SmokePreflightStatus.MODEL_DECISION_REQUIRED, "MODEL_DECISION_REQUIRED"),
+        )
+        for status, reason in non_successes:
+            with self.subTest(status=status, reason=reason):
+                self.assertNotEqual(
+                    smoke_result_exit_code(
+                        smoke_result(status=status, reason=reason)
+                    ),
+                    0,
+                )
+
+        inconsistent_ready = smoke_result(
+            status=SmokePreflightStatus.READY_FOR_CONFIGURATION,
+            composition_built=True,
+            attempted=True,
+            succeeded=False,
+            reason="LIVE_ONE_SHOT_FAILED",
+        )
+        self.assertNotEqual(smoke_result_exit_code(inconsistent_ready), 0)
+
+    def test_cli_unexpected_exception_is_safe_json_and_nonzero(self):
+        output = StringIO()
+        error = StringIO()
+        secret = "sk-offline-unexpected-secret"
+        with (
+            patch("sys.stdout", output),
+            patch("sys.stderr", error),
+            patch.object(
+                IsolatedSmokeTestRunner,
+                "run",
+                side_effect=RuntimeError(secret),
+            ),
+        ):
+            exit_code = main([])
+        rendered = output.getvalue()
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn('"status":"BLOCKED"', rendered)
+        self.assertIn('"safeReasons":["UNEXPECTED_FAILURE"]', rendered)
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn(secret, error.getvalue())
+        self.assertNotIn("Traceback", rendered + error.getvalue())
 
     def test_process_scoped_mapping_is_fixed_and_does_not_mutate_environment(self):
         keys = (

@@ -16,6 +16,11 @@ from backend.ai_advisor.openai_sdk_transport import (
     DefaultOpenAIClientFactory,
     OpenAISDKTransport,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    ProviderFailureStage,
+    ProviderSafeReason,
+    RecordingProviderFailureObservationSink,
+)
 from backend.ai_advisor.provider_models import AdvisorProviderFinishReason
 from backend.ai_advisor.provider_transport import (
     OpenAITransportAuthenticationError,
@@ -100,6 +105,7 @@ def transport(
     allowed=True,
     loader=None,
     usage_sink=None,
+    failure_sink=None,
 ):
     responses = FakeResponses(response=response, exception=exception)
     factory = FakeClientFactory(FakeClient(responses))
@@ -114,11 +120,124 @@ def transport(
     )
     if usage_sink is not None:
         arguments["usageObservationSink"] = usage_sink
+    if failure_sink is not None:
+        arguments["failureObservationSink"] = failure_sink
     value = OpenAISDKTransport(**arguments)
     return value, loader, factory, responses
 
 
 class OpenAISDKTransportTest(unittest.TestCase):
+    def test_non_http_failures_emit_fixed_stage_and_reason(self):
+        cases = (
+            (
+                OpenAITransportAuthenticationError("sk-test-DO-NOT-LEAK"),
+                ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+            ),
+            (
+                OpenAITransportRateLimitError("sk-test-DO-NOT-LEAK"),
+                ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+            ),
+            (
+                OpenAITransportTimeout("sk-test-DO-NOT-LEAK"),
+                ProviderSafeReason.LIVE_PROVIDER_TIMEOUT,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+            ),
+            (
+                OpenAITransportConnectionError("sk-test-DO-NOT-LEAK"),
+                ProviderSafeReason.LIVE_PROVIDER_CONNECTION_FAILED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+            ),
+            (
+                RuntimeError("sk-test-DO-NOT-LEAK"),
+                ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+            ),
+        )
+        for exception, reason, stage in cases:
+            with self.subTest(reason=reason):
+                sink = RecordingProviderFailureObservationSink()
+                value, _, _, responses = transport(
+                    exception=exception,
+                    failure_sink=sink,
+                )
+                with self.assertRaises(Exception):
+                    value.invoke(request())
+                self.assertEqual(len(responses.calls), 1)
+                self.assertEqual(sink.observation.safeReason, reason)
+                self.assertEqual(sink.observation.failureStage, stage)
+                self.assertNotIn(
+                    "sk-test-DO-NOT-LEAK",
+                    sink.observation.model_dump_json(),
+                )
+
+    def test_credential_client_and_response_failures_are_distinct(self):
+        credential_sink = RecordingProviderFailureObservationSink()
+        loader = InjectedCredentialLoader(
+            {},
+            fixedFailure=CredentialFailureCode.CREDENTIAL_NOT_FOUND,
+        )
+        value, _, factory, _ = transport(
+            loader=loader,
+            failure_sink=credential_sink,
+        )
+        with self.assertRaises(OpenAITransportConfigurationError):
+            value.invoke(request())
+        self.assertEqual(factory.calls, 0)
+        self.assertEqual(
+            credential_sink.observation.safeReason,
+            ProviderSafeReason.LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE,
+        )
+        self.assertEqual(
+            credential_sink.observation.failureStage,
+            ProviderFailureStage.CREDENTIAL_RESOLUTION,
+        )
+
+        class FailingFactory:
+            calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                raise RuntimeError("sk-test-DO-NOT-LEAK")
+
+        client_sink = RecordingProviderFailureObservationSink()
+        client_value = OpenAISDKTransport(
+            config=connection_config(),
+            credentialLoader=InjectedCredentialLoader(
+                {"advisor-openai-primary": "offline-placeholder"}
+            ),
+            clientFactory=FailingFactory(),
+            allowNetworkInvocation=True,
+            failureObservationSink=client_sink,
+        )
+        with self.assertRaises(OpenAITransportConfigurationError):
+            client_value.invoke(request())
+        self.assertEqual(
+            client_sink.observation.safeReason,
+            ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
+        )
+        self.assertEqual(
+            client_sink.observation.failureStage,
+            ProviderFailureStage.CLIENT_CREATION,
+        )
+
+        response_sink = RecordingProviderFailureObservationSink()
+        response_value, _, _, calls = transport(
+            response=FakeResponse(" "),
+            failure_sink=response_sink,
+        )
+        with self.assertRaises(OpenAITransportRejectedError):
+            response_value.invoke(request())
+        self.assertEqual(len(calls.calls), 1)
+        self.assertEqual(
+            response_sink.observation.safeReason,
+            ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+        )
+        self.assertEqual(
+            response_sink.observation.failureStage,
+            ProviderFailureStage.RESPONSE_VALIDATION,
+        )
     def test_guard_denial_prevents_credential_and_client_access(self):
         value, loader, factory, responses = transport(
             response=FakeResponse(fixture_text()),

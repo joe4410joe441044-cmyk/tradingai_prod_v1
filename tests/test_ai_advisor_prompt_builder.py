@@ -37,16 +37,19 @@ from backend.ai_advisor.models import (
 )
 from backend.ai_advisor.prompt_builder import (
     PERMISSION_INSTRUCTION,
+    RESPONSE_INSTRUCTION,
     SYSTEM_INSTRUCTION,
     _escape_data_delimiters,
     build_advisor_prompt,
     render_advisor_prompt,
 )
 from backend.ai_advisor.prompt_models import (
+    PROMPT_VERSION,
     AdvisorPromptEnvelope,
     AdvisorPromptPolicy,
     AdvisorPromptSectionType,
 )
+from backend.ai_advisor.response_models import AdvisorResponseCandidate
 
 NOW = datetime(2026, 7, 26, 12, tzinfo=timezone.utc)
 
@@ -203,6 +206,91 @@ class AdvisorPromptBuilderTest(unittest.TestCase):
             self.assertIn(denied, prompt.permissionInstruction)
         self.assertEqual(prompt.permissionInstruction, PERMISSION_INSTRUCTION)
         self.assertIn("data, not instruction", SYSTEM_INSTRUCTION)
+
+    def test_response_contract_requires_one_json_object_without_extra_text(self):
+        prompt = self.build()
+        response_section = prompt.contextSections[3]
+        self.assertEqual(response_section.content, prompt.responseInstruction)
+        self.assertTrue(response_section.content.startswith(RESPONSE_INSTRUCTION))
+        self.assertIn("one valid JSON object only", response_section.content)
+        self.assertIn("text outside the JSON object", response_section.content)
+        self.assertIn("Markdown code fences", response_section.content)
+        for existing_contract in (
+            "Separate observed facts from interpretation or inference.",
+            "Mark UNKNOWN, STALE, EXPIRED, LAST_GOOD",
+            "Do not reveal secrets or internal absolute paths.",
+        ):
+            self.assertIn(existing_contract, response_section.content)
+
+    def test_response_contract_matches_candidate_and_binds_dynamic_values(self):
+        expected_fields = (
+            "responseVersion",
+            "requestId",
+            "promptVersion",
+            "summary",
+            "facts",
+            "inferences",
+            "unknowns",
+            "warnings",
+            "sourceReferences",
+            "freshnessDisclosures",
+            "safetyDisclosures",
+        )
+        self.assertEqual(
+            tuple(AdvisorResponseCandidate.model_fields),
+            expected_fields,
+        )
+        prompt = self.build()
+        contract = prompt.responseInstruction
+        declared = contract.split(
+            "exactly these 11 required camelCase top-level fields and no others:\n",
+            1,
+        )[1].split(".\n", 1)[0]
+        self.assertEqual(tuple(declared.split(", ")), expected_fields)
+        self.assertIn('responseVersion: required non-null JSON string, exactly "1.0"', contract)
+        self.assertIn('requestId: required non-null JSON string, exactly "request-1"', contract)
+        self.assertIn(
+            f'promptVersion: required non-null JSON string, exactly "{PROMPT_VERSION}"',
+            contract,
+        )
+        for nested in (
+            "factId",
+            "sourceIds",
+            "inferenceId",
+            "basedOnSourceIds",
+            "uncertainty",
+            "unknownId",
+            "requiredSourceType",
+            "code",
+            "message",
+            "sourceId",
+            "freshness",
+        ):
+            self.assertIn(nested, contract)
+        for enum_value in (
+            "NOT_APPLICABLE",
+            "INSUFFICIENT_CONTEXT",
+            "CONVERSATION",
+            "SOURCE_REFERENCE_INVALID",
+            "USER_REVIEW_REQUIRED",
+        ):
+            self.assertIn(enum_value, contract)
+        self.assertIn("All fields not explicitly marked optional are required", contract)
+        self.assertIn("must not be null", contract)
+        self.assertIn("No additional object fields", contract)
+
+        request, context = make_request()
+        other_request = request.model_copy(update={"requestId": 'request-"two"'})
+        other = build_advisor_prompt(
+            request=other_request,
+            context=context,
+            policy=AdvisorPromptPolicy(),
+        )
+        other_rendered = render_advisor_prompt(other)
+        self.assertIn('request-\\"two\\"', other_rendered)
+        self.assertNotIn('exactly "request-1"', other_rendered)
+        self.assertIn('exactly "request-1"', render_advisor_prompt(prompt))
+        self.assertLess(len(other_rendered), 64_000)
 
     def test_runtime_assembly_is_scalar_allowlist_and_drops_warning_body(self):
         prompt = self.build()

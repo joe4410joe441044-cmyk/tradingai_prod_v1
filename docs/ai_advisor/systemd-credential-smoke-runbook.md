@@ -1,55 +1,791 @@
-# AI Advisor isolated systemd credential smoke runbook
+# AI Advisor isolated live-validation credential contract
 
-This runbook is preparation only. It does not authorize a live request.
+Status: `PREPARATION ONLY / NO LIVE OR CREDENTIAL AUTHORITY`
 
-## Preconditions
+This is the single credential and unit contract for the isolated AI Advisor
+live validation. It does not authorize credential creation, unit execution,
+network access, or a provider request.
 
-- AI Advisor tests and `git diff --check` pass.
-- The normal `tradingbot.service` remains endpoint-disabled, network-disabled,
-  live-test-disabled, and kill-switch-active.
-- The isolated unit is not installed from an unresolved example template.
-- The approved model is `gpt-4o-mini`; output tokens are fixed at 512.
-- Retry, streaming, tools, storage, and automatic fallback remain disabled.
+## Fixed identities and paths
 
-## Credential preparation
+| Item | Contract |
+|---|---|
+| Unit name | `tradingai-ai-advisor-live-validation.service` |
+| Repository verification mirror | `deploy/systemd/tradingai-ai-advisor-live-validation.service` |
+| Persistent unit install destination | none; persistent installation is prohibited |
+| Transient runtime unit | `/run/systemd/transient/tradingai-ai-advisor-live-validation.service` (systemd-managed) |
+| Runner user/group | `joe4410joe:joe4410joe` |
+| Encrypted source directory | `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation` |
+| Authentication artifact | `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN` |
+| Provider artifact | `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY` |
+| Runtime credential directory | `$CREDENTIALS_DIRECTORY`, created privately by systemd under `/run/credentials/tradingai-ai-advisor-live-validation.service` |
+| Runtime credential names | `AI_ADVISOR_AUTH_TOKEN`, `OPENAI_API_KEY` |
 
-1. Prefer `LoadCredentialEncrypted` on systemd 252.
-2. Use `LoadCredential` only when the encrypted facility cannot be used under
-   the approved operator policy.
-3. Prepare both credentials without a trailing newline:
-   `AI_ADVISOR_AUTH_TOKEN` and `OPENAI_API_KEY`.
-4. Never place credential content in the repository, normal EnvironmentFile,
-   command line, shell history, unit text, or this runbook.
-5. Replace example placeholders only in an operator-controlled unit outside
-   the repository. Do not modify `tradingbot.service`.
+The source directory is `root:root` mode `0700`. Each encrypted source artifact
+is `root:root` mode `0600`, is a regular file, and is not a symlink. The
+repository mirror is `root:root` mode `0644` only if copied for independent
+review; it is never installed as a unit. Runtime credentials are read-only,
+non-swappable when systemd can provide that guarantee, and accessible only to
+root and the configured unit user while the transient unit exists.
 
-## Preflight and one-shot
+The directory is repository-external, outside `/tmp`, project-specific, and
+must contain no plaintext, backup, or historical credential copies. A path
+containing a symlink, a non-root-owned component, or broader permissions fails
+closed.
 
-1. Confirm both systemd credential probes return `AVAILABLE`; do not inspect
-   content, size, path, timestamps, inode, or hashes.
-2. Confirm the isolated unit uses the project virtualenv and invokes only the
-   isolated smoke CLI. It must not start Uvicorn or listen on a port.
-3. Confirm the official endpoint, model, token budget, timeout, and unused
-   one-shot permit.
-4. Obtain the separately issued exact one-request approval. Enter it only at
-   the isolated operator TTY prompt; it is not authentication or authorization.
-5. Start the isolated oneshot once through the approved operator procedure.
-6. Record only the safe result and aggregate token usage.
-7. Do not make a second provider request. The second-call check is an offline
-   gate assertion, not authorization to issue another live call.
+## Credential format and creation contract
 
-## Shutdown and failure
+Both artifacts use `systemd-creds encrypt --with-key=host` and are consumed
+only with `LoadCredentialEncrypted=`. Plain `LoadCredential=`, `Environment=`,
+`EnvironmentFile=`, shell variables containing values, and plaintext temporary
+files are prohibited.
 
-For authentication, authorization, credential, gate, connection, timeout,
-provider, parsing, validation, usage, or unexpected failure:
+The only non-secret environment policy in the isolated unit is
+`TRADINGAI_ISOLATED_STDIO_ONLY=true`. It disables repository file logging
+before the runner import graph is evaluated; it does not contain or select a
+credential, and the normal Production service does not set it.
 
-1. Do not retry.
-2. Do not regenerate the permit, restart the process, switch models, increase
-   token budget, or use the fallback model.
-3. Let the isolated oneshot terminate.
-4. Remove the operator-controlled isolated unit and credential material using
-   the approved secret-management procedure.
-5. Confirm no credential remains available to the terminated process.
-6. Reconfirm the normal `tradingbot.service` safety state without changing or
-   restarting it.
-7. Report only the fixed safe failure classification.
+Creation is a separately authorized root operation:
+
+1. Confirm the final artifact and any `.new` artifact do not exist. Never
+   overwrite, rename, compare, back up, or change an existing artifact.
+2. Create the parent directory as `root:root` mode `0700`, without symlinks.
+3. Set `umask 077`. Feed the value directly from a hidden TTY producer into
+   `systemd-creds encrypt --with-key=host --name=<credential-name> -` and write
+   ciphertext to the corresponding final-path suffix `.new`. The OpenAI key is
+   entered once with `systemd-ask-password --echo=no -n`; it is never passed as
+   an argument. The internal authentication token is generated by a
+   cryptographically secure producer and piped directly; it is never printed.
+4. Set the ciphertext artifact to `root:root` mode `0600`, verify only type,
+   owner, mode, and no-symlink status, fsync the artifact and parent directory,
+   then atomically rename `.new` to the exact final path with no replacement.
+5. On interruption or failure, remove only the named ciphertext `.new`
+   artifact. No plaintext artifact exists at any stage.
+
+The authentication token and provider key are independent. The loader accepts
+strict, non-empty UTF-8 values without leading/trailing whitespace or control
+characters, with a maximum of 8192 bytes. Values, lengths, prefixes, suffixes,
+hashes, and decrypted output are never inspected or logged operationally.
+
+## Content-free presence verification
+
+Before any unit run, verify only:
+
+- the two exact source paths are root-owned regular non-symlinks with mode
+  `0600`;
+- every parent component is non-symlink and the dedicated directory is
+  `root:root` mode `0700`;
+- neither path is under the repository or `/tmp`;
+- the repository loader's `probe()` reports `AVAILABLE` when its
+  `credentialsDirectoryReader` is bound to a systemd-created runtime
+  credential directory.
+
+The last check is performed only inside an separately authorized offline
+transient probe unit using the same two `LoadCredentialEncrypted=` properties.
+It must import only `SystemdCredentialLoader`, call `probe()`, print fixed
+availability enums, and prohibit provider construction, DNS, OpenAI SDK calls,
+live permission, and one-shot permit acquisition. Running the live runner in
+`DRY_RUN` is not a substitute for this probe.
+
+The fixed probe uses `systemd-run --wait --collect`, the same user, group,
+working directory, two encrypted-credential properties, `PrivateNetwork=yes`,
+and `RestrictAddressFamilies=AF_UNIX`. Its direct (shell-free) ExecStart is:
+
+```text
+/home/joe4410joe/tradingai_prod_v1/venv/bin/python -c
+from backend.ai_advisor.credential_loader import CredentialResolutionInput;
+from backend.ai_advisor.provider_config import CredentialReference,CredentialSource,ProviderName;
+from backend.ai_advisor.systemd_credential_loader import SystemdCredentialLoader;
+names=('AI_ADVISOR_AUTH_TOKEN','OPENAI_API_KEY');
+results=tuple(SystemdCredentialLoader((name,)).probe(CredentialResolutionInput(
+credentialReference=CredentialReference(credentialId=name,source=CredentialSource.SYSTEMD_CREDENTIAL),
+provider=ProviderName.OPENAI)).availability.value for name in names);
+print('CREDENTIAL_PROBE_AVAILABLE' if results==('AVAILABLE','AVAILABLE') else 'CREDENTIAL_PROBE_BLOCKED')
+```
+
+The Python source is supplied as one reviewed `-c` argument with whitespace
+normalized; it contains no value or secret metadata. Any output other than
+`CREDENTIAL_PROBE_AVAILABLE` is non-success and blocks live validation. The
+probe unit has no live runner, provider import, SDK import, approval, permit,
+or network namespace.
+
+## Isolated transient unit
+
+The only live execution mechanism is a root-authorized:
+
+```text
+systemd-run --wait --collect
+  --unit=tradingai-ai-advisor-live-validation.service
+  --service-type=oneshot
+  --uid=joe4410joe --gid=joe4410joe
+  --working-directory=/home/joe4410joe/tradingai_prod_v1
+  --property=Environment=TRADINGAI_ISOLATED_STDIO_ONLY=true
+  --property=LoadCredentialEncrypted=AI_ADVISOR_AUTH_TOKEN:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN
+  --property=LoadCredentialEncrypted=OPENAI_API_KEY:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY
+  --property=Restart=no --property=RemainAfterExit=no
+  --property=TimeoutStartSec=120 --property=SuccessExitStatus=0
+  --property=UMask=0077 --property=NoNewPrivileges=yes
+  --property=PrivateTmp=yes --property=PrivateDevices=yes
+  --property=ProtectSystem=strict --property=ProtectHome=tmpfs
+  --property=BindReadOnlyPaths=/home/joe4410joe/tradingai_prod_v1
+  --property=ProtectKernelTunables=yes
+  --property=ProtectKernelModules=yes
+  --property=ProtectControlGroups=yes
+  --property=ProtectKernelLogs=yes --property=ProtectClock=yes
+  --property=ProtectHostname=yes --property=RestrictSUIDSGID=yes
+  --property=RestrictNamespaces=yes --property=LockPersonality=yes
+  --property=MemoryDenyWriteExecute=yes --property=RestrictRealtime=yes
+  --property=SystemCallArchitectures=native
+  --property=CapabilityBoundingSet=
+  --property=AmbientCapabilities=
+  --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
+  --property=ProcSubset=pid --property=ProtectProc=invisible
+  --property=StartLimitIntervalSec=86400 --property=StartLimitBurst=1
+  /home/joe4410joe/tradingai_prod_v1/venv/bin/python
+  -m backend.ai_advisor.isolated_smoke_runner --mode LIVE_ONE_SHOT
+  --live-one-shot-approval 'AI-ADV-1E9 LIVE TEST APPROVED: ONE REQUEST'
+```
+
+The command is assembled from reviewed fixed tokens. It contains paths,
+policy, and the fixed non-secret one-request approval; it never contains a
+credential. The LIVE_ONE_SHOT-only `--live-one-shot-approval` option must
+occur exactly once with the exact value shown above. A missing, incorrect,
+duplicate, or non-LIVE use exits immediately with a safe blocked result before
+configuration, credential, client, permit, or provider access. No stdin or TTY
+is used. The approval exists only in this transient process command and is not
+stored in a credential, environment value, or persistent unit.
+`--wait` returns the runner's non-zero failure status; `--collect` removes the
+transient unit after completion.
+
+The repository mirror is the normative property list and must pass
+`systemd-analyze verify`. An operator must compare the complete `systemd-run`
+property list against it before a separately approved execution. No persistent
+unit is installed, no daemon reload is needed, and `systemctl enable`, timers,
+sockets, automatic restart, retry, and Production-service dependencies are
+prohibited.
+
+The unit is `Type=oneshot`, `Restart=no`, `RemainAfterExit=no`,
+and `TimeoutStartSec=120`, which bounds both approval and oneshot execution.
+Only exit status 0 is accepted as success. The runner permits at most one provider
+call, has retry zero, and maps every blocked or failed result to non-zero. A
+24-hour start limit of one is part of the reviewed property contract; resetting
+it to retry is prohibited.
+
+The runner does not prompt. Stdout contains only the runner's safe JSON and may
+be routed to the transient unit journal. Raw
+exceptions, provider bodies, redirect locations, credential data, and approval
+input must never be logged.
+
+Failed provider attempts expose only the fixed `ProviderSafeReason` and
+`ProviderFailureStage` allowlists, an optional numeric HTTP status from 400
+through 599, `providerRequestUpperBound=1`, `retryPerformed=false`, and the
+existing attempted/succeeded booleans. Authentication, permission, combined
+rate-or-quota, bad request, timeout, connection, server, response-contract,
+client-configuration, credential-unavailable, and unknown are the only safe
+reason classes. Raw exceptions, messages, bodies, headers, request IDs, and
+credential metadata are never copied into the result. An unavailable or
+unrecognized classification fails closed as `LIVE_PROVIDER_UNKNOWN_FAILURE`.
+
+## Safe-result recovery contract
+
+Live Runner execution and safe-result recovery are one indivisible validation
+procedure. Never decide the provider or Response Contract result from the
+`systemd-run` exit code alone. Attempt recovery after both exit status zero and
+nonzero. A recovery failure is not by itself a Live implementation failure: it
+is `PROCEDURAL_OR_ENVIRONMENT_FAILURE` and the validation result is
+`INCONCLUSIVE`.
+
+Once the transient unit has started, never rerun it to recover an unavailable
+result, regenerate its permit, or reuse its one-shot approval. Every later Live
+run requires a new explicit authorization and a new one-shot approval,
+regardless of whether recovery succeeded.
+
+### Safe output contract
+
+`IsolatedSmokeTestRunner` produces one `IsolatedSmokeResult`. The CLI `main()`
+writes its JSON serialization as one stdout line before returning the mapped
+process exit code, including for blocked, configuration-invalid, and other
+nonzero results. The transient unit sends stdout to the journal.
+
+The exact top-level fields are:
+
+```text
+mode
+status
+compositionBuilt
+liveInvocationAttempted
+invocationSucceeded
+maximumProviderCalls
+providerRequestUpperBound
+retryPerformed
+failureStage
+httpStatus
+parseSucceeded
+validationCode
+topLevelType
+invalidField
+missingFields
+usageStatus
+usage
+safeReasons
+```
+
+The result contains only fixed state, allowlisted failure and response-contract
+diagnostics, and optional aggregate token counts. It contains no raw response,
+`output_text`, full Prompt, request body, headers, credential value, traceback,
+or raw exception text. Judge the result only from the fixed fields above.
+Unexpected fields make recovery unsafe and `INCONCLUSIVE`; never display their
+names or values.
+
+### Bind execution metadata before the one shot
+
+The systemd unit name remains the fixed
+`tradingai-ai-advisor-live-validation.service`; it is not dynamically generated.
+This preserves the reviewed unit identity and its 24-hour start-limit contract.
+Per-run correlation is instead established by a locally generated correlation
+ID, that fixed unit, exact UTC start and end times, exactly one
+`systemd-run` invocation, and exactly one recovered safe-result candidate.
+
+The correlation ID is retained only in a local shell variable or protected
+`/tmp` metadata. It is never passed to systemd, the Runner, a Prompt, request
+body, credential, Provider payload, OpenAI request, or journal message. It is
+not a substitute for any request ID.
+
+The integrated control flow below initializes and retains only:
+
+- `LIVE_UNIT`, `CORRELATION_ID`, `START_TIME`, and `END_TIME`;
+- `RUN_EXIT_CODE` and `ONE_SHOT_ATTEMPTED`;
+- `SANITIZER`, `SANITIZER_OUTPUT`, and `RECOVERY_STATUS`.
+
+`ONE_SHOT_ATTEMPTED` means approval-budget consumption, not proof that a
+Provider request occurred. Set it to `1` immediately before calling
+`systemd-run`. From that point onward, treat the approval and one-shot budget as
+consumed for every command outcome, even if later evidence proves that the
+Provider request count was zero. Never automatically return it to zero.
+
+These values must not contain a credential, request body, Prompt, raw response,
+header, `output_text`, API key, or other secret. If the fixed unit, either time
+bound, the single-invocation guarantee, or single-candidate correlation cannot
+be established, the result is `INCONCLUSIVE`; do not perform an unbounded
+journal query.
+
+### Sanitized journal recovery
+
+Journal access is allowed only as part of a separately authorized recovery
+step. Limit the query by the exact saved unit and both saved timestamps, use
+`--no-pager`, and pipe journal stdout directly into the sanitizer. Never render
+the raw journal in a terminal; never pass it to `cat`, `less`, `head`, or
+`tail`; and never save it in a persistent or temporary raw-journal file.
+
+The following reviewed sanitizer uses only the Python standard library. Create
+it in `/tmp` with mode `0700`, use it only for this recovery, and remove it
+through the trap. The example is documentation and does not itself authorize a
+Live run or journal access.
+
+```bash
+set -u
+
+LIVE_UNIT="tradingai-ai-advisor-live-validation.service"
+CORRELATION_ID="$(
+    /usr/bin/python3 - <<'PY'
+import secrets
+print(secrets.token_hex(16))
+PY
+)"
+START_TIME=
+END_TIME=
+RUN_EXIT_CODE=125
+ONE_SHOT_ATTEMPTED=0
+SANITIZER_OUTPUT=
+RECOVERY_STATUS="NOT_ATTEMPTED"
+
+SANITIZER="$(mktemp /tmp/ai-advisor-safe-result.XXXXXX.py)"
+SAFE_OUTPUT="$(mktemp /tmp/ai-advisor-safe-output.XXXXXX.json)"
+chmod 0700 "$SANITIZER"
+chmod 0600 "$SAFE_OUTPUT"
+cleanup_safe_result_recovery() {
+    rm -f -- "$SANITIZER" "$SAFE_OUTPUT"
+}
+trap cleanup_safe_result_recovery EXIT HUP INT TERM
+
+cat >"$SANITIZER" <<'PY'
+#!/usr/bin/env python3
+import json
+import sys
+
+sys.excepthook = (
+    lambda _type, _value, _traceback:
+    sys.stderr.write("SAFE_RESULT_SANITIZER_FAILED\n")
+)
+
+FIELDS = {
+    "mode", "status", "compositionBuilt", "liveInvocationAttempted",
+    "invocationSucceeded", "maximumProviderCalls",
+    "providerRequestUpperBound", "retryPerformed", "failureStage",
+    "httpStatus", "parseSucceeded", "validationCode", "topLevelType",
+    "invalidField", "missingFields", "usageStatus", "usage", "safeReasons",
+}
+USAGE_FIELDS = {"inputTokens", "outputTokens", "totalTokens"}
+FORBIDDEN = {
+    "rawresponse", "responsebody", "outputtext", "fullprompt",
+    "exceptiontext", "traceback", "headers", "requestheaders",
+    "responseheaders", "requestbody", "apikey", "credential", "secret",
+    "token",
+}
+MODES = {"DRY_RUN", "LIVE_ONE_SHOT"}
+STATUSES = {
+    "READY_FOR_CONFIGURATION", "MODEL_DECISION_REQUIRED",
+    "CREDENTIAL_REFERENCE_NOT_READY", "CONFIGURATION_INVALID", "BLOCKED",
+}
+STAGES = {
+    "CONFIGURATION", "CREDENTIAL_RESOLUTION", "CLIENT_CREATION",
+    "PROVIDER_INVOCATION", "RESPONSE_VALIDATION", "UNKNOWN",
+}
+VALIDATION_CODES = {
+    "JSON_DECODE_FAILED", "DUPLICATE_KEY", "TOP_LEVEL_NOT_OBJECT",
+    "REQUIRED_FIELD_MISSING", "UNEXPECTED_FIELD", "FIELD_TYPE_INVALID",
+    "ENUM_VALUE_INVALID", "NULL_NOT_ALLOWED", "CONSTRAINT_VIOLATION",
+    "NESTED_SCHEMA_INVALID", "RESPONSE_CANDIDATE_INVALID",
+    "UNKNOWN_RESPONSE_CONTRACT_FAILURE",
+}
+TOP_LEVEL_TYPES = {
+    "OBJECT", "ARRAY", "STRING", "INTEGER", "NUMBER", "BOOLEAN", "NULL",
+    "UNKNOWN",
+}
+CONTRACT_FIELDS = [
+    "responseVersion", "requestId", "promptVersion", "summary", "facts",
+    "inferences", "unknowns", "warnings", "sourceReferences",
+    "freshnessDisclosures", "safetyDisclosures",
+]
+INVALID_FIELDS = set(CONTRACT_FIELDS) | {"UNKNOWN_OR_UNEXPECTED"}
+SAFE_REASONS = {
+    "COMPOSITION_UNAVAILABLE", "CONFIGURATION_INVALID",
+    "CREDENTIAL_REFERENCE_NOT_READY", "DRY_RUN_COMPLETE",
+    "ENDPOINT_NOT_ALLOWED", "KILL_SWITCH_ACTIVE",
+    "LIVE_APPROVAL_NOT_ALLOWED", "LIVE_APPROVAL_REQUIRED",
+    "LIVE_ONE_SHOT_COMPLETE", "LIVE_ONE_SHOT_FAILED",
+    "MODEL_DECISION_REQUIRED", "MODEL_NOT_ALLOWED", "MODE_INVALID",
+    "OUTPUT_TOKEN_BUDGET_INVALID", "SYSTEMD_CREDENTIAL_UNAVAILABLE",
+    "UNEXPECTED_FAILURE", "USAGE_UNAVAILABLE",
+    "LIVE_PROVIDER_AUTHENTICATION_FAILED",
+    "LIVE_PROVIDER_PERMISSION_DENIED",
+    "LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED", "LIVE_PROVIDER_BAD_REQUEST",
+    "LIVE_PROVIDER_TIMEOUT", "LIVE_PROVIDER_CONNECTION_FAILED",
+    "LIVE_PROVIDER_SERVER_ERROR",
+    "LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED",
+    "LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED",
+    "LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE",
+    "LIVE_PROVIDER_UNKNOWN_FAILURE",
+}
+
+def normalized(name):
+    return "".join(character.lower() for character in name if character.isalnum())
+
+def keys_are_safe(value):
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if not isinstance(key, str) or normalized(key) in FORBIDDEN:
+                return False
+            if not keys_are_safe(nested):
+                return False
+    elif isinstance(value, list):
+        return all(keys_are_safe(item) for item in value)
+    return True
+
+def strict_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+def valid_candidate(value):
+    if not isinstance(value, dict) or set(value) != FIELDS:
+        return False
+    if not keys_are_safe(value):
+        return False
+    if value["mode"] not in MODES or value["status"] not in STATUSES:
+        return False
+    if not all(
+        isinstance(value[name], bool)
+        for name in (
+            "compositionBuilt", "liveInvocationAttempted",
+            "invocationSucceeded", "retryPerformed",
+        )
+    ):
+        return False
+    if (
+        not strict_int(value["maximumProviderCalls"])
+        or not strict_int(value["providerRequestUpperBound"])
+        or value["maximumProviderCalls"] != 1
+        or value["providerRequestUpperBound"] != 1
+        or value["retryPerformed"] is not False
+    ):
+        return False
+    if value["failureStage"] is not None and value["failureStage"] not in STAGES:
+        return False
+    http_status = value["httpStatus"]
+    if http_status is not None and (
+        not strict_int(http_status) or not 400 <= http_status <= 599
+    ):
+        return False
+    if value["parseSucceeded"] not in (None, False):
+        return False
+    if (
+        value["validationCode"] is not None
+        and value["validationCode"] not in VALIDATION_CODES
+    ):
+        return False
+    if (
+        value["topLevelType"] is not None
+        and value["topLevelType"] not in TOP_LEVEL_TYPES
+    ):
+        return False
+    if value["invalidField"] is not None and value["invalidField"] not in INVALID_FIELDS:
+        return False
+    missing = value["missingFields"]
+    if (
+        not isinstance(missing, list)
+        or len(missing) > len(CONTRACT_FIELDS)
+        or any(not isinstance(field, str) for field in missing)
+        or len(set(missing)) != len(missing)
+        or missing != [field for field in CONTRACT_FIELDS if field in set(missing)]
+    ):
+        return False
+    if value["usageStatus"] not in {"AVAILABLE", "USAGE_UNAVAILABLE"}:
+        return False
+    usage = value["usage"]
+    if value["usageStatus"] == "AVAILABLE":
+        if not isinstance(usage, dict) or set(usage) != USAGE_FIELDS:
+            return False
+        counts = [usage[name] for name in ("inputTokens", "outputTokens", "totalTokens")]
+        if not all(strict_int(count) and count >= 0 for count in counts):
+            return False
+        if counts[2] != counts[0] + counts[1]:
+            return False
+    elif usage is not None:
+        return False
+    reasons = value["safeReasons"]
+    if (
+        not isinstance(reasons, list)
+        or not reasons
+        or any(not isinstance(reason, str) for reason in reasons)
+        or any(reason not in SAFE_REASONS for reason in reasons)
+    ):
+        return False
+    diagnostic_present = any(
+        value[name] is not None
+        for name in ("parseSucceeded", "validationCode", "topLevelType", "invalidField")
+    ) or bool(missing)
+    if diagnostic_present and (
+        value["parseSucceeded"] is not False
+        or value["validationCode"] is None
+        or value["topLevelType"] is None
+    ):
+        return False
+    return True
+
+candidates = []
+unsafe_candidates = 0
+for line in sys.stdin:
+    try:
+        decoded = json.loads(line)
+    except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+        continue
+    if not isinstance(decoded, dict):
+        continue
+    try:
+        if valid_candidate(decoded):
+            candidates.append(decoded)
+        else:
+            unsafe_candidates += 1
+    except Exception:
+        unsafe_candidates += 1
+        continue
+
+def emit(status, projection):
+    print(json.dumps(
+        {
+            "recoveryStatus": status,
+            "safeResultCandidates": len(candidates),
+            "unsafeCandidatesRejected": unsafe_candidates,
+            "safeProjection": projection,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ))
+
+if len(candidates) > 1:
+    emit("MULTIPLE_CANDIDATES", {})
+    raise SystemExit(21)
+if unsafe_candidates:
+    emit("UNSAFE_OR_UNKNOWN_FIELD_REJECTED", {})
+    raise SystemExit(22)
+if len(candidates) == 0:
+    emit("NOT_FOUND", {})
+    raise SystemExit(20)
+emit("RECOVERED", candidates[0])
+PY
+
+if systemctl is-active --quiet "$LIVE_UNIT"; then
+    RECOVERY_STATUS="PRE_EXECUTION_SAFETY_STOP"
+    exit 40
+fi
+if pgrep -f -- 'backend[.]ai_advisor[.]isolated_smoke_runner' >/dev/null; then
+    RECOVERY_STATUS="PRE_EXECUTION_SAFETY_STOP"
+    exit 41
+fi
+
+START_TIME="$(date --utc --iso-8601=seconds)"
+
+# Crossing this line consumes the approval budget for operational purposes.
+ONE_SHOT_ATTEMPTED=1
+set +e
+systemd-run --wait --collect \
+    --unit="$LIVE_UNIT" \
+    --service-type=oneshot \
+    --uid=joe4410joe --gid=joe4410joe \
+    --working-directory=/home/joe4410joe/tradingai_prod_v1 \
+    --property=Environment=TRADINGAI_ISOLATED_STDIO_ONLY=true \
+    --property=LoadCredentialEncrypted=AI_ADVISOR_AUTH_TOKEN:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN \
+    --property=LoadCredentialEncrypted=OPENAI_API_KEY:/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY \
+    --property=StandardInput=null \
+    --property=StandardOutput=journal \
+    --property=StandardError=journal \
+    --property=Restart=no --property=RemainAfterExit=no \
+    --property=TimeoutStartSec=120 --property=SuccessExitStatus=0 \
+    --property=UMask=0077 --property=NoNewPrivileges=yes \
+    --property=PrivateTmp=yes --property=PrivateDevices=yes \
+    --property=ProtectSystem=strict --property=ProtectHome=tmpfs \
+    --property=BindReadOnlyPaths=/home/joe4410joe/tradingai_prod_v1 \
+    --property=ProtectKernelTunables=yes \
+    --property=ProtectKernelModules=yes \
+    --property=ProtectControlGroups=yes \
+    --property=ProtectKernelLogs=yes --property=ProtectClock=yes \
+    --property=ProtectHostname=yes --property=RestrictSUIDSGID=yes \
+    --property=RestrictNamespaces=yes --property=LockPersonality=yes \
+    --property=MemoryDenyWriteExecute=yes --property=RestrictRealtime=yes \
+    --property=SystemCallArchitectures=native \
+    --property=CapabilityBoundingSet= \
+    --property=AmbientCapabilities= \
+    --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' \
+    --property=ProcSubset=pid --property=ProtectProc=invisible \
+    --property=StartLimitIntervalSec=86400 --property=StartLimitBurst=1 \
+    /home/joe4410joe/tradingai_prod_v1/venv/bin/python \
+    -m backend.ai_advisor.isolated_smoke_runner --mode LIVE_ONE_SHOT \
+    --live-one-shot-approval 'AI-ADV-1E9 LIVE TEST APPROVED: ONE REQUEST'
+RUN_EXIT_CODE=$?
+set -e
+
+END_TIME="$(date --utc --iso-8601=seconds)"
+
+# Recovery is mandatory after the call above, including RUN_EXIT_CODE != 0.
+set +e
+set -o pipefail
+journalctl \
+    --unit="$LIVE_UNIT" \
+    --since="$START_TIME" \
+    --until="$END_TIME" \
+    --no-pager \
+    --output=cat 2>/dev/null |
+    /usr/bin/python3 "$SANITIZER" >"$SAFE_OUTPUT" 2>/dev/null
+RECOVERY_PIPE_STATUS=("${PIPESTATUS[@]}")
+set +o pipefail
+set -e
+
+JOURNAL_RECOVERY_EXIT="${RECOVERY_PIPE_STATUS[0]}"
+SAFE_RESULT_RECOVERY_EXIT="${RECOVERY_PIPE_STATUS[1]}"
+SANITIZER_OUTPUT="$(<"$SAFE_OUTPUT")"
+
+if [ "$JOURNAL_RECOVERY_EXIT" -ne 0 ]; then
+    RECOVERY_STATUS="ACCESS_DENIED"
+    SANITIZER_OUTPUT='{"recoveryStatus":"ACCESS_DENIED","safeResultCandidates":0,"unsafeCandidatesRejected":0,"safeProjection":{}}'
+else
+    case "$SAFE_RESULT_RECOVERY_EXIT" in
+        0) RECOVERY_STATUS="RECOVERED" ;;
+        20) RECOVERY_STATUS="NOT_FOUND" ;;
+        21) RECOVERY_STATUS="MULTIPLE_CANDIDATES" ;;
+        22) RECOVERY_STATUS="UNSAFE_OR_UNKNOWN_FIELD_REJECTED" ;;
+        *)
+            RECOVERY_STATUS="SANITIZER_FAILED"
+            SANITIZER_OUTPUT='{"recoveryStatus":"SANITIZER_FAILED","safeResultCandidates":0,"unsafeCandidatesRejected":0,"safeProjection":{}}'
+            ;;
+    esac
+fi
+
+# This is fixed safe JSON only. RUN_EXIT_CODE is evaluated with it later;
+# neither the shell status nor RUN_EXIT_CODE alone is a Live result.
+printf '%s\n' "$SANITIZER_OUTPUT"
+
+# No branch below may rerun systemd-run. The EXIT trap removes both temporary
+# files; the operator then performs the documented repository, process,
+# transient-unit, and Production metadata audit.
+```
+
+The sanitizer reads stdin line by line, never prints a rejected or unparsable
+line, and never prints exception text. It accepts only one exact
+`IsolatedSmokeResult` projection. It emits only the fixed wrapper containing
+`recoveryStatus`, safe and rejected candidate counts, and `safeProjection`.
+Exit status `20` means `NOT_FOUND`, `21` means `MULTIPLE_CANDIDATES`, and `22`
+means `UNSAFE_OR_UNKNOWN_FIELD_REJECTED`. A journal failure produces the fixed
+`ACCESS_DENIED` wrapper; any other sanitizer failure produces the fixed
+`SANITIZER_FAILED` wrapper. These recovery codes must never be interpreted as
+Provider failures.
+
+The pipeline records both process statuses so a `journalctl` access failure
+cannot be hidden by a sanitizer result. If both statuses cannot be obtained,
+classify the recovery as `INCONCLUSIVE`. Never weaken the query bounds or
+inspect raw output to diagnose recovery. An object containing an arbitrary
+string, unknown field, forbidden field, or arbitrary nested object is rejected
+as a whole. Its values and unknown field names are neither emitted nor
+redacted into an otherwise accepted candidate.
+
+### Exit status and result decision matrix
+
+`RUN_EXIT_CODE` records process status only. It cannot identify a Provider,
+Response Contract, Semantic Validator, credential, gate, transport, or timeout
+outcome. A recovered safe result is required before any such classification.
+
+| Case | Classification and next step | Rerun / approval reuse |
+|---|---|---|
+| exit 0; one safe result | Evaluate the fixed fields; success requires the documented completed invariants | prohibited / prohibited |
+| exit nonzero; one safe result | Evaluate `status`, `safeReasons`, `failureStage`, and fixed diagnostics; do not infer from the exit code | prohibited / prohibited |
+| exit 0; no safe result | `INCONCLUSIVE` / `RUNNER_EXITED_SAFE_RESULT_NOT_RECOVERED`; audit recovery procedure | prohibited / prohibited |
+| exit nonzero; no safe result | `INCONCLUSIVE` / `RUNNER_EXITED_SAFE_RESULT_NOT_RECOVERED`; audit recovery procedure | prohibited / prohibited |
+| multiple safe candidates | `INCONCLUSIVE`; preserve only the candidate count and audit unit/time correlation | prohibited / prohibited |
+| journal access denied | `PROCEDURAL_OR_ENVIRONMENT_FAILURE`; correct access only under separate authorization | prohibited / prohibited |
+| journal retention expired | `INCONCLUSIVE`; record retention expiry without a new Live run | prohibited / prohibited |
+| unit name or time unknown | `INCONCLUSIVE`; do not issue an unbounded query | prohibited / prohibited |
+| unsafe or unknown field | `INCONCLUSIVE` / `UNSAFE_OR_UNKNOWN_FIELD_REJECTED`; suppress the field and value | prohibited / prohibited |
+| time range too broad | `INCONCLUSIVE`; do not query or widen the range | prohibited / prohibited |
+| another fixed-unit run cannot be excluded | `INCONCLUSIVE`; candidate correlation failed | prohibited / prohibited |
+| Candidate Contract accepted | `validationCode` is absent; this alone does not prove semantic acceptance | prohibited / prohibited |
+| Candidate Contract rejected | `failureStage=RESPONSE_VALIDATION` with allowlisted `validationCode`; report only fixed diagnostics | prohibited / prohibited |
+| Semantic Validator accepted | `invocationSucceeded=true` demonstrates the service completed parsing and semantic validation | prohibited / prohibited |
+| Semantic Validator rejected | No dedicated semantic-rejection field exists; unless fixed fields uniquely establish it, `INCONCLUSIVE` | prohibited / prohibited |
+| Provider failure | Use only an allowlisted `safeReasons` provider code and `failureStage` | prohibited / prohibited |
+| Credential failure | Require the fixed credential reason/stage; never inspect credential material | prohibited / prohibited |
+| Runtime gate failure | Require the recovered fixed gate/configuration reason; never infer it from status alone | prohibited / prohibited |
+| Transport failure | Require the allowlisted timeout, connection, HTTP, or unknown provider classification | prohibited / prohibited |
+| Timeout | Require `LIVE_PROVIDER_TIMEOUT`; do not retry | prohibited / prohibited |
+
+If `systemd-run` was called, every row treats its one-shot approval as consumed,
+even when the exit code is nonzero, the safe result is absent, or Provider
+requests are proven to be zero. A future Live run requires a new explicit
+authorization and new one-shot approval. If safety stops before the call, the
+budget remains unattempted, but a human must explicitly decide whether the
+authorization remains valid; no automatic execution follows. There is no
+automatic retry, fallback, model switch, permit regeneration, or approval
+reuse.
+
+### Raw-information protection and recovery cleanup
+
+During recovery, never display or save the raw journal, raw response,
+`output_text`, full Prompt, request body, headers, credential or API-key value,
+secret, arbitrary exception text, traceback, SDK debug log, or HTTP debug log.
+If any unexpected field is detected, suppress its name and value and classify
+the recovery as `INCONCLUSIVE`.
+
+At the end of recovery:
+
+1. Run the sanitizer cleanup trap and confirm its `/tmp` path is absent.
+2. Confirm no raw-journal artifact and no unnecessary full safe-result artifact
+   was created.
+3. Confirm no child process remains and inspect only metadata for the transient
+   unit state.
+4. Recompare the repository dirty inventory and confirm staged changes remain
+   zero.
+5. Confirm Production MainPID, `ActiveState`, `SubState`, and `NRestarts` match
+   their pre-operation values.
+6. Record that Deploy, restart, reload, and daemon-reload counts are zero.
+7. From the recovered fixed fields and operator record only, confirm the OpenAI
+   request count stayed within its approved upper bound, retry and fallback
+   remained zero, and the same Runner was not executed again.
+
+## Sandbox contract
+
+The verification mirror fixes:
+
+- `NoNewPrivileges=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`;
+- `ProtectSystem=strict`, `ProtectHome=tmpfs`, with only the repository
+  bind-mounted read-only;
+- kernel, control-group, log, clock, and hostname protections;
+- namespace, SUID/SGID, personality, realtime, and writable-executable-memory
+  restrictions;
+- empty capability and ambient-capability sets;
+- native system-call architecture, private process visibility, and
+  `UMask=0077`;
+- only `AF_UNIX`, `AF_INET`, and `AF_INET6`.
+
+AF_UNIX is retained for local resolver/system services; AF_INET/AF_INET6 are
+retained solely for the separately authorized HTTPS request. No filesystem
+write path is granted. The sandbox does not authorize DNS or network use by
+itself.
+
+## Lifecycle and rollback
+
+### Placement abort or failure
+
+Before input, abort leaves no change. After an encryption failure, remove only:
+
+```text
+/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN.new
+/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY.new
+```
+
+Confirm the exact final artifact was not created and the transient unit path is
+absent. Do not daemon-reload or touch `tradingbot.service`.
+
+### Unit abort or live-validation cancellation
+
+If the transient unit never started, the approval and one-shot permit remain
+unused and provider requests remain zero. Credential artifacts may remain only
+when a subsequent validation is still approved; otherwise follow complete
+deletion below. If the unit started, do not retry. Let the bounded unit exit,
+confirm `/run/systemd/transient/tradingai-ai-advisor-live-validation.service`
+and its `$CREDENTIALS_DIRECTORY` have disappeared, and keep the normal service
+unchanged.
+
+### Rotation
+
+Create new ciphertext as the exact `.new` artifacts with the same names,
+ownership, and modes; never overwrite the current artifacts. For the OpenAI
+key, activate and independently approve the new external key before local
+switch-over. For the internal token, update only the isolated validation
+consumer. With no transient unit running, atomically exchange the reviewed
+artifacts during a separately authorized maintenance step. Validate metadata
+and an offline presence probe, then delete the old ciphertext without backup.
+If validation fails, restore the still-valid old artifact before any live run.
+Production `tradingbot.service` is not restarted because these credentials are
+exclusive to the transient unit.
+
+### Complete deletion
+
+With no transient unit running, remove only these exact encrypted artifacts:
+
+```text
+/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN
+/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY
+```
+
+Remove the dedicated directory only after it is empty. Remove any separately
+authorized `.new` ciphertext named above. There is no installed unit or
+drop-in to remove and no daemon reload. Confirm the transient unit path,
+runtime credential directory, and enabled/timer/socket units are absent using
+metadata-only systemd queries. `reset-failed` is needed only to clear a failed
+transient unit after artifacts and runtime credentials are gone; it is never a
+retry authorization.
+
+### Compromise
+
+Immediately revoke the OpenAI key with the provider through a separately
+authorized external incident procedure, prevent any transient unit start,
+remove the two exact local ciphertext artifacts, and generate both credentials
+anew. Review only known audit metadata for unexpected unit starts or failure
+classifications; never search logs, history, processes, or Git by printing a
+secret. Confirm no persistent unit, timer, socket, environment value, runtime
+credential directory, or Production-service change exists. Record the
+incident without secret material.
+
+## Production separation
+
+`tradingbot.service` is neither required nor wanted by the transient unit. It
+receives no credential, environment, signal, reload, restart, or dependency.
+Its MainPID, fragment, drop-ins, active state, and disabled Advisor policy are
+captured before and after every separately approved lifecycle operation.

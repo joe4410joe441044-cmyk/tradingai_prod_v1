@@ -138,11 +138,6 @@ class AdvisorResponseSecurityTest(unittest.TestCase):
                 context,
                 prompt,
             ),
-            (
-                request,
-                context,
-                prompt.model_copy(update={"requestId": "request\u200b-1"}),
-            ),
         )
         for changed_request, changed_context, changed_prompt in cases:
             result = validate_advisor_response(
@@ -158,18 +153,23 @@ class AdvisorResponseSecurityTest(unittest.TestCase):
                 changed_prompt.promptVersion,
             )
 
-        invalid_prompt = prompt.model_copy(update={"promptVersion": "2.0"})
-        with self.assertRaises(ValueError) as raised:
-            validate_advisor_response(
-                raw_response=raw(),
-                request=request,
-                context=context,
-                prompt_envelope=invalid_prompt,
-            )
-        self.assertEqual(
-            str(raised.exception),
-            "advisor response validation input failed",
+        invalid_prompts = (
+            prompt.model_copy(update={"requestId": "request\u200b-1"}),
+            prompt.model_copy(update={"promptVersion": "2.0"}),
         )
+        for invalid_prompt in invalid_prompts:
+            with self.subTest(invalid_prompt=invalid_prompt.requestId):
+                with self.assertRaises(ValueError) as raised:
+                    validate_advisor_response(
+                        raw_response=raw(),
+                        request=request,
+                        context=context,
+                        prompt_envelope=invalid_prompt,
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    "advisor response validation input failed",
+                )
 
     def test_source_fabrication_variants_fail_exact_matching(self):
         source_ids = (

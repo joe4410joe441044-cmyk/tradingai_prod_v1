@@ -17,6 +17,9 @@ from backend.ai_advisor.production_config_loader import (
 from backend.ai_advisor.production_config_models import (
     ProductionReadinessStatus,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    RecordingProviderFailureObservationSink,
+)
 from backend.api.ai_advisor import create_advice_router
 from tests.test_ai_advisor_api import headers, payload
 from tests.test_ai_advisor_openai_sdk_transport import (
@@ -44,7 +47,14 @@ def configuration_values(*, enabled=True, network=False, **overrides):
     return values
 
 
-def build(values, *, auth_loader=None, provider_loader=None, client_factory=None):
+def build(
+    values,
+    *,
+    auth_loader=None,
+    provider_loader=None,
+    client_factory=None,
+    failure_sink=None,
+):
     return build_ai_advisor_production_composition(
         config_loader=InjectedProductionConfigLoader(values),
         authentication_credential_loader=auth_loader
@@ -54,6 +64,11 @@ def build(values, *, auth_loader=None, provider_loader=None, client_factory=None
         allowed_authentication_credential_ids=("auth-ref",),
         allowed_provider_credential_ids=("provider-ref",),
         client_factory=client_factory,
+        **(
+            {"failure_observation_sink": failure_sink}
+            if failure_sink is not None
+            else {}
+        ),
         clock=lambda: 100.0,
     )
 
@@ -154,6 +169,21 @@ class ProductionCompositionTest(unittest.TestCase):
         self.assertEqual(first.operationalStatus, second.operationalStatus)
         self.assertEqual(auth.calls, 0)
         self.assertEqual(provider.calls, 0)
+        self.assertEqual(factory.calls, 0)
+
+    def test_live_composition_injects_one_failure_sink_into_transport_and_service(self):
+        sink = RecordingProviderFailureObservationSink()
+        factory = FakeClientFactory(
+            FakeClient(FakeResponses(response=FakeResponse(fixture_text())))
+        )
+        result = build(
+            configuration_values(network=True),
+            client_factory=factory,
+            failure_sink=sink,
+        )
+        service = result.apiComposition.service
+        self.assertIs(service.failureObservationSink, sink)
+        self.assertIs(service.provider.transport.failureObservationSink, sink)
         self.assertEqual(factory.calls, 0)
 
     def test_live_ready_offline_client_endpoint_succeeds(self):

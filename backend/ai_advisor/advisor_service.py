@@ -22,9 +22,22 @@ from backend.ai_advisor.provider_models import (
     AdvisorProviderFailure,
     AdvisorProviderReceivedAt,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    NoOpProviderFailureObservationSink,
+    ProviderFailureObservation,
+    ProviderFailureObservationSink,
+    ProviderFailureStage,
+    ProviderSafeReason,
+    ResponseContractDiagnostic,
+    ResponseTopLevelType,
+    ResponseValidationCode,
+)
 from backend.ai_advisor.provider_validation import validate_provider_response
 from backend.ai_advisor.response_models import AdvisorRawResponse
-from backend.ai_advisor.response_parser import parse_advisor_response
+from backend.ai_advisor.response_parser import (
+    AdvisorResponseParsingError,
+    parse_advisor_response,
+)
 from backend.ai_advisor.response_validation import validate_advisor_response
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
@@ -55,6 +68,32 @@ class AdvisorService:
     providerConfig: AdvisorProviderConfig
     modelPolicy: AdvisorModelPolicy
     capabilities: AdvisorProviderCapabilities
+    failureObservationSink: ProviderFailureObservationSink = (
+        NoOpProviderFailureObservationSink()
+    )
+
+    def _observe_parse_failure(
+        self,
+        diagnostic: ResponseContractDiagnostic,
+    ) -> None:
+        try:
+            self.failureObservationSink.observe(
+                ProviderFailureObservation(
+                    safeReason=(
+                        ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED
+                    ),
+                    failureStage=ProviderFailureStage.RESPONSE_VALIDATION,
+                    httpStatus=502,
+                    liveInvocationAttempted=True,
+                    parseSucceeded=diagnostic.parseSucceeded,
+                    validationCode=diagnostic.validationCode,
+                    topLevelType=diagnostic.topLevelType,
+                    invalidField=diagnostic.invalidField,
+                    missingFields=diagnostic.missingFields,
+                )
+            )
+        except Exception:
+            return None
 
     def generate_response(
         self,
@@ -139,7 +178,18 @@ class AdvisorService:
 
         try:
             parse_advisor_response(raw_response)
+        except AdvisorResponseParsingError as exception:
+            self._observe_parse_failure(exception.diagnostic)
+            return _failure(AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE)
         except Exception:
+            self._observe_parse_failure(
+                ResponseContractDiagnostic(
+                    validationCode=(
+                        ResponseValidationCode.UNKNOWN_RESPONSE_CONTRACT_FAILURE
+                    ),
+                    topLevelType=ResponseTopLevelType.UNKNOWN,
+                )
+            )
             return _failure(AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE)
 
         try:

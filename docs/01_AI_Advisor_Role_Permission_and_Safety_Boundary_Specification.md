@@ -815,7 +815,7 @@ The following are not authorized or finalized by this specification:
 | Session isolation | Request-scoped only | Prevents cross-session disclosure | Yes for conversation | Security / Backend | Conversation release |
 | OpenAI model | Unselected | Determines provider and data-processing boundary | Yes for provider use | Architecture / Security | Provider activation |
 | Streaming | Disabled | Affects cancellation and partial-output filtering | No | Frontend / Backend | Streaming |
-| Rate limit | Enforced per authenticated principal with bounded window and concurrency limits | Limits abuse and data extraction | No for offline release; revalidate values before provider activation | Security / Backend | Provider activation |
+| Rate limit | Not implemented | Limits abuse and data extraction | Yes for provider release | Security / Backend | Provider activation |
 | Response language | Documented application default | Affects consistent safety wording | No | Product | General release |
 | Disclaimer presentation | Persistent concise boundary | Prevents role confusion | Yes | Product / Legal | General conversation release |
 

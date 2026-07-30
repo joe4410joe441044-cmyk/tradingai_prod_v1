@@ -6,7 +6,17 @@ import { fileURLToPath } from "node:url";
 
 import { transformWithOxc } from "vite";
 
+import {
+    beginAdvisorRequest,
+    completeAdvisorRequest,
+    failAdvisorRequest,
+    initialAdvisorConversationState,
+    validateAdvisorPrompt,
+} from "../../features/ai-advisor/conversation/advisorConversationModel.js";
+
 const directory = dirname(fileURLToPath(import.meta.url));
+const conversationSource = () =>
+    readFile(new URL("./AdvisorConversation.jsx", import.meta.url), "utf8");
 
 test("message renders untrusted response only as plain text", async () => {
     const source = new URL("./AdvisorConversation.jsx", import.meta.url);
@@ -33,7 +43,7 @@ test("message renders untrusted response only as plain text", async () => {
 });
 
 test("conversation source has no persistence, logging, endpoint, or trading controls", async () => {
-    const source = await readFile(new URL("./AdvisorConversation.jsx", import.meta.url), "utf8");
+    const source = await conversationSource();
     for (const forbidden of [
         "localStorage", "sessionStorage", "indexedDB", "console.",
         "fetch(", "WebSocket", "api.openai.com", "botStart", "botStop",
@@ -41,4 +51,106 @@ test("conversation source has no persistence, logging, endpoint, or trading cont
     ]) {
         assert.doesNotMatch(source, new RegExp(forbidden.replace("(", "\\(")));
     }
+});
+
+test("Browser Gateway send path validates prompts and prevents duplicate requests", async () => {
+    const source = await conversationSource();
+    assert.match(source, /createAdvisorBrowserGatewayClient\(\)/);
+    assert.equal(source.match(/client\.requestAdvice\(/g)?.length, 1);
+    assert.match(source, /if \(sendDisabled \|\| controllerRef\.current !== null\) return/);
+    assert.match(source, /const sendDisabled = !authReady \|\| !validation\.valid \|\| sending/);
+    assert.equal(validateAdvisorPrompt("").valid, false);
+    assert.equal(validateAdvisorPrompt("   ").valid, false);
+
+    const pending = beginAdvisorRequest(initialAdvisorConversationState, {
+        requestId: "request-1",
+        userMessageId: "user-1",
+        assistantMessageId: "assistant-1",
+        content: "Explain risk",
+        createdAt: "2026-07-28T00:00:00Z",
+    });
+    assert.equal(
+        beginAdvisorRequest(pending, {
+            requestId: "request-2",
+            userMessageId: "user-2",
+            assistantMessageId: "assistant-2",
+            content: "Duplicate",
+            createdAt: "2026-07-28T00:00:01Z",
+        }),
+        pending,
+    );
+});
+
+test("successful grounded responses are retained for safe conversation rendering", async () => {
+    const source = await conversationSource();
+    const pending = beginAdvisorRequest(initialAdvisorConversationState, {
+        requestId: "request-1",
+        userMessageId: "user-1",
+        assistantMessageId: "assistant-1",
+        content: "Explain risk",
+        createdAt: "2026-07-28T00:00:00Z",
+    });
+    const groundedResponse = Object.freeze({
+        summary: "Risk is normal.",
+        citations: Object.freeze([]),
+    });
+    const completed = completeAdvisorRequest(
+        pending,
+        "request-1",
+        groundedResponse.summary,
+        groundedResponse,
+    );
+    const assistant = completed.messages.at(-1);
+
+    assert.equal(assistant.content, "Risk is normal.");
+    assert.equal(assistant.groundedResponse, groundedResponse);
+    assert.match(source, /<AdvisorGroundedResponse response=\{message\.groundedResponse\} \/>/);
+});
+
+test("safe failure codes never expose raw exception details", async () => {
+    const source = await conversationSource();
+    const pending = beginAdvisorRequest(initialAdvisorConversationState, {
+        requestId: "request-1",
+        userMessageId: "user-1",
+        assistantMessageId: "assistant-1",
+        content: "Explain risk",
+        createdAt: "2026-07-28T00:00:00Z",
+    });
+    const failed = failAdvisorRequest(
+        pending,
+        "request-1",
+        "raw HTTP body with stack trace",
+    );
+
+    assert.equal(
+        failed.messages.at(-1).content,
+        "The advisor request could not be completed.",
+    );
+    assert.doesNotMatch(failed.messages.at(-1).content, /HTTP|stack trace/);
+    assert.match(source, /typeof error\?\.code === "string"/);
+    assert.doesNotMatch(source, /error\?\.message|error\.message|error\?\.stack|error\.stack/);
+});
+
+test("cancel and unmount abort requests while timeout remains distinct", async () => {
+    const source = await conversationSource();
+    assert.match(source, /const cancel = useCallback\(\(\) => \{\s*controllerRef\.current\?\.abort\(\)/s);
+    assert.match(source, /mountedRef\.current = false;\s*controller\.abort\(\);\s*controllerRef\.current\?\.abort\(\)/s);
+    assert.match(source, /signal: controller\.signal/);
+
+    const createPending = () => beginAdvisorRequest(
+        initialAdvisorConversationState,
+        {
+            requestId: "request-1",
+            userMessageId: "user-1",
+            assistantMessageId: "assistant-1",
+            content: "Explain risk",
+            createdAt: "2026-07-28T00:00:00Z",
+        },
+    );
+    const cancelled = failAdvisorRequest(createPending(), "request-1", "CANCELLED");
+    const timedOut = failAdvisorRequest(createPending(), "request-1", "TIMED_OUT");
+    assert.equal(cancelled.messages.at(-1).status, "CANCELLED");
+    assert.equal(cancelled.messages.at(-1).content, "The request was cancelled.");
+    assert.equal(timedOut.messages.at(-1).status, "TIMED_OUT");
+    assert.equal(timedOut.messages.at(-1).content, "The request timed out. You may try again.");
 });

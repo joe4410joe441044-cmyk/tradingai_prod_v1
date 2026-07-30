@@ -11,8 +11,9 @@ Status: `CANDIDATE / NOT ACTIVE`
 | `AI_ADVISOR_BROWSER_GATEWAY_ENABLED` | false | false | true after proxy/bind review | Backend owner | Gateway | false | Non-secret |
 | Trusted Proxy Allowlist | empty | empty | exact direct Nginx peer | Security owner | Proxy trust | empty | Non-secret |
 | Exact Origin Allowlist | empty | empty | exact approved HTTPS origin | Security owner | Browser origin | empty | Non-secret |
-| Authentication credential source | absent | systemd credential | systemd credential | Security owner | Credential placement | absent | Secret reference |
-| Provider credential source | absent | systemd credential | unavailable pending approval | Security owner | Credential placement | absent | Secret reference |
+| Authentication credential source | absent | encrypted artifact `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/AI_ADVISOR_AUTH_TOKEN` | separate production decision | Security owner | Credential placement | delete exact encrypted artifact | Secret reference |
+| Provider credential source | absent | encrypted artifact `/etc/credstore.encrypted/tradingai-ai-advisor-live-validation/OPENAI_API_KEY` | unavailable pending approval | Security owner | Credential placement | revoke externally, then delete exact encrypted artifact | Secret reference |
+| Isolated live unit | absent | transient `tradingai-ai-advisor-live-validation.service` via `systemd-run --wait --collect` | prohibited | Operator | Unit creation and live request are separate | collect transient unit; no daemon reload | Non-secret |
 | Model | server default | `gpt-4o-mini` | server allowlist only | AI owner | Model | disabled | Non-secret |
 | Official endpoint | unset | official allowlisted endpoint | official allowlisted endpoint | Security owner | Endpoint | unset | Non-secret |
 | Output token budget | 4096 | 512 | separately approved | AI owner | Cost/data | 512 or disabled | Non-secret |

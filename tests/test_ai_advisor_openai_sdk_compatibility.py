@@ -2,15 +2,27 @@ import inspect
 import json
 import unittest
 from dataclasses import dataclass
+from unittest.mock import patch
 
 import httpx
 import openai
 from openai import OpenAI
 
 from backend.ai_advisor.advisor_service import AdvisorService
-from backend.ai_advisor.credential_loader import InjectedCredentialLoader
+from backend.ai_advisor.credential_loader import (
+    EphemeralCredential,
+    InjectedCredentialLoader,
+)
 from backend.ai_advisor.openai_provider import OpenAIProviderAdapter
-from backend.ai_advisor.openai_sdk_transport import OpenAISDKTransport
+from backend.ai_advisor.provider_failure_observation import (
+    ProviderFailureStage,
+    ProviderSafeReason,
+    RecordingProviderFailureObservationSink,
+)
+from backend.ai_advisor.openai_sdk_transport import (
+    DefaultOpenAIClientFactory,
+    OpenAISDKTransport,
+)
 from backend.ai_advisor.provider_transport import (
     OpenAITransportAuthenticationError,
     OpenAITransportConnectionError,
@@ -129,25 +141,100 @@ class OfflineSDKClientFactory:
             base_url=endpoint,
             timeout=timeout_seconds,
             max_retries=0,
-            http_client=httpx.Client(transport=transport),
+            http_client=httpx.Client(
+                transport=transport,
+                follow_redirects=False,
+            ),
         )
 
 
-def sdk_transport(handler, *, allowed=True):
+def sdk_transport(handler, *, allowed=True, failure_sink=None):
     loader = InjectedCredentialLoader(
         {"advisor-openai-primary": "offline-placeholder-credential"}
     )
     factory = OfflineSDKClientFactory(handler)
-    value = OpenAISDKTransport(
+    arguments = dict(
         config=connection_config(),
         credentialLoader=loader,
         clientFactory=factory,
         allowNetworkInvocation=allowed,
     )
+    if failure_sink is not None:
+        arguments["failureObservationSink"] = failure_sink
+    value = OpenAISDKTransport(**arguments)
     return value, loader, factory
 
 
 class OpenAISDKCompatibilityTest(unittest.TestCase):
+    def test_http_failures_emit_only_allowlisted_observations(self):
+        cases = (
+            (400, ProviderSafeReason.LIVE_PROVIDER_BAD_REQUEST),
+            (401, ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED),
+            (403, ProviderSafeReason.LIVE_PROVIDER_PERMISSION_DENIED),
+            (429, ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED),
+            (500, ProviderSafeReason.LIVE_PROVIDER_SERVER_ERROR),
+        )
+        for status, reason in cases:
+            with self.subTest(status=status):
+                calls = 0
+                sink = RecordingProviderFailureObservationSink()
+
+                def handler(http_request):
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(
+                        status,
+                        json={
+                            "error": {
+                                "message": "sk-test-DO-NOT-LEAK",
+                                "type": "private",
+                                "code": "private",
+                            }
+                        },
+                        headers={"x-request-id": "private-request-id"},
+                    )
+
+                value, _, _ = sdk_transport(
+                    handler,
+                    failure_sink=sink,
+                )
+                with self.assertRaises(Exception):
+                    value.invoke(request())
+                self.assertEqual(calls, 1)
+                observation = sink.observation
+                self.assertEqual(observation.safeReason, reason)
+                self.assertEqual(
+                    observation.failureStage,
+                    ProviderFailureStage.PROVIDER_INVOCATION,
+                )
+                self.assertEqual(observation.httpStatus, status)
+                rendered = observation.model_dump_json()
+                self.assertNotIn("sk-test-DO-NOT-LEAK", rendered)
+                self.assertNotIn("private-request-id", rendered)
+
+    def test_default_factory_explicitly_disables_redirects_and_retries(self):
+        http_client = object()
+        sdk_client = object()
+        with (
+            patch(
+                "openai.DefaultHttpxClient",
+                return_value=http_client,
+            ) as http_factory,
+            patch("openai.OpenAI", return_value=sdk_client) as sdk_factory,
+        ):
+            result = DefaultOpenAIClientFactory().create(
+                credential=EphemeralCredential("offline-secret"),
+                endpoint="https://api.openai.com/v1",
+                timeout_seconds=30.0,
+            )
+        self.assertIs(result, sdk_client)
+        http_factory.assert_called_once_with(
+            timeout=30.0,
+            follow_redirects=False,
+        )
+        self.assertEqual(sdk_factory.call_args.kwargs["max_retries"], 0)
+        self.assertIs(sdk_factory.call_args.kwargs["http_client"], http_client)
+
     def test_pinned_dependency_and_public_signatures(self):
         self.assertEqual(openai.__version__, PINNED_OPENAI_VERSION)
         client_parameters = inspect.signature(OpenAI).parameters
@@ -246,6 +333,41 @@ class OpenAISDKCompatibilityTest(unittest.TestCase):
             with self.assertRaises(expected):
                 value.invoke(request())
             self.assertEqual(calls, 1)
+
+    def test_real_sdk_redirects_fail_closed_without_second_request(self):
+        locations = (
+            "https://outside.example/collect/offline-location-secret",
+            "https://api.openai.example/v1/responses/redirected",
+        )
+        for status in (301, 302, 307, 308):
+            for location in locations:
+                with self.subTest(status=status, location=location):
+                    calls = 0
+
+                    def handler(http_request):
+                        nonlocal calls
+                        calls += 1
+                        return httpx.Response(
+                            status,
+                            headers={"location": location},
+                            json={
+                                "error": {
+                                    "message": "offline-provider-body-secret",
+                                }
+                            },
+                        )
+
+                    value, _, _ = sdk_transport(handler)
+                    with self.assertRaises(
+                        OpenAITransportRejectedError
+                    ) as caught:
+                        value.invoke(request())
+                    self.assertEqual(calls, 1)
+                    rendered = repr(caught.exception) + str(caught.exception)
+                    self.assertNotIn(location, rendered)
+                    self.assertNotIn("offline-location-secret", rendered)
+                    self.assertNotIn("offline-provider-body-secret", rendered)
+                    self.assertNotIn("offline-placeholder-credential", rendered)
 
     def test_real_sdk_base_exception_is_safe_internal_failure(self):
         class RaisingResponses:

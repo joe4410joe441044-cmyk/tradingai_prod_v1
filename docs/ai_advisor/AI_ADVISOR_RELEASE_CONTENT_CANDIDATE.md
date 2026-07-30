@@ -34,7 +34,7 @@ before staging.
 | Relative path | State | Rule |
 |---|---|---|
 | `deploy/nginx/ai-advisor-browser-gateway.conf.example` | New | Optional candidate; never auto-install |
-| `deploy/systemd/tradingai-ai-advisor-smoke.service.example` | New | Optional candidate; never auto-install |
+| `deploy/systemd/tradingai-ai-advisor-live-validation.service` | New | Optional transient-unit verification mirror; never install or enable |
 | `deploy/systemd/tradingbot-loopback.override.conf.example` | New | Optional candidate; explicit bind-change approval |
 
 ## Explicit exclusions

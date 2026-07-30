@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import getpass
 import hashlib
 import hmac
 import json
@@ -16,7 +15,7 @@ from typing import Callable, Literal, Tuple
 
 import httpx
 from fastapi import FastAPI
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from backend.ai_advisor.context_builder import build_advisor_context
 from backend.ai_advisor.conversation_models import (
@@ -48,6 +47,16 @@ from backend.ai_advisor.production_config_loader import (
     EnvironmentProductionConfigLoader,
 )
 from backend.ai_advisor.provider_config import CredentialSource, ProviderName
+from backend.ai_advisor.provider_failure_observation import (
+    ProviderFailureObservation,
+    ProviderFailureStage,
+    ProviderSafeReason,
+    RecordingProviderFailureObservationSink,
+    ResponseContractDiagnostic,
+    ResponseContractField,
+    ResponseTopLevelType,
+    ResponseValidationCode,
+)
 from backend.ai_advisor.provider_models import AdvisorProviderContractModel
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
@@ -151,6 +160,19 @@ class IsolatedSmokeResult(AdvisorProviderContractModel):
     liveInvocationAttempted: bool
     invocationSucceeded: bool
     maximumProviderCalls: Literal[1] = 1
+    providerRequestUpperBound: Literal[1] = 1
+    retryPerformed: Literal[False] = False
+    failureStage: ProviderFailureStage | None = None
+    httpStatus: int | None = Field(default=None, ge=400, le=599)
+    parseSucceeded: Literal[False] | None = None
+    validationCode: ResponseValidationCode | None = None
+    topLevelType: ResponseTopLevelType | None = None
+    invalidField: ResponseContractField | None = None
+    missingFields: Tuple[ResponseContractField, ...] = Field(
+        default_factory=tuple,
+        max_length=11,
+        strict=False,
+    )
     usageStatus: UsageObservationStatus = UsageObservationStatus.USAGE_UNAVAILABLE
     usage: AdvisorTokenUsage | None = None
     safeReasons: Tuple[str, ...]
@@ -161,7 +183,77 @@ class IsolatedSmokeResult(AdvisorProviderContractModel):
             self.usage is not None
         ):
             raise ValueError("smoke usage invariant failed")
+        diagnostic_values = (
+            self.parseSucceeded,
+            self.validationCode,
+            self.topLevelType,
+            self.invalidField,
+        )
+        has_diagnostic = any(value is not None for value in diagnostic_values) or bool(
+            self.missingFields
+        )
+        if has_diagnostic:
+            if (
+                self.parseSucceeded is not False
+                or self.validationCode is None
+                or self.topLevelType is None
+            ):
+                raise ValueError("smoke response diagnostic invariant failed")
+            ResponseContractDiagnostic(
+                parseSucceeded=False,
+                validationCode=self.validationCode,
+                topLevelType=self.topLevelType,
+                invalidField=self.invalidField,
+                missingFields=self.missingFields,
+            )
         return self
+
+
+def smoke_result_exit_code(result: IsolatedSmokeResult) -> int:
+    """Map a completed smoke result to a process exit code in one place."""
+    if result.status is not SmokePreflightStatus.READY_FOR_CONFIGURATION:
+        return 2 if result.status is SmokePreflightStatus.CONFIGURATION_INVALID else 1
+    if result.mode is SmokeTestMode.DRY_RUN:
+        succeeded = (
+            result.compositionBuilt
+            and not result.liveInvocationAttempted
+            and not result.invocationSucceeded
+            and result.safeReasons == ("DRY_RUN_COMPLETE",)
+        )
+    else:
+        succeeded = (
+            result.compositionBuilt
+            and result.liveInvocationAttempted
+            and result.invocationSucceeded
+            and result.safeReasons
+            in (("LIVE_ONE_SHOT_COMPLETE",), ("USAGE_UNAVAILABLE",))
+        )
+    return 0 if succeeded else 1
+
+
+def _unexpected_cli_failure(mode: SmokeTestMode) -> IsolatedSmokeResult:
+    return IsolatedSmokeResult(
+        mode=mode,
+        status=SmokePreflightStatus.BLOCKED,
+        compositionBuilt=False,
+        liveInvocationAttempted=False,
+        invocationSucceeded=False,
+        safeReasons=("UNEXPECTED_FAILURE",),
+    )
+
+
+def _cli_approval_failure(
+    mode: SmokeTestMode,
+    reason: str,
+) -> IsolatedSmokeResult:
+    return IsolatedSmokeResult(
+        mode=mode,
+        status=SmokePreflightStatus.BLOCKED,
+        compositionBuilt=False,
+        liveInvocationAttempted=False,
+        invocationSucceeded=False,
+        safeReasons=(reason,),
+    )
 
 
 @dataclass(frozen=True)
@@ -306,6 +398,12 @@ class IsolatedSmokeTestRunner:
         repr=False,
         compare=False,
     )
+    _failureSink: RecordingProviderFailureObservationSink = field(
+        default_factory=RecordingProviderFailureObservationSink,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     @staticmethod
     def _result(
@@ -320,6 +418,7 @@ class IsolatedSmokeTestRunner:
             UsageObservationStatus.USAGE_UNAVAILABLE
         ),
         usage: AdvisorTokenUsage | None = None,
+        failure_observation: ProviderFailureObservation | None = None,
     ) -> IsolatedSmokeResult:
         return IsolatedSmokeResult(
             mode=mode,
@@ -327,9 +426,48 @@ class IsolatedSmokeTestRunner:
             compositionBuilt=composition_built,
             liveInvocationAttempted=attempted,
             invocationSucceeded=succeeded,
+            failureStage=(
+                failure_observation.failureStage
+                if failure_observation is not None
+                else None
+            ),
+            httpStatus=(
+                failure_observation.httpStatus
+                if failure_observation is not None
+                else None
+            ),
+            parseSucceeded=(
+                failure_observation.parseSucceeded
+                if failure_observation is not None
+                else None
+            ),
+            validationCode=(
+                failure_observation.validationCode
+                if failure_observation is not None
+                else None
+            ),
+            topLevelType=(
+                failure_observation.topLevelType
+                if failure_observation is not None
+                else None
+            ),
+            invalidField=(
+                failure_observation.invalidField
+                if failure_observation is not None
+                else None
+            ),
+            missingFields=(
+                failure_observation.missingFields
+                if failure_observation is not None
+                else ()
+            ),
             usageStatus=usage_status,
             usage=usage,
-            safeReasons=(reason,),
+            safeReasons=(
+                (failure_observation.safeReason.value,)
+                if failure_observation is not None
+                else (reason,)
+            ),
         )
 
     def _load_and_validate(self, mode: SmokeTestMode):
@@ -429,6 +567,7 @@ class IsolatedSmokeTestRunner:
             allowed_provider_credential_ids=self.allowedProviderCredentialIds,
             client_factory=self.clientFactory,
             usage_observation_sink=self._usageSink,
+            failure_observation_sink=self._failureSink,
             clock=self.clock,
         )
         if composition.readiness.status in {
@@ -551,6 +690,7 @@ class IsolatedSmokeTestRunner:
             else UsageObservationStatus.USAGE_UNAVAILABLE
         )
         usage = observation.usage if observation is not None else None
+        failure_observation = self._failureSink.observation
         return self._result(
             mode,
             (
@@ -568,6 +708,9 @@ class IsolatedSmokeTestRunner:
             succeeded=succeeded,
             usage_status=usage_status,
             usage=usage,
+            failure_observation=(
+                failure_observation if not succeeded else None
+            ),
         )
 
     def _invoke_authenticated_endpoint(
@@ -592,6 +735,15 @@ class IsolatedSmokeTestRunner:
             resolution.status is not CredentialResolutionStatus.SUCCEEDED
             or resolution.credential is None
         ):
+            self._failureSink.observe(
+                ProviderFailureObservation(
+                    safeReason=(
+                        ProviderSafeReason.LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE
+                    ),
+                    failureStage=ProviderFailureStage.CREDENTIAL_RESOLUTION,
+                    liveInvocationAttempted=False,
+                )
+            )
             return False
         ephemeral_header = "Bearer " + resolution.credential._consume()
         try:
@@ -608,8 +760,8 @@ class IsolatedSmokeTestRunner:
             ephemeral_header = ""
             resolution = None
 
-    @staticmethod
     async def _post_in_process(
+        self,
         *,
         composition: ProductionCompositionResult,
         service_input: AdvisorServiceInput,
@@ -636,6 +788,26 @@ class IsolatedSmokeTestRunner:
                     "Content-Type": "application/json",
                 },
             )
+        if response.status_code == 502 and self._failureSink.observation is None:
+            self._failureSink.observe(
+                ProviderFailureObservation(
+                    safeReason=(
+                        ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED
+                    ),
+                    failureStage=ProviderFailureStage.RESPONSE_VALIDATION,
+                    httpStatus=502,
+                    liveInvocationAttempted=True,
+                )
+            )
+        elif response.status_code == 503 and self._failureSink.observation is None:
+            self._failureSink.observe(
+                ProviderFailureObservation(
+                    safeReason=ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE,
+                    failureStage=ProviderFailureStage.PROVIDER_INVOCATION,
+                    httpStatus=503,
+                    liveInvocationAttempted=True,
+                )
+            )
         return response.status_code == 200
 
 
@@ -646,31 +818,55 @@ def main(argv: list[str] | None = None) -> int:
         choices=tuple(mode.value for mode in SmokeTestMode),
         default=SmokeTestMode.DRY_RUN.value,
     )
+    parser.add_argument(
+        "--live-one-shot-approval",
+        action="append",
+        default=[],
+        help=argparse.SUPPRESS,
+    )
     arguments = parser.parse_args(argv)
     mode = SmokeTestMode(arguments.mode)
-    approval = None
+    approval_values = tuple(arguments.live_one_shot_approval)
+    if mode is not SmokeTestMode.LIVE_ONE_SHOT and approval_values:
+        result = _cli_approval_failure(mode, "LIVE_APPROVAL_NOT_ALLOWED")
+        sys.stdout.write(result.model_dump_json() + "\n")
+        return smoke_result_exit_code(result)
     if mode is SmokeTestMode.LIVE_ONE_SHOT:
-        approval = getpass.getpass("Transient live approval: ")
-    process_configuration = isolated_non_secret_environment()
-    runner = IsolatedSmokeTestRunner(
-        configLoader=EnvironmentProductionConfigLoader(
-            environmentReader=process_configuration.get
-        ),
-        authenticationCredentialLoader=SystemdCredentialLoader(
-            ("AI_ADVISOR_AUTH_TOKEN",)
-        ),
-        providerCredentialLoader=SystemdCredentialLoader(("OPENAI_API_KEY",)),
-        allowedAuthenticationCredentialIds=("AI_ADVISOR_AUTH_TOKEN",),
-        allowedProviderCredentialIds=("OPENAI_API_KEY",),
-        approvedModels=(SMOKE_MODEL,),
-    )
-    result = runner.run(
-        mode=mode,
-        generated_at=datetime.now(timezone.utc),
-        live_approval=approval,
-    )
+        if len(approval_values) != 1:
+            result = _cli_approval_failure(mode, "LIVE_APPROVAL_REQUIRED")
+            sys.stdout.write(result.model_dump_json() + "\n")
+            return smoke_result_exit_code(result)
+        approval = approval_values[0]
+        supplied = hashlib.sha256(approval.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(supplied, _LIVE_APPROVAL_SHA256):
+            result = _cli_approval_failure(mode, "LIVE_APPROVAL_REQUIRED")
+            sys.stdout.write(result.model_dump_json() + "\n")
+            return smoke_result_exit_code(result)
+    else:
+        approval = None
+    try:
+        process_configuration = isolated_non_secret_environment()
+        runner = IsolatedSmokeTestRunner(
+            configLoader=EnvironmentProductionConfigLoader(
+                environmentReader=process_configuration.get
+            ),
+            authenticationCredentialLoader=SystemdCredentialLoader(
+                ("AI_ADVISOR_AUTH_TOKEN",)
+            ),
+            providerCredentialLoader=SystemdCredentialLoader(("OPENAI_API_KEY",)),
+            allowedAuthenticationCredentialIds=("AI_ADVISOR_AUTH_TOKEN",),
+            allowedProviderCredentialIds=("OPENAI_API_KEY",),
+            approvedModels=(SMOKE_MODEL,),
+        )
+        result = runner.run(
+            mode=mode,
+            generated_at=datetime.now(timezone.utc),
+            live_approval=approval,
+        )
+    except Exception:
+        result = _unexpected_cli_failure(mode)
     sys.stdout.write(result.model_dump_json() + "\n")
-    return 0 if result.status is not SmokePreflightStatus.CONFIGURATION_INVALID else 2
+    return smoke_result_exit_code(result)
 
 
 if __name__ == "__main__":

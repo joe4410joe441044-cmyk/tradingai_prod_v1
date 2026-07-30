@@ -6,7 +6,13 @@ Status: `PREPARATION ONLY / NO PRODUCTION AUTHORITY`
 
 Current service binds Uvicorn to `0.0.0.0:8001`. The candidate drop-in changes
 only the host to `127.0.0.1`, preserving the application, port and Nginx
-upstream. The isolated one-shot smoke unit remains separate.
+upstream. The isolated one-shot unit is the transient
+`tradingai-ai-advisor-live-validation.service`; its complete encrypted
+credential, PTY approval, sandbox, rotation, and deletion contract is fixed in
+`docs/ai_advisor/systemd-credential-smoke-runbook.md`. It has no dependency on
+the normal service and is never persistently installed or enabled. Its source
+artifacts are confined to
+`/etc/credstore.encrypted/tradingai-ai-advisor-live-validation`.
 
 Before installation, verify the candidate with systemd tooling, compare the
 effective `ExecStart`, and confirm Nginx `/api` and `/ws` both use loopback.
@@ -74,7 +80,9 @@ Each phase requires a separate stop/go decision.
 6. Disable Advisor endpoint.
 7. Withdraw the Nginx candidate and restore the reviewed prior configuration.
 8. Withdraw the loopback candidate only if rollback requires the prior unit.
-9. Stop the isolated unit and verify no temporary credential remains.
+9. Let the bounded transient isolated unit exit, verify systemd collected it
+   and its runtime credential directory, then remove only the two exact
+   encrypted source artifacts when deletion is authorized.
 10. Restore previous frontend artifact and backend release independently.
 11. Verify the normal trading service state without enabling trading.
 

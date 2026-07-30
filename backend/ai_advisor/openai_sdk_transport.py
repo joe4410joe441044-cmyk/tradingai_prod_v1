@@ -15,6 +15,13 @@ from backend.ai_advisor.provider_invocation_guard import (
     InvocationGuardInput,
     evaluate_invocation_guard,
 )
+from backend.ai_advisor.provider_failure_observation import (
+    NoOpProviderFailureObservationSink,
+    ProviderFailureObservation,
+    ProviderFailureObservationSink,
+    ProviderFailureStage,
+    ProviderSafeReason,
+)
 from backend.ai_advisor.provider_transport import (
     OpenAITransportAuthenticationError,
     OpenAITransportConfigurationError,
@@ -53,17 +60,22 @@ class DefaultOpenAIClientFactory:
         timeout_seconds: float,
     ) -> Any:
         try:
-            from openai import OpenAI
+            from openai import DefaultHttpxClient, OpenAI
         except ImportError:
             raise OpenAITransportConfigurationError(
                 "advisor provider unavailable"
             ) from None
         try:
+            http_client = DefaultHttpxClient(
+                timeout=timeout_seconds,
+                follow_redirects=False,
+            )
             return OpenAI(
                 api_key=credential._consume(),
                 base_url=endpoint,
                 timeout=timeout_seconds,
                 max_retries=0,
+                http_client=http_client,
             )
         except Exception:
             raise OpenAITransportConfigurationError(
@@ -71,34 +83,73 @@ class DefaultOpenAIClientFactory:
             ) from None
 
 
-def _map_sdk_exception(exception: Exception) -> Exception:
+def _safe_http_status(exception: Exception) -> int | None:
+    value = getattr(exception, "status_code", None)
+    return (
+        value
+        if isinstance(value, int)
+        and not isinstance(value, bool)
+        and 400 <= value <= 599
+        else None
+    )
+
+
+def _map_sdk_exception(
+    exception: Exception,
+) -> tuple[Exception, ProviderSafeReason, int | None]:
+    status = _safe_http_status(exception)
     try:
         import openai
 
         if isinstance(exception, openai.AuthenticationError):
             mapped = OpenAITransportAuthenticationError
+            reason = ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED
         elif isinstance(exception, openai.RateLimitError):
             mapped = OpenAITransportRateLimitError
+            reason = ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED
+        elif isinstance(exception, openai.PermissionDeniedError):
+            mapped = OpenAITransportRejectedError
+            reason = ProviderSafeReason.LIVE_PROVIDER_PERMISSION_DENIED
+        elif isinstance(exception, openai.BadRequestError):
+            mapped = OpenAITransportRejectedError
+            reason = ProviderSafeReason.LIVE_PROVIDER_BAD_REQUEST
+        elif isinstance(exception, openai.APIStatusError) and status is not None:
+            mapped = OpenAITransportRejectedError
+            if status >= 500:
+                reason = ProviderSafeReason.LIVE_PROVIDER_SERVER_ERROR
+            elif status == 429:
+                reason = ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED
+            elif status == 403:
+                reason = ProviderSafeReason.LIVE_PROVIDER_PERMISSION_DENIED
+            elif status == 401:
+                reason = ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED
+            elif status == 400:
+                reason = ProviderSafeReason.LIVE_PROVIDER_BAD_REQUEST
+            else:
+                reason = ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE
         elif isinstance(
             exception,
-            (
-                openai.PermissionDeniedError,
-                openai.BadRequestError,
-                openai.APIStatusError,
-            ),
+            openai.APIStatusError,
         ):
             mapped = OpenAITransportRejectedError
+            reason = ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE
         elif isinstance(exception, openai.APITimeoutError):
             mapped = OpenAITransportTimeout
+            reason = ProviderSafeReason.LIVE_PROVIDER_TIMEOUT
         elif isinstance(exception, openai.APIConnectionError):
             mapped = OpenAITransportConnectionError
+            reason = ProviderSafeReason.LIVE_PROVIDER_CONNECTION_FAILED
         elif isinstance(exception, openai.OpenAIError):
             mapped = OpenAITransportInternalError
+            reason = ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE
         else:
             mapped = OpenAITransportInternalError
+            reason = ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE
     except Exception:
         mapped = OpenAITransportInternalError
-    return mapped("advisor provider unavailable")
+        reason = ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE
+        status = None
+    return mapped("advisor provider unavailable"), reason, status
 
 
 @dataclass(frozen=True)
@@ -109,6 +160,9 @@ class OpenAISDKTransport:
     allowNetworkInvocation: bool = False
     liveConnectivityGate: LiveConnectivityGate | None = None
     usageObservationSink: UsageObservationSink = NoOpUsageObservationSink()
+    failureObservationSink: ProviderFailureObservationSink = (
+        NoOpProviderFailureObservationSink()
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.allowNetworkInvocation, bool):
@@ -133,18 +187,48 @@ class OpenAISDKTransport:
             )
         )
 
+    def _observe_failure(
+        self,
+        reason: ProviderSafeReason,
+        stage: ProviderFailureStage,
+        *,
+        attempted: bool,
+        http_status: int | None = None,
+    ) -> None:
+        try:
+            self.failureObservationSink.observe(
+                ProviderFailureObservation(
+                    safeReason=reason,
+                    failureStage=stage,
+                    httpStatus=http_status,
+                    liveInvocationAttempted=attempted,
+                )
+            )
+        except Exception:
+            pass
+
     def invoke(self, request: OpenAITransportRequest) -> Any:
         try:
             trusted_request = OpenAITransportRequest.model_validate(
                 request.model_dump(warnings=False)
             )
         except Exception:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
+                ProviderFailureStage.CONFIGURATION,
+                attempted=False,
+            )
             raise OpenAITransportConfigurationError(
                 "advisor provider unavailable"
             ) from None
         if self.liveConnectivityGate is not None:
             decision = self.liveConnectivityGate.authorize_and_acquire(trusted_request)
             if decision.allowed is not True:
+                self._observe_failure(
+                    ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
+                    ProviderFailureStage.CONFIGURATION,
+                    attempted=False,
+                )
                 raise OpenAITransportConfigurationError(
                     "advisor provider unavailable"
                 ) from None
@@ -153,9 +237,19 @@ class OpenAISDKTransport:
             initial_guard.reasonCode.value != "CREDENTIAL_UNAVAILABLE"
             and initial_guard.allowed is not True
         ):
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
+                ProviderFailureStage.CONFIGURATION,
+                attempted=False,
+            )
             raise OpenAITransportConfigurationError("advisor provider unavailable")
         reference = self.config.credentialReference
         if reference is None:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE,
+                ProviderFailureStage.CREDENTIAL_RESOLUTION,
+                attempted=False,
+            )
             raise OpenAITransportConfigurationError("advisor provider unavailable")
         resolution = self.credentialLoader.resolve(
             CredentialResolutionInput(
@@ -169,6 +263,11 @@ class OpenAISDKTransport:
             or resolution.credential is None
             or self._guard(credential_resolved=True).allowed is not True
         ):
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE,
+                ProviderFailureStage.CREDENTIAL_RESOLUTION,
+                attempted=False,
+            )
             raise OpenAITransportConfigurationError("advisor provider unavailable")
         try:
             client = self.clientFactory.create(
@@ -176,6 +275,16 @@ class OpenAISDKTransport:
                 endpoint=self.config.endpoint,
                 timeout_seconds=self.config.timeoutSeconds,
             )
+        except Exception:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
+                ProviderFailureStage.CLIENT_CREATION,
+                attempted=False,
+            )
+            raise OpenAITransportConfigurationError(
+                "advisor provider unavailable"
+            ) from None
+        try:
             response = client.responses.create(
                 model=trusted_request.model,
                 input=trusted_request.input,
@@ -186,18 +295,60 @@ class OpenAISDKTransport:
                 store=False,
                 timeout=trusted_request.timeoutSeconds,
             )
+        except OpenAITransportAuthenticationError:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
+            raise
+        except OpenAITransportRateLimitError:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
+            raise
+        except OpenAITransportTimeout:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_TIMEOUT,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
+            raise
+        except OpenAITransportConnectionError:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_CONNECTION_FAILED,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
+            raise
+        except OpenAITransportRejectedError:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
+            raise
         except (
-            OpenAITransportAuthenticationError,
             OpenAITransportConfigurationError,
-            OpenAITransportConnectionError,
             OpenAITransportInternalError,
-            OpenAITransportRateLimitError,
-            OpenAITransportRejectedError,
-            OpenAITransportTimeout,
         ):
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+            )
             raise
         except Exception as exception:
-            raise _map_sdk_exception(exception) from None
+            mapped, reason, status = _map_sdk_exception(exception)
+            self._observe_failure(
+                reason,
+                ProviderFailureStage.PROVIDER_INVOCATION,
+                attempted=True,
+                http_status=status,
+            )
+            raise mapped from None
         try:
             self.usageObservationSink.observe(project_sdk_usage(response))
         except Exception:
@@ -213,4 +364,9 @@ class OpenAISDKTransport:
                 raise ValueError
             return {"output_text": text, "finish_reason": "completed"}
         except Exception:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+                ProviderFailureStage.RESPONSE_VALIDATION,
+                attempted=True,
+            )
             raise OpenAITransportRejectedError("advisor provider unavailable") from None
