@@ -289,6 +289,7 @@ class SystemdCredentialLoaderTest(unittest.TestCase):
                         output_tokens=1,
                         total_tokens=2,
                     ),
+                    model="gpt-4o-mini",
                 )
             )
             runner = IsolatedSmokeTestRunner(
@@ -340,7 +341,11 @@ class SystemdCredentialLoaderTest(unittest.TestCase):
                 total_tokens=18,
             )
             responses = FakeResponses(
-                response=FakeResponse(response_text(), usage=usage)
+                response=FakeResponse(
+                    response_text(),
+                    usage=usage,
+                    model="gpt-4o-mini",
+                )
             )
             factory = FakeClientFactory(FakeClient(responses))
             mapping = isolated_non_secret_environment()

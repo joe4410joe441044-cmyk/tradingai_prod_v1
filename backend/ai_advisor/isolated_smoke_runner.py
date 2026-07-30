@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
 from types import MappingProxyType
-from typing import Callable, Literal, Tuple
+from typing import Callable, Literal, TextIO, Tuple
 
 import httpx
 from fastapi import FastAPI
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from backend.ai_advisor.context_builder import build_advisor_context
 from backend.ai_advisor.conversation_models import (
@@ -64,8 +64,12 @@ from backend.ai_advisor.service_models import (
 )
 from backend.ai_advisor.usage_observation import (
     AdvisorTokenUsage,
+    RecordingProviderMetadataObservationSink,
     RecordingUsageObservationSink,
+    SafeEndpointClassification,
+    SafeProviderName,
     UsageObservationStatus,
+    safe_metadata_identifier,
 )
 from backend.ai_advisor.systemd_credential_loader import (
     SystemdCredentialAvailability,
@@ -162,6 +166,16 @@ class IsolatedSmokeResult(AdvisorProviderContractModel):
     maximumProviderCalls: Literal[1] = 1
     providerRequestUpperBound: Literal[1] = 1
     retryPerformed: Literal[False] = False
+    request_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    model: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    provider: SafeProviderName | None = None
+    endpoint_classification: SafeEndpointClassification | None = None
     failureStage: ProviderFailureStage | None = None
     httpStatus: int | None = Field(default=None, ge=400, le=599)
     parseSucceeded: Literal[False] | None = None
@@ -177,12 +191,39 @@ class IsolatedSmokeResult(AdvisorProviderContractModel):
     usage: AdvisorTokenUsage | None = None
     safeReasons: Tuple[str, ...]
 
+    @field_validator("request_id", "model")
+    @classmethod
+    def validate_safe_metadata(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+        return safe_metadata_identifier(value)
+
     @model_validator(mode="after")
     def validate_usage(self) -> "IsolatedSmokeResult":
         if (self.usageStatus is UsageObservationStatus.AVAILABLE) != (
             self.usage is not None
         ):
             raise ValueError("smoke usage invariant failed")
+        classified_metadata = (
+            self.model,
+            self.provider,
+            self.endpoint_classification,
+        )
+        if any(value is not None for value in classified_metadata) and not all(
+            value is not None for value in classified_metadata
+        ):
+            raise ValueError("smoke provider metadata invariant failed")
+        if self.request_id is not None and not all(
+            value is not None for value in classified_metadata
+        ):
+            raise ValueError("smoke request metadata invariant failed")
+        if self.invocationSucceeded and not all(
+            value is not None for value in classified_metadata
+        ):
+            raise ValueError("successful smoke metadata required")
         diagnostic_values = (
             self.parseSucceeded,
             self.validationCode,
@@ -207,6 +248,59 @@ class IsolatedSmokeResult(AdvisorProviderContractModel):
                 missingFields=self.missingFields,
             )
         return self
+
+
+def sanitize_safe_result_stream(source: TextIO, target: TextIO) -> int:
+    """Emit one fixed safe projection without rendering rejected input."""
+
+    candidates: list[dict] = []
+    unsafe_candidates = 0
+    expected_fields = frozenset(IsolatedSmokeResult.model_fields)
+    for line in source:
+        decoded = None
+        try:
+            decoded = json.loads(line)
+            if not isinstance(decoded, dict) or set(decoded) != expected_fields:
+                if isinstance(decoded, dict):
+                    unsafe_candidates += 1
+                continue
+            candidate = IsolatedSmokeResult.model_validate_json(line)
+            candidates.append(candidate.model_dump(mode="json"))
+        except Exception:
+            if isinstance(decoded, dict):
+                unsafe_candidates += 1
+            continue
+
+    if len(candidates) > 1:
+        status = "MULTIPLE_CANDIDATES"
+        exit_code = 21
+        projection = {}
+    elif unsafe_candidates:
+        status = "UNSAFE_OR_UNKNOWN_FIELD_REJECTED"
+        exit_code = 22
+        projection = {}
+    elif not candidates:
+        status = "NOT_FOUND"
+        exit_code = 20
+        projection = {}
+    else:
+        status = "RECOVERED"
+        exit_code = 0
+        projection = candidates[0]
+    target.write(
+        json.dumps(
+            {
+                "recoveryStatus": status,
+                "safeResultCandidates": len(candidates),
+                "unsafeCandidatesRejected": unsafe_candidates,
+                "safeProjection": projection,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    return exit_code
 
 
 def smoke_result_exit_code(result: IsolatedSmokeResult) -> int:
@@ -398,6 +492,12 @@ class IsolatedSmokeTestRunner:
         repr=False,
         compare=False,
     )
+    _metadataSink: RecordingProviderMetadataObservationSink = field(
+        default_factory=RecordingProviderMetadataObservationSink,
+        init=False,
+        repr=False,
+        compare=False,
+    )
     _failureSink: RecordingProviderFailureObservationSink = field(
         default_factory=RecordingProviderFailureObservationSink,
         init=False,
@@ -418,6 +518,10 @@ class IsolatedSmokeTestRunner:
             UsageObservationStatus.USAGE_UNAVAILABLE
         ),
         usage: AdvisorTokenUsage | None = None,
+        request_id: str | None = None,
+        model: str | None = None,
+        provider: SafeProviderName | None = None,
+        endpoint_classification: SafeEndpointClassification | None = None,
         failure_observation: ProviderFailureObservation | None = None,
     ) -> IsolatedSmokeResult:
         return IsolatedSmokeResult(
@@ -426,6 +530,10 @@ class IsolatedSmokeTestRunner:
             compositionBuilt=composition_built,
             liveInvocationAttempted=attempted,
             invocationSucceeded=succeeded,
+            request_id=request_id,
+            model=model,
+            provider=provider,
+            endpoint_classification=endpoint_classification,
             failureStage=(
                 failure_observation.failureStage
                 if failure_observation is not None
@@ -567,6 +675,7 @@ class IsolatedSmokeTestRunner:
             allowed_provider_credential_ids=self.allowedProviderCredentialIds,
             client_factory=self.clientFactory,
             usage_observation_sink=self._usageSink,
+            metadata_observation_sink=self._metadataSink,
             failure_observation_sink=self._failureSink,
             clock=self.clock,
         )
@@ -691,6 +800,7 @@ class IsolatedSmokeTestRunner:
         )
         usage = observation.usage if observation is not None else None
         failure_observation = self._failureSink.observation
+        metadata_observation = self._metadataSink.observation
         return self._result(
             mode,
             (
@@ -708,9 +818,15 @@ class IsolatedSmokeTestRunner:
             succeeded=succeeded,
             usage_status=usage_status,
             usage=usage,
-            failure_observation=(
-                failure_observation if not succeeded else None
+            request_id=(
+                metadata_observation.requestId
+                if metadata_observation is not None
+                else None
             ),
+            model=config.model,
+            provider=SafeProviderName.OPENAI,
+            endpoint_classification=SafeEndpointClassification.OFFICIAL_OPENAI,
+            failure_observation=(failure_observation if not succeeded else None),
         )
 
     def _invoke_authenticated_endpoint(

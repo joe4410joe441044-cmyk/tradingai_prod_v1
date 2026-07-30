@@ -33,8 +33,11 @@ from backend.ai_advisor.provider_transport import (
     OpenAITransportTimeout,
 )
 from backend.ai_advisor.usage_observation import (
+    NoOpProviderMetadataObservationSink,
     NoOpUsageObservationSink,
+    ProviderMetadataObservationSink,
     UsageObservationSink,
+    project_sdk_metadata,
     project_sdk_usage,
 )
 
@@ -160,6 +163,9 @@ class OpenAISDKTransport:
     allowNetworkInvocation: bool = False
     liveConnectivityGate: LiveConnectivityGate | None = None
     usageObservationSink: UsageObservationSink = NoOpUsageObservationSink()
+    metadataObservationSink: ProviderMetadataObservationSink = (
+        NoOpProviderMetadataObservationSink()
+    )
     failureObservationSink: ProviderFailureObservationSink = (
         NoOpProviderFailureObservationSink()
     )
@@ -349,6 +355,20 @@ class OpenAISDKTransport:
                 http_status=status,
             )
             raise mapped from None
+        try:
+            response_model = getattr(response, "model", trusted_request.model)
+            if response_model != trusted_request.model:
+                raise ValueError
+            self.metadataObservationSink.observe(
+                project_sdk_metadata(response, model=trusted_request.model)
+            )
+        except Exception:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+                ProviderFailureStage.RESPONSE_VALIDATION,
+                attempted=True,
+            )
+            raise OpenAITransportRejectedError("advisor provider unavailable") from None
         try:
             self.usageObservationSink.observe(project_sdk_usage(response))
         except Exception:

@@ -1,29 +1,55 @@
 # AI Advisor Exact Release Manifest Candidate
 
-- Manifest ID: `AI-ADV-EXACT-RC-20260730-02`
+- Manifest ID: `AI-ADV-EXACT-RC-20260730-03`
 - Repository: `/home/joe4410joe/tradingai_prod_v1`
 - Branch: `main`
 - Base HEAD: `20e7cdcae0dfc457040a793e222b71e0ac5eb192`
 - Base versus `origin/main`: ahead 0 / behind 0
 - Generated at: `2026-07-30`
 - Scope: exact manifest only
-- Working tree: dirty; 34 dirty paths exist, but they are not all release content
-- Status: implementation complete; candidate not staged, committed, pushed,
-  deployed, live-validated, or activated
+- Committed RC HEAD: `8a18b2f58bf02f1b69ac3ab67de6cb8ad3e71ac6`
+- Committed RC versus `origin/main`: ahead 0 / behind 0
+- Working tree: dirty; the unrelated three-path inventory remains excluded
+- Status: RC committed and pushed; not deployed, live-validated, or activated
 - Live Validation 03: `INCONCLUSIVE / EXECUTION_PROCEDURE_GAP`
 - `IMPLEMENTATION_COMPLETE`: `YES`
 - `LIVE_VALIDATED`: `NO`
 - `PRODUCTION_ACTIVATED`: `NO`
 - New Live execution: not authorized; a new explicit approval is required
 
+## Post-RC Safe Result Contract follow-up
+
+The offline `AI-ADV-LIVE-SAFE-RESULT-CONTRACT-FIX-01` delta is based on the
+committed RC HEAD above. It is not staged, committed, pushed, deployed,
+live-validated, or activated. Its exact ten paths are:
+
+```text
+backend/ai_advisor/isolated_smoke_runner.py
+backend/ai_advisor/openai_sdk_transport.py
+backend/ai_advisor/production_composition.py
+backend/ai_advisor/usage_observation.py
+docs/ai_advisor/AI_ADVISOR_EXACT_RELEASE_MANIFEST_CANDIDATE.md
+docs/ai_advisor/systemd-credential-smoke-runbook.md
+tests/test_ai_advisor_isolated_smoke_runner.py
+tests/test_ai_advisor_openai_sdk_transport.py
+tests/test_ai_advisor_systemd_credential.py
+tests/test_ai_advisor_systemd_unit_contract.py
+```
+
+This follow-up adds only the safe `request_id`, `model`, `provider`, and
+`endpoint_classification` evidence contract, its fail-closed sanitizer rules,
+offline tests, and authoritative documentation. It grants no Live authority.
+The committed RC file set remains 110 unique paths.
+
 All paths in this manifest are repository-relative. No wildcard or directory
 path represents release authorization.
 
 ## Exclusive required files
 
-Every file below is `AI_ADVISOR_EXCLUSIVE / Required`. Its current Git state is
-defined by the exact delta tables below. Any required path not present in a
-delta table is `tracked-unchanged`; no path is implicitly `untracked-new`.
+Every file below is `AI_ADVISOR_EXCLUSIVE / Required`. Its committed RC delta
+against Base HEAD is defined by the exact tables below. Any required path not
+present in a delta table was `tracked-unchanged` in that committed RC delta; no
+path was implicitly `untracked-new`.
 
 ### Backend
 
@@ -169,7 +195,7 @@ top-level design baseline. The root and `docs/ai_advisor/` role/safety
 specifications are distinct current candidate copies and remain separately
 listed pending later document-governance decisions.
 
-### Current required-file state deltas
+### Committed RC state deltas against Base HEAD
 
 The following 24 required paths are `tracked-modified`:
 
@@ -220,8 +246,9 @@ tests/test_ai_advisor_systemd_unit_contract.py
 ```
 
 All other paths in the required Backend, Frontend, Tests, Documentation, and
-shared-file lists are `tracked-unchanged`. This yields the exact current
-required set: 110 unique paths total — 24 `tracked-modified`, 1
+shared-file lists were `tracked-unchanged` in the committed RC delta. This
+yields the exact committed required set: 110 unique paths total — 24
+`tracked-modified`, 1
 `tracked-deleted`, 6 `untracked-new`, and 79 `tracked-unchanged`.
 
 ### Required transient unit contract

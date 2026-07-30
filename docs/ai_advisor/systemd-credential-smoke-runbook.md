@@ -218,6 +218,10 @@ invocationSucceeded
 maximumProviderCalls
 providerRequestUpperBound
 retryPerformed
+request_id
+model
+provider
+endpoint_classification
 failureStage
 httpStatus
 parseSucceeded
@@ -236,6 +240,24 @@ diagnostics, and optional aggregate token counts. It contains no raw response,
 or raw exception text. Judge the result only from the fixed fields above.
 Unexpected fields make recovery unsafe and `INCONCLUSIVE`; never display their
 names or values.
+
+The four Live evidence fields are `request_id`, `model`, `provider`, and
+`endpoint_classification`. `request_id` is projected only from the official SDK
+response `_request_id`; it is `null` when no valid response identifier was
+obtained and is never synthesized. `model` is the validated request model and must remain in
+the configured model allowlist. `provider` is the normalized fixed identifier
+`openai`. `endpoint_classification` is the allowlist-derived fixed value
+`official_openai`, never a URL. Before configuration is validated all four may
+be `null`; after a validated provider attempt only `request_id` may remain
+`null`.
+
+The sanitizer explicitly allowlists these fields and restricts identifiers to
+1–128 ASCII letters, digits, dot, underscore, colon, or hyphen. Secret-like
+prefixes, raw URLs, unknown fields, headers, cookies, bearer values, API keys,
+credential material, environment data, Prompt or response text, tool
+arguments, and arbitrary nested provider payloads are rejected as a whole.
+Only the fixed safe projection may be reported; never report the source
+payload or raw journal.
 
 ### Bind execution metadata before the one shot
 
@@ -311,6 +333,7 @@ trap cleanup_safe_result_recovery EXIT HUP INT TERM
 cat >"$SANITIZER" <<'PY'
 #!/usr/bin/env python3
 import json
+import re
 import sys
 
 sys.excepthook = (
@@ -321,9 +344,10 @@ sys.excepthook = (
 FIELDS = {
     "mode", "status", "compositionBuilt", "liveInvocationAttempted",
     "invocationSucceeded", "maximumProviderCalls",
-    "providerRequestUpperBound", "retryPerformed", "failureStage",
-    "httpStatus", "parseSucceeded", "validationCode", "topLevelType",
-    "invalidField", "missingFields", "usageStatus", "usage", "safeReasons",
+    "providerRequestUpperBound", "retryPerformed", "request_id", "model",
+    "provider", "endpoint_classification", "failureStage", "httpStatus",
+    "parseSucceeded", "validationCode", "topLevelType", "invalidField",
+    "missingFields", "usageStatus", "usage", "safeReasons",
 }
 USAGE_FIELDS = {"inputTokens", "outputTokens", "totalTokens"}
 FORBIDDEN = {
@@ -377,6 +401,10 @@ SAFE_REASONS = {
     "LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE",
     "LIVE_PROVIDER_UNKNOWN_FAILURE",
 }
+SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+FORBIDDEN_IDENTIFIER_PREFIXES = (
+    "apikey", "api_key", "authorization", "bearer", "sk-",
+)
 
 def normalized(name):
     return "".join(character.lower() for character in name if character.isalnum())
@@ -394,6 +422,17 @@ def keys_are_safe(value):
 
 def strict_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
+
+def safe_identifier(value):
+    if value is None:
+        return True
+    if not isinstance(value, str) or not SAFE_IDENTIFIER.fullmatch(value):
+        return False
+    normalized = value.lower()
+    return (
+        not normalized.startswith(FORBIDDEN_IDENTIFIER_PREFIXES)
+        and "://" not in normalized
+    )
 
 def valid_candidate(value):
     if not isinstance(value, dict) or set(value) != FIELDS:
@@ -417,6 +456,12 @@ def valid_candidate(value):
         or value["providerRequestUpperBound"] != 1
         or value["retryPerformed"] is not False
     ):
+        return False
+    if not safe_identifier(value["request_id"]) or not safe_identifier(value["model"]):
+        return False
+    if value["provider"] not in {None, "openai"}:
+        return False
+    if value["endpoint_classification"] not in {None, "official_openai"}:
         return False
     if value["failureStage"] is not None and value["failureStage"] not in STAGES:
         return False
@@ -665,6 +710,14 @@ outcome. A recovered safe result is required before any such classification.
 | Transport failure | Require the allowlisted timeout, connection, HTTP, or unknown provider classification | prohibited / prohibited |
 | Timeout | Require `LIVE_PROVIDER_TIMEOUT`; do not retry | prohibited / prohibited |
 
+Live success additionally requires `request_id` to be a non-null validated SDK
+identifier, `model` to equal the approved configured model, `provider=openai`,
+and `endpoint_classification=official_openai`. A null `request_id` or any null
+or mismatched remaining metadata makes the validation `INCONCLUSIVE`, even if
+the invocation otherwise succeeded. On Provider failure, report only metadata
+already obtained safely; `request_id` may be null and no missing value may be
+inferred from an exception, Prompt, response body, header, or URL.
+
 If `systemd-run` was called, every row treats its one-shot approval as consumed,
 even when the exit code is nonzero, the safe result is absent, or Provider
 requests are proven to be zero. A future Live run requires a new explicit
@@ -673,6 +726,10 @@ budget remains unattempted, but a human must explicitly decide whether the
 authorization remains valid; no automatic execution follows. There is no
 automatic retry, fallback, model switch, permit regeneration, or approval
 reuse.
+
+This offline contract change is not Live authorization. A later Live execution
+requires a new explicit validation step and approval after the implementation,
+tests, sanitizer, and Runbook are reviewed together.
 
 ### Raw-information protection and recovery cleanup
 

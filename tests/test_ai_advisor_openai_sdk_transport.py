@@ -36,6 +36,11 @@ from backend.ai_advisor.service_models import (
     AdvisorServiceFailureCode,
     AdvisorServiceStatus,
 )
+from backend.ai_advisor.usage_observation import (
+    RecordingProviderMetadataObservationSink,
+    SafeEndpointClassification,
+    SafeProviderName,
+)
 from tests.test_ai_advisor_provider import (
     boundary_config,
     capabilities,
@@ -47,10 +52,20 @@ from tests.test_ai_advisor_service import service_input
 
 
 class FakeResponse:
-    def __init__(self, output_text, status="completed", usage=None):
+    def __init__(
+        self,
+        output_text,
+        status="completed",
+        usage=None,
+        *,
+        request_id="resp_offline_test",
+        model="openai-advisor-model",
+    ):
         self.output_text = output_text
         self.status = status
         self.usage = usage
+        self._request_id = request_id
+        self.model = model
 
 
 class FakeResponses:
@@ -105,6 +120,7 @@ def transport(
     allowed=True,
     loader=None,
     usage_sink=None,
+    metadata_sink=None,
     failure_sink=None,
 ):
     responses = FakeResponses(response=response, exception=exception)
@@ -120,6 +136,8 @@ def transport(
     )
     if usage_sink is not None:
         arguments["usageObservationSink"] = usage_sink
+    if metadata_sink is not None:
+        arguments["metadataObservationSink"] = metadata_sink
     if failure_sink is not None:
         arguments["failureObservationSink"] = failure_sink
     value = OpenAISDKTransport(**arguments)
@@ -238,6 +256,7 @@ class OpenAISDKTransportTest(unittest.TestCase):
             response_sink.observation.failureStage,
             ProviderFailureStage.RESPONSE_VALIDATION,
         )
+
     def test_guard_denial_prevents_credential_and_client_access(self):
         value, loader, factory, responses = transport(
             response=FakeResponse(fixture_text()),
@@ -250,8 +269,10 @@ class OpenAISDKTransportTest(unittest.TestCase):
         self.assertEqual(responses.calls, [])
 
     def test_request_mapping_client_factory_and_single_sdk_call(self):
+        metadata_sink = RecordingProviderMetadataObservationSink()
         value, loader, factory, responses = transport(
-            response=FakeResponse(fixture_text())
+            response=FakeResponse(fixture_text()),
+            metadata_sink=metadata_sink,
         )
         result = value.invoke(request())
         self.assertEqual(loader.calls, 1)
@@ -271,6 +292,23 @@ class OpenAISDKTransportTest(unittest.TestCase):
         self.assertNotIn("tools", call)
         self.assertNotIn("functions", call)
         self.assertEqual(result["output_text"], fixture_text())
+        self.assertEqual(metadata_sink.observation.requestId, "resp_offline_test")
+        self.assertEqual(metadata_sink.observation.model, "openai-advisor-model")
+        self.assertEqual(metadata_sink.observation.provider, SafeProviderName.OPENAI)
+        self.assertEqual(
+            metadata_sink.observation.endpointClassification,
+            SafeEndpointClassification.OFFICIAL_OPENAI,
+        )
+
+    def test_metadata_rejects_response_model_mismatch(self):
+        sink = RecordingProviderMetadataObservationSink()
+        value, _, _, _ = transport(
+            response=FakeResponse(fixture_text(), model="unapproved-model"),
+            metadata_sink=sink,
+        )
+        with self.assertRaises(OpenAITransportRejectedError):
+            value.invoke(request())
+        self.assertIsNone(sink.observation)
 
     def test_usage_sink_exception_does_not_change_provider_result(self):
         class RaisingSink:

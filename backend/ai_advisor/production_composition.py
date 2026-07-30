@@ -68,7 +68,9 @@ from backend.ai_advisor.service_models import (
     service_failure_message,
 )
 from backend.ai_advisor.usage_observation import (
+    NoOpProviderMetadataObservationSink,
     NoOpUsageObservationSink,
+    ProviderMetadataObservationSink,
     UsageObservationSink,
 )
 from backend.api.ai_advisor import AdvisorAPIComposition
@@ -152,6 +154,7 @@ def _provider_service(
     client_factory: OpenAIClientFactory,
     readiness: ProductionReadiness,
     usage_observation_sink: UsageObservationSink,
+    metadata_observation_sink: ProviderMetadataObservationSink,
     failure_observation_sink: ProviderFailureObservationSink,
 ):
     connection = ProviderConnectionConfig(
@@ -199,6 +202,7 @@ def _provider_service(
         allowNetworkInvocation=configuration.networkInvocationAllowed,
         liveConnectivityGate=live_gate,
         usageObservationSink=usage_observation_sink,
+        metadataObservationSink=metadata_observation_sink,
         failureObservationSink=failure_observation_sink,
     )
     registry = ProviderRegistry(
@@ -249,6 +253,9 @@ def build_ai_advisor_production_composition(
     allowed_provider_credential_ids: tuple[str, ...],
     client_factory: OpenAIClientFactory | None = None,
     usage_observation_sink: UsageObservationSink = NoOpUsageObservationSink(),
+    metadata_observation_sink: ProviderMetadataObservationSink = (
+        NoOpProviderMetadataObservationSink()
+    ),
     failure_observation_sink: ProviderFailureObservationSink = (
         NoOpProviderFailureObservationSink()
     ),
@@ -329,6 +336,7 @@ def build_ai_advisor_production_composition(
                 client_factory=client_factory or DefaultOpenAIClientFactory(),
                 readiness=readiness,
                 usage_observation_sink=usage_observation_sink,
+                metadata_observation_sink=metadata_observation_sink,
                 failure_observation_sink=failure_observation_sink,
             )
         except Exception:

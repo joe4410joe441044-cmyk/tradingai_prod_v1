@@ -1,20 +1,17 @@
+import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 UNIT_NAME = "tradingai-ai-advisor-live-validation.service"
-UNIT = ROOT / (
-    "deploy/systemd/"
-    "tradingai-ai-advisor-live-validation.service"
-)
+UNIT = ROOT / ("deploy/systemd/" "tradingai-ai-advisor-live-validation.service")
 RUNBOOK = ROOT / "docs/ai_advisor/systemd-credential-smoke-runbook.md"
 MATRIX = ROOT / "docs/ai_advisor/PRODUCTION_CONFIGURATION_MATRIX_CANDIDATE.md"
 READINESS = ROOT / "docs/ai_advisor/FINAL_OFFLINE_PRODUCTION_READINESS_PACKAGE.md"
 PRODUCTION_RUNBOOK = ROOT / "docs/ai_advisor/AI_ADV_1F_BATCH2_PRODUCTION_RUNBOOK.md"
-SOURCE_DIRECTORY = (
-    "/etc/credstore.encrypted/tradingai-ai-advisor-live-validation"
-)
+SOURCE_DIRECTORY = "/etc/credstore.encrypted/tradingai-ai-advisor-live-validation"
 CREDENTIALS = ("AI_ADVISOR_AUTH_TOKEN", "OPENAI_API_KEY")
 
 
@@ -67,9 +64,7 @@ class SystemdUnitContractTest(unittest.TestCase):
         self.assertNotIn("Python `getpass`", self.runbook)
         self.assertIn("--live-one-shot-approval", self.runbook)
         self.assertEqual(
-            self.unit.count(
-                "'AI-ADV-1E9 LIVE TEST APPROVED: ONE REQUEST'"
-            ),
+            self.unit.count("'AI-ADV-1E9 LIVE TEST APPROVED: ONE REQUEST'"),
             1,
         )
         self.assertIn("StandardInput=null", self.unit)
@@ -127,8 +122,7 @@ class SystemdUnitContractTest(unittest.TestCase):
             self.assertIn(path, self.runbook)
             self.assertIn(path + ".new", self.runbook)
         self.assertIn(
-            "/run/systemd/transient/"
-            "tradingai-ai-advisor-live-validation.service",
+            "/run/systemd/transient/" "tradingai-ai-advisor-live-validation.service",
             self.runbook,
         )
 
@@ -137,6 +131,88 @@ class SystemdUnitContractTest(unittest.TestCase):
             self.assertIn(UNIT_NAME, document)
             self.assertIn(SOURCE_DIRECTORY, document)
             self.assertNotIn("systemd-run --pty", document)
+
+    def test_safe_result_metadata_and_fail_closed_sanitizer_are_documented(self):
+        for field in (
+            "request_id",
+            "model",
+            "provider",
+            "endpoint_classification",
+        ):
+            self.assertIn(field, self.runbook)
+        self.assertIn("official SDK", self.runbook)
+        self.assertIn("official_openai", self.runbook)
+        self.assertIn("SAFE_IDENTIFIER", self.runbook)
+        self.assertIn("FORBIDDEN_IDENTIFIER_PREFIXES", self.runbook)
+        self.assertIn("UNSAFE_OR_UNKNOWN_FIELD_REJECTED", self.runbook)
+        self.assertIn(
+            "This offline contract change is not Live authorization",
+            self.runbook,
+        )
+
+    def test_documented_sanitizer_accepts_only_exact_safe_metadata(self):
+        marker = "cat >\"$SANITIZER\" <<'PY'\n"
+        script = self.runbook.split(marker, 1)[1].split(
+            "\nPY\n\nif systemctl",
+            1,
+        )[0]
+        safe = {
+            "mode": "DRY_RUN",
+            "status": "READY_FOR_CONFIGURATION",
+            "compositionBuilt": True,
+            "liveInvocationAttempted": False,
+            "invocationSucceeded": False,
+            "maximumProviderCalls": 1,
+            "providerRequestUpperBound": 1,
+            "retryPerformed": False,
+            "request_id": None,
+            "model": None,
+            "provider": None,
+            "endpoint_classification": None,
+            "failureStage": None,
+            "httpStatus": None,
+            "parseSucceeded": None,
+            "validationCode": None,
+            "topLevelType": None,
+            "invalidField": None,
+            "missingFields": [],
+            "usageStatus": "USAGE_UNAVAILABLE",
+            "usage": None,
+            "safeReasons": ["DRY_RUN_COMPLETE"],
+        }
+
+        recovered = subprocess.run(
+            [sys.executable, "-c", script],
+            input=json.dumps(safe) + "\n",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(recovered.returncode, 0)
+        self.assertEqual(
+            json.loads(recovered.stdout)["recoveryStatus"],
+            "RECOVERED",
+        )
+
+        for unsafe in (
+            {**safe, "unknownField": "private response"},
+            {**safe, "request_id": "sk-" + "A" * 40},
+        ):
+            with self.subTest(fields=tuple(unsafe)):
+                rejected = subprocess.run(
+                    [sys.executable, "-c", script],
+                    input=json.dumps(unsafe) + "\n",
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(rejected.returncode, 22)
+                projection = json.loads(rejected.stdout)
+                self.assertEqual(
+                    projection["recoveryStatus"],
+                    "UNSAFE_OR_UNKNOWN_FIELD_REJECTED",
+                )
+                self.assertEqual(projection["safeProjection"], {})
 
 
 if __name__ == "__main__":

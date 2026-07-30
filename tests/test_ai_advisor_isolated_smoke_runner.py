@@ -26,6 +26,7 @@ from backend.ai_advisor.isolated_smoke_runner import (
     isolated_failure_shutdown_steps,
     isolated_non_secret_environment,
     main,
+    sanitize_safe_result_stream,
     smoke_result_exit_code,
 )
 from backend.ai_advisor.production_config_loader import (
@@ -49,8 +50,11 @@ from tests.test_ai_advisor_openai_sdk_transport import (
 from backend.ai_advisor.usage_observation import (
     AdvisorTokenUsage,
     RecordingUsageObservationSink,
+    SafeEndpointClassification,
+    SafeProviderName,
     UsageObservation,
     UsageObservationStatus,
+    project_sdk_metadata,
     project_sdk_usage,
 )
 
@@ -115,6 +119,7 @@ def runner(
         response=FakeResponse(
             response if response is not None else response_text(),
             usage=usage,
+            model=MODEL,
         )
     )
     factory = FakeClientFactory(FakeClient(responses))
@@ -149,6 +154,12 @@ def smoke_result(
         compositionBuilt=composition_built,
         liveInvocationAttempted=attempted,
         invocationSucceeded=succeeded,
+        request_id="resp_offline_test" if succeeded else None,
+        model=MODEL if succeeded else None,
+        provider=SafeProviderName.OPENAI if succeeded else None,
+        endpoint_classification=(
+            SafeEndpointClassification.OFFICIAL_OPENAI if succeeded else None
+        ),
         safeReasons=(reason,),
     )
 
@@ -385,6 +396,13 @@ print("PRODUCTION_FILE_LOGGING_READY")
         self.assertIsNone(result.httpStatus)
         self.assertEqual(result.providerRequestUpperBound, 1)
         self.assertFalse(result.retryPerformed)
+        self.assertIsNone(result.request_id)
+        self.assertEqual(result.model, MODEL)
+        self.assertEqual(result.provider, SafeProviderName.OPENAI)
+        self.assertEqual(
+            result.endpoint_classification,
+            SafeEndpointClassification.OFFICIAL_OPENAI,
+        )
         self.assertEqual(provider.calls, 1)
         self.assertEqual(factory.calls, 1)
         self.assertEqual(len(responses.calls), 1)
@@ -404,10 +422,7 @@ print("PRODUCTION_FILE_LOGGING_READY")
         )
         self.assertEqual(
             result.safeReasons,
-            (
-                ProviderSafeReason
-                .LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED.value,
-            ),
+            (ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED.value,),
         )
         self.assertEqual(
             result.failureStage,
@@ -558,6 +573,13 @@ print("PRODUCTION_FILE_LOGGING_READY")
         )
         self.assertTrue(result.invocationSucceeded)
         self.assertEqual(result.usageStatus, UsageObservationStatus.AVAILABLE)
+        self.assertEqual(result.request_id, "resp_offline_test")
+        self.assertEqual(result.model, MODEL)
+        self.assertEqual(result.provider, SafeProviderName.OPENAI)
+        self.assertEqual(
+            result.endpoint_classification,
+            SafeEndpointClassification.OFFICIAL_OPENAI,
+        )
         self.assertEqual(
             result.usage,
             AdvisorTokenUsage(
@@ -571,6 +593,73 @@ print("PRODUCTION_FILE_LOGGING_READY")
         self.assertEqual(factory.calls, 1)
         self.assertEqual(len(responses.calls), 1)
         self.assertNotIn("usage", response_text())
+
+    def test_safe_result_sanitizer_accepts_metadata_and_fails_closed(self):
+        valid = smoke_result(
+            status=SmokePreflightStatus.READY_FOR_CONFIGURATION,
+            composition_built=True,
+            attempted=True,
+            succeeded=True,
+            reason="LIVE_ONE_SHOT_COMPLETE",
+        ).model_copy(
+            update={
+                "request_id": "resp_safe_123",
+                "model": MODEL,
+                "provider": SafeProviderName.OPENAI,
+                "endpoint_classification": (SafeEndpointClassification.OFFICIAL_OPENAI),
+            }
+        )
+        output = StringIO()
+        self.assertEqual(
+            sanitize_safe_result_stream(
+                StringIO(valid.model_dump_json() + "\n"),
+                output,
+            ),
+            0,
+        )
+        recovered = json.loads(output.getvalue())
+        self.assertEqual(recovered["recoveryStatus"], "RECOVERED")
+        projection = recovered["safeProjection"]
+        self.assertEqual(projection["request_id"], "resp_safe_123")
+        self.assertEqual(projection["model"], MODEL)
+        self.assertEqual(projection["provider"], "openai")
+        self.assertEqual(
+            projection["endpoint_classification"],
+            "official_openai",
+        )
+
+        base = valid.model_dump(mode="json")
+        unsafe_cases = (
+            {**base, "unknownField": "value"},
+            {**base, "request_id": "sk-" + "A" * 40},
+            {**base, "request_id": "Authorization"},
+            {**base, "request_id": "x" * 129},
+            {**base, "request_id": 1},
+            {**base, "model": ["gpt-4o-mini"]},
+            {**base, "provider": "https://api.openai.com/v1?token=x"},
+            {
+                **base,
+                "endpoint_classification": "https://api.openai.com/v1?token=x",
+            },
+            {**base, "prompt": "private prompt"},
+            {**base, "responseBody": "private response"},
+        )
+        for unsafe in unsafe_cases:
+            with self.subTest(fields=tuple(unsafe)):
+                output = StringIO()
+                self.assertEqual(
+                    sanitize_safe_result_stream(
+                        StringIO(json.dumps(unsafe) + "\n"),
+                        output,
+                    ),
+                    22,
+                )
+                rejected = json.loads(output.getvalue())
+                self.assertEqual(
+                    rejected["recoveryStatus"],
+                    "UNSAFE_OR_UNKNOWN_FIELD_REJECTED",
+                )
+                self.assertEqual(rejected["safeProjection"], {})
 
     def test_usage_missing_invalid_and_sink_single_assignment(self):
         missing = project_sdk_usage(SimpleNamespace(usage=None))
@@ -597,6 +686,24 @@ print("PRODUCTION_FILE_LOGGING_READY")
         sink.observe(missing)
         with self.assertRaises(ValueError):
             sink.observe(missing)
+
+    def test_provider_metadata_projection_never_copies_unsafe_identifier(self):
+        safe = project_sdk_metadata(
+            SimpleNamespace(_request_id="req_safe_123"),
+            model=MODEL,
+        )
+        self.assertEqual(safe.requestId, "req_safe_123")
+        unsafe = project_sdk_metadata(
+            SimpleNamespace(_request_id="sk-" + "A" * 40),
+            model=MODEL,
+        )
+        self.assertIsNone(unsafe.requestId)
+        self.assertEqual(unsafe.model, MODEL)
+        self.assertEqual(unsafe.provider, SafeProviderName.OPENAI)
+        self.assertEqual(
+            unsafe.endpointClassification,
+            SafeEndpointClassification.OFFICIAL_OPENAI,
+        )
 
     def test_cli_defaults_to_dry_run_and_prints_only_safe_result(self):
         output = StringIO()
@@ -681,9 +788,7 @@ print("PRODUCTION_FILE_LOGGING_READY")
                     patch.object(
                         IsolatedSmokeTestRunner,
                         "run",
-                        side_effect=AssertionError(
-                            "runner must not be built"
-                        ),
+                        side_effect=AssertionError("runner must not be built"),
                     ),
                     patch.object(
                         socket,
@@ -838,9 +943,7 @@ print("PRODUCTION_FILE_LOGGING_READY")
         for status, reason in non_successes:
             with self.subTest(status=status, reason=reason):
                 self.assertNotEqual(
-                    smoke_result_exit_code(
-                        smoke_result(status=status, reason=reason)
-                    ),
+                    smoke_result_exit_code(smoke_result(status=status, reason=reason)),
                     0,
                 )
 
