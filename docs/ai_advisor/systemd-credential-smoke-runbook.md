@@ -291,6 +291,43 @@ bound, the single-invocation guarantee, or single-candidate correlation cannot
 be established, the result is `INCONCLUSIVE`; do not perform an unbounded
 journal query.
 
+### Independent existing-Runner preflight
+
+Complete this preflight as an independent command before starting the separate
+Live command. Do not place this preflight and any later planned Runner command
+in the same `bash -c`, heredoc, script argument, or shell command line. A
+successful preflight does not authorize Live execution and is not reusable:
+every future Live retry requires a new explicit approval and a new immediately
+preceding preflight.
+
+```bash
+sudo -n /home/joe4410joe/tradingai_prod_v1/venv/bin/python \
+    -m backend.ai_advisor.runner_process_detection
+```
+
+The detector is read-only and emits exactly one state:
+
+- `RUNNER_ABSENT`, exit `0`: the independent preflight passed;
+- `RUNNER_PRESENT`, exit `40`: stop because the fixed transient unit is active;
+- `INDETERMINATE`, exit `41`: fail closed because required metadata is
+  unavailable, contradictory, or not in an explicitly accepted state.
+
+The fixed transient-unit metadata is the primary signal. Process inspection is
+limited to `/proc` metadata: positive PID, PPID, `comm`, resolved executable,
+and the NUL-delimited argv vector. A process match requires a Python
+`comm`/executable and the exact adjacent argv values
+`-m backend.ai_advisor.isolated_smoke_runner`. The detector excludes its own
+PID and parent PID. Shell, heredoc, `grep`, `pgrep`, Python `-c`, partial module
+names, and command text that merely contains a planned Runner invocation do
+not match.
+
+Standalone `pgrep -f` is prohibited because it searches unstructured command
+text and can self-detect the enclosing shell. Missing unit or process metadata
+never means absence; it produces `INDETERMINATE`. A contradictory exact
+process match while the fixed unit is inactive or not found also produces
+`INDETERMINATE`. Never kill an existing or suspected Runner. Stop and
+investigate offline instead.
+
 ### Sanitized journal recovery
 
 Journal access is allowed only as part of a separately authorized recovery
@@ -568,14 +605,9 @@ if len(candidates) == 0:
 emit("RECOVERED", candidates[0])
 PY
 
-if systemctl is-active --quiet "$LIVE_UNIT"; then
-    RECOVERY_STATUS="PRE_EXECUTION_SAFETY_STOP"
-    exit 40
-fi
-if pgrep -f -- 'backend[.]ai_advisor[.]isolated_smoke_runner' >/dev/null; then
-    RECOVERY_STATUS="PRE_EXECUTION_SAFETY_STOP"
-    exit 41
-fi
+# Prerequisite: the independent existing-Runner preflight above completed with
+# RUNNER_ABSENT / exit 0 immediately before this separate command was started.
+# Do not inline or repeat process detection in this Live command.
 
 START_TIME="$(date --utc --iso-8601=seconds)"
 

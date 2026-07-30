@@ -20,7 +20,8 @@
 ## Post-RC Safe Result Contract follow-up
 
 The offline `AI-ADV-LIVE-SAFE-RESULT-CONTRACT-FIX-01` delta is based on the
-committed RC HEAD above. It is not staged, committed, pushed, deployed,
+committed RC HEAD above. It was committed and pushed as
+`fdb5f731a0b94538e4badddb360889c3af3c01dd`; it has not been deployed,
 live-validated, or activated. Its exact ten paths are:
 
 ```text
@@ -40,6 +41,25 @@ This follow-up adds only the safe `request_id`, `model`, `provider`, and
 `endpoint_classification` evidence contract, its fail-closed sanitizer rules,
 offline tests, and authoritative documentation. It grants no Live authority.
 The committed RC file set remains 110 unique paths.
+
+## Post-follow-up Runner Detection delta
+
+The offline `AI-ADV-LIVE-RUNNER-DETECTION-FIX-01` delta is based on
+`fdb5f731a0b94538e4badddb360889c3af3c01dd`. It is not staged, committed,
+pushed, deployed, live-validated, or activated. Its exact five paths are:
+
+```text
+backend/ai_advisor/runner_process_detection.py
+docs/ai_advisor/AI_ADVISOR_EXACT_RELEASE_MANIFEST_CANDIDATE.md
+docs/ai_advisor/systemd-credential-smoke-runbook.md
+tests/test_ai_advisor_runner_process_detection.py
+tests/test_ai_advisor_systemd_unit_contract.py
+```
+
+This delta replaces unstructured standalone `pgrep -f` detection with a
+read-only, fail-closed, independently executed preflight based on fixed-unit
+state and exact process metadata. It grants no Live authority. A future Live
+retry requires separate explicit approval.
 
 All paths in this manifest are repository-relative. No wildcard or directory
 path represents release authorization.

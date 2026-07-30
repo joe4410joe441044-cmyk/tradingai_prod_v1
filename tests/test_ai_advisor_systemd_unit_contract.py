@@ -150,10 +150,33 @@ class SystemdUnitContractTest(unittest.TestCase):
             self.runbook,
         )
 
+    def test_existing_runner_preflight_is_structured_and_independent(self):
+        self.assertNotIn("if pgrep -f", self.runbook)
+        self.assertIn("Standalone `pgrep -f` is prohibited", self.runbook)
+        self.assertIn(
+            "-m backend.ai_advisor.runner_process_detection",
+            self.runbook,
+        )
+        normalized_runbook = " ".join(self.runbook.split())
+        for contract in (
+            "independent command",
+            "separate Live command",
+            "fixed transient-unit metadata is the primary signal",
+            "NUL-delimited argv vector",
+            "`-m backend.ai_advisor.isolated_smoke_runner`",
+            "own PID and parent PID",
+            "Python `-c`",
+            "`INDETERMINATE`",
+            "Never kill an existing or suspected Runner",
+            "does not authorize Live execution",
+            "new explicit approval",
+        ):
+            self.assertIn(contract, normalized_runbook)
+
     def test_documented_sanitizer_accepts_only_exact_safe_metadata(self):
         marker = "cat >\"$SANITIZER\" <<'PY'\n"
         script = self.runbook.split(marker, 1)[1].split(
-            "\nPY\n\nif systemctl",
+            "\nPY\n\n# Prerequisite:",
             1,
         )[0]
         safe = {
