@@ -35,12 +35,16 @@ test("navigation switches all pages, exposes active state, and calls no trading 
     globalThis.window = {
         location: { pathname: "/" },
         history: {
-            pushState: (_state, _title, path) => { globalThis.window.location.pathname = path; },
+            pushState: (_state, _title, path) => {
+                globalThis.window.location.pathname = path;
+                historyPaths.push(path);
+            },
             replaceState: (_state, _title, path) => { globalThis.window.location.pathname = path; },
         },
         addEventListener: (type, listener) => listeners.set(type, listener),
         removeEventListener: (type) => listeners.delete(type),
     };
+    const historyPaths = [];
     const { default: AppNavigation } = await loadModule();
     const paths = [];
     let nodes = descendants(AppNavigation({ currentPath: "/", onPathChange: (path) => paths.push(path) }));
@@ -61,11 +65,14 @@ test("navigation switches all pages, exposes active state, and calls no trading 
 
     nodes = descendants(AppNavigation({ currentPath: "/ai-advisor", onPathChange: (path) => paths.push(path) }));
     buttons = nodes.filter(({ type }) => type === "button");
-    assert.equal(buttons.length, 4);
+    assert.equal(buttons.length, 6);
     assert.equal(buttons[0].props["aria-current"], undefined);
     assert.equal(buttons[1].props["aria-current"], undefined);
     assert.equal(buttons[2].props["aria-current"], "page");
     assert.match(buttons[2].props.className, /--active/);
+    assert.equal(buttons[3].props["aria-current"], undefined);
+    assert.equal(buttons[4].props["aria-current"], undefined);
+    assert.equal(buttons[5].props["aria-current"], undefined);
     buttons[3].props.onClick();
     assert.equal(paths.at(-1), "/money-management");
 
@@ -73,8 +80,62 @@ test("navigation switches all pages, exposes active state, and calls no trading 
     buttons = nodes.filter(({ type }) => type === "button");
     assert.equal(buttons[3].props["aria-current"], "page");
     assert.match(buttons[3].props.className, /--active/);
+    assert.equal(buttons[4].props["aria-current"], undefined);
+    buttons[4].props.onClick();
+    assert.equal(paths.at(-1), "/market-recorder");
+
+    nodes = descendants(AppNavigation({ currentPath: "/market-recorder", onPathChange: (path) => paths.push(path) }));
+    buttons = nodes.filter(({ type }) => type === "button");
+    assert.equal(buttons[4].props["aria-current"], "page");
+    assert.match(buttons[4].props.className, /--active/);
+    assert.equal(buttons[5].props["aria-current"], undefined);
+    buttons[5].props.onClick();
+    assert.equal(paths.at(-1), "/supervisor");
+    assert.equal(historyPaths.at(-1), "/supervisor");
+
+    nodes = descendants(AppNavigation({ currentPath: "/supervisor", onPathChange: (path) => paths.push(path) }));
+    buttons = nodes.filter(({ type }) => type === "button");
+    assert.equal(buttons[5].props["aria-current"], "page");
+    assert.match(buttons[5].props.className, /--active/);
+
+    globalThis.window.location.pathname = "/ai-advisor";
+    listeners.get("popstate")();
+    assert.equal(paths.at(-1), "/ai-advisor");
+    globalThis.window.location.pathname = "/supervisor";
+    listeners.get("popstate")();
+    assert.equal(paths.at(-1), "/supervisor");
+
+    globalThis.window.location.pathname = "/unknown";
+    listeners.get("popstate")();
+    assert.equal(paths.at(-1), "/");
+    assert.equal(globalThis.window.location.pathname, "/");
+
     buttons[0].props.onClick();
     assert.equal(paths.at(-1), "/");
     assert.equal(fetchCalls, 0);
     assert.equal(nodes.some(({ type }) => type === "nav"), true);
+});
+
+test("navigation labels and paths remain unique and preserve existing items", async () => {
+    globalThis.window = {
+        location: { pathname: "/" },
+        history: { pushState() {}, replaceState() {} },
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const { default: AppNavigation } = await loadModule();
+    const nodes = descendants(AppNavigation({ currentPath: "/not-an-app-path", onPathChange() {} }));
+    const buttons = nodes.filter(({ type }) => type === "button");
+    const labels = buttons.map((button) => button.props.children);
+    const paths = [];
+    globalThis.window.history.pushState = (_state, _title, path) => paths.push(path);
+    buttons.forEach((button) => button.props.onClick());
+
+    assert.deepEqual(labels, [
+        "DASHBOARD", "MARKET INTELLIGENCE", "AI ADVISOR",
+        "MONEY MANAGEMENT", "MARKET RECORDER", "SUPERVISOR",
+    ]);
+    assert.equal(new Set(labels).size, labels.length);
+    assert.equal(new Set(paths).size, paths.length);
+    assert.equal(paths.at(-1), "/supervisor");
 });

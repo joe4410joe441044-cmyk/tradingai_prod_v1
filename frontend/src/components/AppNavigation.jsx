@@ -4,12 +4,16 @@ const DASHBOARD_PATH = "/";
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
 const AI_ADVISOR_PATH = "/ai-advisor";
 const MONEY_MANAGEMENT_PATH = "/money-management";
+const MARKET_RECORDER_PATH = "/market-recorder";
+const SUPERVISOR_PATH = "/supervisor";
 
 const APP_PATHS = new Set([
     DASHBOARD_PATH,
     MARKET_INTELLIGENCE_PATH,
     AI_ADVISOR_PATH,
     MONEY_MANAGEMENT_PATH,
+    MARKET_RECORDER_PATH,
+    SUPERVISOR_PATH,
 ]);
 
 const resolveAppPath = (pathname) => (
@@ -21,6 +25,8 @@ const NAVIGATION_ITEMS = [
     { label: "MARKET INTELLIGENCE", path: MARKET_INTELLIGENCE_PATH },
     { label: "AI ADVISOR", path: AI_ADVISOR_PATH },
     { label: "MONEY MANAGEMENT", path: MONEY_MANAGEMENT_PATH },
+    { label: "MARKET RECORDER", path: MARKET_RECORDER_PATH },
+    { label: "SUPERVISOR", path: SUPERVISOR_PATH },
 ];
 
 export default function AppNavigation({ currentPath, onPathChange }) {

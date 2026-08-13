@@ -73,6 +73,7 @@ from backend.money_management.loss_http_api import (
     register_money_management_http_boundary,
     unregister_money_management_http_boundary,
 )
+from backend.api.supervisor import router as supervisor_router
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -1358,6 +1359,8 @@ app.include_router(
 app.include_router(
     money_management_router
 )
+
+app.include_router(supervisor_router)
 
 _ai_advisor_production = build_ai_advisor_production_composition(
     config_loader=EnvironmentProductionConfigLoader(),

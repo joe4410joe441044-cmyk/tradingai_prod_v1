@@ -1,0 +1,408 @@
+.market-intelligence .mr-page {
+    --mr-card-gap: 8px;
+    --mr-section-gap: 10px;
+    display: grid;
+    gap: var(--mr-section-gap);
+    font-family:
+        var(--mi-font-ui),
+        "Yu Gothic UI",
+        "Yu Gothic",
+        Meiryo,
+        "Noto Sans JP",
+        sans-serif;
+}
+
+.market-intelligence .mr-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+}
+
+.market-intelligence .mr-card {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.market-intelligence .mr-card > .mi-panel__title {
+    padding: 7px 9px;
+    font-family:
+        var(--mi-font-ui),
+        "Yu Gothic UI",
+        Meiryo,
+        "Noto Sans JP",
+        sans-serif;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.market-intelligence .mr-card > .mi-panel__content {
+    padding: 7px 9px;
+}
+
+.market-intelligence .mr-card__body {
+    display: grid;
+    flex: 1 1 auto;
+    place-items: center;
+}
+
+.market-intelligence .mr-card__body--content {
+    align-content: start;
+    justify-items: stretch;
+    gap: 7px;
+}
+
+.market-intelligence .mr-card__placeholder {
+    margin: 0;
+    color: var(--mi-text-muted);
+    font: 600 11px/1.4 var(--mi-font-mono);
+    letter-spacing: 0.04em;
+}
+
+.market-intelligence .mr-card__placeholder--error {
+    color: var(--status-color-red);
+}
+
+.market-intelligence .mr-status-badge {
+    width: fit-content;
+    border-color: currentColor;
+    overflow-wrap: anywhere;
+}
+
+.market-intelligence .mr-status-badge--running {
+    color: var(--status-color-green);
+}
+
+.market-intelligence .mr-status-badge--stopped {
+    color: var(--status-color-red);
+}
+
+.market-intelligence .mr-metric-list {
+    display: grid;
+    width: 100%;
+    margin: 0;
+}
+
+.market-intelligence .mr-metric-row {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(110px, auto);
+    gap: 12px;
+    align-items: baseline;
+    min-height: 28px;
+    box-sizing: border-box;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--mi-border-soft);
+}
+
+.market-intelligence .mr-metric-row:last-child {
+    border-bottom: 0;
+}
+
+.market-intelligence .mr-metric-row dt {
+    min-width: 0;
+    color: var(--mi-text-muted);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    overflow-wrap: anywhere;
+}
+
+.market-intelligence .mr-metric-row dd {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 5px;
+    margin: 0;
+    color: var(--mi-text);
+    font: 700 11px/1.35 var(--mi-font-mono);
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.market-intelligence .mr-metric-row dd > span {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.market-intelligence .mr-metric-row dd small {
+    color: var(--mi-text-muted);
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.market-intelligence .mr-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 100%;
+}
+
+.market-intelligence .mr-action-row button {
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid var(--mi-border);
+    border-radius: 5px;
+    background: var(--mi-surface);
+    color: var(--mi-text);
+    font: 700 10px/1.4 var(--mi-font-mono);
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        color 120ms ease,
+        background-color 120ms ease,
+        opacity 120ms ease;
+}
+
+.market-intelligence .mr-action-row button:not(:disabled):hover {
+    border-color: var(--mi-accent);
+    background: var(--mi-surface-raised);
+    color: var(--mi-accent);
+}
+
+.market-intelligence .mr-action-row button:disabled {
+    color: var(--mi-text-muted);
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.market-intelligence .mr-action-row button:focus-visible {
+    outline: 2px solid var(--mi-focus);
+    outline-offset: 2px;
+}
+
+.market-intelligence .mr-archive-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: 600 11px/1.4 var(--mi-font-mono);
+}
+
+.market-intelligence .mr-archive-table th {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--mi-border);
+    color: var(--mi-text-muted);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-align: left;
+}
+
+.market-intelligence .mr-archive-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--mi-border-soft);
+    color: var(--mi-text);
+    vertical-align: middle;
+}
+
+.market-intelligence .mr-archive-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.market-intelligence .mr-archive-table .mr-cell--muted {
+    color: var(--mi-text-muted);
+}
+
+.market-intelligence .mr-archive-table .mr-cell--completed {
+    color: var(--status-color-green);
+}
+
+.market-intelligence .mr-archive-table .mr-cell--recording {
+    color: var(--status-color-yellow);
+}
+
+.market-intelligence .mr-archive-table .mr-cell--actions {
+    display: flex;
+    gap: 4px;
+}
+
+.market-intelligence .mr-archive-table .mr-cell--actions button {
+    min-height: 26px;
+    padding: 3px 8px;
+    border: 1px solid var(--mi-border);
+    border-radius: 4px;
+    background: var(--mi-surface);
+    color: var(--mi-text-muted);
+    font: 600 10px/1.4 var(--mi-font-mono);
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        color 120ms ease,
+        background-color 120ms ease;
+}
+
+.market-intelligence .mr-archive-table .mr-cell--actions button:not(:disabled):hover {
+    border-color: var(--mi-accent);
+    background: var(--mi-surface-raised);
+    color: var(--mi-accent);
+}
+
+.market-intelligence .mr-archive-table .mr-cell--actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.market-intelligence .mr-archive-table .mr-cell--actions button:focus-visible {
+    outline: 2px solid var(--mi-focus);
+    outline-offset: 2px;
+}
+
+.market-intelligence .mr-card--operation {
+    grid-column: 1 / -1;
+}
+
+.market-intelligence .mr-card--operation > .mi-panel__content {
+    padding-block: 10px;
+}
+
+.market-intelligence .mr-action-row--centered {
+    justify-content: center;
+    gap: 18px;
+}
+
+.market-intelligence .mr-action-row .mr-control-button {
+    width: min(220px, 100%);
+    min-height: 52px;
+    padding: 10px 24px;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+}
+
+.market-intelligence .mr-control-button--start:not(:disabled) {
+    border-color: var(--status-color-green);
+    color: var(--status-color-green);
+}
+
+.market-intelligence .mr-control-button--stop:not(:disabled) {
+    border-color: var(--status-color-red);
+    color: var(--status-color-red);
+}
+
+.market-intelligence .mr-control-button--start:not(:disabled):hover {
+    border-color: var(--status-color-green);
+    color: var(--status-color-green);
+}
+
+.market-intelligence .mr-control-button--stop:not(:disabled):hover {
+    border-color: var(--status-color-red);
+    color: var(--status-color-red);
+}
+
+.market-intelligence .mr-progress {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.market-intelligence .mr-progress__bar {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--mi-surface-raised);
+    overflow: hidden;
+}
+
+.market-intelligence .mr-progress__fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--mi-accent);
+    transition: width 200ms ease;
+}
+
+.market-intelligence .mr-progress__label {
+    font: 600 10px/1.4 var(--mi-font-mono);
+    color: var(--mi-text-muted);
+    letter-spacing: 0.04em;
+}
+
+.market-intelligence .mr-text--muted {
+    color: var(--mi-text-muted);
+}
+
+.market-intelligence .mr-diagnostics {
+    min-height: 0;
+}
+
+.market-intelligence .mr-diagnostics__toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--mi-text);
+    font-family: inherit;
+}
+
+.market-intelligence .mr-diagnostics__toggle:hover {
+    background: var(--mi-surface-raised);
+}
+
+.market-intelligence .mr-diagnostics__toggle:focus-visible {
+    outline: 2px solid var(--mi-focus);
+    outline-offset: 2px;
+}
+
+.market-intelligence .mr-diagnostics__toggle-icon {
+    font-size: 9px;
+    color: var(--mi-text-muted);
+    flex-shrink: 0;
+}
+
+.market-intelligence .mr-diagnostics__toggle .mi-panel__title {
+    margin: 0;
+    padding: 0;
+    border-bottom: 0;
+    font-family:
+        var(--mi-font-ui),
+        "Yu Gothic UI",
+        Meiryo,
+        "Noto Sans JP",
+        sans-serif;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.market-intelligence .mr-diagnostics--collapsed .mi-panel__content {
+    display: none;
+}
+
+.market-intelligence .mr-diag--error {
+    color: var(--status-color-red);
+    overflow-wrap: anywhere;
+}
+.mr-pagination {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.mr-pagination span {
+    color: var(--text-secondary, #9ca3af);
+    font-size: 0.8rem;
+}
+
+@media (max-width: 760px) {
+    .market-intelligence .mr-overview-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--mr-section-gap);
+    }
+
+    .market-intelligence .mr-action-row--centered {
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .market-intelligence .mr-action-row .mr-control-button {
+        width: min(320px, 100%);
+    }
+}

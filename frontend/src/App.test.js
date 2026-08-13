@@ -19,6 +19,8 @@ const loadApp = async () => {
     const dashboardStub = moduleUrl("export default()=>({type:'main',props:{children:'DASHBOARD PAGE'}})");
     const marketStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET INTELLIGENCE PAGE'}})");
     const moneyManagementStub = moduleUrl("export default()=>({type:'main',props:{children:'MONEY MANAGEMENT PAGE'}})");
+    const marketRecorderStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET RECORDER PAGE'}})");
+    const supervisorStub = moduleUrl("export default()=>({type:'main',props:{children:'SUPERVISOR PAGE'}})");
     const dashboardMarketProviderStub = moduleUrl(
         "export const DashboardMarketContextProvider=({children})=>children",
     );
@@ -32,6 +34,8 @@ const loadApp = async () => {
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
         .replace('from "./pages/MarketIntelligencePage";', `from "${marketStub}";`)
         .replace('from "./pages/MoneyManagementPage";', `from "${moneyManagementStub}";`)
+        .replace('from "./pages/MarketRecorderPage";', `from "${marketRecorderStub}";`)
+        .replace('from "./pages/SupervisorPage";', `from "${supervisorStub}";`)
         .replace('from "./state/dashboard-market/DashboardMarketContext";', `from "${dashboardMarketProviderStub}";`)
         .replace('from "./runtime/websocketRuntime";', `from "${runtimeStub}";`)
         .replace('import "./App.css";', "");
@@ -80,6 +84,12 @@ test("App selects each primary page and preserves unknown-path fallback", async 
     text = textOf(module.default());
     assert.match(text, /MONEY MANAGEMENT PAGE/);
     assert.equal(globalThis.__wsStarts, 3);
+
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/supervisor" } };
+    module = await loadApp();
+    text = textOf(module.default());
+    assert.match(text, /SUPERVISOR PAGE/);
 
     globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/unknown" } };

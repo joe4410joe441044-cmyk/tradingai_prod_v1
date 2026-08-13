@@ -6,7 +6,9 @@ import AppNavigation from "./components/AppNavigation";
 import AIAdvisorPage from "./pages/AIAdvisorPage";
 import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
+import MarketRecorderPage from "./pages/MarketRecorderPage";
 import MoneyManagementPage from "./pages/MoneyManagementPage";
+import SupervisorPage from "./pages/SupervisorPage";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import {
     startWebSocketRuntime,
@@ -16,6 +18,8 @@ import {
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
 const AI_ADVISOR_PATH = "/ai-advisor";
 const MONEY_MANAGEMENT_PATH = "/money-management";
+const MARKET_RECORDER_PATH = "/market-recorder";
+const SUPERVISOR_PATH = "/supervisor";
 
 const resolveAppPath = (pathname) => {
     if (pathname === MARKET_INTELLIGENCE_PATH) {
@@ -26,6 +30,12 @@ const resolveAppPath = (pathname) => {
     }
     if (pathname === MONEY_MANAGEMENT_PATH) {
         return MONEY_MANAGEMENT_PATH;
+    }
+    if (pathname === MARKET_RECORDER_PATH) {
+        return MARKET_RECORDER_PATH;
+    }
+    if (pathname === SUPERVISOR_PATH) {
+        return SUPERVISOR_PATH;
     }
     return "/";
 };
@@ -45,7 +55,11 @@ export default function App() {
             ? AIAdvisorPage
             : currentPath === MONEY_MANAGEMENT_PATH
                 ? MoneyManagementPage
-                : Dashboard;
+                : currentPath === MARKET_RECORDER_PATH
+                    ? MarketRecorderPage
+                    : currentPath === SUPERVISOR_PATH
+                        ? SupervisorPage
+                        : Dashboard;
     const advisorActive = currentPath === AI_ADVISOR_PATH;
 
     useEffect(() => {
