@@ -8,10 +8,9 @@ import {
 import { API } from "../api";
 import usePolling from "../hooks/usePolling";
 import AccountRuntimeOverview from "../components/runtime/AccountRuntimeOverview";
-import RuntimeHealthPanel from "../components/runtime/RuntimeHealthPanel";
-import ExecutionTimelinePanel from "../components/runtime/ExecutionTimelinePanel";
-import StageInspectorPanel from "../components/runtime/StageInspectorPanel";
-import { formatActivityTime, formatLatency, getLastExecutionActivity } from "../runtime/runtimeDisplay";
+import RuntimeDiagnosticsDisclosure from "../components/runtime/RuntimeDiagnosticsDisclosure";
+import TradingDecisionCard from "../components/runtime/TradingDecisionCard";
+import { formatActivityTime, getLastExecutionActivity } from "../runtime/runtimeDisplay";
 import Header from "../components/header";
 
 import { deriveRuntimeHealth } from "../utils/runtimeHealth";
@@ -23,11 +22,8 @@ import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMa
 
 import BotControl from "../components/BotControl";
 
-import RiskPanel from "../components/RiskPanel";
-
 import TradeSettings from "../components/TradeSettings";
-
-import ExecutionPanel from "../components/ExecutionPanel";
+import AutoMarketSelectionCard from "../components/AutoMarketSelectionCard";
 
 
 const fetchBotStatus = async () => {
@@ -188,6 +184,105 @@ const selectedStage = runtimeHealth.stages.find(
     (stage) => stage.id === runtimeHealth.activeStageId,
 ) ?? runtimeHealth.stages[0];
 
+const accountRuntimeProps = {
+    accountRuntime: botStatus?.accountRuntime,
+    exchange: firstAvailable(
+        botStatus?.exchange,
+        tradeSettings.exchange,
+    ),
+    selectedMode: firstAvailable(
+        tradeSettings.mode,
+        botStatus?.selectedMode,
+        governance?.mode,
+    ),
+    executionMode: firstAvailable(
+        botStatus?.executionMode,
+        botStatus?.execution_mode,
+        "SIMULATION",
+    ),
+    realOrderAllowed: firstAvailable(
+        botStatus?.realOrderAllowed,
+        botStatus?.real_order_allowed,
+        false,
+    ) === true,
+    dryRun: firstAvailable(
+        botStatus?.dryRun,
+        true,
+    ) !== false,
+    safetyReason: botStatus?.safetyReason,
+    allowLive: botStatus?.allowLive,
+    tradeMode: botStatus?.tradeMode,
+    accountSource: firstAvailable(
+        botStatus?.accountSource,
+        "NOT_CONNECTED",
+    ),
+    balanceSource: firstAvailable(
+        botStatus?.balanceSource,
+        "NOT_CONNECTED",
+    ),
+    positionSource: firstAvailable(
+        botStatus?.positionSource,
+        "NOT_CONNECTED",
+    ),
+    exchangeAuth: firstAvailable(
+        botStatus?.exchangeAuth,
+        "NOT_VERIFIED",
+    ),
+    exchangeConnection: firstAvailable(
+        botStatus?.exchangeConnection,
+        "NOT_CONNECTED",
+    ),
+    apiKeyStatus: firstAvailable(
+        botStatus?.apiKeyStatus,
+        "MISSING",
+    ),
+    permission: firstAvailable(
+        botStatus?.permission,
+        "NOT_VERIFIED",
+    ),
+    accountType: firstAvailable(
+        botStatus?.accountType,
+        "UNKNOWN",
+    ),
+    exchangeAuthReason: botStatus?.exchangeAuthReason,
+    exchangeConnectionReason: botStatus?.exchangeConnectionReason,
+    accountReason: botStatus?.accountReason,
+    balanceReason: botStatus?.balanceReason,
+    positionReason: botStatus?.positionReason,
+    accountSourceReason: botStatus?.accountSourceReason,
+    balanceSourceReason: botStatus?.balanceSourceReason,
+    positionSourceReason: botStatus?.positionSourceReason,
+    realAccountConnected: botStatus?.realAccountConnected === true,
+    realBalance: botStatus?.realBalance,
+    realEquity: botStatus?.realEquity,
+    realAvailableBalance: botStatus?.realAvailableBalance,
+    realPosition: botStatus?.realPosition,
+    realPositionState: botStatus?.realPositionState,
+    realAccountLastSync: botStatus?.realAccountLastSync,
+    realLastSync: botStatus?.realLastSync,
+    balance: firstAvailable(
+        botStatus?.balance,
+        wsMarketData?.balance,
+    ),
+    equity: firstAvailable(
+        botStatus?.equity,
+        wsMarketData?.equity,
+    ),
+    availableBalance: firstAvailable(
+        wsMarketData?.availableBalance,
+        wsMarketData?.available_balance,
+        botStatus?.availableBalance,
+        botStatus?.available_balance,
+    ),
+    position,
+    pnl: firstAvailable(
+        botStatus?.pnl,
+        wsMarketData?.pnl,
+        wsMarketData?.unrealizedPnL,
+    ),
+    lastUpdate,
+};
+
 useEffect(() => {
     if (botStatus?.runtime_health) {
         const updateId = setTimeout(() => {
@@ -219,108 +314,124 @@ useEffect(() => {
             <div className="dashboard-layout">
 
             {/* =================================================
-            LEFT COLUMN
+            TOP: OPERATION (FULL WIDTH)
             ================================================= */}
 
-            <div className="left-column">
+            <div className="operations-top-card left-column panel-card">
 
-                <div className="panel-card">
+                <div className="operations-top-card-header">
 
-                    <BotControl
-
-                        config={tradeSettings}
-
-                        executionEnabled={
-                            executionEnabled
-                        }
-
-                        botRunning={runtimeHealth.running}
-
-                        loopEnabled={
-                            typeof botStatus?.loopEnabled === "boolean"
-                                ? botStatus.loopEnabled
-                                : runtimeHealth.running
-                        }
-
-                        loopState={
-                            botStatus?.loopState
-                            || runtimeHealth.lifecycle?.state
-                        }
-
-                        emergencyLocked={
-                            typeof botStatus?.emergencyLocked === "boolean"
-                                ? botStatus.emergencyLocked
-                                : undefined
-                        }
-
-                        emergencyState={
-                            botStatus?.emergencyState
-                        }
-
-                        emergency={
-                            statusEmergency
-                        }
-
-                        pendingOrder={
-                            botStatus?.pendingOrder
-                        }
-
-                        runtimeHealth={runtimeHealth}
-
-                        onStatusRefresh={
-                            refreshBotStatus
-                        }
-
-                        setExecutionEnabledState={
-                            setExecutionEnabled
-                        }
-
-                    />
+                    <div className="left-card-title section-number-title">
+                        OPERATION
+                    </div>
 
                 </div>
 
-                <div className="panel-card trade-risk-card">
+                <div className="operations-top-body">
 
-                    <div className="left-card-header trade-risk-card-header">
+                    <div className="operations-top-section operations-bot-control">
 
-                        <div className="left-card-title trade-risk-title">
-                            TRADE &amp; RISK SETTINGS
-                        </div>
+                        <BotControl
 
-                        <div className="left-card-subtitle trade-risk-subtitle">
-                            APPLIES ON NEXT LOOP START
-                        </div>
+                            config={{
+                                ...tradeSettings,
+                                selectionMode: botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
+                                displaySymbol: botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol,
+                                autoMarketState: botStatus?.autoMarketSelection?.autoRuntime?.runtimeState || "NOT AVAILABLE",
+                            }}
 
-                    </div>
+                            setupColumns={(
+                                <>
+                                    <section className="operation-setup-step" data-testid="trading-mode-step">
+                                        <div className="operation-step-heading"><span>1</span><strong>TRADING MODE</strong></div>
+                                        <label className="operation-field-label" htmlFor="operation-mode">PAPER / LIVE</label>
+                                        <select
+                                            id="operation-mode"
+                                            className="config-select"
+                                            disabled={runtimeHealth.running}
+                                            value={tradeSettings.mode || "PAPER"}
+                                            onChange={(event) => setTradeSettings((previous) => ({ ...previous, mode: event.target.value }))}
+                                        >
+                                            <option value="PAPER">PAPER（模擬）</option>
+                                            <option value="LIVE">LIVE（本番）</option>
+                                        </select>
+                                        {tradeSettings.mode === "LIVE" && <div className="config-warning">LIVE selected. Existing backend permissions still govern real orders.</div>}
+                                    </section>
 
-                    <div className="trade-risk-sections">
+                                    <section className="operation-setup-step" data-testid="market-selection-step">
+                                        <div className="operation-step-heading"><span>2</span><strong>MARKET SELECTION</strong></div>
+                                        <div className="operation-authority-row"><span>AUTHORITY</span><strong>{botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED"}</strong></div>
+                                        {(botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode) === "MANUAL" ? (
+                                            <>
+                                                <label className="operation-field-label" htmlFor="operation-symbol">MANUAL SYMBOL</label>
+                                                <select id="operation-symbol" className="config-select" disabled={runtimeHealth.running} value={tradeSettings.symbol || "XRPUSDTM"} onChange={(event) => setTradeSettings((previous) => ({ ...previous, symbol: event.target.value }))}>
+                                                    <option value="XRPUSDTM">XRPUSDTM</option>
+                                                    <option value="BTCUSDTM">BTCUSDTM</option>
+                                                    <option value="ETHUSDTM">ETHUSDTM</option>
+                                                </select>
+                                            </>
+                                        ) : (
+                                            <div className="operation-active-symbol"><span>ACTIVE SYMBOL</span><strong>{botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol || "UNKNOWN"}</strong><small>Selected by AMS · read only</small></div>
+                                        )}
+                                        {!(botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode) && <div className="operation-authority-note">Market selection control: NOT EXPOSED</div>}
+                                    </section>
 
-                        <TradeSettings
-                            embedded
-                            values={tradeSettings}
-                            onChange={(update) =>
-                                setTradeSettings(prev => ({
+                                    <section className="operation-setup-step operation-risk-step" data-testid="risk-settings-step">
+                                        <div className="operation-step-heading"><span>3</span><strong>RISK SETTINGS</strong></div>
+                                        <TradeSettings
+                                            embedded
+                                            values={tradeSettings}
+                                            onChange={(update) => setTradeSettings((previous) => ({ ...previous, ...update }))}
+                                        />
+                                    </section>
+                                </>
+                            )}
 
-                                    ...prev,
-
-                                    ...update,
-
-                                }))
+                            executionEnabled={
+                                executionEnabled
                             }
-                        />
 
-                        <RiskPanel
-                            embedded
-                            values={tradeSettings}
-                            onChange={(update) =>
-                                setTradeSettings(prev => ({
+                            botRunning={runtimeHealth.running}
 
-                                    ...prev,
-
-                                    ...update,
-
-                                }))
+                            loopEnabled={
+                                typeof botStatus?.loopEnabled === "boolean"
+                                    ? botStatus.loopEnabled
+                                    : runtimeHealth.running
                             }
+
+                            loopState={
+                                botStatus?.loopState
+                                || runtimeHealth.lifecycle?.state
+                            }
+
+                            emergencyLocked={
+                                typeof botStatus?.emergencyLocked === "boolean"
+                                    ? botStatus.emergencyLocked
+                                    : undefined
+                            }
+
+                            emergencyState={
+                                botStatus?.emergencyState
+                            }
+
+                            emergency={
+                                statusEmergency
+                            }
+
+                            pendingOrder={
+                                botStatus?.pendingOrder
+                            }
+
+                            runtimeHealth={runtimeHealth}
+
+                            onStatusRefresh={
+                                refreshBotStatus
+                            }
+
+                            setExecutionEnabledState={
+                                setExecutionEnabled
+                            }
+
                         />
 
                     </div>
@@ -338,309 +449,10 @@ useEffect(() => {
                 <div className="panel-card center-terminal-panel">
 
                     <AccountRuntimeOverview
-                        accountRuntime={botStatus?.accountRuntime}
-                        exchange={firstAvailable(
-                            botStatus?.exchange,
-                            tradeSettings.exchange,
-                        )}
-                        selectedMode={firstAvailable(
-                            tradeSettings.mode,
-                            botStatus?.selectedMode,
-                            governance?.mode,
-                        )}
-                        executionMode={firstAvailable(
-                            botStatus?.executionMode,
-                            botStatus?.execution_mode,
-                            "SIMULATION",
-                        )}
-                        realOrderAllowed={firstAvailable(
-                            botStatus?.realOrderAllowed,
-                            botStatus?.real_order_allowed,
-                            false,
-                        ) === true}
-                        dryRun={firstAvailable(
-                            botStatus?.dryRun,
-                            true,
-                        ) !== false}
-                        safetyReason={botStatus?.safetyReason}
-                        allowLive={botStatus?.allowLive}
-                        tradeMode={botStatus?.tradeMode}
-                        accountSource={firstAvailable(
-                            botStatus?.accountSource,
-                            "NOT_CONNECTED",
-                        )}
-                        balanceSource={firstAvailable(
-                            botStatus?.balanceSource,
-                            "NOT_CONNECTED",
-                        )}
-                        positionSource={firstAvailable(
-                            botStatus?.positionSource,
-                            "NOT_CONNECTED",
-                        )}
-                        exchangeAuth={firstAvailable(
-                            botStatus?.exchangeAuth,
-                            "NOT_VERIFIED",
-                        )}
-                        exchangeConnection={firstAvailable(
-                            botStatus?.exchangeConnection,
-                            "NOT_CONNECTED",
-                        )}
-                        apiKeyStatus={firstAvailable(
-                            botStatus?.apiKeyStatus,
-                            "MISSING",
-                        )}
-                        permission={firstAvailable(
-                            botStatus?.permission,
-                            "NOT_VERIFIED",
-                        )}
-                        accountType={firstAvailable(
-                            botStatus?.accountType,
-                            "UNKNOWN",
-                        )}
-                        exchangeAuthReason={botStatus?.exchangeAuthReason}
-                        exchangeConnectionReason={
-                            botStatus?.exchangeConnectionReason
-                        }
-                        accountReason={botStatus?.accountReason}
-                        balanceReason={botStatus?.balanceReason}
-                        positionReason={botStatus?.positionReason}
-                        accountSourceReason={botStatus?.accountSourceReason}
-                        balanceSourceReason={botStatus?.balanceSourceReason}
-                        positionSourceReason={botStatus?.positionSourceReason}
-                        realAccountConnected={
-                            botStatus?.realAccountConnected === true
-                        }
-                        realBalance={botStatus?.realBalance}
-                        realEquity={botStatus?.realEquity}
-                        realAvailableBalance={
-                            botStatus?.realAvailableBalance
-                        }
-                        realPosition={botStatus?.realPosition}
-                        realPositionState={botStatus?.realPositionState}
-                        realAccountLastSync={botStatus?.realAccountLastSync}
-                        realLastSync={botStatus?.realLastSync}
-                        balance={firstAvailable(
-                            botStatus?.balance,
-                            wsMarketData?.balance,
-                        )}
-                        equity={firstAvailable(
-                            botStatus?.equity,
-                            wsMarketData?.equity,
-                        )}
-                        availableBalance={
-                            firstAvailable(
-                                wsMarketData?.availableBalance,
-                                wsMarketData?.available_balance,
-                                botStatus?.availableBalance,
-                                botStatus?.available_balance,
-                            )
-                        }
-                        position={position}
-                        pnl={firstAvailable(
-                            botStatus?.pnl,
-                            wsMarketData?.pnl,
-                            wsMarketData?.unrealizedPnL,
-                        )}
-                        lastUpdate={lastUpdate}
+                        variant="summary"
+                        {...accountRuntimeProps}
+                        onPaperCapitalApplied={refreshBotStatus}
                     />
-
-                    <RuntimeHealthPanel
-                        stages={runtimeHealth.stages}
-                        loops={runtimeHealth.loops}
-                        selectedStageId={selectedStageId}
-                        onSelectStage={setSelectedStageId}
-                    />
-
-                    <ExecutionPanel
-                        executionStatus={
-                            runtimeHealth.executionEngine.status
-                        }
-                        runtimePhase={
-                            runtimeHealth.tradingAction.reason
-                                ? `${runtimeHealth.tradingAction.status}: ${runtimeHealth.tradingAction.reason}`
-                                : runtimeHealth.tradingAction.status
-                        }
-                        websocketStatus={
-                            runtimeHealth.browserWebSocket.status
-                        }
-                        latency={
-                            runtimeHealth.latencyMs
-                        }
-                    />
-
-                    {/* =============================================
-                       LOGS PANEL
-                    ============================================= */}
-
-                    <ExecutionTimelinePanel events={runtimeHealth.timeline} />
-
-                </div>
-
-            </div>
-
-            {/* =================================================
-            RIGHT GOVERNANCE COLUMN
-            ================================================= */}
-
-            <div className="right-governance-column">
-
-                {/* =============================================
-                   EXECUTION MONITORING
-                ============================================= */}
-
-                <div
-                    className="execution-monitoring-card"
-                    data-testid="runtime-health-monitor"
-                >
-
-                    <div className="governance-card-title">
-                        EXECUTION MONITORING（実行監視）
-                    </div>
-
-                    <div className="monitoring-grid execution-state-grid">
-                        <div className="monitoring-row">
-                            <span>RUNTIME HEALTH（稼働健全性）</span>
-                            <span className={
-                                displayedHealth === "HEALTHY"
-                                    ? "status-safe"
-                                    : displayedHealth === "DEGRADED"
-                                        ? "status-warning"
-                                        : "status-danger"
-                            }>
-                                {displayedHealth}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>BOT STATE（ボット状態）</span>
-                            <span
-                                data-testid="bot-state"
-                                className={runtimeHealth.running
-                                ? "status-safe"
-                                : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.running ? "RUNNING" : "STOPPED"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>TRADING RUNTIME（取引ランタイム）</span>
-                            <span
-                                data-testid="trading-runtime"
-                                className={runtimeHealth.runtimeEngine.healthy
-                                    ? "status-safe"
-                                    : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.runtimeEngine.status ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>PIPELINE（パイプライン）</span>
-                            <span
-                                data-testid="pipeline-status"
-                                className={runtimeHealth.pipelineStatus === "OK"
-                                    ? "status-safe"
-                                    : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.pipelineStatus ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>EXECUTION AUTHORITY（注文送信許可）</span>
-                            <span className={runtimeHealth.executionEnabled
-                                ? "status-safe"
-                                : "status-warning"
-                            }>
-                                {runtimeHealth.executionAuthority.status}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>TRADING ACTION（取引判断）</span>
-                            <span
-                                data-testid="trading-action"
-                                className={
-                                runtimeHealth.tradingAction.status === "ORDER_SUBMITTED"
-                                    ? "status-safe"
-                                    : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.tradingAction.status ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>DECISION（判断）</span>
-                            <span data-testid="current-decision">
-                                {runtimeHealth.tradingAction.decision ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>EXECUTION ENGINE（実行エンジン）</span>
-                            <span
-                                data-testid="execution-engine"
-                                className={runtimeHealth.executionEngine.available
-                                ? "status-safe"
-                                : runtimeHealth.running
-                                    ? "status-danger"
-                                    : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.executionEngine.status ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>BROWSER WS（画面通信）</span>
-                            <span className={browserWsConnected ? "status-safe" : "status-danger"}>
-                                {runtimeHealth.browserWebSocket.status ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>EXCHANGE WS（取引所通信）</span>
-                            <span
-                                data-testid="exchange-ws"
-                                className={runtimeHealth.exchangeWebSocket.connected
-                                ? "status-safe"
-                                : runtimeHealth.running
-                                    ? "status-danger"
-                                    : "status-warning"
-                                }
-                            >
-                                {runtimeHealth.exchangeWebSocket.status ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>ACTION REASON（待機理由）</span>
-                            <span data-testid="action-reason">
-                                {runtimeHealth.tradingAction.reason ?? "--"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>BLOCKING REASON（障害理由）</span>
-                            <span className={displayedBlockingReason
-                                ? "status-danger"
-                                : "status-safe"
-                            }>
-                                {displayedBlockingReason ?? "NONE"}
-                            </span>
-                        </div>
-
-                        <div className="monitoring-row">
-                            <span>LATENCY（遅延）</span>
-                            <span>{formatLatency(runtimeHealth.latencyMs)}</span>
-                        </div>
-
-                    </div>
 
                     <div className="execution-activity" data-testid="last-execution-activity">
                         <span>{lastExecutionActivity.label}</span>
@@ -649,11 +461,26 @@ useEffect(() => {
 
                 </div>
 
-                <StageInspectorPanel stage={selectedStage} />
-
             </div>
 
         </div>
+
+        <AutoMarketSelectionCard
+            status={botStatus?.autoMarketSelection}
+            requestedSymbol={tradeSettings.symbol}
+        />
+
+        <TradingDecisionCard decision={botStatus?.tradingDecision} />
+
+        <RuntimeDiagnosticsDisclosure
+            runtimeHealth={runtimeHealth}
+            displayedHealth={displayedHealth}
+            displayedBlockingReason={displayedBlockingReason}
+            browserWsConnected={browserWsConnected}
+            selectedStageId={selectedStageId}
+            onSelectStage={setSelectedStageId}
+            selectedStage={selectedStage}
+        />
 
     </div>
     </>

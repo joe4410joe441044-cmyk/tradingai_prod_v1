@@ -31,8 +31,31 @@ export function MarketIntelligenceProvider({ children }) {
     const replayMarketModel = useMemo(() => normalizeReplayMarketModel({
         replayEngine: state.replayEngine,
     }), [state.replayEngine]);
+    const liveAuthorityContext = useMemo(() => {
+        const botStatus = runtimeTelemetry.runtime?.botStatus;
+        const activeSymbol = botStatus?.activeSymbol;
+        if (!activeSymbol) return dashboardMarket?.marketContext;
+        const exchange = String(
+            botStatus.exchange ?? runtimeTelemetry.market.exchange ?? "",
+        ).toUpperCase();
+        const marketType = String(
+            runtimeTelemetry.market.marketType ?? "FUTURES",
+        ).toUpperCase();
+        const exchangeSymbol = String(
+            botStatus.orderbookSymbol ?? activeSymbol,
+        ).toUpperCase();
+        return {
+            exchange,
+            marketType,
+            exchangeSymbol,
+            normalizedSymbol: String(activeSymbol).toUpperCase(),
+            displaySymbol: String(activeSymbol).toUpperCase(),
+            contextKey: exchange && marketType && exchangeSymbol
+                ? `${exchange}:${marketType}:${exchangeSymbol}` : null,
+        };
+    }, [dashboardMarket?.marketContext, runtimeTelemetry.market, runtimeTelemetry.runtime]);
     const liveMarketModel = useMemo(() => {
-        const context = dashboardMarket?.marketContext;
+        const context = liveAuthorityContext;
         if (!runtimeMarketMatchesContext(runtimeTelemetry.market, context))
             return createDashboardContextMarketModel(context);
         return normalizeLiveMarketModel({
@@ -48,12 +71,12 @@ export function MarketIntelligenceProvider({ children }) {
             },
             receivedAt: runtimeTelemetry.market.lastUpdate,
         });
-    }, [dashboardMarket?.marketContext, runtimeTelemetry.market, runtimeTelemetry.runtime]);
+    }, [liveAuthorityContext, runtimeTelemetry.market, runtimeTelemetry.runtime]);
     const activeMarket = useMemo(() => resolveMarketContext({
-        dashboardContext: dashboardMarket?.marketContext,
+        dashboardContext: liveAuthorityContext,
         replayEngine: state.replayEngine,
         replayModel: replayMarketModel,
-    }), [dashboardMarket?.marketContext, replayMarketModel, state.replayEngine]);
+    }), [liveAuthorityContext, replayMarketModel, state.replayEngine]);
     const normalizedMarketModel = isReplayMarketContextActive(state.replayEngine)
         ? replayMarketModel : liveMarketModel;
     const contextValue = useMemo(() => ({

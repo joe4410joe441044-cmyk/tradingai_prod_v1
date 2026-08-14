@@ -9,6 +9,8 @@ def build_runtime_debug_result():
     """Return a fresh, JSON-safe telemetry skeleton for one runtime cycle."""
     return {
         "runtimeStageTrace": {},
+        "tradingAiMode": "OFF",
+        "tradingAiStatus": "NOT_INSTALLED",
         "runtimeAdapterReached": False,
         "runtimeStateReached": False,
         "strategyRuntimeReached": False,
@@ -55,6 +57,8 @@ def build_runtime_debug_result():
         "llmProbability": None,
         "consensusInput": None,
         "consensusReason": None,
+        "moneyManagementReached": False,
+        "moneyManagementDecision": None,
         "governanceInput": None,
         "governanceRuntimeReached": False,
         "governanceOutput": None,

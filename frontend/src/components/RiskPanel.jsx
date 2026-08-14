@@ -12,6 +12,10 @@ export default function RiskPanel({
 
     embedded = false,
 
+    hideMaxDd = false,
+
+    hidePositionSize = false,
+
 }) {
 
     const handle = (
@@ -58,6 +62,7 @@ export default function RiskPanel({
             {/* MAX DD */}
             {/* ============================================= */}
 
+            {!hideMaxDd && (
             <div className="config-row">
 
                 <div className="config-label">
@@ -87,11 +92,13 @@ export default function RiskPanel({
                 </div>
 
             </div>
+            )}
 
             {/* ============================================= */}
             {/* POSITION SIZE */}
             {/* ============================================= */}
 
+            {!hidePositionSize && (
             <div className="config-row">
 
                 <div className="config-label">
@@ -121,6 +128,7 @@ export default function RiskPanel({
                 </div>
 
             </div>
+            )}
 
             {/* ============================================= */}
             {/* TAKE PROFIT */}

@@ -525,7 +525,7 @@ const clickAndRender = (
 
 test("Return to Normal is permanently rendered with the required state matrix", async () => {
     const cases = [
-        ["READY", true],
+        ["READY", null],
         ["PROCESSING", true],
         ["LOCKED", false],
         ["ACTION_REQUIRED", false],
@@ -549,8 +549,12 @@ test("Return to Normal is permanently rendered with the required state matrix", 
         });
         const returnButton = findButton(renderer.root, "通常に戻す");
 
-        assert.ok(returnButton, state);
-        assert.equal(returnButton.props.disabled, expectedDisabled, state);
+        if (expectedDisabled === null) {
+            assert.equal(returnButton, null, state);
+        } else {
+            assert.ok(returnButton, state);
+            assert.equal(returnButton.props.disabled, expectedDisabled, state);
+        }
         assert.equal(findButton(renderer.root, "安全状態を再確認"), null);
         assert.equal(textIncludes(renderer.root, "再確認中..."), false);
     }
@@ -803,4 +807,74 @@ test("Status mismatch is reported without enabling trading locally", async () =>
     } finally {
         mock.restore();
     }
+});
+
+
+test("Ready Check projects configured values and does not pass unknown Emergency authority", async () => {
+    const renderer = await renderBotControl({
+        emergency: null,
+        emergencyLocked: undefined,
+        emergencyState: undefined,
+        config: { mode: "PAPER", symbol: "XRPUSDTM", displaySymbol: "BTCUSDTM", selectionMode: "AUTO", risk_percent: 1.25, leverage: 5 },
+    });
+    assert.equal(textIncludes(renderer.root, "READY / START"), true);
+    assert.equal(textIncludes(renderer.root, "BTCUSDTM"), true);
+    assert.equal(textIncludes(renderer.root, "STATE_UNKNOWN"), true);
+    assert.equal(textIncludes(renderer.root, "START BOT"), true);
+});
+
+test("START BOT uses existing lifecycle authority and prevents duplicate requests", async () => {
+    const response = deferred();
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return response.promise;
+    });
+    try {
+        const renderer = await renderBotControl();
+        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        const pending = findButton(renderer.root, "STARTING...");
+        assert.ok(pending);
+        assert.equal(pending.props.disabled, true);
+        pending.props.onClick();
+        assert.equal(mock.requests.length, 1);
+        assert.equal(JSON.parse(mock.requests[0].options.body).mode, "paper");
+        response.resolve(jsonResponse({ body: { success: true, status: "started" } }));
+        await first;
+    } finally { mock.restore(); }
+});
+
+test("running BOT presents STOP BOT and uses existing stop authority", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/stop");
+        return jsonResponse({ body: { success: true, status: "stopped" } });
+    });
+    try {
+        const renderer = await renderBotControl({ botRunning: true, loopEnabled: true });
+        await clickAndRender(renderer, findButton(renderer.root, "STOP BOT"));
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].options.method, "POST");
+    } finally { mock.restore(); }
+});
+
+
+test("Automation precedes the sole final Ready / Start step and stays runtime-only", async () => {
+    const renderer = await renderBotControl({
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "MANUAL", risk_percent: 1, leverage: 5 },
+    });
+    const steps = findAll(renderer.root, (element) => String(element.props?.className || "").includes("operation-setup-step"));
+    assert.equal(steps.length, 2);
+    assert.equal(textIncludes(steps[0], "AUTOMATION"), true);
+    assert.equal(textIncludes(steps[1], "READY / START"), true);
+    assert.equal(findAll(renderer.root, (element) => collectText(element) === "START BOT").length, 1);
+    assert.equal(textIncludes(renderer.root, "LOOP ON START"), true);
+    assert.equal(textIncludes(renderer.root, "AUTO TRADE ON START"), true);
+    assert.equal(textIncludes(renderer.root, "Runtime-only after BOT START"), true);
+});
+
+test("stopped BOT exposes no active Loop or Auto Trade mutation control", async () => {
+    const renderer = await renderBotControl({ botRunning: false, loopEnabled: false, executionEnabled: false });
+    const toggles = findAll(renderer.root, (element) => ["Toggle trading loop", "Toggle automatic trading"].includes(element.props?.ariaLabel));
+    assert.equal(toggles.length, 2);
+    assert.equal(toggles.every((element) => element.props.disabled === true), true);
 });

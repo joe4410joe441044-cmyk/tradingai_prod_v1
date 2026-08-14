@@ -68,6 +68,7 @@ async def set_execution(payload: dict):
         loop_running = (
             bool(getattr(bot_manager, "_running", False))
             and getattr(bot_manager, "lifecycle_state", None) == "RUNNING"
+            and getattr(bot_manager, "loop_state", None) == "RUNNING"
         )
 
         if not loop_running:

@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { API } from "../../api";
+
 const EMPTY_VALUES = new Set([
     "UNKNOWN",
     "NO DATA",
@@ -116,7 +119,7 @@ const formatPositionValue = (
 
     if (Array.isArray(value)) {
         if (value.length === 0) {
-            return "NO OPEN POSITION";
+            return "FLAT";
         }
 
         return formatPositionValue(value[0], state);
@@ -136,8 +139,8 @@ const formatPositionValue = (
         return String(value);
     }
 
-    if (state === "NO_OPEN_POSITION") {
-        return "NO OPEN POSITION";
+    if (state === "NO_OPEN_POSITION" || state === "FLAT") {
+        return "FLAT";
     }
 
     return displayRuntimeValue(state, { emptyLabel });
@@ -163,6 +166,7 @@ function StatusMetric({
 }
 
 export default function AccountRuntimeOverview({
+    variant = "summary",
     accountRuntime,
     exchange,
     selectedMode,
@@ -202,7 +206,10 @@ export default function AccountRuntimeOverview({
     position,
     pnl,
     lastUpdate,
+    onPaperCapitalApplied,
 }) {
+    const isSummary = variant !== "diagnostics";
+    const isDiagnostics = variant === "diagnostics";
     const runtime = accountRuntime && typeof accountRuntime === "object"
         ? accountRuntime
         : {};
@@ -228,6 +235,71 @@ export default function AccountRuntimeOverview({
     const paperPnl = paperAvailable
         ? paperAccount.totalPnl ?? pnl
         : null;
+    const [capitalExpanded, setCapitalExpanded] = useState(false);
+    const [capitalInput, setCapitalInput] = useState("");
+    const [capitalSource, setCapitalSource] = useState("DASHBOARD_MANUAL");
+    const [capitalConfirming, setCapitalConfirming] = useState(false);
+    const [capitalSubmitting, setCapitalSubmitting] = useState(false);
+    const [capitalMessage, setCapitalMessage] = useState(null);
+    const [capitalDirty, setCapitalDirty] = useState(false);
+    useEffect(() => {
+        if (!capitalDirty && isAvailable(paperBalance)) {
+            setCapitalInput(String(paperBalance));
+        }
+    }, [capitalDirty, paperBalance]);
+
+    const capitalNumber = Number(capitalInput);
+    const capitalError = !capitalInput.trim()
+        ? "Simulation capital is required."
+        : !/^\d+(?:\.\d{1,2})?$/.test(capitalInput.trim())
+            ? "Enter a valid amount with up to 2 decimal places."
+            : !Number.isFinite(capitalNumber) || capitalNumber < 0.01
+                ? "Simulation capital must be at least 0.01 USDT."
+                : capitalNumber > 1_000_000_000
+                    ? "Simulation capital must not exceed 1,000,000,000.00 USDT."
+                    : null;
+
+    const chooseCapital = (value, source = "DASHBOARD_MANUAL") => {
+        setCapitalInput(String(value));
+        setCapitalSource(source);
+        setCapitalDirty(true);
+        setCapitalConfirming(false);
+        setCapitalMessage(null);
+    };
+
+    const submitPaperCapital = async () => {
+        if (capitalSubmitting || capitalError) return;
+        setCapitalSubmitting(true);
+        setCapitalMessage(null);
+        try {
+            const response = await fetch(API.paperAccountCapital(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    capital: capitalInput.trim(),
+                    source: capitalSource,
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.detail || "Unable to reset paper capital.");
+            }
+            if (onPaperCapitalApplied) await onPaperCapitalApplied();
+            setCapitalDirty(false);
+            setCapitalConfirming(false);
+            setCapitalMessage({
+                type: "success",
+                text: `Paper simulation capital reset to ${formatAmount(payload.paperBalance)} USDT.`,
+            });
+        } catch (error) {
+            setCapitalMessage({
+                type: "error",
+                text: `Unable to reset paper capital. Reason: ${error.message}`,
+            });
+        } finally {
+            setCapitalSubmitting(false);
+        }
+    };
     const selectedExchange = String(exchange ?? "").trim().toUpperCase();
     const realExchange = String(realAccount.exchange ?? "").trim().toUpperCase();
     const realExchangeMatches = !realExchange || realExchange === selectedExchange;
@@ -286,6 +358,10 @@ export default function AccountRuntimeOverview({
             || realAuthenticated
             || realAccount.connected === true
         );
+    const realAvailablePresetEnabled = realConnected
+        && !realLoading
+        && !realStale
+        && Number.isFinite(Number(realAvailableRaw));
     const normalizedSelectedMode = String(selectedMode ?? "PAPER").toUpperCase();
     const paperMode = normalizedSelectedMode === "PAPER";
     const realSyncStatus = realLoading
@@ -343,7 +419,84 @@ export default function AccountRuntimeOverview({
             className="account-runtime-overview"
             data-testid="account-runtime-overview"
         >
+            {isSummary && (
             <div className="account-separation-grid">
+                <article className="semantic-card semantic-card-real">
+                    <header className="semantic-card-header">
+                        <div>
+                            <span className="semantic-card-kicker">Authenticated account only</span>
+                            <h2>Real / Live Account</h2>
+                        </div>
+                        <span
+                            className={`semantic-badge semantic-badge-${
+                                realLoading
+                                    ? "refreshing"
+                                    : realStale
+                                        ? "stale"
+                                        : realConnected
+                                            ? "connected"
+                                            : "not-connected"
+                            }`}
+                        >
+                            {paperMode ? "READ ONLY" : realSyncStatus}
+                        </span>
+                    </header>
+
+                    {paperMode && (
+                        <p className="semantic-card-context" data-testid="real-account-paper-context">
+                            PAPER MODE — LIVE ACCOUNT INACTIVE · Sync: {realSyncStatus}
+                        </p>
+                    )}
+
+                    <div className="semantic-metric-grid three-columns">
+                        <StatusMetric
+                            label="Real Balance:（実残高）"
+                            value={realBalanceValue}
+                            testId="real-balance"
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="Real Equity:（実純資産）"
+                            value={realEquityValue}
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="Available Balance:（実利用可能額）"
+                            value={realAvailableValue}
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="Real Position:（実ポジション）"
+                            value={realPositionValue}
+                            testId="real-position"
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="Auth:（取引所認証）"
+                            value={displayValue(resolvedExchangeAuth)}
+                            testId="exchange-auth"
+                            tone={authVerified ? "safe" : "real"}
+                        />
+                        <StatusMetric
+                            label="Permission:（権限）"
+                            value={displayValue(resolvedPermission)}
+                            tone="real"
+                        />
+                        <StatusMetric
+                            label="Last Sync:（最終同期）"
+                            value={realConnected
+                                ? displayValue(accountLastSync, formatLastUpdate)
+                                : "--"
+                            }
+                            tone="real"
+                        />
+                    </div>
+
+                    <p className="semantic-card-note">
+                        {displayValue(accountSourceReason || resolvedAccountReason)}
+                    </p>
+                </article>
+
                 <article className="semantic-card semantic-card-paper">
                     <header className="semantic-card-header">
                         <div>
@@ -402,98 +555,82 @@ export default function AccountRuntimeOverview({
                         />
                     </div>
 
+                    <div className="paper-capital-control">
+                        <button
+                            type="button"
+                            className="paper-capital-toggle"
+                            aria-expanded={capitalExpanded}
+                            onClick={() => setCapitalExpanded((value) => !value)}
+                        >
+                            {capitalExpanded ? "▼" : "▶"} Set Paper Capital
+                        </button>
+                        {capitalExpanded && (
+                            <div className="paper-capital-panel">
+                                <label htmlFor="simulation-capital-input">Simulation Capital (USDT)</label>
+                                <input
+                                    id="simulation-capital-input"
+                                    inputMode="decimal"
+                                    value={capitalInput}
+                                    aria-invalid={Boolean(capitalError)}
+                                    onChange={(event) => chooseCapital(event.target.value)}
+                                />
+                                <div className="paper-capital-presets">
+                                    <button
+                                        type="button"
+                                        disabled={!realAvailablePresetEnabled}
+                                        title={realAvailablePresetEnabled ? "Copy current real available balance" : "REAL_ACCOUNT_NOT_SYNCED"}
+                                        onClick={() => chooseCapital(realAvailableRaw, "REAL_AVAILABLE_PRESET")}
+                                    >
+                                        Real Available
+                                    </button>
+                                    {["100", "1000", "10000"].map((preset) => (
+                                        <button type="button" key={preset} onClick={() => chooseCapital(preset)}>
+                                            {formatAmount(preset)}
+                                        </button>
+                                    ))}
+                                </div>
+                                {capitalError && capitalDirty && (
+                                    <p className="paper-capital-feedback error">{capitalError}</p>
+                                )}
+                                {!capitalConfirming ? (
+                                    <button
+                                        type="button"
+                                        className="paper-capital-apply"
+                                        disabled={Boolean(capitalError) || capitalSubmitting}
+                                        onClick={() => setCapitalConfirming(true)}
+                                    >
+                                        Apply Paper Capital
+                                    </button>
+                                ) : (
+                                    <div className="paper-capital-confirm" role="alertdialog" aria-labelledby="paper-capital-confirm-title">
+                                        <strong id="paper-capital-confirm-title">Reset Paper Account?</strong>
+                                        <span>New Simulation Capital: {formatAmount(capitalNumber)} USDT</span>
+                                        <span>Balance, equity, PnL and paper positions will reset. Real funds are not affected.</span>
+                                        <div>
+                                            <button type="button" disabled={capitalSubmitting} onClick={() => setCapitalConfirming(false)}>Cancel</button>
+                                            <button type="button" disabled={capitalSubmitting} onClick={submitPaperCapital}>
+                                                {capitalSubmitting ? "Applying…" : "Reset Paper Account"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="paper-capital-live" aria-live="polite">
+                                    {capitalMessage && (
+                                        <p className={`paper-capital-feedback ${capitalMessage.type}`}>{capitalMessage.text}</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <p className="semantic-card-note">
                         Simulation-only account. No real funds are used.
                     </p>
                 </article>
-
-                <article className="semantic-card semantic-card-real">
-                    <header className="semantic-card-header">
-                        <div>
-                            <span className="semantic-card-kicker">Authenticated account only</span>
-                            <h2>Real / Live Account</h2>
-                        </div>
-                        <span
-                            className={`semantic-badge semantic-badge-${
-                                realLoading
-                                    ? "refreshing"
-                                    : realStale
-                                        ? "stale"
-                                        : realConnected
-                                            ? "connected"
-                                            : "not-connected"
-                            }`}
-                        >
-                            {paperMode ? "READ ONLY" : realSyncStatus}
-                        </span>
-                    </header>
-
-                    {paperMode && (
-                        <p className="semantic-card-context" data-testid="real-account-paper-context">
-                            PAPER MODE — LIVE ACCOUNT INACTIVE · Sync: {realSyncStatus}
-                        </p>
-                    )}
-
-                    <div className="semantic-metric-grid three-columns">
-                        <StatusMetric
-                            label="Real Balance:（実残高）"
-                            value={realBalanceValue}
-                            testId="real-balance"
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="Real Equity:（実純資産）"
-                            value={realEquityValue}
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="Available Balance:（実利用可能額）"
-                            value={realAvailableValue}
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="Real Position:（実ポジション）"
-                            value={realPositionValue}
-                            testId="real-position"
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="Exchange Auth:（取引所認証）"
-                            value={displayValue(resolvedExchangeAuth)}
-                            testId="exchange-auth"
-                            tone={authVerified ? "safe" : "real"}
-                        />
-                        <StatusMetric
-                            label="Last Sync:（最終同期）"
-                            value={realConnected
-                                ? displayValue(accountLastSync, formatLastUpdate)
-                                : "--"
-                            }
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="accountSource"
-                            value={displayValue(accountSource)}
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="balanceSource"
-                            value={displayValue(balanceSource)}
-                            tone="real"
-                        />
-                        <StatusMetric
-                            label="positionSource"
-                            value={displayValue(positionSource)}
-                            tone="real"
-                        />
-                    </div>
-
-                    <p className="semantic-card-note">
-                        {displayValue(accountSourceReason || resolvedAccountReason)}
-                    </p>
-                </article>
             </div>
+            )}
 
+            {isDiagnostics && (
             <div className="operational-separation-grid">
                 <article className="semantic-card semantic-card-execution">
                     <header className="semantic-card-header compact">
@@ -603,6 +740,27 @@ export default function AccountRuntimeOverview({
                             tone="connection"
                         />
                         <StatusMetric
+                            label="Exchange Auth:（取引所認証）"
+                            value={displayValue(resolvedExchangeAuth)}
+                            testId="exchange-auth"
+                            tone={authVerified ? "safe" : "connection"}
+                        />
+                        <StatusMetric
+                            label="accountSource"
+                            value={displayValue(accountSource)}
+                            tone="connection"
+                        />
+                        <StatusMetric
+                            label="balanceSource"
+                            value={displayValue(balanceSource)}
+                            tone="connection"
+                        />
+                        <StatusMetric
+                            label="positionSource"
+                            value={displayValue(positionSource)}
+                            tone="connection"
+                        />
+                        <StatusMetric
                             label="Last Sync:（口座同期）"
                             value={realConnected
                                 ? displayValue(accountLastSync, formatLastUpdate)
@@ -632,13 +790,16 @@ export default function AccountRuntimeOverview({
                     </p>
                 </article>
             </div>
+            )}
 
+            {isSummary && (
             <div className="semantic-legend" aria-label="Status color legend">
                 <span><i className="legend-paper" />Paper / Simulation</span>
                 <span><i className="legend-real" />Real / Live</span>
                 <span><i className="legend-execution" />Execution / Runtime</span>
                 <span><i className="legend-connection" />Connection / Auth</span>
             </div>
+            )}
         </section>
     );
 }

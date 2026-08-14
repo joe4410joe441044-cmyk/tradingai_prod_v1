@@ -66,6 +66,7 @@ from tests.test_money_management_loss_runtime_update_dispatcher import (
     metrics,
     request,
 )
+from tests.test_ams_0d_foundation import capital as ams_capital
 
 
 class Clock:
@@ -122,6 +123,102 @@ def ready_boundary(*, publish=True, runtime_metrics=None):
 
 
 class MoneyManagementStatusApiTests(unittest.TestCase):
+    @staticmethod
+    def _ready_cash_flow(app, *, fresh=True):
+        app.state.money_management.lifecycle_adapter.cash_flow_runtime = (
+            SimpleNamespace(read_model=lambda: {
+                "cashFlowAuthority": "READY" if fresh else "STALE",
+                "cashFlowFresh": fresh,
+                "lastSuccessfulSyncAt": NOW.isoformat(),
+                "lastAttemptAt": NOW.isoformat(),
+                "syncState": "COMPLETED",
+                "lastErrorReason": None,
+                "checkpointRevision": 0,
+            })
+        )
+
+    def test_live_authorities_make_official_mm_available_without_legacy_metrics(self):
+        _, app, _, lifecycle, clock = ready_boundary(publish=False)
+        authority = ams_capital(evaluated_at=clock())
+        current_equity = lifecycle.get_snapshot().state.drawdown_state.current_equity
+        authority = replace(
+            authority,
+            equity=current_equity,
+            input_authority="REAL_LIVE_ACCOUNT",
+            capital_source="REAL_LIVE_ACCOUNT",
+        )
+        self._ready_cash_flow(app)
+        boundary = MoneyManagementHttpBoundary(
+            app, dispatcher=None, timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        )
+        LossGovernanceProjectionDispatcher(timestamp_source=clock).dispatch(app)
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["metricsStatus"], "AVAILABLE")
+        self.assertEqual(payload["riskState"], "NORMAL")
+        self.assertEqual(payload["projectionStatus"], "ALLOW")
+        self.assertFalse(payload["recoveryRequired"])
+        self.assertNotIn("UNKNOWN_STATE", payload["blockReasons"])
+
+    def test_live_authority_stays_fail_closed_when_cash_flow_is_stale(self):
+        _, app, _, lifecycle, clock = ready_boundary(publish=False)
+        authority = replace(
+            ams_capital(evaluated_at=clock()),
+            equity=lifecycle.get_snapshot().state.drawdown_state.current_equity,
+            input_authority="REAL_LIVE_ACCOUNT",
+            capital_source="REAL_LIVE_ACCOUNT",
+        )
+        self._ready_cash_flow(app, fresh=False)
+        payload = MoneyManagementHttpBoundary(
+            app, dispatcher=None, timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        ).get_status().to_dict()
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["safeReason"], "CASH_FLOW_AUTHORITY_UNAVAILABLE")
+
+    def test_live_authority_stays_fail_closed_when_equity_is_not_reconciled(self):
+        _, app, _, _, clock = ready_boundary(publish=False)
+        authority = replace(
+            ams_capital(evaluated_at=clock()),
+            equity=Decimal("999"),
+            input_authority="REAL_LIVE_ACCOUNT",
+            capital_source="REAL_LIVE_ACCOUNT",
+        )
+        self._ready_cash_flow(app)
+        LossGovernanceProjectionDispatcher(timestamp_source=clock).dispatch(app)
+        payload = MoneyManagementHttpBoundary(
+            app, dispatcher=None, timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        ).get_status().to_dict()
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["safeReason"], "LIVE_MM_EQUITY_NOT_RECONCILED")
+
+    def test_monitoring_capital_is_shared_while_runtime_metrics_are_unavailable(self):
+        _, app, _, _, clock = ready_boundary()
+        authority = ams_capital(evaluated_at=clock())
+        boundary = MoneyManagementHttpBoundary(
+            app,
+            dispatcher=None,
+            timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        )
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["metricsStatus"], "UNAVAILABLE")
+        self.assertEqual(payload["runtimeTradingMetricsStatus"], "UNAVAILABLE")
+        self.assertEqual(payload["capitalAuthorityStatus"], "AVAILABLE")
+        self.assertEqual(payload["capitalEligibility"], authority.to_dict())
+        self.assertNotIn("UNKNOWN_STATE", payload["blockReasons"])
+        self.assertIn(
+            "TRADING_RUNTIME_METRICS_UNAVAILABLE", payload["blockReasons"]
+        )
+        self.assertFalse(payload["recoveryRequired"])
+
     def test_status_is_typed_precise_and_matches_entry_projection(self):
         boundary, _, _, _, _ = ready_boundary()
         status = boundary.get_status()

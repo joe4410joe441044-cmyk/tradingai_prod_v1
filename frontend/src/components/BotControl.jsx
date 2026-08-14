@@ -285,7 +285,7 @@ const normalizeEmergencyState = (
         return "READY";
     }
 
-    return "READY";
+    return "STATE_UNKNOWN";
 };
 
 const formatEmergencyTimestamp = (
@@ -362,6 +362,8 @@ export default function BotControl({
 
     setExecutionEnabledState,
 
+    setupColumns,
+
 }){
 
     const [, forceUpdate] =
@@ -370,6 +372,8 @@ export default function BotControl({
         loopPending,
         setLoopPending,
     ] = useState(false);
+    const [botPending, setBotPending] = useState(false);
+    const [botError, setBotError] = useState(null);
     const [
         loopPendingAction,
         setLoopPendingAction,
@@ -412,6 +416,7 @@ export default function BotControl({
     ] = useState(null);
     const loopPendingRef =
         useRef(false);
+    const botPendingRef = useRef(false);
     const autoTradePendingRef =
         useRef(false);
     const emergencyPendingRef =
@@ -694,6 +699,7 @@ export default function BotControl({
         || Boolean(autoTradeDisabledReason);
     const loopDisabled = (
         loopPending
+        || botRunning !== true
         || emergencyBlocksOperations
     );
     const unlockAllowed = (
@@ -736,47 +742,56 @@ export default function BotControl({
         }
     };
 
+    const handleBotLifecycle = async () => {
+        if (botPendingRef.current || emergencyBlocksOperations) return;
+
+        botPendingRef.current = true;
+        setBotPending(true);
+        setBotError(null);
+
+        try {
+            const response = await fetch(botRunning ? API.botStop() : API.botStart(), {
+                method: "POST",
+                headers: botRunning ? undefined : { "Content-Type": "application/json" },
+                body: botRunning ? undefined : JSON.stringify({
+                    symbol: config?.symbol,
+                    exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
+                    risk_percent: config?.risk_percent ?? 1,
+                    position_size: config?.positionSize ?? 0,
+                    max_drawdown_pct: config?.maxDd ?? 5,
+                    sl_percent: config?.sl ?? 1,
+                    leverage: config?.leverage ?? 5,
+                    timeframe: config?.timeframe || "1m",
+                    tp_percent: config?.tp ?? 2,
+                    trailing_stop: config?.trailing === true,
+                    dry_run: String(config?.mode || "PAPER").toUpperCase() !== "LIVE",
+                    mode: String(config?.mode || "PAPER").toLowerCase(),
+                }),
+            });
+            const result = await response.json().catch(() => null);
+
+            const lifecycleConfirmed = botRunning
+                ? result?.status === "stopped" && result?.success === true
+                : result?.status === "started";
+
+            if (!response.ok || !lifecycleConfirmed) {
+                throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
+            }
+            await refreshStatusSafely();
+        } catch (error) {
+            setBotError(`${botRunning ? "STOP" : "START"} failed: ${error?.message || "UNKNOWN ERROR"}`);
+        } finally {
+            botPendingRef.current = false;
+            setBotPending(false);
+        }
+    };
+
     const startLoop = async () => {
-        console.log(
-            "START BUTTON CLICKED"
-        );
-
-        console.log(
-            "START CONFIG",
-            config
-        );
-
-        console.log(
-            "POST BODY",
-            config
-        );
-
         const response =
             await fetch(
-                API.botStart(),
+                API.loopStart(),
                 {
-
                     method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-                    },
-
-                    body: JSON.stringify({
-                        symbol: config.symbol,
-                        exchange: String(config.exchange || "kucoin").toLowerCase(),
-                        risk_percent: Number(config.risk_percent ?? 1),
-                        position_size: Number(config.position_size ?? config.positionSize ?? 0),
-                        max_drawdown_pct: Number(config.max_drawdown_pct ?? config.maxDd ?? 5),
-                        sl_percent: Number(config.sl_percent ?? config.sl ?? 1),
-                        leverage: Number(config.leverage ?? 1),
-                        timeframe: String(config.timeframe || "1m"),
-                        tp_percent: Number(config.tp_percent ?? config.tp ?? 1),
-                        trailing_stop: Boolean(config.trailing_stop ?? config.trailing ?? false),
-                        mode: String(config.mode || "paper").toLowerCase()
-                    })
-
                 }
             );
 
@@ -841,7 +856,7 @@ export default function BotControl({
         );
 
         const result = await requestBotStop({
-            endpoint: API.botStop(),
+            endpoint: API.loopStop(),
         });
 
         if (result?.status !== "stopped") {
@@ -1074,21 +1089,44 @@ export default function BotControl({
 
     return (
 
-        <div className="terminal-panel">
+        <div className="terminal-panel operation-console">
 
-            {/* =======================================================
-               SECTION TITLE
-            ======================================================= */}
-
-            <div className="left-card-header operation-card-header">
-
-                <div className="left-card-title section-number-title">
-
-                    OPERATION（操作）
-
-                </div>
-
+            <div className="operation-setup-flow" data-testid="operation-setup-flow">
+                {setupColumns}
+                <section className="operation-setup-step operation-automation-step" data-testid="automation-step">
+                    <div className="operation-step-heading"><span>4</span><strong>AUTOMATION</strong></div>
+                    <div className="operation-automation-summary">
+                        <div><span>LOOP ON START</span><strong>NO</strong></div>
+                        <small>Runtime-only after BOT START</small>
+                        <div><span>AUTO TRADE ON START</span><strong>OFF</strong></div>
+                        <small>Requires BOT + LOOP running</small>
+                        <div><span>AMS ACTIVATION</span><strong>NOT STAGED</strong></div>
+                        <small>Monitoring status is read only here</small>
+                    </div>
+                </section>
+                <section className="operation-setup-step operation-ready-step" data-testid="ready-start-step">
+                    <div className="operation-step-heading"><span>5</span><strong>READY / START</strong></div>
+                    <div className="operation-ready-check" data-testid="ready-check">
+                        <div><span>Mode</span><strong>{String(config?.mode || "UNKNOWN").toUpperCase()}</strong></div>
+                        <div><span>Market</span><strong>{config?.selectionMode || "NOT EXPOSED"}</strong></div>
+                        <div><span>Symbol</span><strong>{config?.displaySymbol || config?.symbol || "UNKNOWN"}</strong></div>
+                        <div><span>Risk</span><strong>{config?.risk_percent != null ? `${config.risk_percent}%` : "UNKNOWN"}</strong></div>
+                        <div><span>Leverage</span><strong>{config?.leverage != null ? `${config.leverage}x` : "UNKNOWN"}</strong></div>
+                        <div><span>Loop</span><strong>STOPPED ON START</strong></div>
+                        <div><span>Auto Trade</span><strong>OFF ON START</strong></div>
+                        <div><span>Emergency</span><strong>{emergencyStateCode}</strong></div>
+                    </div>
+                    <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || emergencyBlocksOperations} onClick={handleBotLifecycle} type="button">
+                        {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? "STOP BOT" : "START BOT")}
+                    </button>
+                    <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
+                    {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
+                </section>
             </div>
+
+            <div className="operation-runtime-heading">CURRENT RUNTIME STATE <span>POST-START RUNTIME CONTROLS</span></div>
+            <div className="operation-runtime-controls">
+                <div className="operation-runtime-bot"><span>BOT</span><strong>{botRunning ? "RUNNING" : "STOPPED"}</strong></div>
 
             {/* =======================================================
                LOOP
@@ -1187,15 +1225,6 @@ export default function BotControl({
                     </div>
                 )}
 
-                {autoTradeDisabledReason && (
-                    <div
-                        className="operation-state-reason operation-state-reason--warning"
-                        data-testid="auto-trade-disabled-reason"
-                    >
-                        {autoTradeDisabledReason}
-                    </div>
-                )}
-
                 {autoTradeError && (
                     <div
                         className="operation-auto-trade-error"
@@ -1208,80 +1237,68 @@ export default function BotControl({
 
             </div>
 
+                <div className="operation-runtime-market"><span>MARKET MODE</span><strong>{config?.selectionMode || "NOT EXPOSED"}</strong><span>AMS MONITORING</span><strong>{config?.autoMarketState || "NOT AVAILABLE"}</strong><span>ACTIVE SYMBOL</span><strong>{config?.displaySymbol || "UNKNOWN"}</strong></div>
+            </div>
+
             <div className="operation-section operation-emergency-section">
 
                 <div className="operation-section-title">
                     EMERGENCY
                 </div>
 
-                <div
-                    className={
-                        "operation-emergency-status "
-                        + `operation-emergency-status--${emergencyStateDetails.tone}`
-                    }
-                >
-                    <span className="operation-emergency-status__eyebrow">
-                        EMERGENCY STATUS
-                    </span>
-
-                    <strong className="operation-emergency-status__state">
-                        {emergencyStateDetails.label}
-                    </strong>
-
-                    <span className="operation-emergency-status__message">
-                        {emergencyStateDetails.text}
-                    </span>
-
-                    {emergencyStateCode === "READY" && (
-                        <span className="operation-emergency-status__message" data-testid="emergency-bot-state">
-                            {botRunning === true
-                                ? "Botは稼働中です"
-                                : botRunning === false
-                                    ? "Botは停止中です"
-                                    : "Bot状態を確認できません"
-                            }
+                {emergencyStateCode !== "READY" && (
+                    <div
+                        className={
+                            "operation-emergency-status "
+                            + `operation-emergency-status--${emergencyStateDetails.tone}`
+                        }
+                    >
+                        <span className="operation-emergency-status__eyebrow">
+                            EMERGENCY STATUS
                         </span>
-                    )}
 
-                    {emergencyStateCode === "PROCESSING" && (
-                        <span className="operation-emergency-status__pending">
-                            PROCESSING
-                        </span>
-                    )}
+                        <strong className="operation-emergency-status__state">
+                            {emergencyStateDetails.label}
+                        </strong>
 
-                    {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
-                        <div className="operation-emergency-facts">
-                            {lockedFacts.map((fact) => (
-                                <span key={fact}>
-                                    {fact}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-
-                    {emergencyStateCode === "ACTION_REQUIRED"
-                        && actionWarnings.length > 0 && (
-                        <div className="operation-emergency-warnings">
-                            {actionWarnings.map((warning) => (
-                                <span key={warning}>
-                                    {warning}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-
-                    {lastResultMessage && emergencyStateCode !== "READY" && (
                         <span className="operation-emergency-status__message">
-                            {lastResultMessage}
+                            {emergencyStateDetails.text}
                         </span>
-                    )}
 
-                    {unlockNotice && emergencyStateCode === "READY" && (
-                        <span className="operation-emergency-status__message operation-emergency-status__message--safe">
-                            {unlockNotice}
-                        </span>
-                    )}
-                </div>
+                        {emergencyStateCode === "PROCESSING" && (
+                            <span className="operation-emergency-status__pending">
+                                PROCESSING
+                            </span>
+                        )}
+
+                        {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
+                            <div className="operation-emergency-facts">
+                                {lockedFacts.map((fact) => (
+                                    <span key={fact}>
+                                        {fact}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {emergencyStateCode === "ACTION_REQUIRED"
+                            && actionWarnings.length > 0 && (
+                            <div className="operation-emergency-warnings">
+                                {actionWarnings.map((warning) => (
+                                    <span key={warning}>
+                                        {warning}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {lastResultMessage && (
+                            <span className="operation-emergency-status__message">
+                                {lastResultMessage}
+                            </span>
+                        )}
+                    </div>
+                )}
 
                 <button
                     className="emergency-stop-button operation-emergency-button"
@@ -1342,18 +1359,20 @@ export default function BotControl({
                     </div>
                 )}
 
-                <button
-                    className="operation-emergency-unlock"
-                    disabled={!unlockAllowed || unlockPending}
-                    onClick={handleReturnToNormal}
-                    aria-busy={unlockPending ? "true" : undefined}
-                    type="button"
-                >
-                    {unlockPending
-                        ? "復帰中..."
-                        : "通常に戻す"
-                    }
-                </button>
+                {emergencyStateCode !== "READY" && (
+                    <button
+                        className="operation-emergency-unlock"
+                        disabled={!unlockAllowed || unlockPending}
+                        onClick={handleReturnToNormal}
+                        aria-busy={unlockPending ? "true" : undefined}
+                        type="button"
+                    >
+                        {unlockPending
+                            ? "復帰中..."
+                            : "通常に戻す"
+                        }
+                    </button>
+                )}
 
                 <div className="operation-emergency-lock">
                     <span className="operation-state-label">

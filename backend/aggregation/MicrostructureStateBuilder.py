@@ -34,20 +34,44 @@
 #
 # ============================================================
 
+from collections import deque
+from copy import deepcopy
 from datetime import datetime
+import math
 
 from backend.utils.log_buffer import runtime_debug
+from backend.strategy.normalized_parameters import parameter_value
 
 
 class MicrostructureStateBuilder:
 
     ORDERBOOK_AGGREGATION_DEPTH = 20
+    ABSORPTION_VOLUME_THRESHOLD = 50000.0
+    ABSORPTION_ABS_PRICE_DELTA_THRESHOLD = 0.0001
+    STAGNANT_VOLUME_THRESHOLD = 75000.0
+    STAGNANT_SPREAD_THRESHOLD = 0.0003
+    FAKE_PRESSURE_DIFFERENCE_THRESHOLD = 0.70
+    FAKE_PRESSURE_ABS_PRICE_DELTA_THRESHOLD = 0.0001
 
     # ========================================================
     # INIT
     # ========================================================
 
-    def __init__(self):
+    def __init__(self, parameter_set=None):
+
+        self.parameter_set = deepcopy(parameter_set)
+        self.normalized_parameters_enabled = (
+            isinstance(self.parameter_set, dict)
+            and self.parameter_set.get("scope") == "PAPER_ONLY"
+        )
+        volume_window_size = int(parameter_value(
+            self.parameter_set,
+            "volumeWindowSize",
+            100,
+        ))
+        self.total_volume_history = deque(
+            maxlen=max(1, volume_window_size)
+        )
 
         self.previous_spread = None
 
@@ -76,6 +100,29 @@ class MicrostructureStateBuilder:
         self.ai_momentum_persistence = 0.0
 
         self.ai_momentum_trace = None
+
+        # Paper-only Strategy momentum uses causal wall-clock buckets.  The
+        # legacy callback-count window above remains untouched for Live/default.
+        self._strategy_momentum_samples = deque()
+
+        self.strategy_momentum_features = None
+
+    @staticmethod
+    def _rolling_percentile(values, percentile):
+        """Deterministic linear percentile over prior causal observations."""
+
+        ordered = sorted(float(value) for value in values)
+        if not ordered:
+            return None
+        position = (len(ordered) - 1) * float(percentile)
+        lower = math.floor(position)
+        upper = math.ceil(position)
+        if lower == upper:
+            return ordered[lower]
+        weight = position - lower
+        return ordered[lower] + (
+            (ordered[upper] - ordered[lower]) * weight
+        )
 
     def observe_price_history_generation(
         self,
@@ -694,6 +741,143 @@ class MicrostructureStateBuilder:
 
         return return_value
 
+    def compute_strategy_momentum_features(
+        self,
+        current_price,
+        sampled_at=None,
+    ):
+        """Build the Paper-only, time-normalized Strategy momentum contract."""
+
+        if not isinstance(sampled_at, (int, float)) or isinstance(
+            sampled_at,
+            bool,
+        ):
+            sampled_at = datetime.utcnow().timestamp()
+
+        window_seconds = float(parameter_value(
+            self.parameter_set,
+            "momentumWindowSeconds",
+            60.0,
+        ))
+        cadence_seconds = float(parameter_value(
+            self.parameter_set,
+            "momentumSampleCadenceSeconds",
+            1.0,
+        ))
+        minimum_warmup_seconds = float(parameter_value(
+            self.parameter_set,
+            "momentumMinimumWarmupSeconds",
+            20.0,
+        ))
+        minimum_samples = int(parameter_value(
+            self.parameter_set,
+            "momentumMinimumSamples",
+            10,
+        ))
+        activity_exponent = float(parameter_value(
+            self.parameter_set,
+            "momentumActivityExponent",
+            0.5,
+        ))
+        cadence_seconds = max(cadence_seconds, 0.001)
+        window_seconds = max(window_seconds, cadence_seconds)
+
+        bucket = math.floor(sampled_at / cadence_seconds)
+        reset_reason = None
+        if (
+            self._strategy_momentum_samples
+            and bucket < self._strategy_momentum_samples[-1]["bucket"]
+        ):
+            self._strategy_momentum_samples.clear()
+            reset_reason = "TIMESTAMP_REVERSED"
+
+        sample = {
+            "bucket": bucket,
+            "timestamp": float(sampled_at),
+            "price": float(current_price),
+        }
+        if (
+            self._strategy_momentum_samples
+            and bucket == self._strategy_momentum_samples[-1]["bucket"]
+        ):
+            self._strategy_momentum_samples[-1] = sample
+        else:
+            self._strategy_momentum_samples.append(sample)
+
+        minimum_bucket = bucket - math.ceil(
+            window_seconds / cadence_seconds
+        )
+        while (
+            self._strategy_momentum_samples
+            and self._strategy_momentum_samples[0]["bucket"]
+            < minimum_bucket
+        ):
+            self._strategy_momentum_samples.popleft()
+
+        samples = tuple(self._strategy_momentum_samples)
+        deltas = [
+            newer["price"] - older["price"]
+            for older, newer in zip(samples, samples[1:])
+        ]
+        up_moves = sum(delta > 0 for delta in deltas)
+        down_moves = sum(delta < 0 for delta in deltas)
+        non_flat_moves = up_moves + down_moves
+        flat_moves = len(deltas) - non_flat_moves
+
+        if up_moves > down_moves:
+            dominant_direction = "UP"
+        elif down_moves > up_moves:
+            dominant_direction = "DOWN"
+        else:
+            dominant_direction = "FLAT"
+
+        direction_purity = (
+            max(up_moves, down_moves) / non_flat_moves
+            if non_flat_moves
+            else 0.0
+        )
+        elapsed_slots = (
+            bucket - samples[0]["bucket"]
+            if samples
+            else 0
+        )
+        total_observation_slots = max(1, elapsed_slots)
+        activity_ratio = min(
+            1.0,
+            non_flat_moves / total_observation_slots,
+        )
+        activity_factor = activity_ratio ** activity_exponent
+        normalized_momentum = direction_purity * activity_factor
+        elapsed_seconds = elapsed_slots * cadence_seconds
+        warmup_ready = (
+            elapsed_seconds >= minimum_warmup_seconds
+            and len(samples) >= minimum_samples
+        )
+
+        self.strategy_momentum_features = {
+            "contractVersion": "TIME_SYMBOL_NORMALIZED_V1",
+            "windowSeconds": window_seconds,
+            "sampleCadenceSeconds": cadence_seconds,
+            "sampleCount": len(samples),
+            "totalObservationSlots": total_observation_slots,
+            "elapsedSeconds": round(elapsed_seconds, 6),
+            "upMoves": up_moves,
+            "downMoves": down_moves,
+            "flatMoves": flat_moves,
+            "nonFlatMoves": non_flat_moves,
+            "momentumDirection": dominant_direction,
+            "directionPurity": round(direction_purity, 4),
+            "activityRatio": round(activity_ratio, 4),
+            "activityFactor": round(activity_factor, 4),
+            "normalizedMomentum": round(normalized_momentum, 4),
+            "warmupReady": warmup_ready,
+            "warmupReason": (
+                reset_reason
+                or (None if warmup_ready else "INSUFFICIENT_TIME_NORMALIZED_HISTORY")
+            ),
+        }
+        return dict(self.strategy_momentum_features)
+
     # ========================================================
     # SPREAD VOLATILITY
     # ========================================================
@@ -753,6 +937,20 @@ class MicrostructureStateBuilder:
 
         return round(normalized, 4)
 
+    @staticmethod
+    def compute_normalized_spread_quality(spread_pct, maximum_spread_pct):
+        if spread_pct is None or maximum_spread_pct <= 0:
+            return 0.0
+        quality = 1.0 - (float(spread_pct) / float(maximum_spread_pct))
+        return round(max(0.0, min(quality, 1.0)), 4)
+
+    @staticmethod
+    def compute_normalized_liquidity_quality(total_volume, reference_volume):
+        if reference_volume is None or reference_volume <= 0:
+            return 0.0
+        quality = float(total_volume) / float(reference_volume)
+        return round(max(0.0, min(quality, 1.0)), 4)
+
     # ========================================================
     # ABSORPTION DETECTION
     # ========================================================
@@ -766,10 +964,11 @@ class MicrostructureStateBuilder:
 
         heavy_volume = (
             buy_volume + sell_volume
-        ) > 50000
+        ) > self.ABSORPTION_VOLUME_THRESHOLD
 
         weak_price_move = (
-            abs(price_delta) < 0.0001
+            abs(price_delta)
+            < self.ABSORPTION_ABS_PRICE_DELTA_THRESHOLD
         )
 
         return (
@@ -788,8 +987,8 @@ class MicrostructureStateBuilder:
     ):
 
         return (
-            total_volume > 75000
-            and spread > 0.0003
+            total_volume > self.STAGNANT_VOLUME_THRESHOLD
+            and spread > self.STAGNANT_SPREAD_THRESHOLD
         )
 
     # ========================================================
@@ -808,8 +1007,10 @@ class MicrostructureStateBuilder:
         )
 
         return (
-            imbalance > 0.70
-            and abs(price_delta) < 0.0001
+            imbalance
+            > self.FAKE_PRESSURE_DIFFERENCE_THRESHOLD
+            and abs(price_delta)
+            < self.FAKE_PRESSURE_ABS_PRICE_DELTA_THRESHOLD
         )
 
     # ========================================================
@@ -958,6 +1159,17 @@ class MicrostructureStateBuilder:
             best_ask - best_bid,
         )
 
+        mid_price = (
+            (best_bid + best_ask) / 2
+            if best_bid > 0 and best_ask > 0
+            else None
+        )
+        spread_pct = (
+            (spread / mid_price) * 100
+            if mid_price
+            else None
+        )
+
         # ----------------------------------------------------
         # Volume
         # ----------------------------------------------------
@@ -999,6 +1211,12 @@ class MicrostructureStateBuilder:
                 - self.previous_price
             )
 
+        price_delta_pct = (
+            (price_delta / self.previous_price) * 100
+            if self.previous_price not in (None, 0)
+            else None
+        )
+
         # ----------------------------------------------------
         # Metrics
         # ----------------------------------------------------
@@ -1021,12 +1239,15 @@ class MicrostructureStateBuilder:
             or {}
         )
 
-        ai_momentum_persistence = (
-            self.compute_ai_momentum_persistence(
-                last_price,
-                price_path_debug.get("marketUpdateTime"),
+        if self.normalized_parameters_enabled:
+            strategy_momentum_features = (
+                self.compute_strategy_momentum_features(
+                    last_price,
+                    price_path_debug.get("marketUpdateTime"),
+                )
             )
-        )
+        else:
+            strategy_momentum_features = {}
 
         self.observe_price_history_generation(
             last_price,
@@ -1050,6 +1271,8 @@ class MicrostructureStateBuilder:
                 total_volume
             )
         )
+        normalized_spread_quality = spread_quality
+        normalized_liquidity_quality = liquidity_quality
 
         # ----------------------------------------------------
         # Pressure
@@ -1074,28 +1297,255 @@ class MicrostructureStateBuilder:
         # Detection
         # ----------------------------------------------------
 
-        absorption_detected = (
-            self.detect_absorption(
+        pressure_difference = abs(buy_pressure - sell_pressure)
+        liquidity_calibration_ready = True
+
+        if self.normalized_parameters_enabled:
+            history = tuple(self.total_volume_history)
+            minimum_history = int(parameter_value(
+                self.parameter_set,
+                "volumeMinimumHistory",
+                20,
+            ))
+            absorption_percentile = float(parameter_value(
+                self.parameter_set,
+                "absorptionVolumePercentile",
+                0.90,
+            ))
+            stagnant_percentile = float(parameter_value(
+                self.parameter_set,
+                "stagnantVolumePercentile",
+                0.90,
+            ))
+            absorption_volume_threshold = self._rolling_percentile(
+                history,
+                absorption_percentile,
+            )
+            stagnant_volume_threshold = self._rolling_percentile(
+                history,
+                stagnant_percentile,
+            )
+            liquidity_quality_percentile = float(parameter_value(
+                self.parameter_set,
+                "liquidityQualityPercentile",
+                0.90,
+            ))
+            liquidity_quality_reference = self._rolling_percentile(
+                history,
+                liquidity_quality_percentile,
+            )
+            absorption_max_delta_pct = float(parameter_value(
+                self.parameter_set,
+                "absorptionMaxPriceDeltaPct",
+                0.10,
+            ))
+            stagnant_min_spread_pct = float(parameter_value(
+                self.parameter_set,
+                "stagnantMinSpreadPct",
+                0.50,
+            ))
+            fake_pressure_threshold = float(parameter_value(
+                self.parameter_set,
+                "fakePressureDifference",
+                self.FAKE_PRESSURE_DIFFERENCE_THRESHOLD,
+            ))
+            fake_pressure_max_delta_pct = float(parameter_value(
+                self.parameter_set,
+                "fakePressureMaxPriceDeltaPct",
+                0.10,
+            ))
+            liquidity_calibration_ready = (
+                len(history) >= minimum_history
+                and price_delta_pct is not None
+                and spread_pct is not None
+            )
+            absorption_volume_passed = (
+                liquidity_calibration_ready
+                and total_volume >= absorption_volume_threshold
+            )
+            absorption_delta_passed = (
+                liquidity_calibration_ready
+                and abs(price_delta_pct) < absorption_max_delta_pct
+            )
+            stagnant_volume_passed = (
+                liquidity_calibration_ready
+                and total_volume >= stagnant_volume_threshold
+            )
+            stagnant_spread_passed = (
+                liquidity_calibration_ready
+                and spread_pct > stagnant_min_spread_pct
+            )
+            fake_pressure_difference_passed = (
+                liquidity_calibration_ready
+                and pressure_difference > fake_pressure_threshold
+            )
+            fake_pressure_delta_passed = (
+                liquidity_calibration_ready
+                and abs(price_delta_pct) < fake_pressure_max_delta_pct
+            )
+            absorption_detected = (
+                absorption_volume_passed and absorption_delta_passed
+            )
+            stagnant_heavy_flow = (
+                stagnant_volume_passed and stagnant_spread_passed
+            )
+            fake_pressure_detected = (
+                fake_pressure_difference_passed
+                and fake_pressure_delta_passed
+            )
+            maximum_strategy_spread_pct = float(parameter_value(
+                self.parameter_set,
+                "maximumStrategySpreadPct",
+                0.50,
+            ))
+            normalized_spread_quality = (
+                self.compute_normalized_spread_quality(
+                    spread_pct,
+                    maximum_strategy_spread_pct,
+                )
+            )
+            normalized_liquidity_quality = (
+                self.compute_normalized_liquidity_quality(
+                    total_volume,
+                    liquidity_quality_reference,
+                )
+            )
+            parameter_authority = deepcopy(self.parameter_set)
+            detector_details = {
+                "calibrationReady": liquidity_calibration_ready,
+                "historyCount": len(history),
+                "minimumHistory": minimum_history,
+                "normalizedQuality": {
+                    "spreadQuality": normalized_spread_quality,
+                    "spreadPct": spread_pct,
+                    "maximumStrategySpreadPct": maximum_strategy_spread_pct,
+                    "liquidityQuality": normalized_liquidity_quality,
+                    "observedTotalVolume": total_volume,
+                    "referenceRollingVolume": liquidity_quality_reference,
+                    "referenceVolumePercentile": liquidity_quality_percentile,
+                },
+                "absorption": {
+                    "observedTotalVolume": total_volume,
+                    "thresholdRollingVolume": absorption_volume_threshold,
+                    "thresholdVolumePercentile": absorption_percentile,
+                    "totalVolumeOperator": ">=",
+                    "totalVolumeConditionPassed": absorption_volume_passed,
+                    "observedAbsPriceDelta": abs(price_delta),
+                    "observedAbsPriceDeltaPct": (
+                        abs(price_delta_pct)
+                        if price_delta_pct is not None
+                        else None
+                    ),
+                    "thresholdMaxPriceDeltaPct": absorption_max_delta_pct,
+                    "absPriceDeltaPctOperator": "<",
+                    "absPriceDeltaConditionPassed": absorption_delta_passed,
+                    "conditionPassed": absorption_detected,
+                },
+                "stagnantHeavyFlow": {
+                    "observedTotalVolume": total_volume,
+                    "thresholdRollingVolume": stagnant_volume_threshold,
+                    "thresholdVolumePercentile": stagnant_percentile,
+                    "totalVolumeOperator": ">=",
+                    "totalVolumeConditionPassed": stagnant_volume_passed,
+                    "observedSpread": spread,
+                    "observedSpreadPct": spread_pct,
+                    "thresholdMinSpreadPct": stagnant_min_spread_pct,
+                    "spreadPctOperator": ">",
+                    "spreadConditionPassed": stagnant_spread_passed,
+                    "conditionPassed": stagnant_heavy_flow,
+                },
+                "fakePressure": {
+                    "observedPressureDifference": pressure_difference,
+                    "thresholdPressureDifference": fake_pressure_threshold,
+                    "pressureDifferenceOperator": ">",
+                    "pressureDifferenceConditionPassed": (
+                        fake_pressure_difference_passed
+                    ),
+                    "observedAbsPriceDelta": abs(price_delta),
+                    "observedAbsPriceDeltaPct": (
+                        abs(price_delta_pct)
+                        if price_delta_pct is not None
+                        else None
+                    ),
+                    "thresholdMaxPriceDeltaPct": fake_pressure_max_delta_pct,
+                    "absPriceDeltaPctOperator": "<",
+                    "absPriceDeltaConditionPassed": fake_pressure_delta_passed,
+                    "conditionPassed": fake_pressure_detected,
+                },
+            }
+        else:
+            absorption_detected = self.detect_absorption(
                 buy_volume,
                 sell_volume,
                 price_delta,
             )
-        )
-
-        stagnant_heavy_flow = (
-            self.detect_stagnant_heavy_flow(
+            stagnant_heavy_flow = self.detect_stagnant_heavy_flow(
                 total_volume,
                 spread,
             )
-        )
-
-        fake_pressure_detected = (
-            self.detect_fake_pressure(
+            fake_pressure_detected = self.detect_fake_pressure(
                 buy_pressure,
                 sell_pressure,
                 price_delta,
             )
-        )
+            parameter_authority = {
+                "source": "MicrostructureStateBuilder",
+                "kind": "classConstant",
+            }
+            detector_details = {
+                "absorption": {
+                    "observedTotalVolume": total_volume,
+                    "thresholdTotalVolume": self.ABSORPTION_VOLUME_THRESHOLD,
+                    "totalVolumeOperator": ">",
+                    "totalVolumeConditionPassed": (
+                        total_volume > self.ABSORPTION_VOLUME_THRESHOLD
+                    ),
+                    "observedAbsPriceDelta": abs(price_delta),
+                    "thresholdAbsPriceDelta": self.ABSORPTION_ABS_PRICE_DELTA_THRESHOLD,
+                    "absPriceDeltaOperator": "<",
+                    "absPriceDeltaConditionPassed": (
+                        abs(price_delta)
+                        < self.ABSORPTION_ABS_PRICE_DELTA_THRESHOLD
+                    ),
+                    "conditionPassed": absorption_detected,
+                },
+                "stagnantHeavyFlow": {
+                    "observedTotalVolume": total_volume,
+                    "thresholdTotalVolume": self.STAGNANT_VOLUME_THRESHOLD,
+                    "totalVolumeOperator": ">",
+                    "totalVolumeConditionPassed": (
+                        total_volume > self.STAGNANT_VOLUME_THRESHOLD
+                    ),
+                    "observedSpread": spread,
+                    "thresholdSpread": self.STAGNANT_SPREAD_THRESHOLD,
+                    "spreadOperator": ">",
+                    "spreadConditionPassed": (
+                        spread > self.STAGNANT_SPREAD_THRESHOLD
+                    ),
+                    "conditionPassed": stagnant_heavy_flow,
+                },
+                "fakePressure": {
+                    "observedPressureDifference": pressure_difference,
+                    "thresholdPressureDifference": self.FAKE_PRESSURE_DIFFERENCE_THRESHOLD,
+                    "pressureDifferenceOperator": ">",
+                    "pressureDifferenceConditionPassed": (
+                        pressure_difference
+                        > self.FAKE_PRESSURE_DIFFERENCE_THRESHOLD
+                    ),
+                    "observedAbsPriceDelta": abs(price_delta),
+                    "thresholdAbsPriceDelta": self.FAKE_PRESSURE_ABS_PRICE_DELTA_THRESHOLD,
+                    "absPriceDeltaOperator": "<",
+                    "absPriceDeltaConditionPassed": (
+                        abs(price_delta)
+                        < self.FAKE_PRESSURE_ABS_PRICE_DELTA_THRESHOLD
+                    ),
+                    "conditionPassed": fake_pressure_detected,
+                },
+            }
+
+        # The current observation is added only after its causal threshold was
+        # calculated, preventing look-ahead in the rolling percentile.
+        self.total_volume_history.append(total_volume)
 
         # Debug-only snapshot of the exact values used by the liquidity
         # detectors above. Strategy, governance, and execution logic do not
@@ -1104,16 +1554,21 @@ class MicrostructureStateBuilder:
             "absorptionDetected": absorption_detected,
             "fakePressureDetected": fake_pressure_detected,
             "stagnantHeavyFlow": stagnant_heavy_flow,
+            "liquidityCalibrationReady": liquidity_calibration_ready,
             "liquiditySafe": None,
             "priceDelta": price_delta,
+            "absPriceDelta": abs(price_delta),
+            "priceDeltaPct": price_delta_pct,
+            "bestBid": best_bid,
+            "bestAsk": best_ask,
+            "midPrice": mid_price,
+            "spreadPct": spread_pct,
             "buyVolume": buy_volume,
             "sellVolume": sell_volume,
             "totalVolume": total_volume,
             "buyPressure": buy_pressure,
             "sellPressure": sell_pressure,
-            "pressureDiff": abs(
-                buy_pressure - sell_pressure
-            ),
+            "pressureDiff": pressure_difference,
             "orderbookAggregationMode": (
                 orderbook_aggregation_mode
             ),
@@ -1146,6 +1601,11 @@ class MicrostructureStateBuilder:
             "maxRawAsk": max_raw_ask,
             "spread": spread,
             "triggeredReasons": [],
+            "parameterAuthority": parameter_authority,
+            "detectorDetails": detector_details,
+            "strategyMomentumFeatures": strategy_momentum_features,
+            "normalizedSpreadQuality": normalized_spread_quality,
+            "normalizedLiquidityQuality": normalized_liquidity_quality,
         }
 
         # ----------------------------------------------------
@@ -1160,14 +1620,29 @@ class MicrostructureStateBuilder:
             "momentumPersistence":
                 momentum_persistence,
 
-            "aiMomentumPersistence":
-                ai_momentum_persistence,
+            "strategyMomentumFeatures":
+                dict(strategy_momentum_features),
 
-            "aiMomentumTrace":
-                dict(
-                    self.ai_momentum_trace
-                    or {}
+            "normalizedMomentum":
+                strategy_momentum_features.get(
+                    "normalizedMomentum",
+                    momentum_persistence,
                 ),
+
+            "momentumDirection":
+                strategy_momentum_features.get(
+                    "momentumDirection",
+                    "FLAT",
+                ),
+
+            "directionPurity":
+                strategy_momentum_features.get("directionPurity", 0.0),
+
+            "activityRatio":
+                strategy_momentum_features.get("activityRatio", 0.0),
+
+            "momentumWarmupReady":
+                strategy_momentum_features.get("warmupReady", True),
 
             "momentumPersistenceDebug":
                 dict(
@@ -1190,8 +1665,14 @@ class MicrostructureStateBuilder:
             "spreadQuality":
                 spread_quality,
 
+            "normalizedSpreadQuality":
+                normalized_spread_quality,
+
             "liquidityQuality":
                 liquidity_quality,
+
+            "normalizedLiquidityQuality":
+                normalized_liquidity_quality,
 
             "buyPressure":
                 round(
@@ -1213,6 +1694,12 @@ class MicrostructureStateBuilder:
 
             "fakePressureDetected":
                 fake_pressure_detected,
+
+            "liquidityCalibrationReady":
+                liquidity_calibration_ready,
+
+            "parameterAuthority":
+                parameter_authority,
 
             "liquidityInstabilityDebug":
                 liquidity_instability_debug,

@@ -665,27 +665,61 @@ class GovernanceRuntime:
     def process_governance(
         self,
         strategy_state,
-        ai_signal,
     ):
 
-        if ai_signal is None:
+        if not isinstance(strategy_state, dict):
 
             return {
                 "allowed": False,
-                "reason": "AI_SIGNAL_NONE",
+                "reason": "STRATEGY_STATE_INVALID",
                 "direction": None,
             }
 
-        if ai_signal == "HOLD":
+        direction = str(
+            strategy_state.get("direction") or "HOLD"
+        ).strip().upper()
+        strategy_allowed = (
+            strategy_state.get("executionAllowed") is True
+            and direction in {"BUY", "SELL", "LONG", "SHORT"}
+        )
+
+        if not strategy_allowed:
 
             return {
                 "allowed": False,
-                "reason": "AI_HOLD",
+                "reason": (
+                    strategy_state.get("suppressionReason")
+                    or "STRATEGY_HOLD"
+                ),
+                "direction": None,
+            }
+
+        if governance_state.get("emergency_stop", False):
+
+            return {
+                "allowed": False,
+                "reason": "EMERGENCY_HALT",
+                "direction": None,
+            }
+
+        if not governance_state.get("execution_enabled", False):
+
+            return {
+                "allowed": False,
+                "reason": "EXECUTION_DISABLED",
+                "direction": None,
+            }
+
+        if governance_state.get("no_trade_zone", False):
+
+            return {
+                "allowed": False,
+                "reason": "NO_TRADE_ZONE",
                 "direction": None,
             }
 
         return {
             "allowed": True,
             "reason": None,
-            "direction": ai_signal,
+            "direction": direction,
         }

@@ -1,12 +1,9 @@
 const STATIONS = [
-    "Python Runtime",
-    "Runtime Adapter",
+    "Market / Order Book",
+    "Python Detectors",
     "Feature Builder",
     "Python Strategy",
-    "LSTM",
-    "LLM",
-    "Consensus",
-    "AI Final Decision",
+    "Money Management",
     "Governance",
     "Execution",
 ];
@@ -15,12 +12,13 @@ export default function DecisionRailwayPanel() {
     return (
         <section aria-labelledby="mi-railway-panel-title" className="mi-panel mi-railway-panel">
             <h2 className="mi-panel__title" id="mi-railway-panel-title">
-                AI DECISION RAILWAY
+                TRADING DECISION RAILWAY
             </h2>
 
             <div className="mi-panel__content mi-railway-layout">
                 <section aria-labelledby="mi-railway-title" className="mi-placeholder-card mi-railway">
                     <h3 id="mi-railway-title">Decision Railway</h3>
+                    <p><strong>TRADING AI: OFF / NOT INSTALLED</strong></p>
                     <ol className="mi-railway__stations">
                         {STATIONS.map((station) => (
                             <li className="mi-railway__station" key={station}>

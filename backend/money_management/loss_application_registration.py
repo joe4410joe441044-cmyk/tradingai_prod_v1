@@ -19,6 +19,7 @@ from .loss_application_models import (
 )
 from .loss_application_settings import (
     LossLimitApplicationSettingsError,
+    resolve_cash_flow_runtime_settings,
     resolve_loss_limit_application_configuration,
 )
 from .loss_runtime_coordination_models import LossLimitRuntimeStopRequest
@@ -366,6 +367,12 @@ def shutdown_money_management_application(app, timestamp_source=None, logger=Non
     if existing.shutdown_status is not None:
         return existing
     adapter = existing.lifecycle_adapter
+    cash_flow_runtime = getattr(adapter, "cash_flow_runtime", None) if adapter else None
+    if cash_flow_runtime is not None:
+        try:
+            cash_flow_runtime.stop()
+        except Exception:
+            _safe_log(logger, "warning", "Cash Flow Scheduler Stop Failed")
     if adapter is None:
         registration = MoneyManagementApplicationRegistration(
             existing.composition_status,
@@ -432,3 +439,68 @@ def shutdown_money_management_application(app, timestamp_source=None, logger=Non
         event,
     )
     return registration
+
+
+def start_money_management_cash_flow_runtime(
+    app, *, client=None, client_factory=None, settings=None, logger=None,
+):
+    """Start the sole production cash-flow owner after MM lifecycle startup."""
+    registration = getattr(app.state, "money_management", None)
+    if not isinstance(registration, MoneyManagementApplicationRegistration):
+        return None
+    adapter = registration.lifecycle_adapter
+    coordinator = getattr(adapter, "cash_flow_transaction_coordinator", None) if adapter else None
+    if adapter is None or coordinator is None or registration.safe_status.lifecycle_state is not ApplicationLifecycleState.RUNNING:
+        return None
+    existing = getattr(adapter, "cash_flow_runtime", None)
+    if existing is not None:
+        return existing
+    try:
+        enabled, interval, freshness = resolve_cash_flow_runtime_settings(settings)
+        from .cash_flow_runtime import CashFlowAuthorityReader, CashFlowSyncRuntime
+        if not enabled:
+            runtime = CashFlowSyncRuntime(
+                persistence_directory=coordinator._base_directory,
+                reader=None, equity_source=None,
+                transaction_coordinator=coordinator, enabled=False,
+                poll_interval_seconds=interval, freshness_seconds=freshness,
+            )
+            adapter.cash_flow_runtime = runtime
+            runtime.start(immediate=False)
+            return runtime
+        if client is None:
+            if client_factory is None:
+                from backend.execution.kucoin_trade import KucoinTradeClient
+                client_factory = KucoinTradeClient
+            client = client_factory()
+        def current_equity():
+            overview = client.get_account_overview() or {}
+            return {
+                "sourceAuthority": "REAL_LIVE_ACCOUNT",
+                "equity": overview.get("equity", overview.get("accountEquity")),
+            }
+
+        runtime = CashFlowSyncRuntime(
+            persistence_directory=coordinator._base_directory,
+            reader=CashFlowAuthorityReader(client), equity_source=current_equity,
+            transaction_coordinator=coordinator, enabled=enabled,
+            poll_interval_seconds=interval, freshness_seconds=freshness,
+        )
+        adapter.cash_flow_runtime = runtime
+        runtime.start(immediate=True)
+        return runtime
+    except Exception:
+        _safe_log(logger, "warning", "Cash Flow Scheduler Initialization Failed")
+        return None
+
+
+def get_money_management_cash_flow_status(app):
+    registration = getattr(app.state, "money_management", None)
+    adapter = registration.lifecycle_adapter if isinstance(registration, MoneyManagementApplicationRegistration) else None
+    runtime = getattr(adapter, "cash_flow_runtime", None) if adapter else None
+    return runtime.read_model() if runtime is not None else {
+        "cashFlowAuthority": "DISABLED", "cashFlowFresh": False,
+        "lastSuccessfulSyncAt": None, "lastAttemptAt": None,
+        "syncState": "STOPPED", "lastErrorReason": None,
+        "checkpointRevision": 0,
+    }

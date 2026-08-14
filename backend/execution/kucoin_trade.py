@@ -3,6 +3,9 @@
 from .base import BaseClient
 
 import requests
+from requests.adapters import HTTPAdapter
+import socket
+import urllib3.util.connection as _urllib3_conn
 import time
 import base64
 import hmac
@@ -14,6 +17,7 @@ from urllib.parse import quote, urlencode
 
 from dotenv import load_dotenv
 from backend.utils.log_buffer import logger, runtime_debug
+from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
 
 
 # =====================================
@@ -21,6 +25,26 @@ from backend.utils.log_buffer import logger, runtime_debug
 # =====================================
 
 load_dotenv()
+
+
+class ForceIPv4Adapter(HTTPAdapter):
+
+    def send(self, request, stream=False, timeout=None, verify=True,
+             cert=None, proxies=None):
+
+        original_allowed = _urllib3_conn.allowed_gai_family
+        _urllib3_conn.allowed_gai_family = lambda: socket.AF_INET
+        try:
+            return super().send(
+                request,
+                stream=stream,
+                timeout=timeout,
+                verify=verify,
+                cert=cert,
+                proxies=proxies,
+            )
+        finally:
+            _urllib3_conn.allowed_gai_family = original_allowed
 
 
 class KucoinTradeClient(BaseClient):
@@ -97,12 +121,66 @@ class KucoinTradeClient(BaseClient):
             "https://api-futures.kucoin.com"
         )
 
+        self.session = requests.Session()
+        self.session.mount("https://", ForceIPv4Adapter())
+        self.session.mount("http://", ForceIPv4Adapter())
+
     def credentials_ready(self):
 
         return bool(
             self.api_key
             and self.api_secret
             and self.passphrase
+        )
+
+    def private_get(self, endpoint, *, base_url=None, timeout=10):
+        """Execute one authenticated GET with the existing KuCoin signer only."""
+        if not isinstance(endpoint, str) or not endpoint.startswith("/api/"):
+            raise ValueError("KuCoin private GET endpoint required")
+        headers = self._headers("GET", endpoint, "")
+        response = self.session.get(
+            (base_url or self.base_url) + endpoint,
+            headers=headers,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("code") != "200000":
+            raise RuntimeError("KUCOIN_PRIVATE_GET_FAILED")
+        return payload.get("data")
+
+    def get_deposit_history(self, *, start_at, end_at, current_page=1,
+                            page_size=50, currency="USDT", timeout=10):
+        query = urlencode({"currency": currency, "startAt": int(start_at),
+                           "endAt": int(end_at), "currentPage": int(current_page),
+                           "pageSize": int(page_size)})
+        return self.private_get(
+            "/api/v1/deposits?" + query,
+            base_url="https://api.kucoin.com", timeout=timeout,
+        )
+
+    def get_withdrawal_history(self, *, start_at, end_at, current_page=1,
+                               page_size=50, currency="USDT", timeout=10):
+        query = urlencode({"currency": currency, "startAt": int(start_at),
+                           "endAt": int(end_at), "currentPage": int(current_page),
+                           "pageSize": int(page_size)})
+        return self.private_get(
+            "/api/ua/v1/asset/withdrawal/history?" + query,
+            base_url="https://api.kucoin.com", timeout=timeout,
+        )
+
+    def get_futures_transaction_history(self, *, start_at, end_at, offset=None,
+                                        max_count=50, currency="USDT", timeout=10):
+        start_at, end_at = int(start_at), int(end_at)
+        if end_at < start_at or end_at - start_at > 86_400_000:
+            raise ValueError("Futures transaction history range must not exceed one day")
+        params = {"currency": currency, "startAt": int(start_at),
+                  "endAt": int(end_at), "maxCount": int(max_count),
+                  "forward": "false"}
+        if offset is not None:
+            params["offset"] = str(offset)
+        return self.private_get(
+            "/api/v1/transaction-history?" + urlencode(params), timeout=timeout,
         )
 
     def set_live_order_gate(
@@ -130,24 +208,7 @@ class KucoinTradeClient(BaseClient):
         symbol: str
     ) -> str:
 
-        symbol = (
-            str(symbol)
-            .strip()
-            .upper()
-        )
-
-        mapping = {
-            "BTCUSDT": "XBTUSDTM",
-            "ETHUSDT": "ETHUSDTM",
-            "BNBUSDT": "BNBUSDTM",
-            "SOLUSDT": "SOLUSDTM",
-            "XRPUSDT": "XRPUSDTM",
-        }
-
-        mapped = mapping.get(
-            symbol,
-            symbol
-        )
+        mapped = to_kucoin_futures_symbol(symbol)
 
         runtime_debug(
             "KuCoin trade symbol map '%s' -> '%s'",
@@ -197,7 +258,7 @@ class KucoinTradeClient(BaseClient):
             "KC-API-SIGN": signature,
             "KC-API-TIMESTAMP": now,
             "KC-API-PASSPHRASE": passphrase,
-            "KC-API-KEY-VERSION": "2",
+            "KC-API-KEY-VERSION": "3",
             "Content-Type": "application/json"
         }
 
@@ -232,7 +293,7 @@ class KucoinTradeClient(BaseClient):
             ""
         )
 
-        res = requests.get(
+        res = self.session.get(
             self.base_url + endpoint,
             headers=headers,
             timeout=timeout,
@@ -364,7 +425,7 @@ class KucoinTradeClient(BaseClient):
             endpoint
         )
 
-        res = requests.get(
+        res = self.session.get(
             self.base_url + endpoint,
             headers=headers,
             timeout=timeout,
@@ -419,6 +480,22 @@ class KucoinTradeClient(BaseClient):
             if active
             else None
         )
+
+    def get_position_authority_snapshot(self, timeout=10):
+        """Return an explicit, timestamped shape for Live authority checks.
+
+        The legacy ``get_positions`` API uses ``None`` for a successfully
+        verified flat account.  Keep that compatibility surface unchanged,
+        while preventing generic consumers from confusing that value with a
+        missing or malformed response.
+        """
+        position = self.get_positions(timeout=timeout)
+        evaluated_at = time.time()
+        if position is None:
+            return {"qty": 0, "evaluatedAt": evaluated_at}
+        if isinstance(position, dict):
+            return {**position, "evaluatedAt": evaluated_at}
+        return position
 
     def get_current_position(
         self,
@@ -486,7 +563,7 @@ class KucoinTradeClient(BaseClient):
                 endpoint
             )
 
-            res = requests.get(
+            res = self.session.get(
                 self.base_url + endpoint,
                 headers=headers,
                 timeout=timeout,
@@ -913,7 +990,7 @@ class KucoinTradeClient(BaseClient):
                 body,
             )
 
-            res = requests.post(
+            res = self.session.post(
                 self.base_url + endpoint,
                 headers=headers,
                 data=body,
@@ -1161,7 +1238,7 @@ class KucoinTradeClient(BaseClient):
                     endpoint
                 )
 
-                res = requests.get(
+                res = self.session.get(
                     self.base_url + endpoint,
                     headers=headers,
                     timeout=10,
@@ -1350,7 +1427,7 @@ class KucoinTradeClient(BaseClient):
                 endpoint
             )
 
-            res = requests.delete(
+            res = self.session.delete(
                 self.base_url + endpoint,
                 headers=headers,
                 timeout=10,
@@ -1630,7 +1707,7 @@ class KucoinTradeClient(BaseClient):
             f"/api/v1/ticker?symbol={symbol}"
         )
 
-        res = requests.get(
+        res = self.session.get(
             self.base_url + endpoint
         )
 
@@ -1655,7 +1732,7 @@ class KucoinTradeClient(BaseClient):
             f"/api/v1/contracts/{symbol}"
         )
 
-        res = requests.get(
+        res = self.session.get(
             self.base_url + endpoint
         )
 
@@ -1749,7 +1826,7 @@ class KucoinTradeClient(BaseClient):
             body
         )
 
-        res = requests.post(
+        res = self.session.post(
             self.base_url + endpoint,
             headers=headers,
             data=body
@@ -1921,7 +1998,7 @@ class KucoinTradeClient(BaseClient):
                 body
             )
 
-            res = requests.post(
+            res = self.session.post(
                 self.base_url + endpoint,
                 headers=headers,
                 data=body
@@ -2006,7 +2083,7 @@ class KucoinTradeClient(BaseClient):
                 body
             )
 
-            res = requests.post(
+            res = self.session.post(
                 self.base_url + endpoint,
                 headers=headers,
                 data=body

@@ -14,6 +14,7 @@ from .loss_checkpoint_metadata_bootstrap import (
     CheckpointMetadataBootstrapStatus,
     bootstrap_loss_limit_checkpoint_metadata,
 )
+from .cash_flow_transaction import CashFlowTransactionCoordinator
 from .loss_persistence_adapter import load_loss_state, save_loss_state
 from .loss_runtime_checkpoint_coordinator import (
     LossLimitRuntimeCheckpointCoordinator,
@@ -81,6 +82,7 @@ def build_loss_limit_application_composition(
     checkpoint_coordinator_factory=LossLimitRuntimeCheckpointCoordinator,
     runtime_coordinator_factory=LossLimitRuntimeCoordinator,
     lifecycle_adapter_factory=LossLimitApplicationLifecycleAdapter,
+    cash_flow_transaction_factory=CashFlowTransactionCoordinator,
 ):
     if not isinstance(configuration, LossLimitApplicationConfiguration):
         return _failed(
@@ -112,6 +114,15 @@ def build_loss_limit_application_composition(
         )
     try:
         persistence = persistence_adapter_factory(configuration.persistence_path)
+        cash_flow_transactions = None
+        # Custom in-memory persistence adapters used by tests/compositions do
+        # not imply a filesystem cash-flow authority. Production's configured
+        # runtime directory does, and recovery must precede MM bootstrap.
+        if configuration.persistence_path.is_dir():
+            cash_flow_transactions = cash_flow_transaction_factory(
+                configuration.persistence_path
+            )
+            cash_flow_transactions.recover()
     except Exception:
         return _failed(
             CompositionReadinessStatus.PERSISTENCE_UNAVAILABLE,
@@ -179,6 +190,7 @@ def build_loss_limit_application_composition(
             False,
         )
         lifecycle = lifecycle_adapter_factory(runtime, store, readiness)
+        lifecycle.cash_flow_transaction_coordinator = cash_flow_transactions
     except Exception:
         return _failed(
             CompositionReadinessStatus.COMPOSITION_FAILED,

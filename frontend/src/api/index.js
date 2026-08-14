@@ -81,6 +81,15 @@ export const API = {
   botStop: () =>
     join("/bot/stop"),
 
+  loopStart: () =>
+    join("/bot/loop/start"),
+
+  loopStop: () =>
+    join("/bot/loop/stop"),
+
+  paperAccountCapital: () =>
+    join("/bot/paper-account/capital"),
+
   // ==========================
   // SUMMARY
   // ==========================

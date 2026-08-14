@@ -1,6 +1,8 @@
 // frontend/src/components/TradeSettings.jsx
 
-import React from "react";
+import React, { useState } from "react";
+
+const ADVANCED_PANEL_ID = "advanced-trade-settings";
 
 export default function TradeSettings({
 
@@ -11,6 +13,8 @@ export default function TradeSettings({
     embedded = false,
 
 }) {
+
+    const [advancedOpen, setAdvancedOpen] = useState(false);
 
     const handle = (
         key,
@@ -32,30 +36,6 @@ export default function TradeSettings({
                     : "terminal-panel"
             }
         >
-
-            {/* =============================================
-               HEADER
-            ============================================= */}
-
-            {embedded ? (
-
-                <div className="embedded-section-label">
-                    TRADE
-                </div>
-
-            ) : (
-
-                <div className="panel-header">
-
-                    <div className="panel-title">
-
-                        TRADE SETTINGS（取引設定）
-
-                    </div>
-
-                </div>
-
-            )}
 
             {/* =============================================
                MODE
@@ -99,48 +79,6 @@ export default function TradeSettings({
                             ⚠️ LIVE選択中ですが、Backendの本番注文は無効です。 実注文はブロックされています。
                         </div>
                     )}
-
-                </div>
-
-            </div>
-
-            {/* =============================================
-               EXCHANGE
-            ============================================= */}
-
-            <div className="config-row">
-
-                <div className="config-label">
-
-                    EXCHANGE（取引所）
-
-                </div>
-
-                <div className="config-control">
-
-                    <select
-                        className="config-select"
-                        value={
-                            values.exchange
-                            || "KUCOIN"
-                        }
-                        onChange={(e) =>
-                            handle(
-                                "exchange",
-                                e.target.value
-                            )
-                        }
-                    >
-
-                        <option value="KUCOIN">
-                            KUCOIN - 動作保証
-                        </option>
-
-                        <option value="BINANCE">
-                            BINANCE - 未検証・運用保証なし
-                        </option>
-
-                    </select>
 
                 </div>
 
@@ -284,50 +222,231 @@ export default function TradeSettings({
             </div>
 
             {/* =============================================
-               TIMEFRAME
+               ADVANCED TRADE SETTINGS TOGGLE
             ============================================= */}
 
-            <div className="config-row">
+            <button
+                aria-controls={ADVANCED_PANEL_ID}
+                aria-expanded={advancedOpen}
+                className="advanced-trade-settings-toggle"
+                onClick={() => setAdvancedOpen((value) => !value)}
+                type="button"
+            >
 
-                <div className="config-label">
+                <span
+                    aria-hidden="true"
+                    className="advanced-trade-settings-chevron"
+                >
+                    {advancedOpen ? "▼" : "▶"}
+                </span>
 
-                    TIMEFRAME（時間足）
+                <span className="advanced-trade-settings-title">
+                    ADVANCED TRADE SETTINGS
+                </span>
+
+            </button>
+
+            {/* =============================================
+               ADVANCED TRADE SETTINGS PANEL
+            ============================================= */}
+
+            <div
+                hidden={!advancedOpen}
+                id={ADVANCED_PANEL_ID}
+            >
+
+                {/* EXCHANGE */}
+
+                <div className="config-row">
+
+                    <div className="config-label">
+
+                        EXCHANGE（取引所）
+
+                    </div>
+
+                    <div className="config-control">
+
+                        <select
+                            className="config-select"
+                            value={
+                                values.exchange
+                                || "KUCOIN"
+                            }
+                            onChange={(e) =>
+                                handle(
+                                    "exchange",
+                                    e.target.value
+                                )
+                            }
+                        >
+
+                            <option value="KUCOIN">
+                                KUCOIN - 動作保証
+                            </option>
+
+                            <option value="BINANCE">
+                                BINANCE - 未検証・運用保証なし
+                            </option>
+
+                        </select>
+
+                    </div>
 
                 </div>
 
-                <div className="config-control">
+                {/* TIMEFRAME */}
 
-                    <select
-                        className="config-select"
-                        value={
-                            values.timeframe
-                            || "1m"
-                        }
-                        onChange={(e) =>
-                            handle(
-                                "timeframe",
-                                e.target.value
-                            )
-                        }
-                    >
+                <div className="config-row">
 
-                        <option value="1m">
-                            1m
-                        </option>
+                    <div className="config-label">
 
-                        <option value="5m">
-                            5m
-                        </option>
+                        TIMEFRAME（時間足）
 
-                        <option value="15m">
-                            15m
-                        </option>
+                    </div>
 
-                        <option value="1h">
-                            1h
-                        </option>
+                    <div className="config-control">
 
-                    </select>
+                        <select
+                            className="config-select"
+                            value={
+                                values.timeframe
+                                || "1m"
+                            }
+                            onChange={(e) =>
+                                handle(
+                                    "timeframe",
+                                    e.target.value
+                                )
+                            }
+                        >
+
+                            <option value="1m">
+                                1m
+                            </option>
+
+                            <option value="5m">
+                                5m
+                            </option>
+
+                            <option value="15m">
+                                15m
+                            </option>
+
+                            <option value="1h">
+                                1h
+                            </option>
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+                {/* TP */}
+
+                <div className="config-row">
+
+                    <div className="config-label">
+
+                        TP（利確）
+
+                    </div>
+
+                    <div className="config-control">
+
+                        <input
+                            className="config-select"
+                            type="number"
+                            step="0.1"
+                            value={
+                                values.tp ?? 1.0
+                            }
+                            onChange={(e) =>
+                                handle(
+                                    "tp",
+                                    Number(
+                                        e.target.value
+                                    )
+                                )
+                            }
+                        />
+
+                    </div>
+
+                </div>
+
+                {/* SL */}
+
+                <div className="config-row">
+
+                    <div className="config-label">
+
+                        SL（損切り）
+
+                    </div>
+
+                    <div className="config-control">
+
+                        <input
+                            className="config-select"
+                            type="number"
+                            step="0.1"
+                            value={
+                                values.sl ?? 1.0
+                            }
+                            onChange={(e) =>
+                                handle(
+                                    "sl",
+                                    Number(
+                                        e.target.value
+                                    )
+                                )
+                            }
+                        />
+
+                    </div>
+
+                </div>
+
+                {/* TRAILING */}
+
+                <div className="config-row">
+
+                    <div className="config-label">
+
+                        TRAILING（トレーリング）
+
+                    </div>
+
+                    <div className="config-control">
+
+                        <select
+                            className="config-select"
+                            value={
+                                values.trailing
+                                    ? "ON"
+                                    : "OFF"
+                            }
+                            onChange={(e) =>
+                                handle(
+                                    "trailing",
+                                    e.target.value === "ON"
+                                )
+                            }
+                        >
+
+                            <option value="OFF">
+                                OFF（無効）
+                            </option>
+
+                            <option value="ON">
+                                ON（有効）
+                            </option>
+
+                        </select>
+
+                    </div>
 
                 </div>
 

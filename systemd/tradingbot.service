@@ -1,23 +1,20 @@
 ﻿[Unit]
-Description=Trading AI Bot Service (本番運用)
-After=network.target
+Description=Trading AI Bot Service
+After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple
 User=joe4410joe
-WorkingDirectory=/home/joe4410joe/TradingAI_Bot_Prod_v1
-
-# run_prod.py を venv で実行
-ExecStart=/home/joe4410joe/TradingAI_Bot_Prod_v1/venv/bin/python /home/joe4410joe/TradingAI_Bot_Prod_v1/run_prod.py
-
+Group=joe4410joe
+WorkingDirectory=/home/joe4410joe/tradingai_prod_v1
+EnvironmentFile=/home/joe4410joe/tradingai_prod_v1/.env
+ExecStart=/home/joe4410joe/tradingai_prod_v1/venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=5
-
-# 標準出力 / エラーを journal に出力
 StandardOutput=journal
 StandardError=journal
-
-Environment="TELEGRAM_CHAT_ID=1040943428"
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

@@ -1,5 +1,6 @@
 """MM-4G strict settings resolution; no settings are read at import time."""
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from .loss_application_models import LossLimitApplicationConfiguration
@@ -12,7 +13,7 @@ class LossLimitApplicationSettingsError(ValueError):
 def _value(source, name, default=None):
     if source is None:
         return default
-    if isinstance(source, dict):
+    if isinstance(source, Mapping):
         return source.get(name, default)
     return getattr(source, name, default)
 
@@ -29,6 +30,23 @@ def _strict_bool(value, name, default):
         if normalized in ("false", "0"):
             return False
     raise LossLimitApplicationSettingsError(f"{name} must be a strict boolean")
+
+
+def resolve_cash_flow_runtime_settings(settings=None, environ=None):
+    """Resolve the independent MM cash-flow polling contract."""
+    source = settings if settings is not None else (environ if environ is not None else os.environ)
+    enabled = _strict_bool(
+        _value(source, "MONEY_MANAGEMENT_CASH_FLOW_SYNC_ENABLED"),
+        "MONEY_MANAGEMENT_CASH_FLOW_SYNC_ENABLED", True,
+    )
+    try:
+        interval = int(_value(source, "MONEY_MANAGEMENT_CASH_FLOW_POLL_SECONDS", 300))
+        freshness = int(_value(source, "MONEY_MANAGEMENT_CASH_FLOW_FRESHNESS_SECONDS", 600))
+    except (TypeError, ValueError):
+        raise LossLimitApplicationSettingsError("cash-flow timing must be integer seconds") from None
+    if interval <= 0 or freshness <= 0:
+        raise LossLimitApplicationSettingsError("cash-flow timing must be positive")
+    return enabled, interval, freshness
 
 
 def resolve_loss_limit_application_configuration(

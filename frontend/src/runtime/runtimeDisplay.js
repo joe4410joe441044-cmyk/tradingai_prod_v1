@@ -3,7 +3,8 @@ const SOURCE_LABELS = {
     RuntimeAdapter: "Runtime Data Updated",
     RuntimeState: "Market State Updated",
     "Strategy Plugin": "Strategy Evaluation",
-    "AI Plugin": "AI Decision",
+    "AI Plugin": "Trading AI (Optional / Off)",
+    "Trading AI (Optional)": "Trading AI (Optional / Off)",
     "Governance Runtime": "Safety / Governance Check",
     "Execution Runtime": "Execution Check",
     Emergency: "Emergency Operation",
@@ -15,6 +16,8 @@ const REASON_LABELS = {
     IDLE_BY_AI_HOLD: "Waiting — AI HOLD",
     ENABLED_IDLE_BY_AI_HOLD: "Enabled — waiting for AI signal",
     ACCOUNT_EXCHANGE_MISMATCH: "Account exchange mismatch",
+    ACCOUNT_GENERATION_MISMATCH: "Account generation mismatch",
+    IP_NOT_ALLOWED: "IP not allowed by exchange",
     SUSPENDED_BY_BOT_STOP: "Suspended — bot stopped",
 };
 

@@ -6,6 +6,9 @@
 from backend.aggregation.MicrostructureStateBuilder import (
     MicrostructureStateBuilder
 )
+from backend.strategy.normalized_parameters import (
+    paper_calibration_for_mode,
+)
 
 from backend.runtime import runtime_registry
 from backend.runtime.governance_runtime import (
@@ -20,8 +23,15 @@ from backend.runtime.governance_runtime import (
 )
 from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
+    build_trading_decision_snapshot,
 )
 from backend import config as backend_config
+from backend.auto_market_selection.live_status_consistency import (
+    derive_live_readiness,
+)
+from backend.auto_market_selection.live_auto_runtime import (
+    LiveAutoSelectionRuntime,
+)
 import json
 import traceback
 import math
@@ -32,7 +42,8 @@ import threading
 import time
 import uuid
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import MappingProxyType
 from dotenv import load_dotenv
 
@@ -73,6 +84,10 @@ from backend.execution.kucoin_trade import (
 from backend.money_management.loss_authoritative_runtime_metrics import (
     AuthoritativeLossRuntimeMetricsState,
 )
+from backend.runtime.paper_account_store import (
+    PaperAccountStore,
+    normalize_capital,
+)
 
 from Bot.engine.execution_engine import (
     ExecutionEngine
@@ -95,6 +110,14 @@ class BotManager:
         # ============================================
 
         self.pending_order = False
+
+        # AMS-2B controls only new entries. Position management and emergency
+        # operations remain live while this gate is held.
+        self.symbol_switch_lock = threading.Lock()
+        self.symbol_switch_transaction_id = None
+        self._symbol_switch_entry_paused = False
+
+        self.paper_capital_lock = threading.RLock()
 
         self.emergency_orchestrator_lock = threading.Lock()
         # stop() and shutdown() share this re-entrant lifecycle boundary.
@@ -131,11 +154,33 @@ class BotManager:
 
         self.lifecycle_state = "STOPPED"
 
+        # Bot infrastructure and the periodic decision loop are independent
+        # authorities.  Process restart always leaves both stopped.
+        self.loop_state = "STOPPED"
+
         self.lifecycle_revision = 0
 
         self.lifecycle_changed_at = time.time()
 
-        self.symbol = None
+        # Single runtime symbol authority. ``symbol`` remains a compatibility
+        # alias backed by this same value; it is not separately stored.
+        self._active_symbol = None
+        self.selection_mode = "MANUAL"
+        self.auto_market_selection_observation = None
+        self.production_ams_mm_config_provider = None
+        self.production_ams_observation_ttl = 30
+        self.production_ams_last_observed_at = 0.0
+        self.production_ams_observation_lock = threading.Lock()
+        # AMS lifecycle is explicitly composed after process startup. Restart
+        # defaults to STOPPED/MANUAL and never auto-runs a selection cycle.
+        self.auto_market_selection_lifecycle = None
+        self.live_auto_selection_runtime = LiveAutoSelectionRuntime(
+            active_symbol_provider=lambda: self.activeSymbol,
+        )
+        self.live_auto_control_lock = threading.RLock()
+        self.live_auto_control_stop = threading.Event()
+        self.live_auto_control_thread = None
+        self.live_auto_control_arming = False
 
         self.exchange_name = "kucoin"
 
@@ -156,6 +201,7 @@ class BotManager:
         self.strategy = None
 
         self.ws = None
+        self._market_update_callback = None
 
         # Browser monitor WebSockets are distinct from the exchange market
         # feed WebSocket.  The API router updates this observation-only count.
@@ -190,6 +236,10 @@ class BotManager:
 
         self.latest_runtime_result = None
 
+        # Observation-only continuity for the dashboard decision card.
+        self.trading_decision_state_signature = None
+        self.trading_decision_state_since = None
+
         self.exchange_client_ready = False
 
         self.exchange_auth_ready = False
@@ -200,9 +250,6 @@ class BotManager:
 
         self.position_check_ok = False
 
-        # Keep the latest account values independently from the execution
-        # engine.  stop() intentionally tears the engine down, but account
-        # telemetry must remain readable by the dashboard afterwards.
         self.account_snapshot = {
             "balance": None,
             "equity": None,
@@ -216,9 +263,28 @@ class BotManager:
             "available": False,
         }
 
+        self.paper_account_store = PaperAccountStore(
+            os.path.join(
+                self._project_root(),
+                "logs",
+                "runtime",
+                "paper_account_state.json",
+            )
+        )
+        self.paper_account_state = self.paper_account_store.load()
+        # The durable paper account remains authoritative while the bot and
+        # execution loop are stopped.  An engine snapshot replaces it only
+        # after an engine exists.
+        self.paper_account_runtime_snapshot = (
+            self.paper_account_store.as_runtime_snapshot(
+                self.paper_account_state
+            )
+        )
+
         self.account_snapshot_generation = 0
         self.account_refresh_interval = 30
         self.account_stale_after = 90
+        self.account_refresh_lock = threading.Lock()
         self.runtime_instance_id = str(uuid.uuid4())
         self.money_management_runtime_metrics = (
             AuthoritativeLossRuntimeMetricsState(
@@ -545,6 +611,14 @@ class BotManager:
         ).get("exchange")
 
         if current_exchange == normalized_exchange:
+            snapshot = self.real_account_snapshot
+            if (
+                isinstance(snapshot, dict)
+                and snapshot.get("generation")
+                != self.account_snapshot_generation
+            ):
+                snapshot["generation"] = self.account_snapshot_generation
+                self.real_account_snapshot = snapshot
             return self.real_account_snapshot
 
         self.account_snapshot_generation += 1
@@ -568,6 +642,8 @@ class BotManager:
 
         if "TIMEOUT" in text or "TIMED OUT" in text:
             return "REQUEST_TIMEOUT"
+        if "400006" in text or "INVALID" in text and "IP" in text:
+            return "IP_NOT_ALLOWED"
         if "PERMISSION" in text or "FORBIDDEN" in text or "403" in text:
             return "PERMISSION_DENIED"
         if "AUTH" in text or "UNAUTHORIZED" in text or "401" in text:
@@ -598,7 +674,7 @@ class BotManager:
 
         if isinstance(positions, list):
             return (
-                "NO_OPEN_POSITION"
+                "FLAT"
                 if not positions
                 else "OPEN"
             )
@@ -643,21 +719,6 @@ class BotManager:
             loading=False,
         )
 
-        if (
-            not self.config
-            and self.engine is None
-            and not force
-        ):
-            return snapshot
-
-        if (
-            not force
-            and self.engine is None
-            and not self.symbol
-            and not self.config.get("symbol")
-        ):
-            return snapshot
-
         now = time.time()
         last_attempt = snapshot.get("lastAttempt")
 
@@ -669,7 +730,26 @@ class BotManager:
         ):
             return self._mark_real_account_stale_if_needed(snapshot)
 
-        return self._refresh_real_account_snapshot(exchange)
+        if not self.account_refresh_lock.acquire(blocking=False):
+            return self._mark_real_account_stale_if_needed(
+                self.real_account_snapshot
+            )
+
+        try:
+            current = self.real_account_snapshot or {}
+            current_attempt = current.get("lastAttempt")
+            if (
+                not force
+                and current_attempt
+                and time.time() - float(current_attempt)
+                < self.account_refresh_interval
+                and not current.get("loading")
+            ):
+                return self._mark_real_account_stale_if_needed(current)
+
+            return self._refresh_real_account_snapshot(exchange)
+        finally:
+            self.account_refresh_lock.release()
 
     def _refresh_real_account_snapshot(self, exchange=None):
 
@@ -699,14 +779,28 @@ class BotManager:
                 return next_snapshot
 
             stale_snapshot = dict(next_snapshot)
+            generation_mismatch = (
+                generation != self.account_snapshot_generation
+            )
+            exchange_mismatch = (
+                exchange != current_exchange
+            )
+            if generation_mismatch and not exchange_mismatch:
+                mismatch_reason = "ACCOUNT_GENERATION_MISMATCH"
+                next_snapshot["generation"] = self.account_snapshot_generation
+            elif exchange_mismatch:
+                mismatch_reason = "ACCOUNT_EXCHANGE_MISMATCH"
+            else:
+                mismatch_reason = "ACCOUNT_STALE_SNAPSHOT"
+
             stale_snapshot.update({
                 "stale": True,
                 "loading": False,
-                "lastError": "ACCOUNT_EXCHANGE_MISMATCH",
-                "connectionReason": "ACCOUNT_EXCHANGE_MISMATCH",
-                "accountReason": "ACCOUNT_EXCHANGE_MISMATCH",
-                "balanceReason": "ACCOUNT_EXCHANGE_MISMATCH",
-                "positionReason": "ACCOUNT_EXCHANGE_MISMATCH",
+                "lastError": mismatch_reason,
+                "connectionReason": mismatch_reason,
+                "accountReason": mismatch_reason,
+                "balanceReason": mismatch_reason,
+                "positionReason": mismatch_reason,
             })
             return stale_snapshot
 
@@ -960,10 +1054,109 @@ class BotManager:
                 else None
             ),
             "totalPnl": snapshot.get("pnl") if available else None,
-            "source": "PAPER_SIMULATION",
+            "source": self.paper_account_state.get(
+                "source",
+                "PAPER_SIMULATION",
+            ),
+            "capital": float(self.paper_account_state.get("capital", 1000)),
+            "positionState": "FLAT" if available and not positions else "OPEN",
             "lastUpdate": snapshot.get("last_update") if available else None,
             "available": available,
+            "reason": snapshot.get("reason"),
         }
+
+    def reset_paper_capital(self, capital, source="DASHBOARD_MANUAL"):
+        amount = normalize_capital(capital)
+        if source not in {"DASHBOARD_MANUAL", "REAL_AVAILABLE_PRESET"}:
+            raise ValueError("INVALID_PAPER_CAPITAL_SOURCE")
+
+        with self.paper_capital_lock:
+            snapshot = self._capture_account_snapshot()
+            previous = normalize_capital(
+                snapshot.get("balance")
+                if snapshot.get("balance") is not None
+                else self.paper_account_state.get("capital", "1000.00")
+            )
+
+            def reject(reason):
+                self.paper_account_store.append_event({
+                    "event": "PAPER_CAPITAL_RESET",
+                    "timestamp": time.time(),
+                    "previousCapital": format(previous, ".2f"),
+                    "newCapital": format(amount, ".2f"),
+                    "source": source,
+                    "result": "REJECTED",
+                    "reason": reason,
+                })
+                raise ValueError(reason)
+
+            position = snapshot.get("position")
+            positions = snapshot.get("positions")
+            if self._emergency_position_value_present(position) or (
+                isinstance(positions, list)
+                and any(self._emergency_position_value_present(item) for item in positions)
+            ):
+                reject("PAPER_POSITION_OPEN")
+
+            engine = self.engine
+            if engine is not None:
+                pending_state = self._stopped_paper_engine_pending_order_state(engine)
+                if self.pending_order is True or pending_state.get("state") == "remaining":
+                    reject("PAPER_PENDING_ORDER")
+                open_order_state = self._stopped_paper_engine_open_order_state(engine)
+                if open_order_state.get("state") == "remaining":
+                    reject("PAPER_OPEN_ORDER")
+            elif self.pending_order is True or snapshot.get("pendingOrder") is True:
+                reject("PAPER_PENDING_ORDER")
+            now = time.time()
+            state = self.paper_account_store.build_state(amount, source, now)
+            runtime_snapshot = self.paper_account_store.as_runtime_snapshot(state)
+            self.paper_account_store.save(state)
+
+            if engine is not None:
+                engine.balance = float(amount)
+                engine.pnl = 0.0
+                engine.unrealized_pnl = 0.0
+                engine.actual_position = None
+                engine.position = None
+                engine.initial_equity = float(amount)
+                engine.peak_equity = float(amount)
+                engine.current_drawdown_pct = 0.0
+                if engine.portfolio is not None:
+                    with engine.portfolio.lock:
+                        engine.portfolio.initial_balance = float(amount)
+                        engine.portfolio.balance = float(amount)
+                        engine.portfolio.realized_pnl = 0.0
+                        engine.portfolio.positions.clear()
+
+            self.paper_account_store.append_event({
+                "event": "PAPER_CAPITAL_RESET",
+                "timestamp": now,
+                "previousCapital": format(previous, ".2f"),
+                "newCapital": format(amount, ".2f"),
+                "source": source,
+                "result": "SUCCESS",
+                "reason": None,
+            })
+            self.paper_account_state = state
+            self.account_snapshot = runtime_snapshot
+            self.paper_account_runtime_snapshot = runtime_snapshot
+            self._observe_money_management_runtime_metrics(
+                before=snapshot,
+                event_type="PAPER_CAPITAL_RESET",
+                event_key=f"paper-capital:{now}",
+            )
+
+            return {
+                "success": True,
+                "paperBalance": float(amount),
+                "paperEquity": float(amount),
+                "paperAvailableBalance": float(amount),
+                "paperPnl": 0.0,
+                "paperPositionState": "FLAT",
+                "source": source,
+                "updatedAt": now,
+            }
 
     def _build_account_runtime(
         self,
@@ -1291,8 +1484,6 @@ class BotManager:
             )
             readiness_authenticated = bool(
                 readiness.get("exchangeAuthReady")
-                or readiness.get("balanceCheckOk")
-                or readiness.get("positionCheckOk")
             )
             real_account = {
                 "exchange": self._normalize_account_exchange(),
@@ -1463,8 +1654,11 @@ class BotManager:
             ),
         })
         readiness["checks"] = checks
-
-        return readiness
+        return derive_live_readiness(
+            readiness,
+            real_account,
+            reported_reasons=block_reasons if self.engine is not None else None,
+        )
 
     def attach_orderbook_runtime_debug(self, runtime_result):
 
@@ -1539,7 +1733,7 @@ class BotManager:
             execution_mode,
             real_order_allowed,
         )
-        account_snapshot = self._capture_account_snapshot()
+        account_snapshot = self._status_account_snapshot()
         account_runtime = self._build_account_runtime(
             account_snapshot,
             live_readiness,
@@ -1702,6 +1896,36 @@ class BotManager:
 
         self.lifecycle_changed_at = time.time()
 
+    def _set_loop_state(self, state):
+
+        self.loop_state = state
+
+    def start_loop(self):
+
+        if not self._running or self.lifecycle_state != "RUNNING":
+            return {
+                "status": "error",
+                "reason": "LOOP_REQUIRES_BOT_RUNNING",
+                "success": False,
+            }
+        if governance_state.get("emergency_stop", False):
+            return {
+                "status": "error",
+                "reason": "LOOP_BLOCKED_BY_EMERGENCY_LOCK",
+                "success": False,
+            }
+        self._set_loop_state("STARTING")
+        self._set_loop_state("RUNNING")
+        return {"status": "started", "success": True, "loopState": "RUNNING"}
+
+    def stop_loop(self):
+
+        governance_state["execution_enabled"] = False
+        if self.loop_state != "STOPPED":
+            self._set_loop_state("STOPPING")
+        self._set_loop_state("STOPPED")
+        return {"status": "stopped", "success": True, "loopState": "STOPPED"}
+
     def _recheck_stale_stopped_paper_start_authority(
         self,
         config,
@@ -1794,6 +2018,540 @@ class BotManager:
             )
 
         return self.get_authoritative_pending_order_state()
+
+    @property
+    def active_symbol(self):
+        return self._active_symbol
+
+    @property
+    def activeSymbol(self):
+        return self._active_symbol
+
+    @property
+    def symbol(self):
+        return self._active_symbol
+
+    @symbol.setter
+    def symbol(self, value):
+        normalized = (
+            str(value).strip().upper()
+            if value is not None and str(value).strip()
+            else None
+        )
+        if (
+            getattr(self, "_running", False)
+            and normalized != getattr(self, "_active_symbol", None)
+        ):
+            raise RuntimeError("RUNNING_SYMBOL_SWITCH_UNSUPPORTED")
+        self._active_symbol = normalized
+
+    def _set_active_symbol_for_start(self, symbol):
+        if self._running:
+            raise RuntimeError("RUNNING_SYMBOL_SWITCH_UNSUPPORTED")
+        self.symbol = symbol
+        if not self._active_symbol:
+            raise ValueError("symbol_required")
+        return self._active_symbol
+
+    def get_active_symbol_contract(self):
+        return {
+            "activeSymbol": self._active_symbol,
+            "selectionMode": self.selection_mode,
+        }
+
+    def set_auto_market_selection_observation(self, observation):
+        """Internal observation publication; never changes trading authority."""
+        self.auto_market_selection_observation = (
+            deepcopy(observation) if isinstance(observation, dict) else None
+        )
+
+    def configure_production_ams_read_model(self, mm_config_provider):
+        """Attach the production read-only authority chain; no action boundary."""
+        if not callable(mm_config_provider):
+            raise TypeError("Money Management config provider required")
+        self.production_ams_mm_config_provider = mm_config_provider
+
+    def get_official_mm_capital_authority(self):
+        """Return the MM-owned monitoring contract shared with AMS."""
+        observation = self.refresh_production_ams_read_model()
+        capital = observation.get("capitalEligibilityContract") if isinstance(
+            observation, dict
+        ) else None
+        from backend.money_management.capital_eligibility import (
+            CapitalEligibilityContract,
+        )
+        return capital if isinstance(capital, CapitalEligibilityContract) else None
+
+    def _production_ams_safety_state(self):
+        state = {
+            "realOrderAllowed": bool(
+                self.config.get("realOrderAllowed", False)
+            ),
+            "dryRun": bool(self.config.get("dry_run", True)),
+            "executionRealOrderDisabled": not bool(
+                self.config.get("executionRealOrderEnabled", False)
+            ),
+            "autoTradeDisabled": not bool(
+                self.config.get("autoTradeEnabled", False)
+            ),
+            "liveAutoSwitchDisabled": not bool(
+                self.live_auto_selection_runtime.get_status().get("liveAutoEnabled")
+            ),
+            "emergencyAvailable": True,
+            "governanceAvailable": True,
+        }
+        state["liveSelectionOnly"] = bool(
+            str(self.config.get("mode", "")).strip().lower() == "live"
+            and self.config.get("dry_run") is False
+            and state["realOrderAllowed"] is False
+            and state["executionRealOrderDisabled"] is True
+            and state["autoTradeDisabled"] is True
+            and (
+                state["liveAutoSwitchDisabled"] is False
+                or self.live_auto_control_arming is True
+            )
+        )
+        state["stoppedLiveMonitoring"] = bool(
+            self._running is False
+            and self.lifecycle_state == "STOPPED"
+            and str(self.config.get("mode", "")).strip().lower() == "live"
+            and self.config.get("dry_run") is False
+            and state["realOrderAllowed"] is False
+            and state["executionRealOrderDisabled"] is True
+            and state["autoTradeDisabled"] is True
+            and state["liveAutoSwitchDisabled"] is True
+        )
+        return state
+
+    def refresh_production_ams_read_model(self, *, force=False):
+        """Run one cached GET-only account/MM/public-market observation cycle."""
+        provider = self.production_ams_mm_config_provider
+        if not callable(provider):
+            return None
+        now = time.time()
+        if (not force and self.auto_market_selection_observation
+                and now - self.production_ams_last_observed_at
+                < self.production_ams_observation_ttl):
+            return deepcopy(self.auto_market_selection_observation)
+        if not self.production_ams_observation_lock.acquire(blocking=False):
+            return deepcopy(self.auto_market_selection_observation)
+        try:
+            from backend.auto_market_selection import (
+                ExistingKucoinLiveAccountAuthority, LiveReadOnlyValidation,
+            )
+            from backend.market.kucoin_futures_public import KucoinFuturesPublicClient
+
+            if not KucoinTradeClient.credentials_present():
+                raise RuntimeError("KUCOIN_CREDENTIALS_MISSING")
+            client = self.account_read_client or KucoinTradeClient()
+            self.account_read_client = client
+            self.account_read_client_exchange = self.exchange_name
+            authority = ExistingKucoinLiveAccountAuthority(
+                client, safety_provider=self._production_ams_safety_state,
+            )
+            account = authority.read()
+            capital = authority.build_capital_eligibility(
+                account, policy=provider(),
+            )
+            validation = LiveReadOnlyValidation(
+                KucoinFuturesPublicClient(), capital_provider=lambda: capital,
+                active_symbol_provider=lambda: self.activeSymbol,
+                safety_provider=self._production_ams_safety_state,
+                position_provider=lambda: account.open_position_state,
+                pending_order_provider=lambda: account.pending_order_state,
+                emergency_provider=lambda: not bool(
+                    governance_state.get("emergency_stop", False)
+                ),
+                clock=lambda: account.evaluated_at,
+            )
+            live = validation.observe()
+            observation = {
+                "liveObservation": live.to_dict(),
+                "liveAccountAuthority": account.to_dict(),
+                "capitalEligibility": capital.to_dict(),
+                "capitalEligibilityContract": capital,
+                "productionIntegration": {
+                    "status": "READY", "evaluatedAt": live.timestamp,
+                    "readOnly": True,
+                },
+            }
+            self.set_auto_market_selection_observation(observation)
+            self.production_ams_last_observed_at = now
+            return deepcopy(observation)
+        except Exception as error:
+            reason = str(error) if str(error).isupper() else type(error).__name__.upper()
+            observation = deepcopy(self.auto_market_selection_observation) or {}
+            observation["productionIntegration"] = {
+                "status": "BLOCKED", "reasonCodes": [reason],
+                "evaluatedAt": datetime.now(timezone.utc).isoformat(),
+                "readOnly": True,
+            }
+            self.set_auto_market_selection_observation(observation)
+            self.production_ams_last_observed_at = now
+            return deepcopy(observation)
+        finally:
+            self.production_ams_observation_lock.release()
+
+    def approve_live_auto_control(
+        self, *, approval_identity, approval_source,
+        ttl_seconds=900,
+    ):
+        """Install one expiring operator approval; grants no order authority."""
+        from backend.auto_market_selection import LiveAutoActivationApproval
+
+        identity = str(approval_identity or "").strip()
+        source = str(approval_source or "").strip()
+        if not identity or source != "EXPLICIT_OPERATOR_APPROVAL":
+            return {"accepted": False, "reason": "APPROVAL_REJECTED"}
+        if type(ttl_seconds) is not int or not 30 <= ttl_seconds <= 900:
+            return {"accepted": False, "reason": "APPROVAL_EXPIRATION_INVALID"}
+        self.live_auto_control_arming = True
+        try:
+            self.refresh_production_ams_read_model(force=True)
+        finally:
+            self.live_auto_control_arming = False
+        safety = self._live_auto_control_preflight(require_live_runtime=False)
+        if safety["passed"] is not True:
+            return {"accepted": False, "reason": "PREFLIGHT_FAILED",
+                    "blockReasons": safety["blockReasons"]}
+        now = datetime.now(timezone.utc)
+        approval = LiveAutoActivationApproval(
+            live_auto_enabled=True,
+            configuration_version=self.live_auto_selection_runtime.calibration.version,
+            approved_at=now.isoformat().replace("+00:00", "Z"),
+            approval_identity=identity,
+            approval_source=source,
+            expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        )
+        with self.live_auto_control_lock:
+            if self.live_auto_control_thread is not None:
+                return {"accepted": False, "reason": "LIVE_AUTO_ALREADY_RUNNING"}
+            self.live_auto_selection_runtime.approval = approval
+        return {"accepted": True,
+                "liveAuto": self.live_auto_selection_runtime.get_status()}
+
+    def start_live_auto_control(self):
+        """Start the sole production observation/validation/SafeSwitch bridge."""
+        with self.live_auto_control_lock:
+            if (self.live_auto_control_thread is not None
+                    and self.live_auto_control_thread.is_alive()):
+                return {"accepted": False, "reason": "LIVE_AUTO_ALREADY_RUNNING",
+                        "liveAuto": self.live_auto_selection_runtime.get_status()}
+            preflight = self._live_auto_control_preflight(require_live_runtime=True)
+            if preflight["passed"] is not True:
+                return {"accepted": False, "reason": "LIVE_RUNTIME_START_FAILED",
+                        "blockReasons": preflight["blockReasons"]}
+            if self.live_auto_selection_runtime.get_status().get(
+                    "approvalState") != "APPROVED":
+                return {"accepted": False, "reason": "APPROVAL_REJECTED"}
+            self.live_auto_control_stop.clear()
+            thread = threading.Thread(
+                target=self._live_auto_control_loop,
+                name="ams-live-auto-control", daemon=True,
+            )
+            self.live_auto_control_thread = thread
+            thread.start()
+        return {"accepted": True,
+                "liveAuto": self.live_auto_selection_runtime.get_status()}
+
+    def stop_live_auto_control(self):
+        """Stop the bridge and clear all one-shot approval/transient authority."""
+        self.live_auto_control_stop.set()
+        thread = self.live_auto_control_thread
+        if (thread is not None and thread is not threading.current_thread()
+                and thread.is_alive()):
+            thread.join(timeout=15)
+        with self.live_auto_control_lock:
+            self.live_auto_control_thread = None
+            status = self.live_auto_selection_runtime.restart()
+        return {"accepted": True, "liveAuto": status}
+
+    def _live_auto_control_preflight(self, *, require_live_runtime):
+        pending = self.get_authoritative_pending_order_state()
+        mm = self.auto_market_selection_observation or {}
+        account = mm.get("liveAccountAuthority") or {}
+        capital = mm.get("capitalEligibility") or {}
+        checks = {
+            "positionFlat": account.get("openPositionState") == "FLAT",
+            "pendingNone": (
+                account.get("pendingOrderState") == "NONE"
+                and pending.get("known") is True
+                and pending.get("pending") is False
+            ),
+            "emergencyReady": (
+                governance_state.get("emergency_state") == EMERGENCY_READY
+                and governance_state.get("emergency_stop") is False
+            ),
+            "liveAccountFresh": account.get("authorityFresh") is True,
+            "mmFresh": capital.get("authorityFresh") is True,
+            "autoTradeDisabled": not bool(self.config.get("autoTradeEnabled", False)),
+            "executionDisabled": not bool(
+                self.config.get("executionRealOrderEnabled", False)
+            ),
+            "realOrderDisabled": not bool(self.config.get("realOrderAllowed", False)),
+        }
+        if require_live_runtime:
+            checks.update({
+                "botRunning": self._running is True,
+                "selectedModeLive": str(self.config.get("mode", "")).lower() == "live",
+                "dryRunDisabled": self.config.get("dry_run") is False,
+                "marketRuntimeAvailable": self.engine is not None and bool(
+                    self.activeSymbol and self.active_runtime_id
+                ),
+            })
+        reasons = [name for name, passed in checks.items() if passed is not True]
+        return {"passed": not reasons, "checks": checks, "blockReasons": reasons,
+                "status": None}
+
+    def _build_live_auto_runtime_observation(self, source):
+        from backend.auto_market_selection import LiveAutoRuntimeObservation
+
+        live = source.get("liveObservation") or {}
+        account = source.get("liveAccountAuthority") or {}
+        capital = source.get("capitalEligibility") or {}
+        suitability = source.get("microEdgeSuitability")
+        return LiveAutoRuntimeObservation(
+            candidate_symbol=live.get("topCandidate"),
+            candidate_score=live.get("candidateScore") or live.get("topScore"),
+            active_market_score=live.get("activeMarketScore"),
+            selected_mode=str(self.config.get("mode", "")).upper(),
+            dry_run=self.config.get("dry_run", True),
+            market_data_fresh=bool(live.get("observationId")),
+            observation_fresh=bool(live.get("observationId")),
+            ranking_valid=bool(live.get("rankingCycleId")),
+            snapshot_consistent=account.get("snapshotConsistent") is True,
+            runtime_authority_consistent=live.get("activeSymbol") == self.activeSymbol,
+            live_account_fresh=account.get("authorityFresh") is True,
+            mm_fresh=capital.get("authorityFresh") is True,
+            position_state=account.get("openPositionState") or "UNKNOWN",
+            pending_order_state=account.get("pendingOrderState") or "UNKNOWN",
+            emergency_safe=(
+                governance_state.get("emergency_state") == EMERGENCY_READY
+                and governance_state.get("emergency_stop") is False
+            ),
+            governance_allow=governance_state.get("emergency_stop") is False,
+            live_status_consistent=(
+                self.config.get("realOrderAllowed", False) is False
+                and self.config.get("autoTradeEnabled", False) is False
+                and self.config.get("executionRealOrderEnabled", False) is False
+            ),
+            runtime_id=self.active_runtime_id,
+            ranking_cycle_id=live.get("rankingCycleId"),
+            observation_id=live.get("observationId"),
+            configuration_version=self.live_auto_selection_runtime.calibration.version,
+            micro_edge_suitability=suitability,
+        )
+
+    def _build_live_auto_selection_proposal(self, permission, source):
+        from backend.auto_market_selection.selection_proposal import (
+            PendingOrderState, PositionState, ProposalStatus, SelectionMode,
+            SelectionProposal,
+        )
+
+        live = source.get("liveObservation") or {}
+        described = ExchangeFactory.describe_orderbook(
+            self.exchange_name, permission.proposed_symbol,
+        )
+        proposed_at = datetime.fromisoformat(
+            live["timestamp"].replace("Z", "+00:00")
+        )
+        return SelectionProposal(
+            live.get("selectionProposalId") or permission.validation_transaction_id,
+            live.get("scannerCycleId") or "",
+            permission.ranking_cycle_id,
+            live.get("auditEventId") or "",
+            permission.proposed_symbol,
+            described["orderbookSymbol"],
+            permission.expected_active_symbol,
+            SelectionMode.AUTO,
+            ProposalStatus.PROPOSED,
+            Decimal(str(live.get("candidateScore") or live.get("topScore"))),
+            1,
+            proposed_at,
+            PositionState.FLAT,
+            PendingOrderState.NONE,
+            True,
+            (),
+            (),
+        )
+
+    def _live_auto_final_state(self, observation):
+        pending = self.get_authoritative_pending_order_state()
+        suitability = observation.micro_edge_suitability
+        return {
+            "activeSymbol": self.activeSymbol,
+            "activeRuntimeId": self.active_runtime_id,
+            "rankingCycleId": observation.ranking_cycle_id,
+            "observationId": observation.observation_id,
+            "configurationVersion": observation.configuration_version,
+            "candidateSymbol": observation.candidate_symbol,
+            "marketDataFresh": observation.market_data_fresh,
+            "liveAccountFresh": observation.live_account_fresh,
+            "mmFresh": observation.mm_fresh,
+            "positionState": observation.position_state,
+            "pendingOrderState": observation.pending_order_state,
+            "emergencySafe": observation.emergency_safe,
+            "governanceAllow": observation.governance_allow,
+            "runtimeConsistent": observation.runtime_authority_consistent,
+            "snapshotConsistent": observation.snapshot_consistent,
+            "statusConsistent": observation.live_status_consistent,
+            "realOrderAllowed": self.config.get("realOrderAllowed", False),
+            "autoTradeEnabled": self.config.get("autoTradeEnabled", False),
+            "executionRealOrderEnabled": self.config.get(
+                "executionRealOrderEnabled", False
+            ),
+            "pendingAuthorityKnown": pending.get("known") is True,
+            "microEdgeSuitabilityIdentity": (
+                suitability.evidence_identity
+                if suitability is not None else None
+            ),
+            "microEdgeSuitabilityStatus": (
+                suitability.status.value
+                if suitability is not None else None
+            ),
+        }
+
+    def _live_auto_control_loop(self):
+        from backend.auto_market_selection import (
+            BotManagerSwitchRuntime, LimitedLiveSafeSwitchAdapter,
+        )
+
+        try:
+            while not self.live_auto_control_stop.is_set():
+                source = self.refresh_production_ams_read_model(force=True) or {}
+                observation = self._build_live_auto_runtime_observation(source)
+                status = self.live_auto_selection_runtime.observe(observation)
+                if status.get("switchEligible") is True:
+                    switch_runtime = BotManagerSwitchRuntime(
+                        self,
+                        position_provider=lambda: observation.position_state,
+                        mm_provider=lambda: source.get("capitalEligibilityContract"),
+                        emergency_provider=lambda: observation.emergency_safe,
+                    )
+                    adapter = LimitedLiveSafeSwitchAdapter(
+                        switch_runtime,
+                        selection_proposal_provider=lambda permission: (
+                            self._build_live_auto_selection_proposal(permission, source)
+                        ),
+                        final_state_provider=lambda: self._live_auto_final_state(
+                            observation
+                        ),
+                    )
+                    self.live_auto_selection_runtime.validate_activation(
+                        observation, adapter
+                    )
+                    break
+                if self.live_auto_selection_runtime.get_status().get(
+                        "approvalState") != "APPROVED":
+                    break
+                self.live_auto_control_stop.wait(
+                    self.live_auto_selection_runtime.calibration.
+                    selection_observation_interval_seconds
+                )
+        finally:
+            self.live_auto_control_stop.set()
+
+    def attach_auto_market_selection_lifecycle(self, lifecycle):
+        required = ("start", "stop", "run_one_cycle", "get_status")
+        if any(not callable(getattr(lifecycle, name, None)) for name in required):
+            raise TypeError("AUTO market selection lifecycle required")
+        self.auto_market_selection_lifecycle = lifecycle
+        return self.get_auto_market_selection_runtime_status()
+
+    def start_auto_market_selection_runtime(self):
+        if self.auto_market_selection_lifecycle is None:
+            return self.get_auto_market_selection_runtime_status()
+        return self.auto_market_selection_lifecycle.start()
+
+    def stop_auto_market_selection_runtime(self):
+        if self.auto_market_selection_lifecycle is None:
+            return self.get_auto_market_selection_runtime_status()
+        return self.auto_market_selection_lifecycle.stop()
+
+    def run_auto_market_selection_cycle(self, *, started_at=None):
+        if self.auto_market_selection_lifecycle is None:
+            return {"accepted": False, "reasonCodes": ["AUTO_RUNTIME_UNAVAILABLE"],
+                    "runtime": self.get_auto_market_selection_runtime_status(),
+                    "result": None}
+        return self.auto_market_selection_lifecycle.run_one_cycle(started_at=started_at)
+
+    def get_auto_market_selection_runtime_status(self):
+        if self.auto_market_selection_lifecycle is None:
+            return {
+                "amsMode": "MANUAL", "amsRuntimeState": "STOPPED",
+                "currentCycleId": None, "lastCycleId": None,
+                "lastCycleStatus": None, "lastEvaluatedAt": None,
+                "activeSymbol": self.activeSymbol, "topCandidate": None,
+                "switchState": "IDLE", "reasonCodes": [],
+                "enabled": False, "readOnly": True,
+            }
+        return deepcopy(self.auto_market_selection_lifecycle.get_status())
+
+    def _pause_new_entries_for_safe_switch(self, transaction_id):
+        if not transaction_id or not self.symbol_switch_lock.acquire(blocking=False):
+            return False
+        self.symbol_switch_transaction_id = transaction_id
+        self._symbol_switch_entry_paused = True
+        return True
+
+    def _resume_new_entries_for_safe_switch(self, transaction_id):
+        if (not self._symbol_switch_entry_paused
+                or self.symbol_switch_transaction_id != transaction_id):
+            return False
+        self._symbol_switch_entry_paused = False
+        self.symbol_switch_transaction_id = None
+        self.symbol_switch_lock.release()
+        return True
+
+    def _commit_active_symbol_for_safe_switch(
+        self, expected_symbol, proposed_symbol, new_feed, runtime_id,
+        exchange_symbol, transaction_id,
+    ):
+        if (not self._symbol_switch_entry_paused
+                or self.symbol_switch_transaction_id != transaction_id
+                or self._active_symbol != expected_symbol
+                or not proposed_symbol or new_feed is None or not runtime_id):
+            return False
+        self._active_symbol = str(proposed_symbol).strip().upper()
+        self.ws = new_feed
+        self.active_runtime_id = runtime_id
+        self.orderbook_symbol = exchange_symbol
+        return True
+
+    def _synchronize_market_intelligence_for_safe_switch(
+        self, symbol, runtime_id, snapshot,
+    ):
+        if (self._active_symbol != symbol
+                or self.active_runtime_id != runtime_id
+                or not isinstance(snapshot, dict)
+                or snapshot.get("symbol") != symbol):
+            return False
+        bids = snapshot.get("bids")
+        asks = snapshot.get("asks")
+        if not isinstance(bids, dict) or not isinstance(asks, dict) or not bids or not asks:
+            return False
+
+        # Invalidate old-symbol current cognition; historical/audit data is
+        # intentionally retained elsewhere.
+        self.last_signal = None
+        self.latest_runtime_result = None
+        self.state.strategy_state = {}
+        self.state.execution_state = {}
+        self.microstructure_builder = MicrostructureStateBuilder(
+            parameter_set=paper_calibration_for_mode(
+                self.config.get("mode")
+            )
+        )
+
+        self.ob_manager.update(bids, asks)
+        self.ob_manager.current_price = snapshot.get("price", 0)
+        self.last_price = snapshot.get("price", 0)
+        self.market_ready = True
+        self.last_update_time = snapshot.get("market_timestamp", time.time())
+        self._store_market_snapshot(snapshot)
+        return True
 
     def start(self, config):
 
@@ -1977,12 +2735,14 @@ class BotManager:
 
             self.position_check_ok = False
 
-            self.symbol = config["symbol"].upper()
+            active_symbol = self._set_active_symbol_for_start(
+                config["symbol"]
+            )
 
             orderbook_context = (
                 ExchangeFactory.describe_orderbook(
                     config.get("exchange", "kucoin"),
-                    self.symbol,
+                    active_symbol,
                 )
             )
 
@@ -2004,8 +2764,18 @@ class BotManager:
             self.config = dict(config)
 
             self.config["exchange"] = self.exchange_name
+            self.config["symbol"] = active_symbol
 
             config = self.config
+
+            # A fresh causal history is owned by this runtime/symbol.  Only
+            # Paper receives the normalized calibration; Live keeps legacy
+            # defaults because paper_calibration_for_mode returns None.
+            self.microstructure_builder = MicrostructureStateBuilder(
+                parameter_set=paper_calibration_for_mode(
+                    config.get("mode")
+                )
+            )
 
             invalidated = self._invalidate_stopped_paper_durable_snapshot(
                 "BOT_START"
@@ -2081,7 +2851,7 @@ class BotManager:
                     )
 
             portfolio = PortfolioManager(
-                initial_balance=1000
+                initial_balance=float(self.paper_account_state["capital"])
             )
 
             self.engine = ExecutionEngine(
@@ -2114,7 +2884,7 @@ class BotManager:
 
             self.engine.set_config(config)
 
-            self.engine.symbol = self.symbol
+            self.engine.symbol = active_symbol
 
             self.engine.start()
 
@@ -2385,11 +3155,15 @@ class BotManager:
                             )
                         )
 
-                        if runtime_registry.trading_runtime:
+                        if (self.loop_state == "RUNNING"
+                                and runtime_registry.trading_runtime
+                                and not self._symbol_switch_entry_paused):
 
                             self.latest_runtime_result = (
                                 runtime_registry.trading_runtime.process_runtime(
-                                    micro_state
+                                    micro_state,
+                                    active_symbol=self.activeSymbol,
+                                    runtime_id=runtime_id,
                                 )
                             )
 
@@ -2504,6 +3278,15 @@ class BotManager:
 
                     if signal:
 
+                        if self._symbol_switch_entry_paused:
+
+                            add_log(
+                                "SYMBOL SWITCH NEW ENTRY PAUSED",
+                                "warning",
+                            )
+
+                            return
+
                         self.last_signal = signal
 
                         self.state.strategy_state[
@@ -2586,6 +3369,10 @@ class BotManager:
                         traceback.format_exc()
                     )
 
+            # A validated AMS-2B staging feed forwards into this same runtime
+            # pipeline only after its runtime ID becomes authoritative.
+            self._market_update_callback = on_update
+
             self.active_runtime_id = str(
                 uuid.uuid4()
             )
@@ -2600,7 +3387,7 @@ class BotManager:
             self.ws = (
                 ExchangeFactory.create_market_ws(
                     exchange=self.exchange_name,
-                    symbol=self.symbol,
+                    symbol=self.activeSymbol,
                     on_update=on_update,
                     runtime_id=self.active_runtime_id
                 )
@@ -2629,13 +3416,20 @@ class BotManager:
                 "RUNNING"
             )
 
+            # Starting the bot establishes monitoring infrastructure only.
+            # Loop and AUTO TRADE remain explicitly disabled.
+            self._set_loop_state("STOPPED")
+            governance_state["execution_enabled"] = False
+
             add_log(
                 "🟢 ORDERBOOK WS STARTED"
             )
 
             return {
                 "status": "started",
-                "symbol": self.symbol,
+                "symbol": self.activeSymbol,
+                "activeSymbol": self.activeSymbol,
+                "selectionMode": self.selection_mode,
                 "exchange": self.exchange_name,
                 "orderbookSource": self.orderbook_source,
                 "orderbookSymbol": self.orderbook_symbol,
@@ -3158,7 +3952,6 @@ class BotManager:
     def _capture_account_snapshot(self):
 
         if self.engine is None:
-
             return self.account_snapshot
 
         try:
@@ -3203,6 +3996,15 @@ class BotManager:
             )
 
         return self.account_snapshot
+
+    def _status_account_snapshot(self):
+        snapshot = self._capture_account_snapshot()
+        if (
+            self.engine is None
+            and snapshot.get("available") is not True
+        ):
+            return self.paper_account_runtime_snapshot
+        return snapshot
 
     def _emergency_response(
         self,
@@ -5181,6 +5983,11 @@ class BotManager:
         return {
             "valid": True,
             "source": source,
+            # A preserved runtime projection wraps, but never replaces, the
+            # canonical engine/portfolio evidence source.  Refresh callers
+            # must carry this effective source forward instead of nesting the
+            # wrapper source into sourceSnapshotSource.
+            "effective_source": effective_source,
             "position_state": (
                 "remaining" if position_remaining else "flat"
             ),
@@ -5463,7 +6270,10 @@ class BotManager:
                 else now
             ),
             "source": "stopped_paper_preserved_runtime_state",
-            "sourceSnapshotSource": authority_state.get("source"),
+            "sourceSnapshotSource": authority_state.get(
+                "effective_source",
+                authority_state.get("source"),
+            ),
             "tradeMode": "paper",
             "mode": "paper",
             "selectedMode": "PAPER",
@@ -6206,6 +7016,31 @@ class BotManager:
             )
 
         if engine is None:
+            configured_mode = str(
+                self.config.get("mode", "")
+            ).strip().lower()
+            if (
+                configured_mode == "live"
+                and self._running is False
+                and self.lifecycle_state == "STOPPED"
+            ):
+                return self._stopped_live_pending_order_authority(
+                    manager_pending_order
+                )
+
+            # Manager state is current process authority.  A pending order
+            # must never be hidden by an older flat stopped snapshot.
+            if manager_pending_order is True:
+                return self._pending_order_authority_payload(
+                    known=True,
+                    pending=True,
+                    safe=False,
+                    reason="PENDING_ORDER_REMAINING",
+                    source="bot_manager.pending_order",
+                    manager_pending_order=True,
+                    engine_available=False,
+                )
+
             stopped_state = (
                 self._stopped_paper_authoritative_safety_state()
             )
@@ -6385,6 +7220,87 @@ class BotManager:
             engine_available=True,
             engine_pending_order=engine_pending_order,
         )
+
+    def _stopped_live_pending_order_authority(self, manager_pending_order):
+        """Resolve pending orders from the real GET-only exchange authority."""
+        def unknown(reason):
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason=reason,
+                source="live_account_read_only",
+                manager_pending_order=manager_pending_order,
+                engine_available=False,
+            )
+
+        safety = self._production_ams_safety_state()
+        if safety.get("stoppedLiveMonitoring") is not True:
+            return unknown("STOPPED_LIVE_MONITORING_UNAVAILABLE")
+
+        current = self.auto_market_selection_observation
+        account = (
+            current.get("liveAccountAuthority")
+            if isinstance(current, dict) else None
+        )
+        fresh = False
+        if isinstance(account, dict) and account.get("authorityFresh") is True:
+            evaluated_at = account.get("authorityEvaluatedAt") or account.get(
+                "evaluatedAt"
+            )
+            try:
+                observed = datetime.fromisoformat(
+                    str(evaluated_at).replace("Z", "+00:00")
+                )
+                fresh = bool(
+                    observed.tzinfo is not None
+                    and 0 <= (
+                        datetime.now(timezone.utc) - observed.astimezone(timezone.utc)
+                    ).total_seconds() <= self.production_ams_observation_ttl
+                )
+            except (TypeError, ValueError):
+                fresh = False
+
+        if not fresh:
+            current = self.refresh_production_ams_read_model(force=True)
+            account = (
+                current.get("liveAccountAuthority")
+                if isinstance(current, dict) else None
+            )
+
+        if not isinstance(account, dict):
+            return unknown("LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE")
+        if (
+            account.get("authorityFresh") is not True
+            or account.get("pendingOrdersFresh") is not True
+            or account.get("snapshotConsistent") is not True
+        ):
+            return unknown("LIVE_PENDING_ORDER_AUTHORITY_STALE")
+
+        state = account.get("pendingOrderState")
+        if state == "NONE":
+            if manager_pending_order is not False:
+                return unknown("PENDING_ORDER_MANAGER_CONFLICT")
+            return self._pending_order_authority_payload(
+                known=True,
+                pending=False,
+                safe=True,
+                reason="STOPPED_LIVE_GET_ONLY_SAFE",
+                source="live_account_read_only",
+                manager_pending_order=manager_pending_order,
+                engine_available=False,
+            )
+        if state == "EXISTS":
+            return self._pending_order_authority_payload(
+                known=True,
+                pending=True,
+                safe=False,
+                reason="LIVE_PENDING_ORDER_EXISTS",
+                source="live_account_read_only",
+                manager_pending_order=manager_pending_order,
+                engine_available=False,
+            )
+        return unknown("LIVE_PENDING_ORDER_UNKNOWN")
 
     def _stopped_paper_emergency_response(
         self,
@@ -7255,6 +8171,9 @@ class BotManager:
 
         engine = self.engine
 
+        # Bot shutdown always revokes transient Live AUTO authority first.
+        self.stop_live_auto_control()
+
         self._set_lifecycle_state(
             "STOPPING"
         )
@@ -7266,6 +8185,8 @@ class BotManager:
         self._running = False
 
         governance_state["execution_enabled"] = False
+
+        self._set_loop_state("STOPPED")
 
         # Invalidate callbacks from the old exchange WebSocket immediately.
         self.active_runtime_id = None
@@ -7624,7 +8545,7 @@ class BotManager:
             else 0.0
         )
 
-        snapshot = self._capture_account_snapshot()
+        snapshot = self._status_account_snapshot()
 
         actual_position = deepcopy(
             snapshot.get("position")
@@ -7693,10 +8614,7 @@ class BotManager:
             self.ws is not None
             and getattr(self.ws, "connected", False)
         )
-        loop_enabled = bool(
-            self._running
-            and self.lifecycle_state == "RUNNING"
-        )
+        loop_enabled = bool(self.loop_state == "RUNNING")
         auto_trade_enabled = bool(
             governance_state.get(
                 "execution_enabled",
@@ -7778,6 +8696,59 @@ class BotManager:
             live_readiness.get("realOrderAllowed", False)
         )
 
+        trace = (
+            completed_runtime_result.get("runtimeStageTrace", {})
+            if isinstance(completed_runtime_result, dict) else {}
+        )
+        trace_timestamps = [
+            event.get("timestamp")
+            for event in trace.values()
+            if isinstance(event, dict)
+            and isinstance(event.get("timestamp"), (int, float))
+        ]
+        decision_timestamp = max(trace_timestamps) if trace_timestamps else None
+        decision_cycle_id = (
+            f"{self.session_id}:{self.update_id}"
+            if decision_timestamp is not None else None
+        )
+
+        trading_decision = build_trading_decision_snapshot(
+            running=self._running,
+            mode=selected_mode,
+            market_ready=bool(self.market_ready and not market_stale),
+            runtime_result=completed_runtime_result,
+            pending_order=pending_order,
+            position_active=position_candidate is not None,
+            money_management_guard=(
+                getattr(self.engine, "last_money_management_guard", None)
+                if self.engine is not None else None
+            ),
+            exchange=self.exchange_name,
+            symbol=self.symbol,
+            cycle_id=decision_cycle_id,
+            timestamp=decision_timestamp,
+            stale=bool(market_stale or decision_timestamp is None),
+            order_state=pending_order_status_state.get("state"),
+            order_side=pending_order_state.get("side"),
+            order_type=pending_order_state.get("type"),
+            position_state="OPEN" if position_candidate is not None else "FLAT",
+            real_order_allowed=real_order_allowed,
+            execution_authority=("ENABLED" if real_order_allowed else "BLOCKED"),
+            emergency_state=emergency_state,
+        )
+        decision_signature = (
+            trading_decision.get("finalDecision"),
+            trading_decision.get("currentState"),
+            trading_decision.get("blockingStage"),
+            trading_decision.get("blockingReason"),
+            trading_decision["stages"]["execution"].get("orderState"),
+            trading_decision["stages"]["execution"].get("positionState"),
+        )
+        if decision_signature != self.trading_decision_state_signature:
+            self.trading_decision_state_signature = decision_signature
+            self.trading_decision_state_since = decision_timestamp
+        trading_decision["stateSince"] = self.trading_decision_state_since
+
         execution_mode = (
             "LIVE"
             if real_order_allowed
@@ -7840,6 +8811,35 @@ class BotManager:
                 account_runtime,
                 live_readiness,
             )
+        )
+
+        from backend.auto_market_selection.dashboard_status import (
+            build_auto_market_selection_status,
+        )
+        self.refresh_production_ams_read_model()
+        observation = deepcopy(self.auto_market_selection_observation) or {}
+        if self._symbol_switch_entry_paused:
+            switch_observation = dict(observation.get("switchResult") or {})
+            switch_observation.update({
+                "state": "IN_PROGRESS",
+                "switchTransactionId": self.symbol_switch_transaction_id,
+                "entryPaused": True,
+            })
+            observation["switchResult"] = switch_observation
+        auto_market_selection = build_auto_market_selection_status(
+            active_symbol=self.activeSymbol,
+            selection_mode=self.selection_mode,
+            requested_symbol=trade_settings.get("symbol"),
+            audit_event=observation.get("auditEvent"),
+            proposal=observation.get("selectionProposal"),
+            switch_result=observation.get("switchResult"),
+            cycle=observation.get("autoSelectionCycle"),
+            lifecycle=self.get_auto_market_selection_runtime_status(),
+            live_observation=observation.get("liveObservation"),
+            live_account_authority=observation.get("liveAccountAuthority"),
+            capital_eligibility=observation.get("capitalEligibility"),
+            production_integration=observation.get("productionIntegration"),
+            live_auto_runtime=self.live_auto_selection_runtime.get_status(),
         )
 
         status_payload = {
@@ -7962,7 +8962,9 @@ class BotManager:
 
             "loopEnabled": loop_enabled,
 
-            "loopState": self.lifecycle_state,
+            "loopState": self.loop_state,
+
+            "botState": self.lifecycle_state,
 
             "autoTradeEnabled": auto_trade_enabled,
 
@@ -8036,7 +9038,21 @@ class BotManager:
                 "adapterOutput"
             ),
 
-            "symbol": self.symbol,
+            "symbol": self.activeSymbol,
+
+            "activeSymbol": self.activeSymbol,
+
+            "selectionMode": self.selection_mode,
+
+            "autoMarketSelection": auto_market_selection,
+
+            "symbolSwitchState": (
+                "IN_PROGRESS"
+                if self._symbol_switch_entry_paused
+                else "IDLE"
+            ),
+
+            "symbolSwitchTransactionId": self.symbol_switch_transaction_id,
 
             "exchange": self.exchange_name,
 
@@ -8068,9 +9084,15 @@ class BotManager:
 
             "ai_state": runtime_states["ai"],
 
+            "tradingAiMode": "OFF",
+
+            "tradingAiStatus": "NOT_INSTALLED",
+
             "governance_state": runtime_states["governance"],
 
             "runtime_health": runtime_health,
+
+            "tradingDecision": trading_decision,
 
             "ws_connected": (
                 websocket_connected

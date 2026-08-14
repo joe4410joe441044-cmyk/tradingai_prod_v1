@@ -42,7 +42,15 @@ from backend.api.runtime import router as runtime_api_router
 from backend.api.ai_advisor import create_advice_router, create_runtime_router
 from backend.ai_advisor.credential_loader import EnvironmentCredentialLoader
 from backend.ai_advisor.production_composition import (
+    ProviderInteractionPolicy,
     build_ai_advisor_production_composition,
+)
+from backend.ai_advisor.provider_failure_observation import StructuredLoggingProviderFailureObservationSink
+from backend.ai_advisor.response_safety_observation import (
+    StructuredLoggingResponseSafetyRejectionObservationSink,
+)
+from backend.ai_advisor.authoritative_knowledge import (
+    load_authoritative_specifications,
 )
 from backend.ai_advisor.production_config_loader import (
     EnvironmentProductionConfigLoader,
@@ -57,7 +65,15 @@ from backend.ai_advisor.browser_gateway import (
     create_browser_gateway_router,
     load_browser_gateway_config,
 )
+from backend.auth.auth_config import load_operator_auth_config
+from backend.auth.operator_session import OperatorSessionManager
+from backend.auth.operator_auth import OperatorAuthenticator, hash_operator_credential
+from backend.auth.session_middleware import OperatorSessionMiddleware
+from backend.auth.csrf import OperatorCsrfProtection
+from backend.auth.api import create_operator_auth_router
 from backend.money_management.loss_application_registration import (
+    get_money_management_config,
+    start_money_management_cash_flow_runtime,
     shutdown_money_management_application,
     startup_money_management_application,
 )
@@ -73,6 +89,10 @@ from backend.money_management.loss_http_api import (
     register_money_management_http_boundary,
     unregister_money_management_http_boundary,
 )
+from backend.api.recorder_proxy import (
+    create_recorder_proxy_router,
+)
+from backend.api.trading_trace import router as trading_trace_router
 from backend.api.supervisor import router as supervisor_router
 
 # ============================================================
@@ -101,241 +121,11 @@ from backend.runtime.ExecutionRuntime import (
     ExecutionRuntime
 )
 
-from backend.ai.ai_pipeline import (
-    AIPipeline
-)
-
-from backend.ai.runtime_adapter import (
-    RuntimeAdapter
-)
-
 # ============================================================
 # FASTAPI
 # ============================================================
 
 app = FastAPI()
-
-
-def _new_momentum_trace(microstructure_state):
-
-    missing = object()
-    source_value = extract_value(
-        microstructure_state,
-        "momentumPersistence",
-        missing,
-    )
-    source_present = source_value is not missing
-
-    if not source_present:
-        source_value = None
-
-    source_computation = extract_value(
-        microstructure_state,
-        "momentumPersistenceDebug",
-    )
-
-    price_history_generation = extract_value(
-        microstructure_state,
-        "priceHistoryGenerationDebug",
-    )
-
-    return {
-        "sourceGenerator": (
-            "MicrostructureStateBuilder."
-            "compute_momentum_persistence"
-        ),
-        "sourceField": (
-            "microstructure_state.momentumPersistence"
-        ),
-        "sourcePresent": source_present,
-        "sourceValue": safe_debug(source_value),
-        "sourceComputation": safe_debug(
-            source_computation
-        ),
-        "priceHistoryGeneration": safe_debug(
-            price_history_generation
-        ),
-        "strategyInputValue": safe_debug(source_value),
-        "strategyFallbackUsed": not source_present,
-        "strategyFallbackValue": 0.0,
-        "strategyOutputPresent": None,
-        "strategyOutputValue": None,
-        "runtimeAdapterFallbackUsed": None,
-        "runtimeStateValue": None,
-        "tradeBrainFallbackUsed": None,
-        "tradeBrainValue": None,
-        "llmEngineFallbackUsed": None,
-        "llmEngineValue": None,
-        "valueChanged": None,
-        "zeroFirstObservedAt": (
-            "microstructure_state.momentumPersistence"
-            if source_present and source_value == 0
-            else None
-        ),
-    }
-
-
-def _update_momentum_trace_consistency(momentum_trace):
-
-    stages = (
-        (
-            "microstructure_state.momentumPersistence",
-            momentum_trace.get("sourceValue"),
-        ),
-        (
-            "runtime_state.momentum_score",
-            momentum_trace.get("runtimeStateValue"),
-        ),
-        (
-            "TradeBrain.llmInput.runtime_state.momentum_score",
-            momentum_trace.get("tradeBrainValue"),
-        ),
-        (
-            "LLMEngine.llmRuleInput.momentum_score",
-            momentum_trace.get("llmEngineValue"),
-        ),
-    )
-    observed_values = [
-        value
-        for _, value in stages
-        if value is not None
-    ]
-
-    momentum_trace["zeroFirstObservedAt"] = next(
-        (
-            stage
-            for stage, value in stages
-            if value == 0
-        ),
-        None,
-    )
-
-    if len(observed_values) < 2:
-        momentum_trace["valueChanged"] = None
-        return
-
-    first_value = observed_values[0]
-    momentum_trace["valueChanged"] = any(
-        value != first_value
-        for value in observed_values[1:]
-    )
-
-
-def _new_momentum_pipeline_trace(microstructure_state):
-
-    momentum = safe_debug(extract_value(
-        microstructure_state,
-        "momentumPersistence",
-    ))
-    ai_momentum = safe_debug(extract_value(
-        microstructure_state,
-        "aiMomentumPersistence",
-    ))
-    ai_momentum_trace = extract_value(
-        microstructure_state,
-        "aiMomentumTrace",
-    )
-    comparison_metrics = extract_value(
-        ai_momentum_trace,
-        "comparisonMetrics",
-    )
-    candidate_metrics = extract_value(
-        ai_momentum_trace,
-        "candidateMetrics",
-    )
-
-    trace = {
-        "microstructureMomentumPersistence": momentum,
-        "microstructureAiMomentumPersistence": ai_momentum,
-        "runtimeAdapterInputMomentum": momentum,
-        "runtimeAdapterInputAiMomentum": ai_momentum,
-        "runtimeStateMomentumScore": None,
-        "tradeBrainInputMomentumScore": None,
-        "llmInputMomentumScore": None,
-        "llmRuleInputMomentumScore": None,
-        "aiMomentumTraceValue": safe_debug(extract_value(
-            ai_momentum_trace,
-            "value",
-        )),
-        "aiMomentumFlatExcludedMomentum": safe_debug(
-            extract_value(
-                comparison_metrics,
-                "flatExcludedMomentum",
-            )
-        ),
-        "aiMomentumProposedMomentumScore": safe_debug(
-            extract_value(
-                candidate_metrics,
-                "proposedMomentumScore",
-            )
-        ),
-        "allValuesEqual": None,
-        "mismatchDetected": None,
-        "mismatchReason": None,
-    }
-    _update_momentum_pipeline_trace_consistency(trace)
-    return trace
-
-
-def _update_momentum_pipeline_trace_consistency(trace):
-
-    value_fields = (
-        "microstructureMomentumPersistence",
-        "microstructureAiMomentumPersistence",
-        "runtimeAdapterInputMomentum",
-        "runtimeAdapterInputAiMomentum",
-        "runtimeStateMomentumScore",
-        "tradeBrainInputMomentumScore",
-        "llmInputMomentumScore",
-        "llmRuleInputMomentumScore",
-        "aiMomentumTraceValue",
-        "aiMomentumFlatExcludedMomentum",
-        "aiMomentumProposedMomentumScore",
-    )
-    values = [trace.get(field) for field in value_fields]
-    all_present = all(value is not None for value in values)
-    all_values_equal = (
-        all_present
-        and all(value == values[0] for value in values[1:])
-    )
-
-    trace["allValuesEqual"] = all_values_equal
-    trace["mismatchDetected"] = not all_values_equal
-
-    runtime_state_momentum = trace.get(
-        "runtimeStateMomentumScore"
-    )
-    llm_input_momentum = trace.get("llmInputMomentumScore")
-    microstructure_momentum = trace.get(
-        "microstructureMomentumPersistence"
-    )
-    microstructure_ai_momentum = trace.get(
-        "microstructureAiMomentumPersistence"
-    )
-    ai_trace_value = trace.get("aiMomentumTraceValue")
-    proposed_momentum = trace.get(
-        "aiMomentumProposedMomentumScore"
-    )
-
-    if runtime_state_momentum is None:
-        reason = "MISSING_RUNTIME_STATE_MOMENTUM"
-    elif ai_trace_value is None:
-        reason = "MISSING_AI_MOMENTUM_TRACE"
-    elif all_values_equal:
-        reason = "NO_MISMATCH"
-    elif (
-        llm_input_momentum == microstructure_momentum
-        and microstructure_ai_momentum != llm_input_momentum
-    ):
-        reason = "LLM_USES_MICROSTRUCTURE_MOMENTUM"
-    elif ai_trace_value != llm_input_momentum:
-        reason = "AI_TRACE_VALUE_DIFFERS_FROM_LLM_INPUT"
-    elif proposed_momentum != llm_input_momentum:
-        reason = "PROPOSED_SCORE_DIFFERS_FROM_LLM_INPUT"
-    else:
-        reason = "UNKNOWN_MISMATCH"
-
-    trace["mismatchReason"] = reason
 
 
 def _record_strategy_debug(debug_result, strategy_result):
@@ -425,250 +215,28 @@ def _record_runtime_stage(
 
 
 def _attach_runtime_debug(runtime_result, debug_result):
+    """Attach mainline telemetry without evaluating archived AI diagnostics."""
 
-    if isinstance(runtime_result, dict):
-        runtime_result.update(debug_result)
-        runtime_result["runtimeDebug"] = {
-            "momentumTrace": safe_debug(
-                debug_result.get("momentumTrace")
-            ),
-            "momentumPipelineTrace": safe_debug(
-                debug_result.get("momentumPipelineTrace")
-            ),
-            "priceHistoryTrace": safe_debug(
-                debug_result.get("priceHistoryTrace")
-            ),
-            "aiMomentumTrace": safe_debug(
-                debug_result.get("aiMomentumTrace")
-            ),
-            "liquidityInstabilityDebug": safe_debug(
-                debug_result.get(
-                    "liquidityInstabilityDebug"
-                )
-            ),
-            "liquidityDeteriorationDebug": safe_debug(
-                debug_result.get(
-                    "liquidityDeteriorationDebug"
-                )
-            ),
-            "aiRuntimeReached": safe_debug(
-                debug_result.get("aiRuntimeReached")
-            ),
-            "aiInput": safe_debug(
-                debug_result.get("aiInput")
-            ),
-            "aiOutput": safe_debug(
-                debug_result.get("aiOutput")
-            ),
-            "aiDecision": safe_debug(
-                debug_result.get("aiDecision")
-            ),
-            "aiReason": safe_debug(
-                debug_result.get("consensusReason")
-            ),
-            "aiHoldReason": safe_debug(
-                debug_result.get("aiHoldReason")
-            ),
-            "llmDebug": {
-                "input": safe_debug(
-                    debug_result.get("llmInput")
-                ),
-                "output": safe_debug(
-                    debug_result.get("llmOutput")
-                ),
-                "decision": safe_debug(
-                    debug_result.get("llmDecision")
-                ),
-                "confidence": safe_debug(
-                    debug_result.get("llmConfidence")
-                ),
-                "reason": safe_debug(
-                    debug_result.get("llmRuleReason")
-                ),
-                "decisionSource": safe_debug(
-                    debug_result.get("llmDecisionSource")
-                ),
-                "longCandidate": safe_debug(
-                    debug_result.get("aiLongCandidate")
-                ),
-                "shortCandidate": safe_debug(
-                    debug_result.get("aiShortCandidate")
-                ),
-                "rawSignal": safe_debug(
-                    debug_result.get("aiRawSignal")
-                ),
-            },
-            "tradeBrainDebug": {
-                "aiRuntimeReached": safe_debug(
-                    debug_result.get("aiRuntimeReached")
-                ),
-                "aiInput": safe_debug(
-                    debug_result.get("aiInput")
-                ),
-                "aiOutput": safe_debug(
-                    debug_result.get("aiOutput")
-                ),
-                "aiDecision": safe_debug(
-                    debug_result.get("aiDecision")
-                ),
-                "aiHoldReason": safe_debug(
-                    debug_result.get("aiHoldReason")
-                ),
-                "llmDecision": safe_debug(
-                    debug_result.get("llmDecision")
-                ),
-                "llmDecisionSource": safe_debug(
-                    debug_result.get("llmDecisionSource")
-                ),
-                "consensusReason": safe_debug(
-                    debug_result.get("consensusReason")
-                ),
-            },
-        }
-
+    if not isinstance(runtime_result, dict):
+        return runtime_result
+    runtime_result.update(debug_result)
+    runtime_result["runtimeDebug"] = {
+        "tradingAiMode": "OFF",
+        "tradingAiStatus": "NOT_INSTALLED",
+        "aiRuntimeReached": False,
+        "aiDecision": None,
+        "aiFallback": None,
+        "momentumTrace": safe_debug(debug_result.get("momentumTrace")),
+        "priceHistoryTrace": safe_debug(debug_result.get("priceHistoryTrace")),
+        "liquidityInstabilityDebug": safe_debug(
+            debug_result.get("liquidityInstabilityDebug")
+        ),
+        "liquidityDeteriorationDebug": safe_debug(
+            debug_result.get("liquidityDeteriorationDebug")
+        ),
+    }
     return runtime_result
 
-
-def _build_llm_debug(
-    latest_ai_event,
-    ai_raw_signal,
-    ai_decision_debug=None,
-):
-
-    def llm_debug_value(key, default=None):
-
-        for source in (
-            ai_decision_debug,
-            latest_ai_event,
-            ai_raw_signal,
-        ):
-            value = extract_value(source, key)
-
-            if value is not None:
-                return value
-
-        return default
-
-    llm_output = extract_value(
-        ai_decision_debug,
-        "llmOutput",
-        extract_value(ai_raw_signal, "llm"),
-    )
-
-    llm_decision = extract_value(
-        ai_decision_debug,
-        "llmDecision",
-        llm_output,
-    )
-
-    lstm_decision = extract_value(
-        ai_raw_signal,
-        "lstm",
-    )
-
-    llm_input = extract_value(
-        ai_decision_debug,
-        "llmInput",
-        extract_value(latest_ai_event, "llmInput"),
-    )
-
-    reject_buy_reason = llm_debug_value(
-        "llmRejectBuyReason"
-    )
-
-    reject_sell_reason = llm_debug_value(
-        "llmRejectSellReason"
-    )
-
-    llm_hold_reason = llm_debug_value(
-        "llmHoldReason"
-    )
-
-    if llm_decision == "HOLD" and llm_hold_reason is None:
-        llm_hold_reason = (
-            "LLM returned HOLD without exposed reason"
-        )
-
-    consensus_input = extract_value(
-        ai_decision_debug,
-        "consensusInput",
-        extract_value(latest_ai_event, "consensusInput"),
-    )
-
-    if (
-        consensus_input is None
-        and (
-            lstm_decision is not None
-            or llm_output is not None
-        )
-    ):
-        consensus_input = {
-            "lstm": lstm_decision,
-            "llm": llm_output,
-        }
-
-    consensus_reason = extract_value(
-        ai_decision_debug,
-        "consensusReason",
-        extract_value(
-            latest_ai_event,
-            "consensusReason",
-            extract_value(latest_ai_event, "reason"),
-        ),
-    )
-
-    return {
-        "llmInput": safe_debug(llm_input),
-        "llmOutput": safe_debug(llm_output),
-        "llmDecision": safe_debug(llm_decision),
-        "llmDecisionSource": safe_debug(
-            llm_debug_value("llmDecisionSource")
-        ),
-        "llmRuleReason": safe_debug(
-            llm_debug_value("llmRuleReason")
-        ),
-        "llmHoldReason": safe_debug(llm_hold_reason),
-        "llmRejectReason": safe_debug(
-            llm_debug_value("llmRejectReason")
-        ),
-        "llmRuleInput": safe_debug(
-            llm_debug_value("llmRuleInput")
-        ),
-        "llmRuleThresholds": safe_debug(
-            llm_debug_value("llmRuleThresholds")
-        ),
-        "llmFallbackUsed": safe_debug(
-            llm_debug_value("llmFallbackUsed")
-        ),
-        "llmFallbackReason": safe_debug(
-            llm_debug_value("llmFallbackReason")
-        ),
-        "llmPromptSummary": safe_debug(
-            llm_debug_value("llmPromptSummary")
-        ),
-        "llmRawOutput": safe_debug(
-            llm_debug_value("llmRawOutput")
-        ),
-        "llmParsedOutput": safe_debug(
-            llm_debug_value("llmParsedOutput")
-        ),
-        "llmParserResult": safe_debug(
-            llm_debug_value("llmParserResult")
-        ),
-        "llmRejectBuyReason": safe_debug(reject_buy_reason),
-        "llmRejectSellReason": safe_debug(reject_sell_reason),
-        "llmConfidence": safe_debug(
-            extract_value(ai_raw_signal, "llmConfidence")
-        ),
-        "llmScore": safe_debug(
-            extract_value(ai_raw_signal, "llmScore")
-        ),
-        "llmProbability": safe_debug(
-            extract_value(ai_raw_signal, "llmProbability")
-        ),
-        "consensusInput": safe_debug(consensus_input),
-        "consensusReason": safe_debug(consensus_reason),
-    }
 
 # ============================================================
 # TRADING RUNTIME
@@ -694,17 +262,6 @@ class TradingRuntime:
             ExecutionRuntime()
         )
 
-        # ----------------------------------------------------
-        # AI Runtime
-        # ----------------------------------------------------
-
-        self.ai_pipeline = (
-            AIPipeline()
-        )
-
-        self.runtime_adapter = (
-            RuntimeAdapter()
-        )
         self.governance_runtime = (
             GovernanceRuntime()
         )
@@ -722,31 +279,55 @@ class TradingRuntime:
     def process_runtime(
         self,
         microstructure_state,
+        active_symbol=None,
+        runtime_id=None,
     ):
 
+        from backend.runtime.runtime_symbol_context import (
+            build_runtime_symbol_context,
+        )
+
+        symbol_context = build_runtime_symbol_context(
+            active_symbol, runtime_id,
+        )
+        symbol_context_payload = (
+            symbol_context.to_dict() if symbol_context is not None else None
+        )
+        microstructure_state = dict(microstructure_state)
+        if symbol_context is not None:
+            microstructure_state["symbol"] = symbol_context.symbol
+            microstructure_state["runtimeId"] = symbol_context.runtime_id
+            microstructure_state["runtimeSymbolContext"] = symbol_context_payload
+
         debug_result = build_runtime_debug_result()
+        debug_result["runtimeSymbolContext"] = symbol_context_payload
         _record_runtime_stage(
             debug_result,
             "trading-runtime",
             status="ACTIVE",
         )
-        debug_result["momentumTrace"] = (
-            _new_momentum_trace(microstructure_state)
-        )
-        debug_result["momentumPipelineTrace"] = (
-            _new_momentum_pipeline_trace(microstructure_state)
-        )
-        debug_result["priceHistoryTrace"] = (
-            debug_result["momentumTrace"].get(
-                "priceHistoryGeneration"
-            )
-        )
-        debug_result["aiMomentumTrace"] = safe_debug(
-            extract_value(
+        # Strategy telemetry remains available without constructing the
+        # archived AI adapter/consensus momentum pipeline.
+        debug_result["momentumTrace"] = safe_debug({
+            "sourceGenerator": (
+                "MicrostructureStateBuilder.compute_momentum_persistence"
+            ),
+            "sourceField": "microstructure_state.momentumPersistence",
+            "sourceValue": extract_value(
                 microstructure_state,
-                "aiMomentumTrace",
-            )
-        )
+                "momentumPersistence",
+            ),
+            "sourceComputation": extract_value(
+                microstructure_state,
+                "momentumPersistenceDebug",
+            ),
+        })
+        debug_result["momentumPipelineTrace"] = None
+        debug_result["priceHistoryTrace"] = safe_debug(extract_value(
+            microstructure_state,
+            "priceHistoryGenerationDebug",
+        ))
+        debug_result["aiMomentumTrace"] = None
         debug_result["liquidityInstabilityDebug"] = safe_debug(
             extract_value(
                 microstructure_state,
@@ -768,222 +349,18 @@ class TradingRuntime:
 
         try:
 
-            # ------------------------------------------------
-            # AI Shadow Runtime
-            # ------------------------------------------------
-
-            try:
-
-                runtime_state = (
-                    self.runtime_adapter.build(
-                        microstructure_state
-                    )
-                )
-                debug_result["runtimeAdapterReached"] = True
-                debug_result["runtimeStateReached"] = True
-                _record_runtime_stage(debug_result, "runtime-adapter")
-                _record_runtime_stage(debug_result, "runtime-state")
-
-                momentum_trace = debug_result["momentumTrace"]
-                missing = object()
-                ai_momentum = extract_value(
-                    microstructure_state,
-                    "aiMomentumPersistence",
-                    missing,
-                )
-                momentum_trace["runtimeAdapterFallbackUsed"] = (
-                    ai_momentum is missing
-                )
-                momentum_trace["runtimeStateValue"] = safe_debug(
-                    extract_value(runtime_state, "momentum_score")
-                )
-                momentum_pipeline_trace = debug_result[
-                    "momentumPipelineTrace"
-                ]
-                momentum_pipeline_trace[
-                    "runtimeStateMomentumScore"
-                ] = safe_debug(extract_value(
-                    runtime_state,
-                    "momentum_score",
-                ))
-                _update_momentum_pipeline_trace_consistency(
-                    momentum_pipeline_trace
-                )
-                _update_momentum_trace_consistency(
-                    momentum_trace
-                )
-
-                ai_input = {
-                    "runtime_state": runtime_state
-                }
-
-                debug_result["aiInput"] = safe_debug(
-                    ai_input
-                )
-
-                runtime_debug(
-                    "[STEP56-6][AI_INPUT] %s",
-                    debug_result["aiInput"],
-                )
-
-                ai_signal, ai_events = (
-                    self.ai_pipeline.decide(
-                        ai_input
-                    )
-                )
-
-                latest_ai_event = (
-                    ai_events[-1]
-                    if isinstance(ai_events, (list, tuple))
-                    and ai_events
-                    else None
-                )
-
-                ai_raw_signal = extract_value(
-                    latest_ai_event,
-                    "data",
-                )
-
-                ai_hold_reason = None
-
-                if ai_signal == "HOLD":
-                    ai_hold_reason = extract_value(
-                        latest_ai_event,
-                        "reason",
-                    )
-
-                debug_result.update({
-                    "aiRuntimeReached": True,
-                    "aiOutput": safe_debug({
-                        "signal": ai_signal,
-                        "events": ai_events,
-                    }),
-                    "aiConfidence": safe_debug(
-                        extract_value(
-                            latest_ai_event,
-                            "confidence",
-                        )
-                    ),
-                    "aiScore": safe_debug(
-                        extract_value(
-                            latest_ai_event,
-                            "score",
-                            extract_value(ai_raw_signal, "score"),
-                        )
-                    ),
-                    "aiDecision": safe_debug(ai_signal),
-                    "aiDirection": safe_debug(ai_signal),
-                    "aiHoldReason": safe_debug(ai_hold_reason),
-                    "aiLongCandidate": safe_debug(
-                        extract_value(
-                            latest_ai_event,
-                            "longCandidate",
-                            extract_value(
-                                ai_raw_signal,
-                                "longCandidate",
-                            ),
-                        )
-                    ),
-                    "aiShortCandidate": safe_debug(
-                        extract_value(
-                            latest_ai_event,
-                            "shortCandidate",
-                            extract_value(
-                                ai_raw_signal,
-                                "shortCandidate",
-                            ),
-                        )
-                    ),
-                    "aiRawSignal": safe_debug(ai_raw_signal),
-                })
-                _record_runtime_stage(debug_result, "ai-plugin")
-
-                ai_decision_debug = extract_value(
-                    self.ai_pipeline.brain,
-                    "latest_decision_debug",
-                )
-                llm_debug = _build_llm_debug(
-                    latest_ai_event,
-                    ai_raw_signal,
-                    ai_decision_debug,
-                )
-                debug_result.update(llm_debug)
-
-                trade_brain_input = extract_value(
-                    ai_decision_debug,
-                    "llmInput",
-                )
-                trade_brain_runtime_state = extract_value(
-                    trade_brain_input,
-                    "runtime_state",
-                )
-                llm_features = extract_value(
-                    trade_brain_input,
-                    "features",
-                )
-                llm_feature_map = extract_value(
-                    llm_features,
-                    "feature_map",
-                )
-                momentum_trace["tradeBrainValue"] = safe_debug(
-                    extract_value(
-                        trade_brain_runtime_state,
-                        "momentum_score",
-                    )
-                )
-                momentum_trace["tradeBrainFallbackUsed"] = False
-                momentum_trace["llmEngineValue"] = safe_debug(
-                    extract_value(
-                        llm_debug.get("llmRuleInput"),
-                        "momentum_score",
-                    )
-                )
-                momentum_trace["llmEngineFallbackUsed"] = False
-                momentum_pipeline_trace[
-                    "tradeBrainInputMomentumScore"
-                ] = safe_debug(extract_value(
-                    trade_brain_runtime_state,
-                    "momentum_score",
-                ))
-                momentum_pipeline_trace[
-                    "llmInputMomentumScore"
-                ] = safe_debug(extract_value(
-                    llm_feature_map,
-                    "momentum_score",
-                ))
-                momentum_pipeline_trace[
-                    "llmRuleInputMomentumScore"
-                ] = safe_debug(extract_value(
-                    llm_debug.get("llmRuleInput"),
-                    "momentum_score",
-                ))
-                _update_momentum_pipeline_trace_consistency(
-                    momentum_pipeline_trace
-                )
-                _update_momentum_trace_consistency(
-                    momentum_trace
-                )
-
-                runtime_debug(
-                    "[STEP56-6][AI_OUTPUT] %s",
-                    debug_result["aiOutput"],
-                )
-
-                if ai_signal == "HOLD":
-                    runtime_debug(
-                        "[STEP56-6][HOLD_REASON] %s",
-                        debug_result["aiHoldReason"],
-                    )
-
-                runtime_debug(
-                    "AI signal=%s",
-                    ai_signal,
-                )
-
-            except Exception:
-
-                logger.exception("AI SHADOW ERROR")
-
+            # Trading AI is an optional subsystem. No implementation is
+            # installed and no archived heuristic is invoked or used as a
+            # fallback by the production mainline.
+            debug_result.update({
+                "tradingAiMode": "OFF",
+                "tradingAiStatus": "NOT_INSTALLED",
+                "aiRuntimeReached": False,
+                "aiDecision": None,
+                "aiDirection": None,
+                "aiConfidence": None,
+                "aiHoldReason": None,
+            })
 
             # ------------------------------------------------
             # Strategy Layer
@@ -1011,132 +388,57 @@ class TradingRuntime:
                 "Strategy result=%s",
                 strategy_result,
             )
-            strategy_state = (
-                strategy_result["strategy"]
-            )
-
-            strategy_result = (
-                self.strategy_engine
-                .process_microstructure_strategy(
-                    microstructure_state
-                )
-            )
-
-            _record_strategy_debug(
-                debug_result,
-                strategy_result,
-            )
-
             if not strategy_result["valid"]:
 
                 return {
                     "valid": False,
-                    "reason": (
-                        "STRATEGY_FAILED"
-                    ),
+                    "reason": "STRATEGY_FAILED",
                     **debug_result,
                 }
 
-            strategy_state = (
-                strategy_result["strategy"]
-            )
+            strategy_state = dict(strategy_result["strategy"])
+            if symbol_context is not None:
+                strategy_state["symbol"] = symbol_context.symbol
+                strategy_state["runtimeId"] = symbol_context.runtime_id
+                strategy_state["runtimeSymbolContext"] = symbol_context_payload
 
-            governance_input = {
-                "strategy_state": strategy_state,
-                "ai_signal": ai_signal,
-            }
-
-            debug_result["governanceInput"] = safe_debug(
-                governance_input
-            )
-
-            runtime_debug(
-                "[STEP56-6][GOV_INPUT] %s",
-                debug_result["governanceInput"],
-            )
-
-            governance_decision = (
-                self.governance_runtime
-                .process_governance(
-                    strategy_state,
-                    ai_signal,
-                )
-            )
-
-            governance_allowed = extract_value(
-                governance_decision,
-                "allowed",
-            )
-
-            governance_decision_value = extract_value(
-                governance_decision,
-                "decision",
-            )
-
-            if (
-                governance_decision_value is None
-                and governance_allowed is not None
-            ):
-                governance_decision_value = (
-                    "ALLOW"
-                    if governance_allowed
-                    else "BLOCK"
-                )
-
-            debug_result.update({
-                "governanceRuntimeReached": True,
-                "governanceOutput": safe_debug(
-                    governance_decision
-                ),
-                "governanceDecision": safe_debug(
-                    governance_decision_value
-                ),
-                "governanceAllowed": safe_debug(
-                    governance_allowed
-                ),
-                "governanceBlockedReason": safe_debug(
-                    extract_value(
-                        governance_decision,
-                        "blockedReason",
-                        extract_value(
-                            governance_decision,
-                            "blocked_reason",
-                            extract_value(
-                                governance_decision,
-                                "reason",
-                            ),
-                        ),
-                    )
-                ),
-            })
-            _record_runtime_stage(
-                debug_result,
-                "governance-runtime",
-                reason=debug_result["governanceBlockedReason"],
-            )
-
-            runtime_debug(
-                "[STEP56-6][GOV_OUTPUT] %s",
-                debug_result["governanceOutput"],
-            )
-
-            runtime_debug(
-                "Governance decision=%s",
-                governance_decision,
-            )
-
-            # ------------------------------------------------
-            # Execution Runtime
-            # ------------------------------------------------
-
+            # Authoritative mainline: Strategy → Money Management →
+            # Governance → Execution. Trading AI is optional, OFF, and not
+            # consulted as an approval or fallback authority.
             runtime_result = (
-                self.execution_runtime
-                .process_execution_runtime(
+                self.execution_runtime.process_execution_runtime(
                     strategy_state,
-                    governance_decision,
+                    governance_resolver=(
+                        self.governance_runtime.process_governance
+                    ),
                     current_exposure=0.0,
+                    runtime_symbol_context=symbol_context_payload,
                 )
             )
+
+            for key in (
+                "moneyManagementReached",
+                "moneyManagementDecision",
+                "governanceRuntimeReached",
+                "governanceOutput",
+                "governanceDecision",
+                "governanceAllowed",
+                "governanceBlockedReason",
+            ):
+                if key in runtime_result:
+                    debug_result[key] = safe_debug(runtime_result.get(key))
+
+            debug_result["governanceInput"] = safe_debug({
+                "strategy_state": strategy_state,
+                "tradingAiMode": "OFF",
+                "runtimeSymbolContext": symbol_context_payload,
+            })
+            if runtime_result.get("governanceRuntimeReached"):
+                _record_runtime_stage(
+                    debug_result,
+                    "governance-runtime",
+                    reason=runtime_result.get("governanceBlockedReason"),
+                )
             _record_runtime_stage(
                 debug_result,
                 "execution-runtime",
@@ -1205,12 +507,21 @@ async def startup_event():
     add_log("🔥 API STARTED")
     add_log("🧠 Production Execution Cognition Runtime Active")
     startup_money_management_application(app, logger=logger)
+    start_money_management_cash_flow_runtime(app, logger=logger)
+    get_bot_manager().configure_production_ams_read_model(
+        lambda: get_money_management_config(app)
+    )
     register_money_management_runtime_hook(
         app,
         get_bot_manager,
         logger=logger,
     )
-    register_money_management_http_boundary(app)
+    register_money_management_http_boundary(
+        app,
+        capital_authority_provider=(
+            lambda: get_bot_manager().get_official_mm_capital_authority()
+        ),
+    )
     register_money_management_execution_entry_gate(
         app,
         get_bot_manager,
@@ -1298,6 +609,45 @@ app.add_middleware(
 )
 
 # ============================================================
+# OPERATOR AUTHENTICATION
+# ============================================================
+
+_auth_config = load_operator_auth_config()
+_auth_configured = (
+    _auth_config.credential_hash is not None
+    and _auth_config.session_secret is not None
+)
+
+if _auth_configured:
+    try:
+        _session_manager = OperatorSessionManager(
+            _auth_config.session_secret,
+            _auth_config.session_ttl_seconds,
+        )
+        _authenticator = OperatorAuthenticator(_auth_config.credential_hash)
+    except ValueError:
+        _auth_configured = False
+
+if _auth_configured:
+    app.add_middleware(
+        OperatorSessionMiddleware,
+        session_manager=_session_manager,
+        config=_auth_config,
+    )
+
+    _csrf_protected = frozenset({
+        "/api/auth/logout",
+        "/api/ai-advisor/conversation",
+    })
+    app.add_middleware(
+        OperatorCsrfProtection,
+        csrf_required_paths=_csrf_protected,
+    )
+else:
+    _session_manager = None
+    _authenticator = None
+
+# ============================================================
 # API IMPORTS
 # ============================================================
 
@@ -1310,7 +660,6 @@ from backend.api import summary_api
 from backend.api import risk as risk_api
 from backend.api import websocket as websocket_api
 from backend.api import result as result_api
-from backend.api import symbol as symbol_api
 from backend.api.money_management import (
     router as money_management_router,
 )
@@ -1360,9 +709,16 @@ app.include_router(
     money_management_router
 )
 
+app.include_router(
+    create_recorder_proxy_router()
+)
+
+app.include_router(trading_trace_router)
+
 app.include_router(supervisor_router)
 
 _ai_advisor_production = build_ai_advisor_production_composition(
+    provider_interaction_policy=ProviderInteractionPolicy.INTERACTIVE,
     config_loader=EnvironmentProductionConfigLoader(),
     authentication_credential_loader=EnvironmentCredentialLoader(
         ("AI_ADVISOR_AUTH_TOKEN",),
@@ -1375,6 +731,10 @@ _ai_advisor_production = build_ai_advisor_production_composition(
     ),
     allowed_provider_credential_ids=(
         "OPENAI_API_KEY",
+    ),
+    failure_observation_sink=StructuredLoggingProviderFailureObservationSink(),
+    response_safety_observation_sink=(
+        StructuredLoggingResponseSafetyRejectionObservationSink()
     ),
 )
 
@@ -1420,10 +780,20 @@ app.include_router(
                 )
                 else "OFFLINE"
             ),
+            approvedSpecifications=load_authoritative_specifications(),
         )
     )
 )
 app.add_middleware(AdvisorGatewayPreflightDenyMiddleware)
+
+if _auth_configured and _authenticator is not None and _session_manager is not None:
+    app.include_router(
+        create_operator_auth_router(
+            _authenticator,
+            _session_manager,
+            _auth_config,
+        ),
+    )
 
 # ------------------------------------------------------------
 # BOT
@@ -1441,11 +811,6 @@ app.include_router(
 
 app.include_router(
     result_api.router,
-    prefix="/api/bot"
-)
-
-app.include_router(
-    symbol_api.router,
     prefix="/api/bot"
 )
 

@@ -11,21 +11,25 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
     def _active_snapshot(**overrides):
         runtime_result = {
             "valid": False,
-            "runtimeAdapterReached": True,
-            "runtimeStateReached": True,
+            "tradingAiMode": "OFF",
+            "tradingAiStatus": "NOT_INSTALLED",
+            "runtimeAdapterReached": False,
+            "runtimeStateReached": False,
             "strategyRuntimeReached": True,
             "strategyOutput": {
                 "strategy": {
                     "direction": "SHORT",
                     "executionAllowed": False,
+                    "suppressionReason": "ENTRY_THRESHOLD_NOT_MET",
                 },
             },
-            "aiRuntimeReached": True,
-            "aiDecision": "HOLD",
-            "governanceRuntimeReached": True,
-            "governanceDecision": "BLOCK",
-            "governanceAllowed": False,
-            "governanceBlockedReason": "AI_HOLD",
+            "aiRuntimeReached": False,
+            "aiDecision": None,
+            "moneyManagementReached": False,
+            "governanceRuntimeReached": False,
+            "governanceDecision": None,
+            "governanceAllowed": None,
+            "governanceBlockedReason": None,
             "executionRuntimeReached": True,
             "executionGovernanceReached": False,
             "signalAdapterReached": False,
@@ -33,7 +37,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
             "handoffExecuted": False,
             "runtime": {
                 "executionAllowed": False,
-                "reason": "AI_HOLD",
+                "reason": "ENTRY_THRESHOLD_NOT_MET",
             },
             "runtimeStageTrace": {
                 "trading-runtime": {
@@ -49,7 +53,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
                 "execution-runtime": {
                     "reached": True,
                     "status": "OK",
-                    "reason": "AI_HOLD",
+                    "reason": "ENTRY_THRESHOLD_NOT_MET",
                     "timestamp": 1_700_000_000.2,
                 },
             },
@@ -84,7 +88,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         values.update(overrides)
         return build_runtime_health_snapshot(**values)
 
-    def test_hold_cycle_is_healthy_and_reached_stages_are_explicit(self):
+    def test_strategy_hold_with_ai_off_is_healthy_and_explicit(self):
         snapshot = self._active_snapshot()
 
         self.assertEqual(snapshot["health"], "HEALTHY")
@@ -92,7 +96,9 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertTrue(snapshot["engineAvailable"])
         self.assertTrue(snapshot["executionEnabled"])
         self.assertFalse(snapshot["executionAllowed"])
-        self.assertEqual(snapshot["executionReason"], "AI_HOLD")
+        self.assertEqual(snapshot["executionReason"], "ENTRY_THRESHOLD_NOT_MET")
+        self.assertEqual(snapshot["tradingAiMode"], "OFF")
+        self.assertEqual(snapshot["tradingAiStatus"], "NOT_INSTALLED")
         self.assertEqual(snapshot["schemaVersion"], 2)
         self.assertEqual(snapshot["bot"]["status"], "RUNNING")
         self.assertEqual(snapshot["executionAuthority"]["status"], "ENABLED")
@@ -100,15 +106,15 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["browserWebSocket"]["status"], "LIVE")
         self.assertEqual(snapshot["exchangeWebSocket"]["status"], "LIVE")
         self.assertEqual(snapshot["runtimeEngine"]["status"], "ACTIVE")
-        self.assertEqual(snapshot["tradingAction"]["status"], "IDLE_BY_AI_HOLD")
+        self.assertEqual(snapshot["tradingAction"]["status"], "IDLE")
         self.assertEqual(
             snapshot["executionEngine"]["status"],
-            "ENABLED_IDLE_BY_AI_HOLD",
+            "ENABLED_IDLE_BLOCKED",
         )
         self.assertIsNone(snapshot["blockingReason"])
         self.assertEqual(snapshot["loops"]["strategy-loop"], "REACHED")
-        self.assertEqual(snapshot["loops"]["ai-loop"], "EVALUATED")
-        self.assertEqual(snapshot["loops"]["governance-loop"], "EVALUATED")
+        self.assertEqual(snapshot["loops"]["ai-loop"], "OFF")
+        self.assertEqual(snapshot["loops"]["governance-loop"], "IDLE")
         self.assertEqual(snapshot["loops"]["execution-queue"], "REACHED")
         self.assertEqual(snapshot["stages"]["execution-runtime"]["status"], "IDLE")
         self.assertEqual(
@@ -119,7 +125,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(len(snapshot["timeline"]), 3)
         self.assertEqual(snapshot["timeline"][-1]["source"], "Execution Runtime")
         self.assertEqual(snapshot["timeline"][-1]["state"], "IDLE")
-        self.assertEqual(snapshot["timeline"][-1]["reason"], "AI_HOLD")
+        self.assertEqual(snapshot["timeline"][-1]["reason"], "ENTRY_THRESHOLD_NOT_MET")
 
     def test_emergency_timeline_merges_with_runtime_stage_events(self):
         emergency_event = {
@@ -249,8 +255,8 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["tradingAction"]["decision"], "N/A")
         self.assertEqual(snapshot["executionReason"], "BOT_STOPPED")
-        self.assertEqual(snapshot["ai"]["decision"], "N/A")
-        self.assertEqual(snapshot["ai"]["reason"], "BOT_STOPPED")
+        self.assertEqual(snapshot["ai"]["decision"], "NOT_REQUIRED")
+        self.assertEqual(snapshot["ai"]["reason"], "TRADING_AI_OFF")
         self.assertEqual(
             snapshot["lastCompletedDecision"]["decision"],
             "HOLD",

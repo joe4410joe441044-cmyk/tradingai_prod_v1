@@ -45,6 +45,13 @@ from backend.execution.ExecutionGovernance import (
 from backend.runtime.adapters.execution_signal_adapter import (
     ExecutionSignalAdapter,
 )
+from backend.runtime.runtime_symbol_context import symbol_context_matches
+from backend.runtime.trading_trace import (
+    new_trace_id,
+    safe_record,
+    strategy_decision_snapshot,
+)
+from backend.strategy.normalized_parameters import parameter_value
 
 import backend.config as config
 
@@ -83,6 +90,7 @@ class ExecutionRuntime:
         self.handoff_signal = None
         self.handoff_live_block_reasons = []
         self.execution_governance_reached = False
+        self.current_runtime_symbol_context = None
 
     # ========================================================
     # ENGINE BINDING
@@ -153,6 +161,14 @@ class ExecutionRuntime:
             self.handoff_blocked_reason = (
                 "ADAPTER_OUTPUT_UNAVAILABLE"
             )
+            return
+
+        if (self.current_runtime_symbol_context is not None
+                and not symbol_context_matches(
+                    adapter_output.get("runtimeSymbolContext"),
+                    getattr(self.engine, "symbol", None),
+                )):
+            self.handoff_blocked_reason = "ORDER_INTENT_SYMBOL_MISMATCH"
             return
 
         if getattr(self.engine, "mode", None) == "live":
@@ -253,13 +269,41 @@ class ExecutionRuntime:
             return
 
         try:
-
-            self.engine.submit_signal(
+            paper_orders_before = len(
+                getattr(self.engine, "paper_orders", []) or []
+            )
+            submit_result = self.engine.submit_signal(
                 adapter_output
             )
-
-            self.handoff_executed = True
-            self.handoff_blocked_reason = None
+            paper_orders_after = len(
+                getattr(self.engine, "paper_orders", []) or []
+            )
+            rejected = (
+                isinstance(submit_result, dict)
+                and submit_result.get("allowed") is False
+            )
+            self.handoff_executed = (
+                not rejected
+                and (
+                    paper_orders_after > paper_orders_before
+                    or isinstance(
+                        getattr(self.engine, "actual_position", None),
+                        dict,
+                    )
+                )
+            )
+            self.handoff_blocked_reason = (
+                None
+                if self.handoff_executed
+                else submit_result.get("reason")
+                if isinstance(submit_result, dict)
+                else getattr(
+                    self.engine,
+                    "last_order_blocked_reason",
+                    None,
+                )
+                or "ENGINE_DID_NOT_EXECUTE"
+            )
 
         except Exception as e:
 
@@ -418,7 +462,15 @@ class ExecutionRuntime:
             )
         )
 
-        if confidence < 0.60:
+        minimum_confidence = 0.60
+        if str(getattr(self.engine, "mode", "")).strip().lower() == "paper":
+            minimum_confidence = float(parameter_value(
+                strategy_state.get("parameterAuthority"),
+                "minimumStrategyConfidence",
+                minimum_confidence,
+            ))
+
+        if confidence < minimum_confidence:
 
             return {
                 "executionAllowed": False,
@@ -456,6 +508,7 @@ class ExecutionRuntime:
     def dispatch_execution(
         self,
         canonical_direction,
+        trace_id=None,
     ):
 
         execution_event = {
@@ -471,6 +524,10 @@ class ExecutionRuntime:
             "timestamp": (
                 datetime.utcnow().isoformat()
             ),
+
+            "runtimeSymbolContext": self.current_runtime_symbol_context,
+
+            "traceId": trace_id,
         }
 
         # ----------------------------------------------------
@@ -687,8 +744,125 @@ class ExecutionRuntime:
         self,
         strategy_state,
         governance_decision=None,
+        governance_resolver=None,
+        money_management_decision=None,
         current_exposure=0.0,
+        runtime_symbol_context=None,
     ):
+        trace_id = strategy_state.get("traceId") or new_trace_id()
+        strategy_state["traceId"] = trace_id
+        mode = (
+            "LIVE"
+            if getattr(self.engine, "mode", None) == "live"
+            else "PAPER"
+        )
+        context = (
+            runtime_symbol_context
+            or strategy_state.get("runtimeSymbolContext")
+            or {}
+        )
+        symbol = (
+            strategy_state.get("symbol")
+            or context.get("symbol")
+            or getattr(self.engine, "symbol", None)
+        )
+        runtime_id = (
+            strategy_state.get("runtimeId")
+            or context.get("runtimeId")
+        )
+        decision_id = strategy_state.get("decisionId")
+        direction = str(
+            strategy_state.get("direction") or "HOLD"
+        ).upper()
+        strategy_status = (
+            "HOLD"
+            if direction == "HOLD"
+            or not strategy_state.get("executionAllowed", False)
+            else direction
+        )
+
+        def record(stage, status, reason=None, metadata=None):
+            safe_record(
+                trace_id=trace_id,
+                mode=mode,
+                stage=stage,
+                status=status,
+                symbol=symbol,
+                runtime_id=runtime_id,
+                decision_id=decision_id,
+                reason_code=reason,
+                metadata=metadata,
+            )
+
+        def clear_preflight():
+            if self.engine is not None and hasattr(
+                self.engine,
+                "clear_execution_entry_preflight",
+            ):
+                self.engine.clear_execution_entry_preflight(trace_id)
+
+        def context_fields(
+            *,
+            money_reached=False,
+            money_decision=None,
+            governance_reached=False,
+            governance_output=None,
+        ):
+            governance_allowed = (
+                governance_output.get("allowed")
+                if isinstance(governance_output, dict)
+                else None
+            )
+            governance_reason = (
+                governance_output.get("reason")
+                if isinstance(governance_output, dict)
+                else None
+            )
+            return {
+                "tradingAiMode": "OFF",
+                "tradingAiStatus": "NOT_INSTALLED",
+                "aiRuntimeReached": False,
+                "aiDecision": None,
+                "moneyManagementReached": bool(money_reached),
+                "moneyManagementDecision": money_decision,
+                "governanceRuntimeReached": bool(governance_reached),
+                "governanceOutput": governance_output,
+                "governanceDecision": (
+                    "ALLOW" if governance_allowed is True
+                    else "BLOCK" if governance_allowed is False
+                    else None
+                ),
+                "governanceAllowed": governance_allowed,
+                "governanceBlockedReason": (
+                    governance_reason
+                    if governance_allowed is False
+                    else None
+                ),
+            }
+
+        record(
+            "STRATEGY",
+            strategy_status,
+            strategy_state.get("suppressionReason"),
+            {
+                "decision": direction,
+                "confidence": strategy_state.get("confidence"),
+                "executionAllowed": strategy_state.get("executionAllowed"),
+                "decisionInput": strategy_decision_snapshot(strategy_state),
+            },
+        )
+        record(
+            "AI",
+            "DISABLED",
+            "TRADING_AI_OFF",
+            {
+                "mode": "OFF",
+                "implementationStatus": "NOT_INSTALLED",
+                "required": False,
+                "fallback": None,
+            },
+        )
+
         self.signal_adapter_reached = False
         self.last_adapter_output = None
         self.handoff_attempted = False
@@ -697,248 +871,374 @@ class ExecutionRuntime:
         self.handoff_signal = None
         self.handoff_live_block_reasons = []
         self.execution_governance_reached = False
+        self.current_runtime_symbol_context = runtime_symbol_context
 
-        if governance_decision is not None:
-
-            source_direction = governance_decision.get(
-                "direction"
+        if strategy_status == "HOLD":
+            reason = (
+                strategy_state.get("suppressionReason")
+                or "STRATEGY_HOLD"
             )
-
-        else:
-
-            source_direction = strategy_state.get(
-                "direction"
+            record(
+                "MONEY_MANAGEMENT",
+                "NOT_REQUIRED",
+                "STRATEGY_HOLD",
             )
+            record(
+                "RESULT",
+                "SUPPRESSED",
+                reason,
+                {"decision": "HOLD"},
+            )
+            return {
+                "valid": True,
+                "traceId": trace_id,
+                **context_fields(),
+                "runtime": {
+                    "executionAllowed": False,
+                    "reason": reason,
+                },
+                **self.build_direction_contract_trace(None),
+            }
 
-        canonical_direction = self.normalize_direction(
-            source_direction
-        )
+        engine_symbol = getattr(self.engine, "symbol", None)
+        strategy_context = strategy_state.get("runtimeSymbolContext")
+        if runtime_symbol_context is not None and (
+            not symbol_context_matches(
+                runtime_symbol_context,
+                engine_symbol,
+            )
+            or strategy_context != runtime_symbol_context
+        ):
+            self.handoff_blocked_reason = (
+                "RUNTIME_SYMBOL_CONTEXT_MISMATCH"
+            )
+            record(
+                "RESULT",
+                "FAILED",
+                self.handoff_blocked_reason,
+            )
+            return {
+                "valid": False,
+                "traceId": trace_id,
+                **context_fields(),
+                **self.build_direction_contract_trace(None),
+                "runtime": {
+                    "executionAllowed": False,
+                    "reason": self.handoff_blocked_reason,
+                },
+            }
 
-        runtime_debug(
-            "Execution governance=%s source_direction=%s "
-            "canonical_direction=%s",
-            governance_decision,
-            source_direction,
-            canonical_direction,
-        )
+        canonical_direction = self.normalize_direction(direction)
 
         try:
-
-            # ------------------------------------------------
-            # Strategy Validation
-            # ------------------------------------------------
-
-            validation_result = (
-                self.validate_strategy_state(
-                    strategy_state
+            validation_result = self.validate_strategy_state(
+                strategy_state
+            )
+            if not validation_result["valid"]:
+                reason = validation_result["reason"]
+                record(
+                    "MONEY_MANAGEMENT",
+                    "NOT_REQUIRED",
+                    "STRATEGY_INVALID",
                 )
+                record("RESULT", "BLOCKED", reason)
+                return {
+                    "valid": False,
+                    "traceId": trace_id,
+                    **context_fields(),
+                    **self.build_direction_contract_trace(
+                        canonical_direction
+                    ),
+                    "runtime": {
+                        "executionAllowed": False,
+                        "reason": reason,
+                    },
+                }
+
+            if money_management_decision is None:
+                if self.engine is None or not hasattr(
+                    self.engine,
+                    "preflight_execution_entry",
+                ):
+                    money_management_decision = {
+                        "allowed": False,
+                        "decision": "UNKNOWN",
+                        "reason": "MONEY_MANAGEMENT_UNKNOWN",
+                    }
+                else:
+                    money_management_decision = (
+                        self.engine.preflight_execution_entry(
+                            (
+                                "BUY"
+                                if canonical_direction == "LONG"
+                                else "SELL"
+                            ),
+                            trace_id,
+                        )
+                    )
+            money_management_decision = dict(
+                money_management_decision or {}
+            )
+            money_allowed = (
+                money_management_decision.get("allowed") is True
+            )
+            money_reason = money_management_decision.get("reason")
+            record(
+                "MONEY_MANAGEMENT",
+                "ALLOW" if money_allowed else "BLOCKED",
+                money_reason,
+                money_management_decision,
             )
 
-            if not validation_result["valid"]:
-
-                suppression_event = (
-                    self.build_suppression_event(
-                        validation_result[
-                            "reason"
-                        ],
-                        layer="STRATEGY_VALIDATION",
-                    )
+            if not money_allowed:
+                clear_preflight()
+                reason = (
+                    money_reason
+                    or "MONEY_MANAGEMENT_BLOCKED"
                 )
-            if governance_decision is not None:
+                record(
+                    "RESULT",
+                    "BLOCKED",
+                    reason,
+                    {"decision": direction},
+                )
+                return {
+                    "valid": True,
+                    "traceId": trace_id,
+                    **context_fields(
+                        money_reached=True,
+                        money_decision=money_management_decision,
+                    ),
+                    **self.build_direction_contract_trace(
+                        canonical_direction
+                    ),
+                    "runtime": {
+                        "executionAllowed": False,
+                        "reason": reason,
+                    },
+                }
 
-                if not governance_decision.get(
-                    "allowed",
-                    False,
-                ):
-                    return {
-                        "valid": False,
-                        **self.build_direction_contract_trace(
-                            canonical_direction
-                        ),
-                        "runtime": {
-                            "executionAllowed": False,
-                            "reason": (
-                                governance_decision.get(
-                                    "reason",
-                                    "GOVERNANCE_REJECTED",
-                                )
-                            ),
-                        },
-                    }
+            if governance_resolver is not None:
+                governance_decision = governance_resolver(
+                    strategy_state
+                )
+            if not isinstance(governance_decision, dict):
+                governance_decision = {
+                    "allowed": False,
+                    "reason": "GOVERNANCE_UNAVAILABLE",
+                    "direction": None,
+                }
+            else:
+                governance_decision = dict(governance_decision)
 
-                # allowed=True
-                # returnしない
-                # 後続の permission → dispatch へ進む
-            # ------------------------------------------------
-            # Governance State Sync
-            # ------------------------------------------------
+            if runtime_symbol_context is not None:
+                governance_decision.update({
+                    "symbol": symbol,
+                    "runtimeId": runtime_id,
+                    "runtimeSymbolContext": runtime_symbol_context,
+                })
 
-            if governance_state.get(
-                "emergency_stop",
-                False,
-            ):
+            governance_allowed = (
+                governance_decision.get("allowed") is True
+            )
+            governance_reason = governance_decision.get("reason")
+            record(
+                "GOVERNANCE",
+                "ALLOW" if governance_allowed else "BLOCKED",
+                governance_reason,
+            )
+            decision_fields = context_fields(
+                money_reached=True,
+                money_decision=money_management_decision,
+                governance_reached=True,
+                governance_output=governance_decision,
+            )
+
+            if not governance_allowed:
+                clear_preflight()
+                reason = governance_reason or "GOVERNANCE_REJECTED"
+                record(
+                    "RESULT",
+                    "BLOCKED",
+                    reason,
+                    {"decision": direction},
+                )
+                return {
+                    "valid": False,
+                    "traceId": trace_id,
+                    **decision_fields,
+                    **self.build_direction_contract_trace(
+                        canonical_direction
+                    ),
+                    "runtime": {
+                        "executionAllowed": False,
+                        "reason": reason,
+                    },
+                }
+
+            if governance_state.get("emergency_stop", False):
                 self.governance.activate_emergency_halt()
             else:
                 self.governance.release_emergency_halt()
 
-            # ------------------------------------------------
-            # Governance
-            # ------------------------------------------------
-
             self.mark_execution_governance_reached()
-
             governance_wrapper = (
-                self.governance
-                .process_execution_governance(
+                self.governance.process_execution_governance(
                     strategy_state,
                     current_exposure,
                 )
             )
-
-            governance_result = (
-                governance_wrapper[
-                    "governance"
-                ]
-            )
-
-            # ------------------------------------------------
-            # Final Permission
-            # ------------------------------------------------
-
-            permission_result = (
-                self.evaluate_execution_permission(
-                    strategy_state,
-                    governance_result,
-                    governance_decision,
-                    canonical_direction,
-                )
-            )
-
-            # ------------------------------------------------
-            # Execution Rejected
-            # ------------------------------------------------
-
-            if not permission_result[
-                "executionAllowed"
-            ]:
-
-                suppression_event = (
-                    self.build_suppression_event(
-                        permission_result[
-                            "reason"
-                        ]
-                    )
-                )
-
-                runtime_state = (
-                    self.build_execution_runtime_state(
-                        permission_result
-                    )
-                )
-
-                return {
-
-                    "valid": True,
-
-                    **self.build_direction_contract_trace(
-                        canonical_direction
-                    ),
-
-                    "runtime": {
-
-                        "executionAllowed": False,
-
-                        "reason": (
-                            permission_result[
-                                "reason"
-                            ]
-                        ),
-
-                        "suppression": (
-                            suppression_event
-                        ),
-
-                        "telemetry": (
-                            runtime_state
-                        ),
-                    },
-                }
-
-            # ------------------------------------------------
-            # Dispatch Execution
-            # ------------------------------------------------
-
-            runtime_debug(
-                "Execution dispatch direction=%s",
+            governance_result = governance_wrapper["governance"]
+            permission_result = self.evaluate_execution_permission(
+                strategy_state,
+                governance_result,
+                governance_decision,
                 canonical_direction,
             )
 
-            execution_event = (
-                self.dispatch_execution(
-                    canonical_direction
-
+            if not permission_result["executionAllowed"]:
+                clear_preflight()
+                reason = permission_result["reason"]
+                record("GOVERNANCE", "BLOCKED", reason)
+                record(
+                    "RESULT",
+                    "BLOCKED",
+                    reason,
+                    {"decision": direction},
                 )
-            )
-
-            # ------------------------------------------------
-            # Runtime Telemetry
-            # ------------------------------------------------
-
-            runtime_state = (
-                self.build_execution_runtime_state(
+                suppression_event = self.build_suppression_event(
+                    reason
+                )
+                runtime_state = self.build_execution_runtime_state(
                     permission_result
                 )
+                return {
+                    "valid": True,
+                    "traceId": trace_id,
+                    **decision_fields,
+                    **self.build_direction_contract_trace(
+                        canonical_direction
+                    ),
+                    "runtime": {
+                        "executionAllowed": False,
+                        "reason": reason,
+                        "suppression": suppression_event,
+                        "telemetry": runtime_state,
+                    },
+                }
+
+            execution_event = self.dispatch_execution(
+                canonical_direction,
+                trace_id=trace_id,
             )
+            if not self.handoff_executed:
+                clear_preflight()
 
+            execution_status = (
+                "PAPER_FILLED"
+                if mode == "PAPER" and self.handoff_executed
+                else "ORDER_SUBMITTED"
+                if mode == "LIVE" and self.handoff_executed
+                else "FAILED"
+            )
+            order_id = None
+            if (
+                mode == "PAPER"
+                and self.engine is not None
+                and getattr(self.engine, "paper_orders", None)
+            ):
+                order_id = self.engine.paper_orders[-1].get(
+                    "orderId"
+                )
+            record(
+                "EXECUTION",
+                execution_status,
+                self.handoff_blocked_reason,
+                {"orderId": order_id},
+            )
+            if (
+                self.handoff_executed
+                and isinstance(
+                    getattr(self.engine, "actual_position", None),
+                    dict,
+                )
+            ):
+                position = self.engine.actual_position
+                position_id = (
+                    position.get("position_id")
+                    or position.get("order_id")
+                )
+                record(
+                    "POSITION",
+                    "OPEN",
+                    metadata={
+                        "positionId": position_id,
+                        "orderId": order_id,
+                        "side": position.get("side"),
+                        "entry": position.get("entry_price"),
+                        "quantity": position.get("coin_qty"),
+                    },
+                )
+                record(
+                    "RESULT",
+                    "EXECUTED",
+                    metadata={
+                        "decision": direction,
+                        "orderId": order_id,
+                        "positionId": position_id,
+                    },
+                )
+            elif not self.handoff_executed:
+                record(
+                    "RESULT",
+                    "BLOCKED",
+                    self.handoff_blocked_reason
+                    or "EXECUTION_HANDOFF_BLOCKED",
+                    {"decision": direction},
+                )
+
+            runtime_state = self.build_execution_runtime_state(
+                permission_result
+            )
             return {
-
                 "valid": True,
-
+                "traceId": trace_id,
+                **decision_fields,
                 **self.build_direction_contract_trace(
                     canonical_direction
                 ),
-
                 "runtime": {
-
-                    "executionAllowed": True,
-
-                    "execution": (
-                        execution_event
+                    "executionAllowed": self.handoff_executed,
+                    "reason": (
+                        None
+                        if self.handoff_executed
+                        else self.handoff_blocked_reason
+                        or "EXECUTION_HANDOFF_BLOCKED"
                     ),
-
-                    "telemetry": (
-                        runtime_state
-                    ),
+                    "execution": execution_event,
+                    "telemetry": runtime_state,
                 },
             }
 
-        except Exception as e:
-
+        except Exception as error:
+            clear_preflight()
             self.runtime_healthy = False
-
-            suppression_event = (
-                self.build_suppression_event(
-                    str(e),
-                    layer="RUNTIME_EXCEPTION",
-                )
+            reason = str(error)
+            record("RESULT", "FAILED", reason)
+            suppression_event = self.build_suppression_event(
+                reason,
+                layer="RUNTIME_EXCEPTION",
             )
-
             return {
-
                 "valid": False,
-
+                "traceId": trace_id,
+                **context_fields(),
                 **self.build_direction_contract_trace(
                     canonical_direction
                 ),
-
                 "runtime": {
-
                     "executionAllowed": False,
-
-                    "reason": str(e),
-
-                    "suppression": (
-                        suppression_event
-                    ),
+                    "reason": reason,
+                    "suppression": suppression_event,
                 },
             }

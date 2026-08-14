@@ -9,6 +9,8 @@ const sharedContext = (context) => context?.contextKey ? {
     exchange: context.exchange,
     marketType: context.marketType,
     exchangeSymbol: context.exchangeSymbol,
+    normalizedSymbol: context.normalizedSymbol,
+    displaySymbol: context.displaySymbol,
     contextKey: context.contextKey,
 } : null;
 

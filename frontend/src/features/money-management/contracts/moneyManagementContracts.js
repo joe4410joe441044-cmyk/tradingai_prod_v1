@@ -81,6 +81,7 @@ const BLOCK_REASONS = new Set([
   "INCOMPLETE_INPUT",
   "UNSAFE_STATE",
   "UNKNOWN_STATE",
+  "TRADING_RUNTIME_METRICS_UNAVAILABLE",
 ]);
 const DIAGNOSTIC_REASONS = new Set([
   "STARTING_EQUITY_ZERO",
@@ -386,6 +387,18 @@ export function normalizeMoneyManagementStatus(raw) {
     "metricsStatus",
     diagnostics,
   );
+  const capitalAuthorityStatus = enumValue(
+    value.capitalAuthorityStatus ?? "UNAVAILABLE",
+    MONEY_MANAGEMENT_METRICS_STATUS,
+    "capitalAuthorityStatus",
+    diagnostics,
+  );
+  const runtimeTradingMetricsStatus = enumValue(
+    value.runtimeTradingMetricsStatus ?? value.metricsStatus,
+    MONEY_MANAGEMENT_METRICS_STATUS,
+    "runtimeTradingMetricsStatus",
+    diagnostics,
+  );
   const projectionStatus = enumValue(
     value.projectionStatus,
     MONEY_MANAGEMENT_PROJECTION_STATUS,
@@ -458,6 +471,11 @@ export function normalizeMoneyManagementStatus(raw) {
       ...(metrics?.diagnostics ?? []),
     ]),
     metricsStatus,
+    capitalAuthorityStatus,
+    runtimeTradingMetricsStatus,
+    capitalEligibility: value.capitalEligibility
+      ? Object.freeze({ ...object(value.capitalEligibility, "capitalEligibility") })
+      : null,
     projectionStatus,
     recoveryRequired: bool(
       value.recoveryRequired,

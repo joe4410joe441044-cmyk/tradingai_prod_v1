@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from backend.utils.order import place_order_safe
+from backend.utils.order import place_paper_order as place_order_safe
 from backend.runtime.governance_runtime import governance_state
 from backend.utils.log_buffer import (
     add_log,
@@ -91,6 +91,10 @@ class ExecutionEngine:
         self.execution_entry_admission_lock = threading.RLock()
         self.execution_entry_admission_in_progress = False
         self.last_money_management_guard = None
+        # One short-lived, exact-order MM admission lets the mainline evaluate
+        # Money Management before Governance without evaluating the same entry
+        # twice. It is consumed by the normal engine entry boundary.
+        self.execution_entry_preapproval = None
 
         # realtime freshness
         self.last_market_update = 0
@@ -137,6 +141,13 @@ class ExecutionEngine:
         self.real_position_state = "NOT_SYNCED"
         self.last_order_blocked_reason = None
         self.last_live_block_reasons = []
+
+        # Paper execution audit trail.  Paper orders fill immediately, but we
+        # retain the order and fill as separate lifecycle records so the
+        # simulation path can be inspected without touching an exchange.
+        self.paper_orders = []
+        self.paper_fills = []
+        self.trade_history = []
 
     # =====================================
     # START
@@ -1145,6 +1156,23 @@ class ExecutionEngine:
 
     def _evaluate_execution_entry_guard(self, order):
 
+        with self.execution_entry_guard_lock:
+            preapproval = self.execution_entry_preapproval
+            self.execution_entry_preapproval = None
+
+        if isinstance(preapproval, dict):
+            exact_order = (
+                preapproval.get("traceId") == order.get("traceId")
+                and preapproval.get("side") == order.get("side")
+                and preapproval.get("quantity") == str(order.get("qty"))
+                and preapproval.get("expiresAt", 0) >= time.time()
+            )
+            if exact_order:
+                self.last_money_management_guard = dict(
+                    preapproval["decision"]
+                )
+                return True, None
+
         side = order.get("side")
         expected_operation = {
             "BUY": LossExecutionOperation.NEW_BUY,
@@ -1222,6 +1250,99 @@ class ExecutionEngine:
                 result,
             )
         return True, None
+
+    def clear_execution_entry_preflight(self, trace_id=None):
+        """Discard an unused MM admission, for example after Governance BLOCK."""
+
+        with self.execution_entry_guard_lock:
+            current = self.execution_entry_preapproval
+            if (
+                trace_id is None
+                or not isinstance(current, dict)
+                or current.get("traceId") == trace_id
+            ):
+                self.execution_entry_preapproval = None
+
+    def preflight_execution_entry(self, side, trace_id):
+        """Evaluate the exact candidate at MM before Governance.
+
+        This is fail-closed and creates no order, position, provider call, or
+        exchange call. A successful decision is valid only for the matching
+        synchronous engine handoff and is consumed there.
+        """
+
+        normalized_side = str(side or "").strip().upper()
+        if normalized_side not in {"BUY", "SELL"} or not trace_id:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": "EXECUTION_INTENT_INVALID",
+            }
+        if self.pending_order:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": "PENDING_ORDER_REMAINING",
+            }
+        if self.actual_position is not None:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": "POSITION_ALREADY_OPEN",
+            }
+
+        price = self.get_price()
+        preview = self.get_result().get("preview", {})
+        quantity = preview.get("qty")
+        if (
+            not price
+            or price <= 0
+            or preview.get("valid") is not True
+            or not quantity
+            or quantity <= 0
+        ):
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": preview.get("reason") or "ENTRY_PREVIEW_INVALID",
+            }
+
+        order = {
+            "symbol": self.symbol,
+            "side": normalized_side,
+            "qty": quantity,
+            "price": price,
+            "traceId": trace_id,
+        }
+        self.clear_execution_entry_preflight()
+        allowed, rejection = self._evaluate_execution_entry_guard(order)
+        decision = dict(self.last_money_management_guard or {})
+        if not allowed:
+            rejection = dict(rejection or {})
+            return {
+                **decision,
+                "allowed": False,
+                "decision": rejection.get("decision") or "BLOCK",
+                "reason": rejection.get("reason") or "MONEY_MANAGEMENT_BLOCKED",
+                "suggestedQuantity": quantity,
+                "approvedQuantity": None,
+            }
+
+        decision.update({
+            "allowed": True,
+            "decision": "ALLOW",
+            "suggestedQuantity": quantity,
+            "approvedQuantity": quantity,
+        })
+        with self.execution_entry_guard_lock:
+            self.execution_entry_preapproval = {
+                "traceId": trace_id,
+                "side": normalized_side,
+                "quantity": str(quantity),
+                "expiresAt": time.time() + 5.0,
+                "decision": dict(decision),
+            }
+        return decision
 
     def submit_signal(self, signal):
 
@@ -1736,7 +1857,8 @@ class ExecutionEngine:
             "symbol": self.symbol,
             "side": str(signal.get("side")).upper(),
             "qty": qty,
-            "price": price
+            "price": price,
+            "traceId": signal.get("traceId"),
         }
 
         add_log(f"🟡 ORDER: {order}")
@@ -1799,7 +1921,6 @@ class ExecutionEngine:
             if self.mode == "paper":
 
                 raw_res = place_order_safe(
-                    self.exchange,
                     self.portfolio,
                     order
                 )
@@ -1934,6 +2055,34 @@ class ExecutionEngine:
 
             if self.mode == "paper":
 
+                paper_order_id = (
+                    f"paper-{self.engine_id}-{signal.get('id') or int(time.time() * 1000)}"
+                )
+                filled_at = time.time()
+                self.paper_orders.append({
+                    "orderId": paper_order_id,
+                    "mode": "paper",
+                    "status": "FILLED",
+                    "symbol": order["symbol"],
+                    "side": order["side"],
+                    "qty": qty,
+                    "price": price,
+                    "signalId": signal.get("id"),
+                    "traceId": signal.get("traceId"),
+                    "createdAt": filled_at,
+                })
+                self.paper_fills.append({
+                    "fillId": f"{paper_order_id}-fill-1",
+                    "orderId": paper_order_id,
+                    "traceId": signal.get("traceId"),
+                    "mode": "paper",
+                    "symbol": order["symbol"],
+                    "side": order["side"],
+                    "qty": qty,
+                    "price": price,
+                    "filledAt": filled_at,
+                })
+
                 rules = (
                     self.exchange.get_symbol_rules(
                         self.symbol
@@ -1983,6 +2132,12 @@ class ExecutionEngine:
                     "entry_time": time.time(),
 
                     "signal_id": signal.get("id"),
+
+                    "trace_id": signal.get("traceId"),
+
+                    "runtimeSymbolContext": signal.get("runtimeSymbolContext"),
+
+                    "order_id": paper_order_id,
 
                     "sl": target_prices["sl"],
 
@@ -2107,9 +2262,31 @@ class ExecutionEngine:
                 * coin_qty
             )
 
+        position_before = copy.deepcopy(self.actual_position)
+
         self.pnl += pnl
 
-        self.balance += pnl
+        paper_portfolio_position = bool(
+            self.mode == "paper"
+            and self.portfolio
+            and self.symbol
+            and self.symbol in self.portfolio.get_positions()
+        )
+
+        if paper_portfolio_position:
+            # place_order_safe opened the authoritative simulated portfolio
+            # position.  Close it through the matching simulation boundary so
+            # positions, realized PnL and balance stay consistent.
+            portfolio_pnl = self.portfolio.close_position(
+                self.symbol,
+                price,
+            )
+            self.balance = self.portfolio.balance
+            pnl = portfolio_pnl
+        else:
+            self.balance += pnl
+            if self.mode == "paper" and self.portfolio:
+                self.portfolio.balance = self.balance
 
         self.unrealized_pnl = 0
 
@@ -2119,7 +2296,7 @@ class ExecutionEngine:
             self.pnl,
         )
 
-        if self.portfolio:
+        if self.portfolio and self.mode != "paper":
             self.portfolio.balance = self.balance
 
         self.update_drawdown_state(
@@ -2127,6 +2304,50 @@ class ExecutionEngine:
         )
 
         add_log(f"💰 PnL: {pnl:.4f}")
+
+        if self.mode == "paper":
+            closed_at = time.time()
+            history_record = {
+                "tradeId": (
+                    position_before.get("order_id")
+                    or f"paper-trade-{self.engine_id}-{int(closed_at * 1000)}"
+                ),
+                "mode": "paper",
+                "traceId": position_before.get("trace_id"),
+                "status": "CLOSED",
+                "symbol": self.symbol,
+                "side": side,
+                "qty": coin_qty,
+                "entryPrice": entry,
+                "exitPrice": price,
+                "pnl": pnl,
+                "reason": reason,
+                "openedAt": position_before.get("entry_time"),
+                "closedAt": closed_at,
+                "balanceAfter": self.balance,
+            }
+            self.trade_history.append(history_record)
+            # Trace recording is intentionally best-effort and cannot affect P&L.
+            trace_id = position_before.get("trace_id")
+            if trace_id:
+                try:
+                    from backend.runtime.trading_trace import safe_record
+                    runtime_context = position_before.get("runtimeSymbolContext") or {}
+                    common = {
+                        "trace_id": trace_id, "mode": "PAPER", "symbol": self.symbol,
+                        "runtime_id": runtime_context.get("runtimeId"),
+                    }
+                    safe_record(stage="RESULT", status="CLOSED", reason_code=reason,
+                                metadata={"decision": side, "positionId": position_before.get("order_id"),
+                                          "entry": entry, "exit": price, "quantity": coin_qty,
+                                          "grossPnL": pnl, "netPnL": pnl,
+                                          "openedAt": position_before.get("entry_time"), "closedAt": closed_at},
+                                **common)
+                    safe_record(stage="HISTORY", status="RECORDED",
+                                metadata={"tradeId": history_record["tradeId"],
+                                          "positionId": position_before.get("order_id")}, **common)
+                except Exception:
+                    pass
 
         # =========================
         # CLEANUP
@@ -2150,7 +2371,9 @@ class ExecutionEngine:
             else self.balance
         )
 
-        equity = balance + self.pnl
+        # Balance already includes realized PnL.  Equity adds only current
+        # unrealized PnL; adding cumulative realized PnL again double-counts it.
+        equity = balance + float(self.unrealized_pnl or 0)
 
         price = self.get_price()
 
@@ -2335,5 +2558,8 @@ class ExecutionEngine:
             "risk_state": risk_state,
             "engine_id": self.engine_id,
             "pending_order": self.pending_order,
-            "actual_position": self.actual_position
+            "actual_position": self.actual_position,
+            "paper_orders": copy.deepcopy(self.paper_orders),
+            "paper_fills": copy.deepcopy(self.paper_fills),
+            "trade_history": copy.deepcopy(self.trade_history),
         }

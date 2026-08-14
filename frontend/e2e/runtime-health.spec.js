@@ -24,6 +24,10 @@ const expectMonitorValue = async (page, testId, expected) => {
     await expect(page.getByTestId(testId)).toHaveText(expected);
 };
 
+const expandDiagnostics = async (page) => {
+    await page.getByRole("button", { name: /RUNTIME & DIAGNOSTICS/i }).click();
+};
+
 test.describe("Runtime Health Monitor lifecycle", () => {
     let mock;
 
@@ -40,6 +44,7 @@ test.describe("Runtime Health Monitor lifecycle", () => {
         await page.goto("/");
 
         await expect(page).toHaveTitle("react_dashboard");
+        await expandDiagnostics(page);
         const monitor = page.getByTestId("runtime-health-monitor");
         await expect(monitor).toBeVisible();
         await expect(page.getByText("2 | Runtime Health", { exact: true })).toBeVisible();
@@ -120,6 +125,7 @@ test.describe("Runtime Health Monitor lifecycle", () => {
     test("LIVE selection remains clearly identified as simulation", async ({ page }) => {
         await page.goto("/");
 
+        await expandDiagnostics(page);
         await page.locator("select.config-select").first().selectOption("LIVE");
 
         await expect(page.getByTestId("selected-mode")).toHaveText("LIVE");

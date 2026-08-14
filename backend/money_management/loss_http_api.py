@@ -15,6 +15,7 @@ from .loss_application_models import (
     CompositionReadinessStatus,
 )
 from .loss_application_registration import (
+    get_money_management_cash_flow_status,
     MoneyManagementApplicationRegistration,
     MoneyManagementConfigProvider,
     MoneyManagementSafeApplicationStatus,
@@ -52,6 +53,10 @@ from .position_risk import (
     PositionSizingInput,
     calculate_position_size,
     calculate_risk_budget,
+)
+from .capital_eligibility import (
+    CapitalEligibilityContract,
+    build_capital_eligibility_contract,
 )
 from .simulation import (
     MAX_SIMULATION_TRADES,
@@ -149,6 +154,9 @@ class MoneyManagementMetricsResponse:
     monthly_trade_count: Optional[int]
     open_exposure: Optional[Decimal]
     exposure_limit: Optional[Decimal]
+    total_exposure_percent: Optional[Decimal]
+    max_total_exposure_amount: Optional[Decimal]
+    remaining_exposure_amount: Optional[Decimal]
     exposure_utilization: Optional[Decimal]
     open_position_state: str
     risk_utilization: Optional[Decimal]
@@ -176,6 +184,9 @@ class MoneyManagementMetricsResponse:
             "monthlyTradeCount": self.monthly_trade_count,
             "openExposure": _serialize(self.open_exposure),
             "exposureLimit": _serialize(self.exposure_limit),
+            "totalExposurePercent": _serialize(self.total_exposure_percent),
+            "maxTotalExposureAmount": _serialize(self.max_total_exposure_amount),
+            "remainingExposureAmount": _serialize(self.remaining_exposure_amount),
             "exposureUtilization": _serialize(self.exposure_utilization),
             "openPositionState": self.open_position_state,
             "riskUtilization": _serialize(self.risk_utilization),
@@ -265,6 +276,10 @@ class MoneyManagementStatusResponse:
     configuration_revision: int
     metrics: MoneyManagementMetricsResponse
     configuration: MoneyManagementConfigurationResponse
+    capital_eligibility: object
+    cash_flow_authority: object
+    capital_authority_status: str = "UNAVAILABLE"
+    runtime_trading_metrics_status: str = "UNAVAILABLE"
 
     def to_dict(self):
         return {
@@ -282,6 +297,8 @@ class MoneyManagementStatusResponse:
             "metricsStatus": self.metrics_status,
             "projectionStatus": self.projection_status,
             "recoveryRequired": self.recovery_required,
+            "capitalAuthorityStatus": self.capital_authority_status,
+            "runtimeTradingMetricsStatus": self.runtime_trading_metrics_status,
             "safeReason": self.safe_reason,
             "generatedAt": _serialize(self.generated_at),
             "revision": self.revision,
@@ -289,6 +306,8 @@ class MoneyManagementStatusResponse:
             "configurationRevision": self.configuration_revision,
             "metrics": self.metrics.to_dict(),
             "configuration": self.configuration.to_dict(),
+            "capitalEligibility": self.capital_eligibility.to_dict(),
+            "cashFlowAuthority": self.cash_flow_authority,
         }
 
 
@@ -409,6 +428,7 @@ class MoneyManagementHttpBoundary:
         timestamp_source=None,
         maximum_metrics_age=DEFAULT_MAXIMUM_METRICS_AGE,
         timeline_recorder=None,
+        capital_authority_provider=None,
     ):
         if dispatcher is not None and not isinstance(
             dispatcher, LossRuntimeUpdateDispatcher
@@ -432,6 +452,11 @@ class MoneyManagementHttpBoundary:
         ):
             raise TypeError("timeline recorder invalid")
         self._timeline_recorder = timeline_recorder
+        if capital_authority_provider is not None and not callable(
+            capital_authority_provider
+        ):
+            raise TypeError("capital authority provider must be callable")
+        self._capital_authority_provider = capital_authority_provider
         self._projection_dispatcher = LossGovernanceProjectionDispatcher(
             timestamp_source=self._timestamp_source
         )
@@ -925,6 +950,13 @@ class MoneyManagementHttpBoundary:
             metrics.trade_count_monthly if metrics else None,
             metrics.open_exposure if metrics else None,
             exposure_limit,
+            exposure_limit,
+            exposure_limit_amount,
+            (
+                max(exposure_limit_amount - metrics.open_exposure, Decimal("0"))
+                if metrics is not None and metrics.open_exposure is not None
+                and exposure_limit_amount is not None else None
+            ),
             exposure_utilization,
             open_position_state,
             risk_budget.risk_utilization,
@@ -956,6 +988,7 @@ class MoneyManagementHttpBoundary:
         registration = getattr(
             getattr(self._app, "state", None), "money_management", None
         )
+        cash_flow_authority = get_money_management_cash_flow_status(self._app)
         hook_registration = self._hook_registration()
         hook_healthy = bool(
             hook_registration is not None
@@ -992,6 +1025,14 @@ class MoneyManagementHttpBoundary:
             if self._base_config_provider is not None
             else None
         )
+        monitoring_capital = None
+        if self._capital_authority_provider is not None:
+            try:
+                candidate = self._capital_authority_provider()
+                if isinstance(candidate, CapitalEligibilityContract):
+                    monitoring_capital = candidate
+            except Exception:
+                monitoring_capital = None
         metrics_fresh = bool(
             isinstance(metrics, LossRuntimeMetrics)
             and metrics.data_quality is LossRuntimeDataQuality.COMPLETE
@@ -1020,7 +1061,7 @@ class MoneyManagementHttpBoundary:
             and registration.composition_status
             is CompositionReadinessStatus.READY
         )
-        available = bool(
+        runtime_metrics_available = bool(
             enabled
             and registration_ready
             and lifecycle_running
@@ -1042,11 +1083,53 @@ class MoneyManagementHttpBoundary:
         projection = public.projection if isinstance(
             public, LossGovernancePublicSnapshot
         ) else None
+        cash_flow_ready = bool(
+            isinstance(cash_flow_authority, dict)
+            and cash_flow_authority.get("cashFlowAuthority") == "READY"
+            and cash_flow_authority.get("cashFlowFresh") is True
+        )
+        live_capital_complete = bool(
+            isinstance(monitoring_capital, CapitalEligibilityContract)
+            and monitoring_capital.capital_authority == "MONEY_MANAGEMENT"
+            and monitoring_capital.input_authority == "REAL_LIVE_ACCOUNT"
+            and monitoring_capital.authority_fresh
+            and monitoring_capital.equity is not None
+            and monitoring_capital.available_capital is not None
+            and monitoring_capital.risk_budget is not None
+            and monitoring_capital.remaining_exposure is not None
+            and monitoring_capital.remaining_position_capacity is not None
+        )
+        live_equity_matches_mm_state = bool(
+            live_capital_complete
+            and runtime_snapshot is not None
+            and runtime_snapshot.state is not None
+            and monitoring_capital.equity
+            == runtime_snapshot.state.drawdown_state.current_equity
+        )
+        live_projection_valid = bool(
+            projection is not None
+            and projection.entry_permission is not LossEntryPermission.UNKNOWN
+            and revisions_match
+        )
+        live_authority_available = bool(
+            enabled
+            and registration_ready
+            and lifecycle_running
+            and live_equity_matches_mm_state
+            and cash_flow_ready
+            and live_projection_valid
+            and base_config is not None
+        )
+        available = bool(runtime_metrics_available or live_authority_available)
         execution_allowed = bool(
             available
             and projection is not None
             and projection.entry_permission is LossEntryPermission.ALLOW
             and projection.new_entry_allowed is True
+            and (
+                runtime_metrics_available
+                or monitoring_capital.execution_entry_allowed is True
+            )
         )
         safe_reason = None
         if not enabled:
@@ -1055,10 +1138,16 @@ class MoneyManagementHttpBoundary:
             safe_reason = "MONEY_MANAGEMENT_NOT_REGISTERED"
         elif not lifecycle_running:
             safe_reason = "MONEY_MANAGEMENT_UNAVAILABLE"
-        elif not hook_healthy:
+        elif not hook_healthy and not live_capital_complete:
             safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
-        elif not metrics_fresh:
+        elif not metrics_fresh and not live_capital_complete:
             safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
+        elif live_capital_complete and not cash_flow_ready:
+            safe_reason = "CASH_FLOW_AUTHORITY_UNAVAILABLE"
+        elif live_capital_complete and not live_equity_matches_mm_state:
+            safe_reason = "LIVE_MM_EQUITY_NOT_RECONCILED"
+        elif live_capital_complete and not live_projection_valid:
+            safe_reason = "INTERNAL_STATE_UNAVAILABLE"
         elif not projection_fresh or not revisions_match:
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"
         elif base_config is None:
@@ -1124,6 +1213,54 @@ class MoneyManagementHttpBoundary:
             if isinstance(public, LossGovernancePublicSnapshot)
             else now
         )
+        runtime_capital = build_capital_eligibility_contract(
+            equity=metrics.equity if isinstance(metrics, LossRuntimeMetrics) else None,
+            available_capital=(
+                metrics.available_balance if isinstance(metrics, LossRuntimeMetrics) else None
+            ),
+            risk_budget=risk_budget.risk_budget_remaining,
+            max_position_notional=(
+                base_config.maximum_position_notional if base_config is not None else None
+            ),
+            total_exposure_percent=(
+                base_config.total_exposure_pct if base_config is not None else None
+            ),
+            open_exposure=(
+                metrics.open_exposure if isinstance(metrics, LossRuntimeMetrics) else None
+            ),
+            position_count=(
+                metrics.position_count if isinstance(metrics, LossRuntimeMetrics) else None
+            ),
+            pending_order_count=(
+                metrics.pending_order_count if isinstance(metrics, LossRuntimeMetrics) else None
+            ),
+            mm_regime=risk_state,
+            policy_version=f"{HTTP_BOUNDARY_SCHEMA_VERSION}:{config_revision}",
+            evaluated_at=generated_at,
+            authority_fresh=bool(metrics_fresh and projection_fresh and revisions_match),
+            execution_entry_allowed=execution_allowed,
+        )
+        capital = monitoring_capital or runtime_capital
+        capital_authority_available = bool(
+            capital.authority_fresh
+            and capital.equity is not None
+            and capital.available_capital is not None
+            and capital.risk_budget is not None
+            and capital.remaining_exposure is not None
+            and capital.remaining_position_capacity is not None
+        )
+        if capital_authority_available and not available:
+            blocks = [item for item in blocks if item != "UNKNOWN_STATE"]
+            blocks.append("TRADING_RUNTIME_METRICS_UNAVAILABLE")
+        recovery_required = bool(
+            projection is not None and projection.recovery_required
+        )
+        if (
+            capital_authority_available
+            and not available
+            and not isinstance(metrics_result, LossRuntimeMetricsReadResult)
+        ):
+            recovery_required = False
         return MoneyManagementStatusResponse(
             available,
             enabled,
@@ -1137,19 +1274,17 @@ class MoneyManagementHttpBoundary:
             _values(decision.hold_reasons) if decision is not None else (),
             tuple(blocks),
             tuple(diagnostics),
-            metrics_result.status.value
-            if isinstance(metrics_result, LossRuntimeMetricsReadResult)
-            else LossRuntimeMetricsReadStatus.UNAVAILABLE.value,
+            (
+                LossRuntimeMetricsReadStatus.AVAILABLE.value
+                if live_authority_available
+                else metrics_result.status.value
+                if isinstance(metrics_result, LossRuntimeMetricsReadResult)
+                else LossRuntimeMetricsReadStatus.UNAVAILABLE.value
+            ),
             projection.entry_permission.value
             if projection is not None
             else LossEntryPermission.UNKNOWN.value,
-            bool(
-                not available
-                or (
-                    projection is not None
-                    and projection.recovery_required
-                )
-            ),
+            recovery_required,
             safe_reason,
             generated_at,
             public.revision
@@ -1161,6 +1296,12 @@ class MoneyManagementHttpBoundary:
             config_revision,
             metrics_response,
             configuration,
+            capital,
+            cash_flow_authority,
+            "AVAILABLE" if capital_authority_available else "UNAVAILABLE",
+            metrics_result.status.value
+            if isinstance(metrics_result, LossRuntimeMetricsReadResult)
+            else LossRuntimeMetricsReadStatus.UNAVAILABLE.value,
         )
 
     def _normalize_update(self, payload):
@@ -1603,6 +1744,7 @@ def register_money_management_http_boundary(
     app,
     timestamp_source=None,
     timeline_directory=None,
+    capital_authority_provider=None,
 ):
     state = getattr(app, "state", None)
     if state is None:
@@ -1634,6 +1776,12 @@ def register_money_management_http_boundary(
             dispatcher,
             timestamp_source=timestamp_source,
             timeline_recorder=timeline_recorder,
+            capital_authority_provider=capital_authority_provider,
+        )
+        # Publish the existing official lifecycle snapshot at registration;
+        # startup health must not wait for an unrelated bot-runtime event.
+        dispatch_money_management_governance_projection(
+            app, boundary._projection_dispatcher,
         )
         lifecycle_state = getattr(
             getattr(

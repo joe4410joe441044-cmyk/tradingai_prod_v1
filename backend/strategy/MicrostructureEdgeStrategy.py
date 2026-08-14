@@ -29,6 +29,7 @@
 from datetime import datetime
 
 from backend.utils.log_buffer import runtime_debug
+from backend.strategy.normalized_parameters import parameter_value
 
 
 class MicrostructureEdgeStrategy:
@@ -48,26 +49,54 @@ class MicrostructureEdgeStrategy:
 
         self.MIN_MOMENTUM_SCORE = 0.50
 
+    @staticmethod
+    def _uses_normalized_feature_contract(microstructure_state):
+        return parameter_value(
+            microstructure_state.get("parameterAuthority"),
+            "strategyFeatureCalibrationId",
+            None,
+        ) == "TIME_SYMBOL_NORMALIZED_V1"
+
     # ============================================================
     # EDGE SCORE
     # ============================================================
 
     def compute_edge_score(self, microstructure_state):
 
+        normalized_contract = self._uses_normalized_feature_contract(
+            microstructure_state
+        )
+
         imbalance = float(
-            microstructure_state.get("imbalanceStrength", 0.0)
+            (
+                abs(
+                    float(microstructure_state.get("buyPressure", 0.0))
+                    - float(microstructure_state.get("sellPressure", 0.0))
+                )
+                if normalized_contract
+                else microstructure_state.get("imbalanceStrength", 0.0)
+            )
         )
 
         momentum = float(
-            microstructure_state.get("momentumPersistence", 0.0)
+            microstructure_state.get(
+                "normalizedMomentum" if normalized_contract else "momentumPersistence",
+                0.0,
+            )
         )
 
         spread_quality = float(
-            microstructure_state.get("spreadQuality", 0.0)
+            microstructure_state.get(
+                "normalizedSpreadQuality" if normalized_contract else "spreadQuality",
+                0.0,
+            )
         )
 
         liquidity_quality = float(
-            microstructure_state.get("liquidityQuality", 0.0)
+            microstructure_state.get(
+                "normalizedLiquidityQuality" if normalized_contract else "liquidityQuality",
+                0.0,
+            )
         )
 
         # --------------------------------------------------------
@@ -102,6 +131,13 @@ class MicrostructureEdgeStrategy:
         return {
             "edgeScore": round(edge_score, 4),
             "confidence": round(confidence, 4),
+            "normalizedContract": normalized_contract,
+            "inputs": {
+                "pressureAlignment": round(imbalance, 4),
+                "momentum": round(momentum, 4),
+                "spreadQuality": round(spread_quality, 4),
+                "liquidityQuality": round(liquidity_quality, 4),
+            },
         }
 
     # ============================================================
@@ -110,8 +146,37 @@ class MicrostructureEdgeStrategy:
 
     def evaluate_spread_safety(self, microstructure_state):
 
+        normalized_contract = self._uses_normalized_feature_contract(
+            microstructure_state
+        )
+
         spread = float(
             microstructure_state.get("spread", 0.0)
+        )
+
+        liquidity_instability_debug = dict(
+            microstructure_state.get(
+                "liquidityInstabilityDebug",
+                {},
+            )
+            or {}
+        )
+        maximum_spread_pct = parameter_value(
+            microstructure_state.get("parameterAuthority"),
+            "maximumStrategySpreadPct",
+            None,
+        )
+        if maximum_spread_pct is None:
+            spread_value = spread
+            spread_threshold = self.MAX_SPREAD
+            spread_unit = "absolute_price"
+        else:
+            spread_value = liquidity_instability_debug.get("spreadPct")
+            spread_threshold = float(maximum_spread_pct)
+            spread_unit = "percent"
+        spread_ok = (
+            spread_value is not None
+            and float(spread_value) <= spread_threshold
         )
 
         spread_volatility = float(
@@ -123,7 +188,11 @@ class MicrostructureEdgeStrategy:
 
         liquidity_quality = float(
             microstructure_state.get(
-                "liquidityQuality",
+                (
+                    "normalizedLiquidityQuality"
+                    if normalized_contract
+                    else "liquidityQuality"
+                ),
                 0.0
             )
         )
@@ -135,7 +204,7 @@ class MicrostructureEdgeStrategy:
         # Widening Spread
         # --------------------------------------------------------
 
-        if spread > self.MAX_SPREAD:
+        if not spread_ok:
 
             spread_safe = False
             spread_risk = "ABNORMAL_SPREAD"
@@ -144,7 +213,7 @@ class MicrostructureEdgeStrategy:
         # Spread Instability
         # --------------------------------------------------------
 
-        elif spread_volatility > 0.65:
+        elif not normalized_contract and spread_volatility > 0.65:
 
             spread_safe = False
             spread_risk = "SPREAD_VOLATILITY"
@@ -153,18 +222,11 @@ class MicrostructureEdgeStrategy:
         # Liquidity Deterioration
         # --------------------------------------------------------
 
-        elif liquidity_quality < 0.35:
+        elif not normalized_contract and liquidity_quality < 0.35:
 
             spread_safe = False
             spread_risk = "LIQUIDITY_DETERIORATION"
 
-        liquidity_instability_debug = dict(
-            microstructure_state.get(
-                "liquidityInstabilityDebug",
-                {},
-            )
-            or {}
-        )
         total_volume = liquidity_instability_debug.get(
             "totalVolume"
         )
@@ -192,6 +254,8 @@ class MicrostructureEdgeStrategy:
             checked_fields = ["spread"]
         elif spread_risk == "SPREAD_VOLATILITY":
             checked_fields = ["spread", "volatility"]
+        elif normalized_contract:
+            checked_fields = ["spreadPct"]
         else:
             checked_fields = [
                 "spread",
@@ -204,7 +268,9 @@ class MicrostructureEdgeStrategy:
         )
         total_volume_ok = None
 
-        if total_volume is not None:
+        if normalized_contract:
+            total_volume_ok = None
+        elif total_volume is not None:
             total_volume_liquidity_quality = round(
                 min(float(total_volume) / 100000, 1.0),
                 4,
@@ -234,7 +300,7 @@ class MicrostructureEdgeStrategy:
                 "executionQuality"
             ),
             "spread": spread,
-            "spreadOk": spread <= self.MAX_SPREAD,
+            "spreadOk": spread_ok,
             "totalVolume": total_volume,
             "totalVolumeOk": total_volume_ok,
             "pressureDiff": pressure_diff,
@@ -254,10 +320,19 @@ class MicrostructureEdgeStrategy:
                 )
             ),
         }
+        if maximum_spread_pct is not None:
+            liquidity_deterioration_debug.update({
+                "spreadValue": spread_value,
+                "spreadThreshold": spread_threshold,
+                "spreadUnit": spread_unit,
+            })
 
         return {
             "spreadSafe": spread_safe,
             "spreadRisk": spread_risk,
+            "spreadValue": spread_value,
+            "spreadThreshold": spread_threshold,
+            "spreadUnit": spread_unit,
             "liquidityDeteriorationDebug": (
                 liquidity_deterioration_debug
             ),
@@ -268,6 +343,13 @@ class MicrostructureEdgeStrategy:
     # ============================================================
 
     def evaluate_liquidity_safety(self, microstructure_state):
+
+        calibration_ready = bool(
+            microstructure_state.get(
+                "liquidityCalibrationReady",
+                True,
+            )
+        )
 
         absorption = bool(
             microstructure_state.get(
@@ -290,7 +372,9 @@ class MicrostructureEdgeStrategy:
             )
         )
 
-        liquidity_safe = True
+        # Normalized Paper volume detection is deliberately fail-closed while
+        # its causal rolling history warms up.
+        liquidity_safe = calibration_ready
 
         # --------------------------------------------------------
         # Aggressive Absorption
@@ -314,6 +398,11 @@ class MicrostructureEdgeStrategy:
             liquidity_safe = False
 
         triggered_reasons = []
+
+        if not calibration_ready:
+            triggered_reasons.append(
+                "normalizedCalibrationWarmup"
+            )
 
         if absorption:
             triggered_reasons.append(
@@ -391,6 +480,7 @@ class MicrostructureEdgeStrategy:
             "absorptionDetected": absorption,
             "fakePressureDetected": fake_pressure,
             "stagnantHeavyFlow": stagnant_flow,
+            "calibrationReady": calibration_ready,
             "liquiditySafe": liquidity_safe,
             "triggeredReasons": triggered_reasons,
         })
@@ -412,9 +502,17 @@ class MicrostructureEdgeStrategy:
         microstructure_state,
     ):
 
+        normalized_contract = self._uses_normalized_feature_contract(
+            microstructure_state
+        )
+
         momentum_score = float(
             microstructure_state.get(
-                "momentumPersistence",
+                (
+                    "normalizedMomentum"
+                    if normalized_contract
+                    else "momentumPersistence"
+                ),
                 0.0
             )
         )
@@ -445,6 +543,41 @@ class MicrostructureEdgeStrategy:
             buy_pressure - sell_pressure
         )
 
+        if normalized_contract:
+            momentum_direction = str(
+                microstructure_state.get("momentumDirection", "FLAT")
+            ).upper()
+            candidate_direction = {
+                "LONG": "BUY",
+                "SHORT": "SELL",
+            }.get(direction, "HOLD")
+            direction_aligned = (
+                (candidate_direction == "BUY" and momentum_direction == "UP")
+                or (
+                    candidate_direction == "SELL"
+                    and momentum_direction == "DOWN"
+                )
+            )
+            warmup_ready = bool(
+                microstructure_state.get("momentumWarmupReady", False)
+            )
+            return {
+                "momentumValid": warmup_ready and direction_aligned,
+                "direction": direction,
+                "candidateDirection": candidate_direction,
+                "momentumDirection": momentum_direction,
+                "directionAligned": direction_aligned,
+                "warmupReady": warmup_ready,
+                "directionPurity": float(
+                    microstructure_state.get("directionPurity", 0.0)
+                ),
+                "activityRatio": float(
+                    microstructure_state.get("activityRatio", 0.0)
+                ),
+                "normalizedMomentum": momentum_score,
+                "pressureAlignment": round(directional_alignment, 4),
+            }
+
         momentum_valid = (
             momentum_score >= self.MIN_MOMENTUM_SCORE
             and directional_alignment >= 0.15
@@ -453,6 +586,10 @@ class MicrostructureEdgeStrategy:
         return {
             "momentumValid": momentum_valid,
             "direction": direction,
+            "candidateDirection": {
+                "LONG": "BUY",
+                "SHORT": "SELL",
+            }.get(direction, "HOLD"),
         }
 
     # ============================================================
@@ -465,7 +602,52 @@ class MicrostructureEdgeStrategy:
         spread_result,
         liquidity_result,
         momentum_result,
+        minimum_confidence=None,
+        normalized_contract=False,
+        minimum_composite_score=None,
     ):
+
+        if minimum_confidence is None:
+            minimum_confidence = self.MIN_CONFIDENCE
+
+        if normalized_contract:
+            if minimum_composite_score is None:
+                minimum_composite_score = self.MIN_EDGE_SCORE
+            direction_confirmed = momentum_result.get(
+                "momentumDirection"
+            ) in {"UP", "DOWN"}
+            hard_gate_results = {
+                "marketSpreadSafety": bool(spread_result["spreadSafe"]),
+                "liquiditySafety": bool(liquidity_result["liquiditySafe"]),
+                "momentumWarmup": bool(momentum_result.get("warmupReady")),
+                "directionConsistency": bool(
+                    momentum_result.get("directionAligned")
+                ),
+                "compositeDecisionScore": (
+                    edge_result["edgeScore"] >= minimum_composite_score
+                ),
+            }
+            if not hard_gate_results["marketSpreadSafety"]:
+                reason = spread_result["spreadRisk"]
+            elif not hard_gate_results["liquiditySafety"]:
+                reason = "LIQUIDITY_INSTABILITY"
+            elif not hard_gate_results["momentumWarmup"]:
+                reason = "MOMENTUM_WARMUP"
+            elif not hard_gate_results["directionConsistency"]:
+                reason = (
+                    "DIRECTION_CONFLICT"
+                    if direction_confirmed
+                    else "DIRECTION_NOT_CONFIRMED"
+                )
+            elif not hard_gate_results["compositeDecisionScore"]:
+                reason = "LOW_COMPOSITE_SCORE"
+            else:
+                reason = None
+            return {
+                "executionAllowed": reason is None,
+                "suppressionReason": reason,
+                "hardGateResults": hard_gate_results,
+            }
 
         # --------------------------------------------------------
         # Spread Danger
@@ -528,7 +710,7 @@ class MicrostructureEdgeStrategy:
 
         if (
             edge_result["confidence"]
-            < self.MIN_CONFIDENCE
+            < minimum_confidence
         ):
 
             return {
@@ -553,11 +735,15 @@ class MicrostructureEdgeStrategy:
 
     def build_strategy_state(
         self,
+        microstructure_state,
         edge_result,
         spread_result,
         liquidity_result,
         momentum_result,
         suppression_result,
+        minimum_confidence,
+        minimum_composite_score,
+        normalized_contract,
     ):
 
         risk = "LOW"
@@ -579,6 +765,21 @@ class MicrostructureEdgeStrategy:
                 edge_result["confidence"]
             ),
 
+            "minimumConfidence": minimum_confidence,
+
+            "minimumCompositeScore": minimum_composite_score,
+
+            "featureContract": (
+                "TIME_SYMBOL_NORMALIZED_V1"
+                if normalized_contract
+                else "LEGACY_CALLBACK_WINDOW"
+            ),
+
+            "parameterAuthority": dict(
+                microstructure_state.get("parameterAuthority")
+                or {}
+            ),
+
             "executionAllowed": (
                 suppression_result[
                     "executionAllowed"
@@ -595,6 +796,32 @@ class MicrostructureEdgeStrategy:
                 suppression_result[
                     "suppressionReason"
                 ]
+            ),
+
+            "momentumDirection": momentum_result.get("momentumDirection"),
+
+            "directionPurity": momentum_result.get("directionPurity"),
+
+            "activityRatio": momentum_result.get("activityRatio"),
+
+            "normalizedMomentum": momentum_result.get(
+                "normalizedMomentum"
+            ),
+
+            "directionAligned": momentum_result.get("directionAligned"),
+
+            "normalizedSpreadQuality": edge_result.get("inputs", {}).get(
+                "spreadQuality"
+            ),
+
+            "normalizedLiquidityQuality": edge_result.get("inputs", {}).get(
+                "liquidityQuality"
+            ),
+
+            "edgeInputs": dict(edge_result.get("inputs") or {}),
+
+            "hardGateResults": dict(
+                suppression_result.get("hardGateResults") or {}
             ),
 
             "liquidityInstabilityDebug": (
@@ -614,7 +841,223 @@ class MicrostructureEdgeStrategy:
             ),
         }
 
+        strategy_state["entryReadiness"] = (
+            self.build_entry_readiness(
+                microstructure_state,
+                edge_result,
+                spread_result,
+                liquidity_result,
+                momentum_result,
+                suppression_result,
+                minimum_confidence,
+                minimum_composite_score,
+                normalized_contract,
+            )
+        )
+
         return strategy_state
+
+    @staticmethod
+    def _source_status(state, key, *, derived=False):
+        if derived:
+            return "DERIVED"
+        return "MEASURED" if key in state and state.get(key) is not None else "DEFAULTED"
+
+    @staticmethod
+    def _condition(code, current, threshold=None, operator=None, *,
+                   expected=None, source_status="MEASURED", delta=None):
+        if source_status == "MISSING":
+            status = "NOT AVAILABLE"
+        elif current is None:
+            status = "NOT EVALUATED"
+        elif expected is not None:
+            status = "PASS" if current == expected else "FAIL"
+        elif operator == "<=":
+            status = "PASS" if current <= threshold else "FAIL"
+        elif operator == ">=":
+            status = "PASS" if current >= threshold else "FAIL"
+        else:
+            status = "NOT EVALUATED"
+        return {
+            "code": code,
+            "status": status,
+            "currentValue": current,
+            "threshold": threshold,
+            "operator": operator,
+            "expected": expected,
+            "delta": delta,
+            "sourceStatus": source_status,
+        }
+
+    def build_entry_readiness(
+        self, state, edge, spread_result, liquidity_result,
+        momentum_result, suppression, minimum_confidence,
+        minimum_composite_score, normalized_contract,
+    ):
+        """Publish the values already used by this evaluation; never re-evaluate it."""
+        if normalized_contract:
+            direction = momentum_result["direction"]
+            candidate = momentum_result.get("candidateDirection") or {
+                "LONG": "BUY",
+                "SHORT": "SELL",
+            }.get(direction, "HOLD")
+            decision = candidate if suppression["executionAllowed"] else "HOLD"
+            hard_gates = dict(suppression.get("hardGateResults") or {})
+            conditions = [
+                self._condition(
+                    "MARKET_SPREAD_SAFETY",
+                    hard_gates.get("marketSpreadSafety"),
+                    expected=True,
+                    source_status="DERIVED",
+                ),
+                self._condition(
+                    "LIQUIDITY_SAFETY",
+                    hard_gates.get("liquiditySafety"),
+                    expected=True,
+                    source_status="DERIVED",
+                ),
+                self._condition(
+                    "MOMENTUM_WARMUP",
+                    hard_gates.get("momentumWarmup"),
+                    expected=True,
+                    source_status="DERIVED",
+                ),
+                self._condition(
+                    "DIRECTION_CONSISTENCY",
+                    hard_gates.get("directionConsistency"),
+                    expected=True,
+                    source_status="DERIVED",
+                ),
+                self._condition(
+                    "COMPOSITE_SCORE",
+                    edge["edgeScore"],
+                    minimum_composite_score,
+                    ">=",
+                    source_status="DERIVED",
+                    delta=round(
+                        max(0.0, minimum_composite_score - edge["edgeScore"]),
+                        4,
+                    ),
+                ),
+                {
+                    "code": "CONFIDENCE_DIAGNOSTIC",
+                    "status": "DIAGNOSTIC",
+                    "currentValue": edge["confidence"],
+                    "threshold": None,
+                    "operator": None,
+                    "expected": None,
+                    "delta": None,
+                    "sourceStatus": "DERIVED",
+                },
+            ]
+            blocker_by_reason = {
+                "ABNORMAL_SPREAD": "MARKET_SPREAD_SAFETY",
+                "SPREAD_VOLATILITY": "MARKET_SPREAD_SAFETY",
+                "LIQUIDITY_DETERIORATION": "MARKET_SPREAD_SAFETY",
+                "LIQUIDITY_INSTABILITY": "LIQUIDITY_SAFETY",
+                "MOMENTUM_WARMUP": "MOMENTUM_WARMUP",
+                "DIRECTION_CONFLICT": "DIRECTION_CONSISTENCY",
+                "DIRECTION_NOT_CONFIRMED": "DIRECTION_CONSISTENCY",
+                "LOW_COMPOSITE_SCORE": "COMPOSITE_SCORE",
+            }
+            return {
+                "available": True,
+                "schemaVersion": 2,
+                "strategy": self.__class__.__name__,
+                "featureContract": "TIME_SYMBOL_NORMALIZED_V1",
+                "strategyDecision": decision,
+                "candidateDirection": candidate,
+                "rawDirection": direction,
+                "executionAllowed": suppression["executionAllowed"],
+                "edgeScore": edge["edgeScore"],
+                "confidence": edge["confidence"],
+                "confidenceSemantics": "DIAGNOSTIC_ONLY_AT_STRATEGY",
+                "conditions": conditions,
+                "hardGateResults": hard_gates,
+                "blockingCondition": blocker_by_reason.get(
+                    suppression["suppressionReason"]
+                ),
+                "suppressionReason": suppression["suppressionReason"],
+            }
+
+        spread = float(state.get("spread", 0.0))
+        spread_value = spread_result.get("spreadValue", spread)
+        spread_threshold = spread_result.get(
+            "spreadThreshold",
+            self.MAX_SPREAD,
+        )
+        spread_volatility = float(state.get("spreadVolatility", 0.0))
+        liquidity = float(state.get("liquidityQuality", 0.0))
+        momentum = float(state.get("momentumPersistence", 0.0))
+        buy_pressure = float(state.get("buyPressure", 0.0))
+        sell_pressure = float(state.get("sellPressure", 0.0))
+        alignment = abs(buy_pressure - sell_pressure)
+        absorption = bool(state.get("absorptionDetected", False))
+        stagnant = bool(state.get("stagnantHeavyFlow", False))
+        fake_pressure = bool(state.get("fakePressureDetected", False))
+        volume = liquidity_result["liquidityInstabilityDebug"].get("totalVolume")
+
+        def gap_ge(value, threshold):
+            return round(max(0.0, threshold - value), 4)
+
+        def gap_le(value, threshold):
+            return round(max(0.0, value - threshold), 4)
+
+        conditions = [
+            self._condition("SPREAD", spread_value, spread_threshold, "<=",
+                            source_status=self._source_status(state, "spread"), delta=gap_le(spread_value, spread_threshold)),
+            self._condition("SPREAD_VOLATILITY", spread_volatility, 0.65, "<=",
+                            source_status=self._source_status(state, "spreadVolatility"), delta=gap_le(spread_volatility, 0.65)),
+            self._condition("LIQUIDITY_QUALITY", liquidity, 0.35, ">=",
+                            source_status=self._source_status(state, "liquidityQuality"), delta=gap_ge(liquidity, 0.35)),
+            self._condition("LIQUIDITY_VOLUME", float(volume) if volume is not None else None, 35000, ">=",
+                            source_status="DERIVED" if volume is not None else "MISSING",
+                            delta=gap_ge(float(volume), 35000) if volume is not None else None),
+            self._condition("ABSORPTION", absorption, expected=False,
+                            source_status=self._source_status(state, "absorptionDetected")),
+            self._condition("STAGNANT_FLOW", stagnant, expected=False,
+                            source_status=self._source_status(state, "stagnantHeavyFlow")),
+            self._condition("FAKE_PRESSURE", fake_pressure, expected=False,
+                            source_status=self._source_status(state, "fakePressureDetected")),
+            self._condition("LIQUIDITY_SAFETY", liquidity_result["liquiditySafe"], expected=True,
+                            source_status="DERIVED"),
+            self._condition("MOMENTUM", momentum, 0.50, ">=",
+                            source_status=self._source_status(state, "momentumPersistence"), delta=gap_ge(momentum, 0.50)),
+            self._condition("PRESSURE_ALIGNMENT", round(alignment, 4), 0.15, ">=",
+                            source_status="DERIVED", delta=gap_ge(alignment, 0.15)),
+            self._condition("EDGE", edge["edgeScore"], 0.55, ">=", source_status="DERIVED"),
+            self._condition("CONFIDENCE", edge["confidence"], minimum_confidence, ">=", source_status="DERIVED"),
+        ]
+        direction = momentum_result["direction"]
+        candidate = {"LONG": "BUY", "SHORT": "SELL"}.get(direction, "HOLD")
+        decision = candidate if suppression["executionAllowed"] else "HOLD"
+        blocker_by_reason = {
+            "ABNORMAL_SPREAD": "SPREAD",
+            "SPREAD_VOLATILITY": "SPREAD_VOLATILITY",
+            "LIQUIDITY_DETERIORATION": "LIQUIDITY_QUALITY",
+            "LIQUIDITY_INSTABILITY": "LIQUIDITY_SAFETY",
+            "CONFLICTING_MOMENTUM": (
+                "MOMENTUM"
+                if momentum < self.MIN_MOMENTUM_SCORE
+                else "PRESSURE_ALIGNMENT"
+            ),
+            "WEAK_EDGE": "EDGE",
+            "LOW_CONFIDENCE": "CONFIDENCE",
+        }
+        return {
+            "available": True,
+            "schemaVersion": 1,
+            "strategy": self.__class__.__name__,
+            "strategyDecision": decision,
+            "candidateDirection": candidate,
+            "rawDirection": direction,
+            "executionAllowed": suppression["executionAllowed"],
+            "edgeScore": edge["edgeScore"],
+            "confidence": edge["confidence"],
+            "conditions": conditions,
+            "blockingCondition": blocker_by_reason.get(suppression["suppressionReason"]),
+            "suppressionReason": suppression["suppressionReason"],
+        }
 
     # ============================================================
     # MAIN STRATEGY PIPELINE
@@ -626,6 +1069,21 @@ class MicrostructureEdgeStrategy:
     ):
 
         try:
+
+            normalized_contract = self._uses_normalized_feature_contract(
+                microstructure_state
+            )
+
+            minimum_confidence = float(parameter_value(
+                microstructure_state.get("parameterAuthority"),
+                "minimumStrategyConfidence",
+                self.MIN_CONFIDENCE,
+            ))
+            minimum_composite_score = float(parameter_value(
+                microstructure_state.get("parameterAuthority"),
+                "minimumCompositeScore",
+                self.MIN_EDGE_SCORE,
+            ))
 
             # ----------------------------------------------------
             # EDGE
@@ -675,6 +1133,9 @@ class MicrostructureEdgeStrategy:
                     spread_result,
                     liquidity_result,
                     momentum_result,
+                    minimum_confidence,
+                    normalized_contract=normalized_contract,
+                    minimum_composite_score=minimum_composite_score,
                 )
             )
 
@@ -694,11 +1155,15 @@ class MicrostructureEdgeStrategy:
 
             strategy_state = (
                 self.build_strategy_state(
+                    microstructure_state,
                     edge_result,
                     spread_result,
                     liquidity_result,
                     momentum_result,
                     suppression_result,
+                    minimum_confidence,
+                    minimum_composite_score,
+                    normalized_contract,
                 )
             )
 

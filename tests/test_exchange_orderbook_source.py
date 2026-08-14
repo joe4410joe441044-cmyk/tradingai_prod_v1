@@ -177,10 +177,27 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         with patch(
             "backend.bot_manager.bot_manager.ExchangeFactory.create_market_ws",
             return_value=ws,
-        ):
+        ) as create_market_ws:
             result = manager.start(config)
 
         self.assertEqual(result["status"], "started")
+        self.assertEqual(result["activeSymbol"], "XRPUSDT")
+        self.assertEqual(result["symbol"], result["activeSymbol"])
+        self.assertEqual(result["selectionMode"], "MANUAL")
+        self.assertEqual(manager.activeSymbol, "XRPUSDT")
+        self.assertEqual(manager.symbol, manager.activeSymbol)
+        self.assertEqual(manager.engine.symbol, manager.activeSymbol)
+        self.assertEqual(
+            create_market_ws.call_args.kwargs["symbol"],
+            manager.activeSymbol,
+        )
+        self.assertEqual(manager.orderbook_symbol, "XRPUSDTM")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "RUNNING_SYMBOL_SWITCH_UNSUPPORTED",
+        ):
+            manager.symbol = "BTCUSDT"
+        self.assertEqual(manager.activeSymbol, "XRPUSDT")
         self.assertEqual(manager.engine.config["position_size"], 100)
         self.assertEqual(manager.engine.config["max_drawdown_pct"], 5)
         self.assertEqual(manager.engine.config["tp_percent"], 1)
@@ -569,6 +586,23 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         engine.set_config(config)
         engine.balance_check_ok = balance_check_ok
         engine.position_check_ok = position_check_ok
+        # Live-readiness uses synchronized account evidence, not boolean
+        # readiness flags alone.  Populate the same public fields produced by
+        # a successful read-only account sync.
+        engine.real_balance = 2500.0 if balance_check_ok else None
+        engine.real_equity = 2500.0 if balance_check_ok else None
+        engine.real_available_balance = (
+            2500.0 if balance_check_ok else None
+        )
+        engine.real_position = [] if position_check_ok else None
+        engine.real_position_state = (
+            "FLAT" if position_check_ok else "NOT_SYNCED"
+        )
+        engine.real_account_last_sync = (
+            1_700_000_000.0
+            if balance_check_ok or position_check_ok
+            else None
+        )
 
         bot = BotManager()
         bot.symbol = "XRPUSDT"
@@ -641,7 +675,7 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         self.assertEqual(engine.unrealized_pnl, 0)
         self.assertNotIn("XRPUSDT", portfolio.positions)
         self.assertIn("ETHUSDT", portfolio.positions)
-        self.assertEqual(portfolio.realized_pnl, 0)
+        self.assertEqual(portfolio.realized_pnl, 5.0)
 
     def test_flatten_paper_position_skips_without_position(self):
         engine, _, _ = self._paper_engine_with_position()
@@ -1116,6 +1150,9 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         running_status = bot.get_status()
         response = StatusResponse(**running_status)
 
+        self.assertEqual(response.activeSymbol, "XRPUSDT")
+        self.assertEqual(response.symbol, response.activeSymbol)
+        self.assertEqual(response.selectionMode, "MANUAL")
         self.assertEqual(response.exchange, "kucoin")
         self.assertEqual(response.orderbookSource, "kucoin_futures")
         self.assertEqual(response.orderbookSymbol, "XRPUSDTM")

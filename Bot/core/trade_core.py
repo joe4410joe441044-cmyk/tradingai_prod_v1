@@ -13,8 +13,8 @@ from Bot.utils.safety import safe_run
 # =========================
 # AI MODULES
 # =========================
-from Bot.ai.ai_risk_filter import AIRiskFilter
-from Bot.monitoring.ai_logger import AILogger
+from backend.legacy_ai.ai_risk_filter import AIRiskFilter
+from backend.legacy_ai.ai_decision_logger import AILogger
 
 
 # =====================================================

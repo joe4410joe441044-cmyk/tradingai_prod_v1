@@ -29,4 +29,9 @@ class ExecutionSignalAdapter:
             "id": int(time.time() * 1000),
             "side": side,
             "timestamp": time.time(),
+            "runtimeSymbolContext": execution_event.get(
+                "runtimeSymbolContext"
+            ),
+            # Correlation only; ExecutionEngine must never mint a replacement.
+            "traceId": execution_event.get("traceId"),
         }

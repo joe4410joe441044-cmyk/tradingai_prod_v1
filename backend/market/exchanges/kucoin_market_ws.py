@@ -9,29 +9,11 @@ import uuid
 import math
 
 from backend.utils.log_buffer import add_log, logger, ws_debug
+from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
 
 
 def normalize_futures_symbol(symbol):
-
-    normalized_symbol = str(symbol).strip().upper()
-
-    mapping = {
-        "BTCUSDT": "XBTUSDTM",
-        "XBTUSDT": "XBTUSDTM",
-        "ETHUSDT": "ETHUSDTM",
-        "XRPUSDT": "XRPUSDTM",
-    }
-
-    if normalized_symbol in mapping:
-        return mapping[normalized_symbol]
-
-    if normalized_symbol.endswith("USDTM"):
-        return normalized_symbol
-
-    if normalized_symbol.endswith("USDT"):
-        return f"{normalized_symbol}M"
-
-    return normalized_symbol
+    return to_kucoin_futures_symbol(symbol)
 
 
 class OrderBookWS:

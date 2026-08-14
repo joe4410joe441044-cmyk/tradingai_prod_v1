@@ -138,6 +138,7 @@ const initialState = () => ({
     lastResult: null,
     timeline: [],
     nextEmergencyOutcome: "success",
+    tradingDecision: null,
 });
 
 const buildRuntimeHealth = (state) => {
@@ -416,6 +417,7 @@ const buildStatus = (state) => {
         execution_state: {},
         ai_state: null,
         governance_state: null,
+        tradingDecision: state.tradingDecision ? clone(state.tradingDecision) : null,
         runtime_health: buildRuntimeHealth(state),
         latestRuntimeResult: null,
         executionRuntimeReached: state.botStatus === "RUNNING",
@@ -834,6 +836,9 @@ export function createEmergencyMock() {
         seedProcessing,
         setNextEmergencyOutcome(outcome) {
             state.nextEmergencyOutcome = outcome;
+        },
+        setTradingDecision(decision) {
+            state.tradingDecision = clone(decision);
         },
         setRouteDelay(path, ms) {
             routeDelays[path] = ms;

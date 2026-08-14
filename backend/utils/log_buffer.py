@@ -8,6 +8,17 @@ import os
 from collections import deque
 from logging.handlers import RotatingFileHandler
 
+
+def _env_flag(name, default=False):
+    value = os.getenv(name, str(default))
+    return value.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 # =========================================
 # UI LOG BUFFER
 # =========================================
@@ -29,7 +40,9 @@ BASE_DIR = os.path.dirname(
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 
-os.makedirs(LOG_DIR, exist_ok=True)
+ISOLATED_STDIO_ONLY = _env_flag(
+    "TRADINGAI_ISOLATED_STDIO_ONLY"
+)
 
 LOG_FILE = os.path.join(
     LOG_DIR,
@@ -41,16 +54,6 @@ LOG_FILE = os.path.join(
 # =========================================
 
 logger = logging.getLogger("TradingAI")
-
-
-def _env_flag(name, default=False):
-    value = os.getenv(name, str(default))
-    return value.strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
 
 
 LOG_LEVEL_NAME = os.getenv(
@@ -87,15 +90,17 @@ formatter = logging.Formatter(
 # FILE LOGGER
 # =========================================
 
-file_handler = RotatingFileHandler(
-    LOG_FILE,
-    maxBytes=10 * 1024 * 1024,   # 10MB
-    backupCount=3,
-    encoding="utf-8"
-)
+if not ISOLATED_STDIO_ONLY:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=10 * 1024 * 1024,   # 10MB
+        backupCount=3,
+        encoding="utf-8"
+    )
 
-file_handler.setLevel(LOG_LEVEL)
-file_handler.setFormatter(formatter)
+    file_handler.setLevel(LOG_LEVEL)
+    file_handler.setFormatter(formatter)
 
 # =========================================
 # CONSOLE LOGGER
@@ -111,7 +116,8 @@ console_handler.setFormatter(formatter)
 # ADD HANDLERS
 # =========================================
 
-logger.addHandler(file_handler)
+if not ISOLATED_STDIO_ONLY:
+    logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 # =========================================

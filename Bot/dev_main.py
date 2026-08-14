@@ -11,7 +11,7 @@ from Bot.utils.logger import BotLogger
 # =========================
 # 🧠 AI FASTAPI INJECTION
 # =========================
-from backend.api_ai import set_trade_core
+from backend.legacy_ai.standalone_api import set_trade_core
 
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
 LIVE_MODE = False

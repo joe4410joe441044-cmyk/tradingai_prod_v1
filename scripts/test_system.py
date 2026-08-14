@@ -4,10 +4,10 @@ import time
 
 from backend.cluster.cluster_monitor import ClusterMonitor
 from backend.portfolio.portfolio_manager import PortfolioManager
-from backend.protection.capital_protection_ai import CapitalProtectionAI
-from backend.ai.trade_brain import TradeBrain
-from backend.ai.lstm_model import LSTMModel
-from backend.ai.llm_engine import LLMEngine
+from backend.legacy_ai.capital_protection import CapitalProtectionAI
+from backend.legacy_ai.trade_brain import TradeBrain
+from backend.legacy_ai.lstm_model import LSTMModel
+from backend.legacy_ai.llm_engine import LLMEngine
 
 
 # =====================================================

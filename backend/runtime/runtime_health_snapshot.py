@@ -36,16 +36,16 @@ STAGE_DEFINITIONS = {
         "relatedFiles": ["backend/market/exchanges"],
     },
     "runtime-adapter": {
-        "name": "RuntimeAdapter",
-        "backendFile": "backend/ai/runtime_adapter.py",
-        "functionName": "RuntimeAdapter.build",
-        "relatedFiles": ["backend/ai/runtime_state.py"],
+        "name": "Trading AI Adapter (Disabled)",
+        "backendFile": None,
+        "functionName": None,
+        "relatedFiles": [],
     },
     "runtime-state": {
-        "name": "RuntimeState",
-        "backendFile": "backend/ai/runtime_state.py",
-        "functionName": "RuntimeState",
-        "relatedFiles": ["backend/ai/runtime_adapter.py"],
+        "name": "Trading AI State (Disabled)",
+        "backendFile": None,
+        "functionName": None,
+        "relatedFiles": [],
     },
     "strategy-plugin": {
         "name": "Strategy Plugin",
@@ -53,14 +53,17 @@ STAGE_DEFINITIONS = {
         "functionName": "process_microstructure_strategy",
         "relatedFiles": ["backend/bot_manager/runtime_state.py"],
     },
+    "money-management": {
+        "name": "Money Management",
+        "backendFile": "Bot/engine/execution_engine.py",
+        "functionName": "ExecutionEngine.preflight_execution_entry",
+        "relatedFiles": ["backend/money_management"],
+    },
     "ai-plugin": {
-        "name": "AI Plugin",
-        "backendFile": "backend/ai/ai_pipeline.py",
-        "functionName": "AIPipeline.decide",
-        "relatedFiles": [
-            "backend/ai/feature_engine.py",
-            "backend/ai/trade_brain.py",
-        ],
+        "name": "Trading AI (Optional)",
+        "backendFile": None,
+        "functionName": None,
+        "relatedFiles": [],
     },
     "governance-runtime": {
         "name": "Governance Runtime",
@@ -128,16 +131,18 @@ def _strategy_state(runtime_result):
 
 
 def _ai_state(runtime_result):
-    if not runtime_result.get("aiRuntimeReached"):
-        return {}
     return {
-        "runtimeReached": True,
-        "decision": runtime_result.get("aiDecision"),
+        "runtimeReached": False,
+        "mode": "OFF",
+        "status": "NOT_INSTALLED",
+        "required": False,
+        "decision": "NOT_REQUIRED",
         "direction": runtime_result.get("aiDirection"),
         "confidence": runtime_result.get("aiConfidence"),
         "score": runtime_result.get("aiScore"),
-        "holdReason": runtime_result.get("aiHoldReason"),
-        "output": deepcopy(runtime_result.get("aiOutput")),
+        "holdReason": None,
+        "fallbackUsed": False,
+        "output": None,
     }
 
 
@@ -169,8 +174,178 @@ def _execution_state(runtime_result):
     return state
 
 
-def _is_hold(runtime_result):
-    return str(runtime_result.get("aiDecision") or "").upper() == "HOLD"
+def build_trading_decision_snapshot(
+    *,
+    running,
+    mode,
+    market_ready,
+    runtime_result,
+    pending_order=False,
+    position_active=False,
+    money_management_guard=None,
+    exchange=None,
+    symbol=None,
+    cycle_id=None,
+    timestamp=None,
+    stale=False,
+    state_since=None,
+    order_state=None,
+    order_side=None,
+    order_type=None,
+    position_state=None,
+    real_order_allowed=False,
+    execution_authority=None,
+    emergency_state=None,
+):
+    """Project one runtime cycle into an entry-readiness contract.
+
+    This is observation-only.  In particular, it does not reinterpret an AI
+    HOLD as the final decision when the Python strategy blocked entry first.
+    """
+
+    result = runtime_result if running and isinstance(runtime_result, dict) else {}
+    strategy = _strategy_state(result)
+    strategy_reached = bool(result.get("strategyRuntimeReached"))
+    governance_reached = bool(result.get("governanceRuntimeReached"))
+    execution_reached = bool(result.get("executionRuntimeReached"))
+    handoff_attempted = bool(result.get("handoffAttempted"))
+    handoff_executed = bool(result.get("handoffExecuted"))
+
+    direction = str(
+        strategy.get("direction")
+        or result.get("strategyDirection")
+        or ""
+    ).upper()
+    strategy_allowed = strategy.get("executionAllowed") is True
+    strategy_reason = (
+        strategy.get("suppressionReason")
+        or (result.get("reason") if strategy_reached and not strategy_allowed else None)
+    )
+    strategy_decision = (
+        "NOT REACHED" if not strategy_reached else
+        "HOLD" if not strategy_allowed else
+        "BUY" if direction in {"BUY", "LONG"} else
+        "SELL" if direction in {"SELL", "SHORT"} else
+        direction or "READY"
+    )
+
+    guard = (
+        result.get("moneyManagementDecision")
+        if isinstance(result.get("moneyManagementDecision"), dict)
+        else money_management_guard
+        if isinstance(money_management_guard, dict)
+        else {}
+    )
+    money_reached = bool(result.get("moneyManagementReached"))
+    money_allowed = guard.get("allowed") is True
+    money_decision = str(guard.get("decision") or "").upper()
+    money_reason = guard.get("reason")
+    money_status = (
+        "NOT REACHED" if not money_reached else
+        "PASS" if money_allowed or money_decision == "ALLOW" else
+        "BLOCK"
+    )
+
+    governance_allowed = result.get("governanceAllowed") is True
+    governance_status = (
+        "NOT REACHED" if not governance_reached else
+        "PASS" if governance_allowed else
+        "BLOCK"
+    )
+    governance_reason = (
+        result.get("governanceBlockedReason") if governance_reached and not governance_allowed
+        else None
+    )
+
+    if position_active:
+        execution_status = "POSITION OPEN"
+    elif pending_order:
+        execution_status = "WAITING FOR FILL"
+    else:
+        execution_status = "NO ORDER"
+
+    blocking_stage = None
+    blocking_reason = None
+    if not running:
+        blocking_stage, blocking_reason = "OPERATION", "BOT_STOPPED"
+    elif not market_ready:
+        blocking_stage, blocking_reason = "MARKET", "MARKET_DATA_MISSING_OR_STALE"
+    elif not strategy_reached:
+        blocking_stage, blocking_reason = "PYTHON STRATEGY", "STRATEGY_NOT_REACHED"
+    elif not strategy_allowed:
+        blocking_stage, blocking_reason = "PYTHON STRATEGY", strategy_reason or "ENTRY_NOT_ALLOWED"
+    elif money_reached and money_status == "BLOCK":
+        blocking_stage, blocking_reason = "MONEY MANAGEMENT", money_reason or "MONEY_MANAGEMENT_BLOCKED"
+    elif governance_reached and not governance_allowed:
+        blocking_stage, blocking_reason = "GOVERNANCE", governance_reason or "GOVERNANCE_BLOCKED"
+
+    if position_active:
+        current_state = "POSITION OPEN"
+    elif execution_status == "WAITING FOR FILL":
+        current_state = "WAITING FOR FILL"
+    elif blocking_stage == "PYTHON STRATEGY":
+        current_state = "WAITING FOR SIGNAL"
+    elif blocking_stage:
+        current_state = "ENTRY BLOCKED"
+    elif strategy_allowed:
+        current_state = "READY FOR ORDER"
+    else:
+        current_state = "WAITING FOR SIGNAL"
+
+    final_decision = (
+        "BLOCK" if blocking_stage in {"MARKET", "MONEY MANAGEMENT", "GOVERNANCE", "OPERATION"} else
+        "HOLD" if blocking_stage else
+        strategy_decision if strategy_decision in {"BUY", "SELL"} else
+        "HOLD"
+    )
+
+    normalized_mode = str(mode or "PAPER").upper()
+    normalized_order_state = str(
+        order_state or ("SUBMITTED" if pending_order else "NONE")
+    ).upper()
+    normalized_position_state = str(
+        position_state or ("OPEN" if position_active else "FLAT")
+    ).upper()
+
+    entry_readiness = deepcopy(strategy.get("entryReadiness"))
+    if not isinstance(entry_readiness, dict):
+        entry_readiness = {
+            "available": False,
+            "schemaVersion": 1,
+            "conditions": [],
+        }
+    else:
+        entry_readiness["cycleId"] = cycle_id
+        entry_readiness["evaluatedAt"] = strategy.get("timestamp") or timestamp
+
+    return {
+        "schemaVersion": 1,
+        "tradingAiMode": "OFF",
+        "tradingAiStatus": "NOT_INSTALLED",
+        "mode": normalized_mode,
+        "exchange": exchange,
+        "symbol": symbol,
+        "cycleId": cycle_id,
+        "timestamp": timestamp,
+        "stale": bool(stale),
+        "stateSince": state_since,
+        "orderDestination": "PAPER SIMULATION" if normalized_mode == "PAPER" else str(exchange or "LIVE EXCHANGE").upper(),
+        "realOrderAllowed": bool(real_order_allowed),
+        "finalDecision": final_decision,
+        "currentState": current_state,
+        "blockingStage": blocking_stage,
+        "blockingReason": blocking_reason,
+        "stages": {
+            "market": {"reached": bool(market_ready), "status": "PASS" if market_ready else "NOT READY", "reason": None if market_ready else "MARKET_DATA_MISSING_OR_STALE"},
+            "pythonStrategy": {"evaluated": strategy_reached, "reached": strategy_reached, "status": strategy_decision, "decision": strategy_decision, "confidence": strategy.get("confidence", result.get("strategyConfidence")), "executionAllowed": strategy.get("executionAllowed"), "reason": strategy_reason, "suppressionReason": strategy.get("suppressionReason"), "evaluatedAt": timestamp if strategy_reached else None},
+            "aiReview": {"available": False, "called": False, "reached": False, "required": False, "mode": "OFF", "implementationStatus": "NOT_INSTALLED", "status": "OFF", "decision": "NOT_REQUIRED", "confidence": None, "reason": "TRADING_AI_OFF", "fallbackUsed": False},
+            "moneyManagement": {"evaluated": money_reached, "reached": money_reached, "status": money_status, "decision": guard.get("decision") if money_reached else None, "reason": money_reason if money_reached else "NO_TRADE_CANDIDATE", "suggestedQuantity": guard.get("suggestedQuantity"), "approvedQuantity": guard.get("approvedQuantity"), "riskAmount": guard.get("riskAmount")},
+            "governance": {"evaluated": governance_reached, "reached": governance_reached, "status": governance_status, "decision": result.get("governanceDecision") if governance_reached else None, "reason": governance_reason if governance_reached else "NO_TRADE_CANDIDATE", "executionAuthority": execution_authority, "emergencyState": emergency_state},
+            "execution": {"reached": execution_reached or handoff_attempted, "status": execution_status, "state": "WAITING FOR FILL" if pending_order else "POSITION OPEN" if position_active else "IDLE", "orderState": normalized_order_state, "orderSide": order_side, "orderType": order_type, "positionState": normalized_position_state, "reason": result.get("handoffBlockedReason") or (blocking_reason if not pending_order and not position_active else None)},
+        },
+        "entryReadiness": entry_readiness,
+        "entryReadinessAvailable": entry_readiness.get("available") is True,
+    }
 
 
 def _stage(
@@ -285,10 +460,11 @@ def build_runtime_health_snapshot(
         _trace_reached(trace.get("callback_fire"))
         or metrics.get("last_callback") is not None
     )
-    adapter_reached = active and bool(result.get("runtimeAdapterReached"))
-    runtime_state_reached = active and bool(result.get("runtimeStateReached"))
+    adapter_reached = False
+    runtime_state_reached = False
     strategy_reached = active and bool(result.get("strategyRuntimeReached"))
-    ai_reached = active and bool(result.get("aiRuntimeReached"))
+    ai_reached = False
+    money_reached = active and bool(result.get("moneyManagementReached"))
     governance_reached = active and bool(result.get("governanceRuntimeReached"))
     execution_reached = active and bool(result.get("executionRuntimeReached"))
     execution_governance_reached = active and bool(
@@ -307,9 +483,7 @@ def build_runtime_health_snapshot(
         or result.get("governanceBlockedReason")
         or result.get("handoffBlockedReason")
     )
-    hold_cycle = _is_hold(result) or str(decision_reason or "").upper() == "AI_HOLD"
-    trading_reason = "AI_HOLD" if hold_cycle else decision_reason
-    ai_reason = result.get("aiHoldReason") if hold_cycle else None
+    trading_reason = decision_reason
     strategy = _strategy_state(result)
     strategy_reason = (
         strategy.get("suppressionReason")
@@ -322,8 +496,18 @@ def build_runtime_health_snapshot(
     strategy_status = "OK" if strategy_reached else "WAIT"
     if strategy_reached and strategy_reason:
         strategy_status = "IDLE"
-    ai_status = "IDLE" if ai_reached and hold_cycle else (
-        "OK" if ai_reached else "WAIT"
+    ai_status = "OFF"
+    money_decision = result.get("moneyManagementDecision")
+    money_allowed = (
+        isinstance(money_decision, dict)
+        and money_decision.get("allowed") is True
+    )
+    money_status = (
+        "OK" if money_reached and money_allowed
+        else "BLOCKED" if money_reached
+        else "NOT_REQUIRED" if strategy_reached
+        and strategy.get("executionAllowed") is not True
+        else "WAIT"
     )
     governance_status = (
         "IDLE" if governance_reached and not result.get("governanceAllowed")
@@ -335,7 +519,8 @@ def build_runtime_health_snapshot(
     )
 
     stage_inputs = {
-        "ai-plugin": result.get("aiInput"),
+        "money-management": strategy,
+        "ai-plugin": None,
         "governance-runtime": result.get("governanceInput"),
         "execution-runtime": {
             "strategyState": result.get("governanceInput", {}).get("strategy_state")
@@ -354,13 +539,16 @@ def build_runtime_health_snapshot(
             "exchangeWebSocketConnected": bool(exchange_ws_connected),
             "messageCount": metrics.get("message_count"),
         },
-        "runtime-adapter": result.get("aiInput"),
-        "runtime-state": (
-            result.get("aiInput", {}).get("runtime_state")
-            if isinstance(result.get("aiInput"), dict) else None
-        ),
+        "runtime-adapter": {"mode": "OFF", "status": "NOT_INSTALLED"},
+        "runtime-state": {"mode": "OFF", "status": "NOT_INSTALLED"},
         "strategy-plugin": result.get("strategyOutput"),
-        "ai-plugin": result.get("aiOutput"),
+        "money-management": money_decision,
+        "ai-plugin": {
+            "mode": "OFF",
+            "status": "NOT_INSTALLED",
+            "decision": "NOT_REQUIRED",
+            "fallbackUsed": False,
+        },
         "governance-runtime": result.get("governanceOutput"),
         "execution-runtime": execution_runtime,
         "execution-governance": _execution_state(result),
@@ -374,9 +562,7 @@ def build_runtime_health_snapshot(
         "exchange-api": {"status": "AVAILABLE" if active else "IDLE"},
         "complete": {
             "executionAllowed": execution_allowed,
-            "tradingAction": "IDLE_BY_AI_HOLD" if hold_cycle else (
-                "ORDER_SUBMITTED" if handoff_executed else "IDLE"
-            ),
+            "tradingAction": "ORDER_SUBMITTED" if handoff_executed else "IDLE",
         },
     }
 
@@ -400,21 +586,30 @@ def build_runtime_health_snapshot(
             output_value=stage_outputs["order-book"],
         ),
         "runtime-adapter": _stage(
-            "runtime-adapter", "OK" if adapter_reached else "WAIT",
-            adapter_reached, output_value=stage_outputs["runtime-adapter"],
+            "runtime-adapter", "OFF", False, "TRADING_AI_OFF",
+            output_value=stage_outputs["runtime-adapter"],
         ),
         "runtime-state": _stage(
-            "runtime-state", "OK" if runtime_state_reached else "WAIT",
-            runtime_state_reached, output_value=stage_outputs["runtime-state"],
+            "runtime-state", "OFF", False, "TRADING_AI_OFF",
+            output_value=stage_outputs["runtime-state"],
         ),
         "strategy-plugin": _stage(
             "strategy-plugin", strategy_status, strategy_reached,
             strategy_reason, output_value=stage_outputs["strategy-plugin"],
         ),
+        "money-management": _stage(
+            "money-management", money_status, money_reached,
+            (
+                money_decision.get("reason")
+                if isinstance(money_decision, dict)
+                else "STRATEGY_HOLD" if money_status == "NOT_REQUIRED"
+                else None
+            ),
+            input_value=stage_inputs["money-management"],
+            output_value=stage_outputs["money-management"],
+        ),
         "ai-plugin": _stage(
-            "ai-plugin", ai_status, ai_reached,
-            (f"AI_HOLD: {ai_reason}" if ai_reason else "AI_HOLD")
-            if hold_cycle else None,
+            "ai-plugin", ai_status, False, "TRADING_AI_OFF",
             input_value=stage_inputs["ai-plugin"],
             output_value=stage_outputs["ai-plugin"],
         ),
@@ -476,7 +671,7 @@ def build_runtime_health_snapshot(
         "market-feed": "REACHED" if market_reached else "IDLE",
         "orderbook-ws": "REACHED" if orderbook_reached else "IDLE",
         "strategy-loop": "REACHED" if strategy_reached else "IDLE",
-        "ai-loop": "EVALUATED" if ai_reached else "IDLE",
+        "ai-loop": "OFF",
         "governance-loop": "EVALUATED" if governance_reached else "IDLE",
         "execution-queue": "REACHED" if execution_reached else "IDLE",
         "exchange-sync": "REACHED" if active and engine_available else "IDLE",
@@ -485,6 +680,12 @@ def build_runtime_health_snapshot(
 
     if not active:
         for stage_id, stage in stages.items():
+            if stage_id in {"runtime-adapter", "runtime-state", "ai-plugin"}:
+                stage["status"] = "OFF"
+                stage["reached"] = False
+                stage["reason"] = "TRADING_AI_OFF"
+                stage["exception"] = None
+                continue
             if stage_id in {"start-request", "trading-runtime"}:
                 stage["status"] = "STOPPED"
             else:
@@ -493,7 +694,7 @@ def build_runtime_health_snapshot(
             stage["reason"] = "BOT_STOPPED"
             stage["exception"] = None
         loops = {
-            key: "SUSPENDED_BY_BOT_STOP"
+            key: "OFF" if key == "ai-loop" else "SUSPENDED_BY_BOT_STOP"
             for key in loops
         }
 
@@ -534,15 +735,11 @@ def build_runtime_health_snapshot(
         execution_engine_status = "DISABLED_BY_OPERATOR"
     elif execution_allowed:
         execution_engine_status = "READY"
-    elif hold_cycle:
-        execution_engine_status = "ENABLED_IDLE_BY_AI_HOLD"
     else:
         execution_engine_status = "ENABLED_IDLE_BLOCKED"
 
     if not active:
         trading_action_status = "NONE_BY_BOT_STOP"
-    elif hold_cycle:
-        trading_action_status = "IDLE_BY_AI_HOLD"
     elif handoff_executed:
         trading_action_status = "ORDER_SUBMITTED"
     elif execution_allowed:
@@ -551,7 +748,9 @@ def build_runtime_health_snapshot(
         trading_action_status = "IDLE"
 
     current_reason = "BOT_STOPPED" if not active else trading_reason
-    current_decision = "N/A" if not active else result.get("aiDecision")
+    current_decision = "N/A" if not active else (
+        strategy.get("direction") or "HOLD"
+    )
     resolved_lifecycle_state = lifecycle_state or (
         "RUNNING" if active else "STOPPED"
     )
@@ -604,11 +803,15 @@ def build_runtime_health_snapshot(
             "reason": strategy_reason if active else "BOT_STOPPED",
         },
         "ai": {
-            "reached": ai_reached,
-            "status": ai_status if active else "SUSPENDED_BY_BOT_STOP",
-            "reason": "AI_HOLD" if hold_cycle else current_reason,
-            "detail": ai_reason if active else None,
-            "decision": current_decision,
+            "reached": False,
+            "required": False,
+            "mode": "OFF",
+            "implementationStatus": "NOT_INSTALLED",
+            "status": "OFF",
+            "reason": "TRADING_AI_OFF",
+            "detail": None,
+            "decision": "NOT_REQUIRED",
+            "fallbackUsed": False,
         },
         "governance": {
             "reached": governance_reached,
@@ -679,6 +882,8 @@ def build_runtime_health_snapshot(
 
     return {
         "schemaVersion": 2,
+        "tradingAiMode": "OFF",
+        "tradingAiStatus": "NOT_INSTALLED",
         "source": "BotManager.get_result",
         "snapshotId": str(metrics.get("last_bot_update") or snapshot_timestamp),
         "snapshotTimestamp": snapshot_timestamp,
@@ -712,10 +917,15 @@ def build_runtime_health_snapshot(
         },
         "lastCompletedDecision": (
             {
-                "decision": completed_result.get("aiDecision"),
+                "decision": (
+                    _strategy_state(completed_result).get("direction")
+                    if _strategy_state(completed_result).get(
+                        "executionAllowed"
+                    ) is True
+                    else "HOLD"
+                ),
                 "reason": (
-                    completed_result.get("aiHoldReason")
-                    or completed_result.get("governanceBlockedReason")
+                    completed_result.get("governanceBlockedReason")
                     or completed_result.get("handoffBlockedReason")
                 ),
             }

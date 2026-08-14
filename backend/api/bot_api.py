@@ -3,7 +3,8 @@
 from fastapi import APIRouter, HTTPException
 from backend.bot_manager import get_bot_manager
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from decimal import Decimal
 from enum import Enum
 from typing import Any, List, Optional
 from backend.utils.log_buffer import runtime_debug
@@ -22,6 +23,31 @@ class Mode(str, Enum):
 class Exchange(str, Enum):
     kucoin = "kucoin"
     binance = "binance"
+
+
+class PaperCapitalSource(str, Enum):
+    dashboard_manual = "DASHBOARD_MANUAL"
+    real_available_preset = "REAL_AVAILABLE_PRESET"
+
+
+class PaperCapitalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capital: Decimal = Field(
+        ...,
+        gt=Decimal("0"),
+        le=Decimal("1000000000.00"),
+        decimal_places=2,
+    )
+    source: PaperCapitalSource = PaperCapitalSource.dashboard_manual
+
+
+class LiveAutoApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approvalIdentity: str = Field(..., min_length=1, max_length=200)
+    approvalSource: str = Field("EXPLICIT_OPERATOR_APPROVAL")
+    ttlSeconds: int = Field(600, ge=30, le=900)
 
 
 # =========================
@@ -196,6 +222,8 @@ class StatusResponse(BaseModel):
 
     executionEnabled: bool = False
 
+    botState: str = "STOPPED"
+
     loopEnabled: bool = False
 
     loopState: str = "STOPPED"
@@ -240,9 +268,15 @@ class StatusResponse(BaseModel):
 
     ai_state: Optional[dict] = None
 
+    tradingAiMode: str = "OFF"
+
+    tradingAiStatus: str = "NOT_INSTALLED"
+
     governance_state: Optional[dict] = None
 
     runtime_health: dict = Field(default_factory=dict)
+
+    tradingDecision: dict = Field(default_factory=dict)
 
     latestRuntimeResult: Optional[dict] = None
 
@@ -255,6 +289,12 @@ class StatusResponse(BaseModel):
     adapterOutput: Optional[dict] = None
 
     symbol: Optional[str] = None
+
+    activeSymbol: Optional[str] = None
+
+    selectionMode: str = "MANUAL"
+
+    autoMarketSelection: dict = Field(default_factory=dict)
 
     exchange: Optional[str] = None
 
@@ -329,6 +369,44 @@ def stop_bot():
     return result
 
 
+@router.post("/loop/start")
+def start_loop():
+    result = get_bot_manager().start_loop()
+    if result.get("success") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/loop/stop")
+def stop_loop():
+    return get_bot_manager().stop_loop()
+
+
+@router.post("/live-auto/approve")
+def approve_live_auto(request: LiveAutoApprovalRequest):
+    result = get_bot_manager().approve_live_auto_control(
+        approval_identity=request.approvalIdentity,
+        approval_source=request.approvalSource,
+        ttl_seconds=request.ttlSeconds,
+    )
+    if result.get("accepted") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/live-auto/start")
+def start_live_auto():
+    result = get_bot_manager().start_live_auto_control()
+    if result.get("accepted") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/live-auto/stop")
+def stop_live_auto():
+    return get_bot_manager().stop_live_auto_control()
+
+
 # =========================
 # STATUS
 # =========================
@@ -348,3 +426,30 @@ def get_status():
         status["trade_settings"] = trade_settings
 
     return status
+
+
+@router.post("/symbol")
+def reject_direct_symbol_switch():
+    raise HTTPException(
+        status_code=409,
+        detail="RUNNING_SYMBOL_SWITCH_UNSUPPORTED; set symbol via /api/bot/start",
+    )
+
+
+@router.post("/paper-account/capital")
+def reset_paper_capital(request: PaperCapitalRequest):
+    bot_manager = get_bot_manager()
+
+    try:
+        return bot_manager.reset_paper_capital(
+            request.capital,
+            request.source.value,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        status_code = 409 if reason in {
+            "PAPER_POSITION_OPEN",
+            "PAPER_PENDING_ORDER",
+            "PAPER_OPEN_ORDER",
+        } else 400
+        raise HTTPException(status_code=status_code, detail=reason)

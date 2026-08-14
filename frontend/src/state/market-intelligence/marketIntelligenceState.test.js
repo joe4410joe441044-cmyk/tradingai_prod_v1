@@ -468,6 +468,32 @@ test("Provider exposes replay engine and command application and updates context
     delete globalThis.__RUNTIME_MARKET_TELEMETRY__;
 });
 
+test("Provider uses backend activeSymbol for LIVE and keeps requested symbol separate", async () => {
+    const { MarketIntelligenceProvider, useMarketIntelligence } = await getProviderModule();
+    globalThis.__DASHBOARD_MARKET_CONTEXT__ = {
+        marketContext: {
+            exchange: "KUCOIN", marketType: "FUTURES", exchangeSymbol: "BTCUSDTM",
+            contextKey: "KUCOIN:FUTURES:BTCUSDTM",
+        },
+    };
+    globalThis.__RUNTIME_MARKET_TELEMETRY__ = {
+        market: { exchange: "KUCOIN", marketType: "FUTURES", exchangeSymbol: "ETHUSDTM" },
+        runtime: { botStatus: {
+            activeSymbol: "ETHUSDT", symbol: "ETHUSDT", selectionMode: "MANUAL",
+            exchange: "kucoin", orderbookSymbol: "ETHUSDTM",
+        } },
+    };
+    const Consumer = () => useMarketIntelligence();
+    const renderer = createProviderRenderer(MarketIntelligenceProvider, Consumer);
+    assert.equal(renderer.result.marketContextMode, "LIVE");
+    assert.equal(renderer.result.marketContext.normalizedSymbol, "ETHUSDT");
+    assert.equal(renderer.result.marketContext.displaySymbol, "ETHUSDT");
+    assert.equal(renderer.result.marketContext.exchangeSymbol, "ETHUSDTM");
+    assert.equal(globalThis.__DASHBOARD_MARKET_CONTEXT__.marketContext.exchangeSymbol, "BTCUSDTM");
+    delete globalThis.__DASHBOARD_MARKET_CONTEXT__;
+    delete globalThis.__RUNTIME_MARKET_TELEMETRY__;
+});
+
 test("useMarketIntelligence rejects consumers outside the Provider", async () => {
     const { useMarketIntelligence } = await getProviderModule();
     const renderer = createProviderRenderer(

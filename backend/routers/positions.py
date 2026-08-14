@@ -137,4 +137,12 @@ def get_positions():
 # =========================
 @router.get("/history")
 def get_history():
-    return []
+    if not engine:
+        return []
+
+    # Trade history is simulation-owned.  Never query an exchange from this
+    # endpoint; live account history requires a separate governed boundary.
+    if str(getattr(engine, "mode", "")).strip().lower() != "paper":
+        return []
+
+    return list(getattr(engine, "trade_history", []) or [])

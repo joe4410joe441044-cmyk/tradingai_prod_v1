@@ -11,7 +11,7 @@ import {
 } from "./runtimeDisplay.js";
 
 test("runtime source labels are operator friendly with an unknown fallback", () => {
-    assert.equal(getRuntimeSourceLabel("AI Plugin"), "AI Decision");
+    assert.equal(getRuntimeSourceLabel("AI Plugin"), "Trading AI (Optional / Off)");
     assert.equal(getRuntimeSourceLabel("Strategy Plugin"), "Strategy Evaluation");
     assert.equal(getRuntimeSourceLabel("Governance Runtime"), "Safety / Governance Check");
     assert.equal(getRuntimeSourceLabel("Execution Runtime"), "Execution Check");

@@ -67,6 +67,21 @@ test("unknown enum is retained as UNKNOWN with diagnostics and fail closed", () 
   assert.equal(safe.executionEntryAllowed, false);
 });
 
+test("monitoring capital status remains distinct from runtime-cycle metrics", () => {
+  const status = normalizeMoneyManagementStatus(validStatus({
+    available: false,
+    metricsStatus: "UNAVAILABLE",
+    metrics: { ...validStatus().metrics, status: "UNAVAILABLE" },
+    capitalAuthorityStatus: "AVAILABLE",
+    runtimeTradingMetricsStatus: "UNAVAILABLE",
+    capitalEligibility: { authorityFresh: true, capitalSource: "REAL_LIVE_ACCOUNT" },
+  }));
+
+  assert.equal(status.capitalAuthorityStatus, "AVAILABLE");
+  assert.equal(status.runtimeTradingMetricsStatus, "UNAVAILABLE");
+  assert.equal(status.capitalEligibility.capitalSource, "REAL_LIVE_ACCOUNT");
+});
+
 test("missing required fields, invalid timestamps, and reason shapes reject", () => {
   const missing = validStatus();
   delete missing.available;

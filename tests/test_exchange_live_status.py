@@ -26,7 +26,10 @@ from backend.api.governance import (
 )
 from backend.api.bot_api import StatusResponse
 from backend.bot_manager.bot_manager import BotManager
-from backend.execution.kucoin_trade import KucoinTradeClient
+from backend.execution.kucoin_trade import (
+    ForceIPv4Adapter,
+    KucoinTradeClient,
+)
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.runtime.governance_runtime import (
     EMERGENCY_ACTION_REQUIRED,
@@ -125,6 +128,41 @@ class FakeReadOnlyEngine:
 
 class ExchangeLiveStatusTest(unittest.TestCase):
 
+    def setUp(self):
+        self.external_network_guard = patch.object(
+            requests.Session,
+            "request",
+            side_effect=AssertionError("EXTERNAL_NETWORK_CALL_BLOCKED"),
+        )
+        self.external_network_guard.start()
+        self.addCleanup(self.external_network_guard.stop)
+
+    def test_kucoin_client_uses_ipv4_session_and_v3_headers(self):
+        client = self._kucoin_client()
+
+        self.assertIsInstance(client.session, requests.Session)
+        self.assertIsInstance(
+            client.session.adapters["https://"],
+            ForceIPv4Adapter,
+        )
+        self.assertIsInstance(
+            client.session.adapters["http://"],
+            ForceIPv4Adapter,
+        )
+
+        headers = client._headers("GET", "/api/v1/account-overview", "")
+
+        for name in [
+            "KC-API-KEY",
+            "KC-API-SIGN",
+            "KC-API-TIMESTAMP",
+            "KC-API-PASSPHRASE",
+            "Content-Type",
+        ]:
+            self.assertIn(name, headers)
+        self.assertEqual(headers["KC-API-KEY-VERSION"], "3")
+        self.assertEqual(headers["Content-Type"], "application/json")
+
     def test_operation_status_fields_reflect_authoritative_state(self):
         execution_enabled_before = governance_state["execution_enabled"]
         scenarios = [
@@ -140,6 +178,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "name": "loop_on_auto_trade_off",
                 "running": True,
                 "lifecycle_state": "RUNNING",
+                "loop_state": "RUNNING",
                 "execution_enabled": False,
                 "loop_enabled": True,
                 "auto_trade_enabled": False,
@@ -148,6 +187,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "name": "loop_on_auto_trade_on",
                 "running": True,
                 "lifecycle_state": "RUNNING",
+                "loop_state": "RUNNING",
                 "execution_enabled": True,
                 "loop_enabled": True,
                 "auto_trade_enabled": True,
@@ -156,6 +196,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "name": "running_flag_without_running_lifecycle",
                 "running": True,
                 "lifecycle_state": "STARTING",
+                "loop_state": "STOPPED",
                 "execution_enabled": False,
                 "loop_enabled": False,
                 "auto_trade_enabled": False,
@@ -171,6 +212,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     bot = BotManager()
                     bot._running = scenario["running"]
                     bot.lifecycle_state = scenario["lifecycle_state"]
+                    # Bot and decision-loop lifecycles are independent.  The
+                    # old test inferred Loop from Bot lifecycle, which is no
+                    # longer an authoritative operation contract.
+                    bot.loop_state = scenario.get(
+                        "loop_state",
+                        "STOPPED",
+                    )
 
                     status = bot.get_status()
                     response = StatusResponse(**status)
@@ -181,7 +229,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     )
                     self.assertEqual(
                         response.loopState,
-                        scenario["lifecycle_state"],
+                        scenario.get("loop_state", "STOPPED"),
                     )
                     self.assertEqual(
                         response.autoTradeEnabled,
@@ -223,6 +271,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "name": "locked_loop_continues_auto_trade_read_only",
                 "running": True,
                 "lifecycle_state": "RUNNING",
+                "loop_state": "RUNNING",
                 "emergency_stop": True,
                 "execution_enabled": True,
                 "emergency_locked": True,
@@ -249,6 +298,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     bot = BotManager()
                     bot._running = scenario["running"]
                     bot.lifecycle_state = scenario["lifecycle_state"]
+                    bot.loop_state = scenario.get(
+                        "loop_state",
+                        "STOPPED",
+                    )
 
                     status = bot.get_status()
                     response = StatusResponse(**status)
@@ -313,6 +366,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         bot = Mock()
         bot._running = True
         bot.lifecycle_state = "RUNNING"
+        bot.loop_state = "RUNNING"
 
         try:
             governance_state["execution_enabled"] = False
@@ -878,7 +932,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         )
         self.assertEqual(
             response.accountRuntime["paperAccount"]["source"],
-            "PAPER_SIMULATION",
+            bot.paper_account_state["source"],
         )
 
         for key in [
@@ -900,7 +954,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         ]:
             self.assertEqual(runtime_debug[key], status[key])
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_account_overview_uses_read_only_get(self, request_get):
         request_get.return_value.json.return_value = {
             "code": "200000",
@@ -8401,7 +8455,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_normalizes_symbol_and_orders(
         self,
         request_get,
@@ -8442,7 +8496,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(query["pageSize"], ["100"])
         self.assertEqual(request_get.call_args.kwargs["timeout"], 10)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_allows_empty_result(self, request_get):
         request_get.return_value.json.return_value = self._order_page([])
         client = self._kucoin_client()
@@ -8454,7 +8508,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["count"], 0)
         self.assertEqual(result["symbol"], "XRPUSDTM")
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_normalizes_multiple_orders(
         self,
         request_get,
@@ -8497,7 +8551,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["orders"][1]["side"], "SELL")
         self.assertEqual(result["pagination"]["pagesFetched"], 2)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_returns_failure_on_api_error(
         self,
         request_get,
@@ -8517,7 +8571,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertIn("bad request", result["error"])
         self.assertEqual(result["raw"], raw_error)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_returns_failure_on_http_exception(
         self,
         request_get,
@@ -8532,7 +8586,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["count"], 0)
         self.assertIn("network down", result["error"])
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_open_orders_allows_symbol_none(self, request_get):
         request_get.return_value.json.return_value = self._order_page([
             {
@@ -8553,7 +8607,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertNotIn("symbol", query)
         self.assertEqual(query["status"], ["active"])
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_normalizes_symbol_and_uses_delete(
         self,
         request_delete,
@@ -8590,7 +8644,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             ("DELETE", "/api/v1/orders/order-123"),
         )
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_allows_symbol_none(self, request_delete):
         request_delete.return_value.json.return_value = {
             "code": "200000",
@@ -8609,7 +8663,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         self.assertEqual(parsed_url.path, "/api/v1/orders/order-123")
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_rejects_invalid_order_id(
         self,
         request_delete,
@@ -8628,7 +8682,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         request_delete.assert_not_called()
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_returns_failure_on_api_error(
         self,
         request_delete,
@@ -8649,7 +8703,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertIn("order not found", result["error"])
         self.assertEqual(result["raw"], raw_error)
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_returns_failure_on_http_exception(
         self,
         request_delete,
@@ -8666,7 +8720,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertIn("network down", result["error"])
         self.assertIsNone(result["raw"])
 
-    @patch("backend.execution.kucoin_trade.requests.delete")
+    @patch("backend.execution.kucoin_trade.requests.Session.delete")
     def test_kucoin_cancel_order_returns_failure_on_json_parse_error(
         self,
         request_delete,
@@ -8915,7 +8969,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         open_orders.assert_not_called()
         cancel_order.assert_not_called()
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_create_order_live_gate_still_blocks_without_request(
         self,
         request_post,
@@ -8932,7 +8986,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["error"], "LIVE_NOT_READY")
         request_post.assert_not_called()
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_get_positions_still_uses_positions_endpoint(
         self,
         request_get,
@@ -8960,7 +9014,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "/api/v1/positions",
         )
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_found_false_cases(
         self,
         request_get,
@@ -9003,7 +9057,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 )
                 self.assertEqual(request_get.call_args.kwargs["timeout"], 10)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_normalizes_quantities(
         self,
         request_get,
@@ -9040,7 +9094,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertEqual(result["raw_quantity"], raw_qty)
                 self.assertEqual(result["entry_price"], 0.5)
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_rejects_malformed_wrappers(
         self,
         request_get,
@@ -9069,7 +9123,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertFalse(result["found"])
                 self.assertEqual(result["error_code"], "MALFORMED_RESPONSE")
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_rejects_invalid_quantities(
         self,
         request_get,
@@ -9105,7 +9159,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertFalse(result["found"])
                 self.assertEqual(result["error_code"], "INVALID_QUANTITY")
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_rejects_duplicate_symbol_matches(
         self,
         request_get,
@@ -9139,7 +9193,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertFalse(result["found"])
                 self.assertEqual(result["error_code"], "MALFORMED_RESPONSE")
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_classifies_transport_errors(
         self,
         request_get,
@@ -9198,7 +9252,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["error_code"], "API_ERROR")
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_ignores_side_isopen_and_active(
         self,
         request_get,
@@ -9237,7 +9291,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     else "short",
                 )
 
-    @patch("backend.execution.kucoin_trade.requests.get")
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
     def test_kucoin_current_position_does_not_create_state(
         self,
         request_get,
@@ -9260,7 +9314,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertFalse(hasattr(client, "cached_position"))
         self.assertFalse(hasattr(client, "kucoin_position_state"))
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_skips_when_no_position(
         self,
         request_post,
@@ -9292,7 +9346,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         request_post.assert_not_called()
         get_current_position.assert_called_once_with("XRPUSDT", timeout=7)
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_sends_reduce_only_market_close(
         self,
         request_post,
@@ -9384,7 +9438,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
                 request_post.reset_mock()
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_rejects_invalid_contract_size(
         self,
         request_post,
@@ -9415,7 +9469,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["error_code"], "INVALID_QUANTITY")
         request_post.assert_not_called()
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_does_not_post_on_precheck_failure(
         self,
         request_post,
@@ -9443,7 +9497,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(result["error_code"], "API_ERROR")
         request_post.assert_not_called()
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_classifies_order_failures(
         self,
         request_post,
@@ -9528,7 +9582,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["error_code"], "MALFORMED_RESPONSE")
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_reports_post_check_failure(
         self,
         request_post,
@@ -9578,7 +9632,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertFalse(result["confirmed"])
         self.assertEqual(result["error_code"], "POST_CHECK_TIMEOUT")
 
-    @patch("backend.execution.kucoin_trade.requests.post")
+    @patch("backend.execution.kucoin_trade.requests.Session.post")
     def test_kucoin_flatten_current_position_reports_position_remains(
         self,
         request_post,
@@ -9669,7 +9723,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         )
         self.assertEqual(
             account_runtime["paperAccount"]["source"],
-            "PAPER_SIMULATION",
+            bot.paper_account_state["source"],
         )
         self.assertEqual(
             account_runtime["realAccount"]["exchange"],
@@ -9689,7 +9743,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         )
         self.assertEqual(
             account_runtime["realAccount"]["positionSummary"],
-            "NO_OPEN_POSITION",
+            "FLAT",
         )
         self.assertEqual(
             response.balanceSource,
@@ -9711,6 +9765,40 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             cached["accountRuntime"]["realAccount"]["generation"],
             status["accountRuntime"]["realAccount"]["generation"],
         )
+
+    def test_stopped_unconfigured_bot_syncs_kucoin_read_only_account(self):
+        bot = BotManager()
+        bot._running = False
+        bot.config = {}
+        bot.engine = None
+
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ) as client_class:
+            client_class.credentials_present.return_value = True
+            client = client_class.return_value
+            client.get_account_overview.return_value = {
+                "accountType": "KUCOIN_FUTURES",
+                "balance": 0,
+                "equity": 0,
+                "availableBalance": 0,
+                "permission": "READ_ONLY",
+            }
+            client.get_positions.return_value = []
+
+            status = bot.get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertFalse(status["loopEnabled"])
+        self.assertFalse(status["autoTradeEnabled"])
+        self.assertFalse(status["realOrderAllowed"])
+        self.assertTrue(real_account["connected"])
+        self.assertTrue(real_account["authenticated"])
+        self.assertEqual(real_account["balance"], 0)
+        self.assertEqual(real_account["equity"], 0)
+        self.assertEqual(real_account["availableBalance"], 0)
+        self.assertEqual(real_account["positions"], [])
+        self.assertEqual(real_account["positionSummary"], "FLAT")
 
     @staticmethod
     def _bootstrap_start_config():
@@ -9816,8 +9904,19 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                             else None
                         )
 
-                    self.assertFalse(pending["known"])
-                    self.assertIsNone(pending["pending"])
+                    if name == "pending-true":
+                        # A current manager flag is positive authority for an
+                        # existing pending order.  It remains fail-closed, but
+                        # is not an unknown state.
+                        self.assertTrue(pending["known"])
+                        self.assertTrue(pending["pending"])
+                        self.assertEqual(
+                            pending["reason"],
+                            "PENDING_ORDER_REMAINING",
+                        )
+                    else:
+                        self.assertFalse(pending["known"])
+                        self.assertIsNone(pending["pending"])
                     self.assertFalse(pending["safe"])
                     if start_result is not None:
                         self.assertEqual(start_result["status"], "error")
@@ -10474,7 +10573,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 finally:
                     self._restore_governance(state_before)
 
-    def test_start_rechecks_one_stale_flat_stopped_paper_snapshot(self):
+    def test_start_recheck_refreshes_one_stale_flat_stopped_paper_snapshot(self):
         state_before = self._set_governance(
             execution_enabled=False,
             emergency_stop=False,
@@ -10494,7 +10593,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 wraps=bot._stopped_paper_authoritative_safety_state,
             ) as recheck:
                 stale = bot.get_authoritative_pending_order_state()
-                self.assertEqual(stale["reason"], "SNAPSHOT_STALE")
+                self.assertEqual(
+                    stale["reason"],
+                    "SNAPSHOT_STALE",
+                )
+                self.assertFalse(stale["known"])
+                self.assertIsNone(stale["pending"])
+                self.assertFalse(stale["safe"])
                 refreshed = (
                     bot._recheck_stale_stopped_paper_start_authority(
                         self._bootstrap_start_config(),
@@ -10517,6 +10622,185 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 "AUTHORITATIVE_STOPPED_PAPER_RECHECK",
             )
             self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_pending_read_reports_strict_flat_stale_snapshot(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_900_000_000.0
+        bot = self._stopped_paper_bot()
+        bot.account_snapshot["last_update"] = now - 600
+
+        try:
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ), patch(
+                "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+                "paper",
+            ), patch(
+                "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+                False,
+            ):
+                authority = bot.get_authoritative_pending_order_state()
+
+            # Observation is side-effect free: only the explicit START
+            # authority recheck may refresh stale stopped-Paper evidence.
+            self.assertFalse(authority["known"])
+            self.assertIsNone(authority["pending"])
+            self.assertFalse(authority["safe"])
+            self.assertEqual(
+                authority["reason"],
+                "SNAPSHOT_STALE",
+            )
+            self.assertEqual(
+                bot.account_snapshot["dataQuality"],
+                "AUTHORITATIVE_STOPPED_PAPER_ENGINE_SNAPSHOT",
+            )
+            self.assertEqual(
+                bot.account_snapshot["last_update"],
+                now - 600,
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_repeated_refresh_preserves_canonical_source(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        path = self._temporary_durable_snapshot_path()
+
+        try:
+            governance_state["mode"] = "PAPER"
+            _, payload = self._persist_flat_stopped_paper_durable_snapshot(
+                path
+            )
+            bot = self._restart_stopped_paper_bot(path)
+
+            restored = bot.get_authoritative_pending_order_state()
+            self.assertTrue(restored["known"])
+            self.assertFalse(restored["pending"])
+            self.assertTrue(restored["safe"])
+
+            first, first_reason = (
+                bot._refresh_stopped_paper_safety_snapshot(
+                    bot.account_snapshot
+                )
+            )
+            second, second_reason = (
+                bot._refresh_stopped_paper_safety_snapshot(first)
+            )
+
+            self.assertIsNone(first_reason)
+            self.assertIsNone(second_reason)
+            self.assertEqual(
+                first["sourceSnapshotSource"],
+                payload["source"],
+            )
+            self.assertEqual(
+                second["sourceSnapshotSource"],
+                payload["source"],
+            )
+            self.assertNotEqual(
+                second["sourceSnapshotSource"],
+                "stopped_paper_preserved_runtime_state",
+            )
+            authority = bot.get_authoritative_pending_order_state()
+            self.assertTrue(authority["known"])
+            self.assertFalse(authority["pending"])
+            self.assertTrue(authority["safe"])
+            self.assertEqual(
+                authority["reason"],
+                "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+            )
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_pending_read_does_not_hide_current_pending(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        bot = self._stopped_paper_bot()
+        bot.pending_order = True
+        bot.account_snapshot["last_update"] = time.time() - 600
+
+        try:
+            authority = bot.get_authoritative_pending_order_state()
+            self.assertTrue(authority["known"])
+            self.assertTrue(authority["pending"])
+            self.assertFalse(authority["safe"])
+            self.assertEqual(authority["reason"], "PENDING_ORDER_REMAINING")
+            self.assertEqual(authority["source"], "bot_manager.pending_order")
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_pending_read_stale_unknown_and_corrupt_fail_closed(self):
+        cases = (
+            (
+                "unknown",
+                {"pendingOrder": None, "pending_order": None},
+                "SNAPSHOT_STALE",
+            ),
+            ("corrupt", {"source": "manual_snapshot"}, "SNAPSHOT_STALE"),
+        )
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_900_000_000.0
+
+        try:
+            for name, changes, reason in cases:
+                with self.subTest(name=name):
+                    bot = self._stopped_paper_bot()
+                    bot.account_snapshot.update(changes)
+                    bot.account_snapshot["last_update"] = now - 600
+                    with patch(
+                        "backend.bot_manager.bot_manager.time.time",
+                        return_value=now,
+                    ):
+                        authority = bot.get_authoritative_pending_order_state()
+                    self.assertFalse(authority["known"])
+                    self.assertIsNone(authority["pending"])
+                    self.assertFalse(authority["safe"])
+                    # Freshness is evaluated before content/source authority;
+                    # START recheck exposes the deeper reason after refreshing.
+                    self.assertEqual(authority["reason"], reason)
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_recovery_does_not_change_live_or_running_contracts(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        try:
+            live = self._stopped_paper_bot()
+            live.config["mode"] = "live"
+            expected_live = {"safe": False, "known": False, "pending": None}
+            with patch.object(
+                live,
+                "_stopped_live_pending_order_authority",
+                return_value=expected_live,
+            ) as resolver:
+                self.assertIs(
+                    live.get_authoritative_pending_order_state(),
+                    expected_live,
+                )
+            resolver.assert_called_once_with(False)
+
+            running = self._stopped_paper_bot()
+            running.engine = SimpleNamespace(pending_order=False)
+            authority = running.get_authoritative_pending_order_state()
+            self.assertTrue(authority["known"])
+            self.assertFalse(authority["pending"])
+            self.assertTrue(authority["safe"])
+            self.assertEqual(authority["reason"], "NO_PENDING_ORDER")
         finally:
             self._restore_governance(state_before)
 
