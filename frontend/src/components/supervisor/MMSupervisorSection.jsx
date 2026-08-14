@@ -1,10 +1,44 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { getSupervisorSnapshot } from "../../api/supervisorClient";
 
 import SupervisorConversationShell from "./SupervisorConversationShell";
 
+const KNOWN_MM_STATES = new Set([
+    "NORMAL",
+    "CAUTION",
+    "DEFENSIVE",
+    "LOCKED",
+    "RECOVERY_25",
+    "RECOVERY_50",
+]);
+
+function deriveMMState(snapshot) {
+    const raw = snapshot?.moneyManagement?.ruinGuardStatus;
+    if (typeof raw === "string" && KNOWN_MM_STATES.has(raw.trim().toUpperCase())) {
+        return raw.trim().toUpperCase();
+    }
+    return "UNKNOWN";
+}
+
 export default function MMSupervisorSection() {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [state, setState] = useState("UNKNOWN");
     const contentId = "mm-supervisor-content";
+
+    useEffect(() => {
+        let active = true;
+        getSupervisorSnapshot()
+            .then((next) => {
+                if (active) setState(deriveMMState(next));
+            })
+            .catch(() => {
+                if (active) setState("UNKNOWN");
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
 
     return (
         <section className="mm-supervisor" aria-labelledby="mm-supervisor-heading">
@@ -12,7 +46,7 @@ export default function MMSupervisorSection() {
                 <div>
                     <p className="supervisor-page__section-kicker">SPECIALIST SUPERVISOR</p>
                     <h2 id="mm-supervisor-heading">MM SUPERVISOR</h2>
-                    <p className="mm-supervisor__state">State: <strong>UNKNOWN</strong></p>
+                    <p className="mm-supervisor__state">State: <strong>{state}</strong></p>
                 </div>
                 <button
                     className="supervisor-disclosure-button"

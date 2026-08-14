@@ -174,3 +174,20 @@ def test_adapter_surface_contains_only_readers_and_never_invokes_commands():
     assert set(RuntimeAuthorityReaders.__dataclass_fields__) == {
         "bot", "governance", "moneyManagement", "health",
     }
+
+
+def test_adapter_projects_authoritative_risk_state_to_ruin_guard_status():
+    payloads = authority_payloads()
+    payloads["moneyManagement"]["riskState"] = "NORMAL"
+    snapshot = adapter_for(payloads).build(object())
+    assert snapshot.moneyManagement.ruinGuardStatus == "NORMAL"
+
+
+def test_adapter_risk_state_is_allowlisted_and_non_risk_keys_still_excluded():
+    payloads = authority_payloads()
+    payloads["moneyManagement"]["riskState"] = "LOCKED"
+    payloads["moneyManagement"]["recommendedAction"] = "SECRET_VALUE_MUST_NOT_LEAK"
+    snapshot = adapter_for(payloads).build(object())
+    serialized = snapshot.stable_json()
+    assert snapshot.moneyManagement.ruinGuardStatus == "LOCKED"
+    assert "SECRET_VALUE_MUST_NOT_LEAK" not in serialized

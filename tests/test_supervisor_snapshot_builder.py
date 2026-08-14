@@ -165,6 +165,59 @@ def test_capital_source_normalization_does_not_mutate_producer_payload():
     assert values[2]["capitalEligibility"]["capitalSource"] == "REAL_LIVE_ACCOUNT"
 
 
+@pytest.mark.parametrize("risk_state", ["NORMAL", "CAUTION", "DEFENSIVE", "LOCKED", "RECOVERY_25", "RECOVERY_50"])
+def test_authoritative_risk_state_maps_to_canonical_ruin_guard_status(risk_state):
+    bot, governance, mm, health = sources()
+    mm["riskState"] = risk_state
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.ruinGuardStatus == risk_state
+    assert not any(item.field == "riskState" for item in snapshot.warnings)
+
+
+def test_authoritative_risk_state_lowercase_normalizes_without_warning():
+    bot, governance, mm, health = sources()
+    mm["riskState"] = "normal"
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.ruinGuardStatus == "NORMAL"
+
+
+def test_risk_state_unknown_fails_safe_to_unknown():
+    bot, governance, mm, health = sources()
+    mm["riskState"] = "UNKNOWN"
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.ruinGuardStatus == "UNKNOWN"
+
+
+def test_risk_state_unrecognized_value_fails_safe_with_warning():
+    bot, governance, mm, health = sources()
+    mm["riskState"] = "MYSTERY_STATE"
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.ruinGuardStatus == "UNKNOWN"
+    assert any(
+        item.code is SupervisorFailureCode.INPUT_INVALID
+        and item.domain == "moneyManagement"
+        and item.field == "riskState"
+        for item in snapshot.warnings
+    )
+
+
+def test_risk_state_absence_falls_back_to_legacy_ruin_guard_status():
+    bot, governance, mm, health = sources()
+    assert "riskState" not in mm
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.ruinGuardStatus == "UNAVAILABLE"
+
+
+def test_risk_state_mapping_does_not_mutate_producer_payload():
+    values = sources()
+    values[2]["riskState"] = "caution"
+    original = deepcopy(values)
+    snapshot = build(*values)
+    assert snapshot.moneyManagement.ruinGuardStatus == "CAUTION"
+    assert values == original
+    assert values[2]["riskState"] == "caution"
+
+
 @pytest.mark.parametrize("missing_index, domain", [
     (0, "bot"), (1, "governance"), (2, "moneyManagement"), (3, "health"),
 ])

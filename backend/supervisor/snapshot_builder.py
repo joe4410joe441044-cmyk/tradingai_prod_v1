@@ -249,6 +249,33 @@ def _capital_source(value: object, warnings: list[SnapshotWarning], evaluated_at
     return CapitalSource.UNKNOWN
 
 
+_KNOWN_RUIN_GUARD_STATES = frozenset({
+    "NORMAL", "CAUTION", "DEFENSIVE", "LOCKED", "RECOVERY_25", "RECOVERY_50",
+})
+
+
+def _ruin_guard_status(
+    value: object,
+    warnings: list[SnapshotWarning],
+    evaluated_at: datetime | None,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.INPUT_INVALID, "riskState must be a string or null"
+        )
+    normalized = value.strip().upper()
+    if normalized in _KNOWN_RUIN_GUARD_STATES:
+        return normalized
+    if normalized != "UNKNOWN":
+        warnings.append(warning(
+            SupervisorFailureCode.INPUT_INVALID, "moneyManagement", "riskState",
+            "risk state is not a recognized Money Management authority", evaluated_at,
+        ))
+    return "UNKNOWN"
+
+
 def _domain(
     freshness: Freshness,
     evaluated_at: datetime | None,
@@ -363,6 +390,13 @@ def build_supervisor_snapshot(
                                   "Money Management and account capital sources conflict")
         capital_source = CapitalSource.UNKNOWN
 
+    risk_state_value = _first((mm_data,), "riskState")
+    ruin_guard_status = (
+        _ruin_guard_status(risk_state_value, warnings, mm_at)
+        if risk_state_value is not None
+        else _string(_first(mm_layers, "ruinGuardStatus"), "moneyManagement.ruinGuardStatus")
+    )
+
     money_management = MoneyManagementSnapshot(
         capitalAuthority=_string(_first(mm_layers, "capitalAuthority"), "moneyManagement.capitalAuthority"),
         capitalSource=capital_source,
@@ -375,7 +409,7 @@ def build_supervisor_snapshot(
                                    "moneyManagement.remainingExposure", non_negative=True),
         remainingPositionCapacity=_decimal(_first(mm_layers, "remainingPositionCapacity"),
                                            "moneyManagement.remainingPositionCapacity", non_negative=True),
-        ruinGuardStatus=_string(_first(mm_layers, "ruinGuardStatus"), "moneyManagement.ruinGuardStatus"),
+        ruinGuardStatus=ruin_guard_status,
         compoundingEnabled=_bool(_first(mm_layers, "compoundingEnabled"), "moneyManagement.compoundingEnabled"),
         executionEntryAllowed=_bool(_first(mm_layers, "executionEntryAllowed"), "moneyManagement.executionEntryAllowed"),
         policyVersion=_string(_first(mm_layers, "policyVersion"), "moneyManagement.policyVersion"),

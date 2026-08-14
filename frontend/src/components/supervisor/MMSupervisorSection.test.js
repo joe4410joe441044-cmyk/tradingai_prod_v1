@@ -4,10 +4,22 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("./MMSupervisorSection.jsx", import.meta.url), "utf8");
 
-test("MM Supervisor starts collapsed after Master and identifies unknown state", function () {
+test("MM Supervisor renders an authoritative state instead of hardcoding UNKNOWN", function () {
     assert.match(source, /MM SUPERVISOR/);
-    assert.match(source, /State: <strong>UNKNOWN<\/strong>/);
-    assert.match(source, /useState\(false\)/);
+    assert.doesNotMatch(source, /State:\s*<strong>UNKNOWN<\/strong>/);
+    assert.match(source, /State: <strong>\{state\}<\/strong>/);
+});
+
+test("MM Supervisor derives state from the authoritative snapshot ruin guard status", function () {
+    assert.match(source, /getSupervisorSnapshot/);
+    assert.match(source, /moneyManagement\?\.ruinGuardStatus/);
+    assert.match(source, /KNOWN_MM_STATES/);
+});
+
+test("MM Supervisor falls back to UNKNOWN when authority is missing or unrecognized", function () {
+    assert.match(source, /useState\("UNKNOWN"\)/);
+    assert.match(source, /return "UNKNOWN";/);
+    assert.match(source, /setState\("UNKNOWN"\)/);
 });
 
 test("MM disclosure is keyboard-operable and exposes expansion semantics", function () {
