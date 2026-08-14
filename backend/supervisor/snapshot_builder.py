@@ -235,9 +235,11 @@ def _capital_source(value: object, warnings: list[SnapshotWarning], evaluated_at
     if not isinstance(value, str):
         raise SupervisorBoundaryError(SupervisorFailureCode.INPUT_INVALID, "capitalSource must be a string")
     normalized = value.strip().upper()
-    if normalized in {"PAPER", "PAPER_SIMULATION"}:
+    if normalized in {"PAPER", "PAPER_SIMULATION", "PAPER_ACCOUNT"}:
         return CapitalSource.PAPER
-    if normalized in {"LIVE", "LIVE_ACCOUNT", "LIVE_ACCOUNT_AUTHORITY"}:
+    if normalized in {
+        "LIVE", "LIVE_ACCOUNT", "LIVE_ACCOUNT_AUTHORITY", "REAL_LIVE_ACCOUNT",
+    }:
         return CapitalSource.LIVE
     if normalized not in {"", "UNKNOWN", "UNSPECIFIED"}:
         warnings.append(warning(

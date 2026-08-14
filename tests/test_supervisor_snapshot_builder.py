@@ -121,6 +121,50 @@ def test_live_snapshot_preserves_live_authority_without_recalculating():
     assert snapshot.moneyManagement.riskBudget == Decimal("10.123456789")
 
 
+def test_capital_source_paper_aliases_normalize_to_canonical_paper_without_warning():
+    for alias in ("PAPER", "PAPER_SIMULATION", "PAPER_ACCOUNT"):
+        snapshot = build(*sources(capital_source=alias, account_source=alias))
+        assert snapshot.moneyManagement.capitalSource is CapitalSource.PAPER
+        assert not any(item.field == "capitalSource" for item in snapshot.warnings)
+
+
+def test_capital_source_live_aliases_normalize_to_canonical_live_without_warning():
+    for alias in ("LIVE", "LIVE_ACCOUNT", "LIVE_ACCOUNT_AUTHORITY", "REAL_LIVE_ACCOUNT"):
+        snapshot = build(*sources(capital_source=alias, selected_mode="LIVE", account_source="LIVE_ACCOUNT"))
+        assert snapshot.moneyManagement.capitalSource is CapitalSource.LIVE
+        assert not any(item.field == "capitalSource" for item in snapshot.warnings)
+
+
+def test_capital_source_unknown_arbitrary_value_remains_failsafe_unknown_with_warning():
+    bot, governance, mm, health = sources(capital_source="MYSTERY_SOURCE")
+    mm["capitalEligibility"]["capitalSource"] = "MYSTERY_SOURCE"
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.capitalSource is CapitalSource.UNKNOWN
+    assert any(
+        item.code is SupervisorFailureCode.INPUT_INVALID
+        and item.domain == "moneyManagement"
+        and item.field == "capitalSource"
+        for item in snapshot.warnings
+    )
+
+
+def test_capital_source_absence_remains_failsafe_unknown():
+    bot, governance, mm, health = sources()
+    del mm["capitalEligibility"]["capitalSource"]
+    snapshot = build(bot, governance, mm, health)
+    assert snapshot.moneyManagement.capitalSource is CapitalSource.UNKNOWN
+    assert not any(item.field == "capitalSource" for item in snapshot.warnings)
+
+
+def test_capital_source_normalization_does_not_mutate_producer_payload():
+    values = sources(capital_source="REAL_LIVE_ACCOUNT", selected_mode="LIVE", account_source="LIVE_ACCOUNT")
+    original = deepcopy(values)
+    snapshot = build(*values)
+    assert snapshot.moneyManagement.capitalSource is CapitalSource.LIVE
+    assert values == original
+    assert values[2]["capitalEligibility"]["capitalSource"] == "REAL_LIVE_ACCOUNT"
+
+
 @pytest.mark.parametrize("missing_index, domain", [
     (0, "bot"), (1, "governance"), (2, "moneyManagement"), (3, "health"),
 ])
