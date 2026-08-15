@@ -10,6 +10,9 @@ from backend.ai_advisor.conversation_validation import (
 )
 from backend.ai_advisor.prompt_builder import build_advisor_prompt
 from backend.ai_advisor.prompt_models import AdvisorPromptPolicy
+from backend.ai_advisor.no_source_response_normalizer import (
+    normalize_no_source_response,
+)
 from backend.ai_advisor.provider_adapter import (
     AdvisorProvider,
     build_provider_request,
@@ -25,6 +28,7 @@ from backend.ai_advisor.provider_models import (
 from backend.ai_advisor.provider_failure_observation import (
     NoOpProviderFailureObservationSink,
     ProviderFailureObservation,
+    ProviderFailureCategory,
     ProviderFailureObservationSink,
     ProviderFailureStage,
     ProviderSafeReason,
@@ -39,6 +43,12 @@ from backend.ai_advisor.response_parser import (
     parse_advisor_response,
 )
 from backend.ai_advisor.response_validation import validate_advisor_response
+from backend.ai_advisor.response_models import AdvisorResponseStatus
+from backend.ai_advisor.response_safety_observation import (
+    NoOpResponseSafetyRejectionObservationSink,
+    ResponseSafetyRejectionObservationSink,
+    project_response_safety_rejection,
+)
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
     AdvisorServiceFailure,
@@ -71,14 +81,24 @@ class AdvisorService:
     failureObservationSink: ProviderFailureObservationSink = (
         NoOpProviderFailureObservationSink()
     )
+    responseSafetyObservationSink: ResponseSafetyRejectionObservationSink = (
+        NoOpResponseSafetyRejectionObservationSink()
+    )
 
     def _observe_parse_failure(
         self,
         diagnostic: ResponseContractDiagnostic,
+        *,
+        request_id: str,
+        provider_request_id: str,
     ) -> None:
         try:
             self.failureObservationSink.observe(
                 ProviderFailureObservation(
+                    model=self.providerConfig.modelId,
+                    requestId=request_id,
+                    providerRequestId=provider_request_id,
+                    category=ProviderFailureCategory.RESPONSE_VALIDATION,
                     safeReason=(
                         ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED
                     ),
@@ -176,10 +196,17 @@ class AdvisorService:
         if not isinstance(raw_response, AdvisorRawResponse):
             return _failure(AdvisorServiceFailureCode.ADVISOR_PROVIDER_RESPONSE_INVALID)
 
+        if not context.sources:
+            raw_response = normalize_no_source_response(raw_response)
+
         try:
             parse_advisor_response(raw_response)
         except AdvisorResponseParsingError as exception:
-            self._observe_parse_failure(exception.diagnostic)
+            self._observe_parse_failure(
+                exception.diagnostic,
+                request_id=request.requestId,
+                provider_request_id=service_input.providerRequestId,
+            )
             return _failure(AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE)
         except Exception:
             self._observe_parse_failure(
@@ -188,7 +215,9 @@ class AdvisorService:
                         ResponseValidationCode.UNKNOWN_RESPONSE_CONTRACT_FAILURE
                     ),
                     topLevelType=ResponseTopLevelType.UNKNOWN,
-                )
+                ),
+                request_id=request.requestId,
+                provider_request_id=service_input.providerRequestId,
             )
             return _failure(AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE)
 
@@ -201,6 +230,16 @@ class AdvisorService:
             )
         except Exception:
             return _failure(AdvisorServiceFailureCode.ADVISOR_RESPONSE_INVALID)
+        if response.status is AdvisorResponseStatus.REJECTED:
+            try:
+                self.responseSafetyObservationSink.observe(
+                    project_response_safety_rejection(
+                        response,
+                        provider_request_id=service_input.providerRequestId,
+                    )
+                )
+            except Exception:
+                pass
         return AdvisorServiceResult(
             status=AdvisorServiceStatus.SUCCEEDED,
             response=response,

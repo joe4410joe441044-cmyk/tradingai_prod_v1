@@ -18,6 +18,10 @@ const loadPage = async () => {
     const hook = join(temporary, "useAdvisorRuntime.mjs");
     const runtimeStatus = join(temporary, "AdvisorRuntimeStatus.mjs");
     const conversation = join(temporary, "AdvisorConversation.mjs");
+    const conversationHistory = join(temporary, "AdvisorConversationHistory.mjs");
+    const operatorLogin = join(temporary, "OperatorLogin.mjs");
+    const disclosure = join(temporary, "AdvisorDisclosure.mjs");
+    const react = join(temporary, "react.mjs");
     try {
         await writeFile(hook, [
             "export default () => ({",
@@ -31,9 +35,23 @@ const loadPage = async () => {
         );
         await writeFile(
             conversation,
-            "export default()=>({type:'section',props:{children:'Advisor Availability AUTHENTICATION_REQUIRED Read-only advisor Conversation Thread Prompt Input Send Cancel Clear Safe Failure'}});",
+            "export default()=>({type:'section',props:{children:'Prompt Input Send Cancel Clear Conversation Thread'}});",
         );
+        await writeFile(
+            conversationHistory,
+            "export default()=>({type:'div',props:{children:'No archived conversations.（履歴はありません。）'}});",
+        );
+        await writeFile(
+            operatorLogin,
+            "export default()=>({type:'div',props:{children:'Operator authentication'}});",
+        );
+        await writeFile(
+            disclosure,
+            "export default({title,children})=>({type:'section',props:{'data-disclosure':title,children:[title,children]}});",
+        );
+        await writeFile(react, "export const useState=(value)=>[value,()=>{}];");
         const code = transformed.code
+            .replace('from "react";', `from "${pathToFileURL(react).href}";`)
             .replace(
                 'from "../features/ai-advisor/runtime/useAdvisorRuntime";',
                 `from "${pathToFileURL(hook).href}";`,
@@ -45,7 +63,20 @@ const loadPage = async () => {
             .replace(
                 'from "../components/ai-advisor/AdvisorConversation";',
                 `from "${pathToFileURL(conversation).href}";`,
+            )
+            .replace(
+                'from "../components/ai-advisor/AdvisorConversationHistory";',
+                `from "${pathToFileURL(conversationHistory).href}";`,
+            )
+            .replace(
+                'from "../components/auth/OperatorLogin";',
+                `from "${pathToFileURL(operatorLogin).href}";`,
+            )
+            .replace(
+                'from "../components/ai-advisor/AdvisorDisclosure";',
+                `from "${pathToFileURL(disclosure).href}";`,
             );
+
         await writeFile(output, code);
         return await import(`${pathToFileURL(output).href}?test=ai-advisor`);
     } finally {
@@ -67,7 +98,7 @@ const descendants = (node) => {
     return [node, ...descendants(node.props?.children)];
 };
 
-test("AI Advisor preserves its shell and mounts read-only runtime status", async () => {
+test("AI Advisor is conversation-first: compact header, no hero, collapsed details", async () => {
     let fetchCalls = 0;
     globalThis.fetch = () => { fetchCalls += 1; };
     const { default: AIAdvisorPage } = await loadPage();
@@ -75,38 +106,50 @@ test("AI Advisor preserves its shell and mounts read-only runtime status", async
     const text = textOf(page);
     const nodes = descendants(page);
 
-    assert.match(text, /AI ADVISOR/);
-    assert.match(text, /TradingAI Intelligent Assistant/);
-    assert.match(text, /Platform Ready/);
-    assert.match(text, /AI Provider/);
-    assert.match(text, /Not Configured/);
-    assert.match(text, /API/);
+    assert.match(text, /AI Advisor/);
+    assert.match(text, /AI Advisor（AIアドバイザー）/);
+    assert.match(text, /Operator authentication/);
     assert.match(text, /Connecting/);
-    assert.match(text, /Runtime/);
-    assert.match(text, /Not Connected/);
-    assert.match(text, /Knowledge/);
-    assert.match(text, /Not Indexed/);
-    for (const heading of [
-        "CONVERSATIONS",
-        "ADVISOR WORKSPACE",
-        "CONTEXT",
-        "RUNTIME",
-        "KNOWLEDGE",
-        "CAPABILITIES",
+    assert.match(text, /Prompt Input Send Cancel Clear Conversation Thread/);
+
+    for (const disclosure of [
+        "Conversation History（会話履歴） · 0",
+        "System / Runtime Details（システム / ランタイム詳細）",
+        "Context & Knowledge（コンテキスト / ナレッジ）",
     ]) {
-        assert.match(text, new RegExp(heading));
+        assert.ok(
+            nodes.some((node) => node.props?.["data-disclosure"] === disclosure),
+            `expected disclosure: ${disclosure}`,
+        );
     }
 
-    const statusGroup = nodes.find(({ props }) => (
-        props?.["aria-label"] === "AI Advisor system status"
-    ));
-
-    assert.ok(statusGroup);
-    assert.equal(fetchCalls, 0);
     assert.match(text, /RUNTIME STATUS/);
-    assert.match(text, /AUTHENTICATION_REQUIRED/);
-    assert.match(text, /Read-only advisor/);
-    assert.match(text, /Send Cancel Clear Safe Failure/);
+    assert.match(text, /No archived conversations/);
+    assert.match(text, /CAPABILITIES/);
+
+    assert.equal(fetchCalls, 0);
+});
+
+test("AI Advisor has no large hero title or permanent technical columns", async () => {
+    const { default: AIAdvisorPage } = await loadPage();
+    const text = textOf(AIAdvisorPage());
+
+    assert.doesNotMatch(text, /TradingAI Intelligent Assistant/);
+    for (const removed of [
+        "ADVISOR WORKSPACE",
+        "CONTEXT & SYSTEM",
+    ]) {
+        assert.doesNotMatch(text, new RegExp(removed));
+    }
+});
+
+test("Context & Knowledge describes authoritative per-request grounding", async () => {
+    const { default: AIAdvisorPage } = await loadPage();
+    const text = textOf(AIAdvisorPage());
+    assert.match(text, /Authoritative static grounding/);
+    assert.match(text, /Approved and hash-verified per request/);
+    assert.match(text, /Shown in answer citations when used/);
+    assert.doesNotMatch(text, /Not Indexed|No sources configured/);
 });
 
 test("AI Advisor source has no direct fetch, mutation, or persistence integration", async () => {
@@ -128,4 +171,6 @@ test("AI Advisor source has no direct fetch, mutation, or persistence integratio
     }
     assert.match(source, /useAdvisorRuntime/);
     assert.match(source, /AdvisorRuntimeStatus/);
+    assert.match(source, /AdvisorConversation/);
+    assert.match(source, /AdvisorDisclosure/);
 });

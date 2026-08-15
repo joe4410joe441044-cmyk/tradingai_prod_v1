@@ -250,7 +250,7 @@ class OpenAISDKTransportTest(unittest.TestCase):
         self.assertEqual(len(calls.calls), 1)
         self.assertEqual(
             response_sink.observation.safeReason,
-            ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+            ProviderSafeReason.LIVE_PROVIDER_OUTPUT_TEXT_CONTRACT_FAILED,
         )
         self.assertEqual(
             response_sink.observation.failureStage,

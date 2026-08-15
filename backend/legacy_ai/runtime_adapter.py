@@ -1,11 +1,16 @@
-# backend/ai/runtime_adapter.py
+# Archived from backend/ai/runtime_adapter.py.
 
-from backend.ai.runtime_state import RuntimeState
+from backend.legacy_ai.runtime_state import RuntimeState
 
 
 class RuntimeAdapter:
 
-    def build(self, microstructure_state):
+    def build(self, microstructure_state, active_symbol=None):
+
+        # Production supplies BotManager.activeSymbol explicitly. Standalone
+        # legacy analysis may have no trading session, so it remains unset
+        # rather than inventing a market authority.
+        symbol = active_symbol or microstructure_state.get("symbol") or ""
 
         if "aiMomentumPersistence" in microstructure_state:
             momentum_score = (
@@ -17,7 +22,7 @@ class RuntimeAdapter:
             )
 
         return RuntimeState(
-            symbol="XRPUSDT",
+            symbol=str(symbol).strip().upper(),
 
             directional_bias=(
                 microstructure_state["buyPressure"]

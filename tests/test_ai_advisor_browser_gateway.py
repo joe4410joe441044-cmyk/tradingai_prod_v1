@@ -18,6 +18,12 @@ from backend.ai_advisor.browser_gateway import (
     assemble_browser_service_input,
     create_browser_gateway_router,
 )
+from backend.auth.csrf import (
+    CSRF_TOKEN_COOKIE,
+    CSRF_TOKEN_HEADER,
+    OperatorCsrfProtection,
+    generate_csrf_token,
+)
 from tests.test_ai_advisor_api import CountingService, FixedClock
 
 NOW = datetime(2026, 7, 26, 12, tzinfo=timezone.utc)
@@ -35,10 +41,24 @@ class PeerMiddleware:
         await self.app(scope, receive, send)
 
 
-def gateway(
+class SessionMiddleware:
+    """Simulate OperatorSessionMiddleware injecting an authenticated session."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        scope = dict(scope)
+        scope["operator_session"] = {
+            "identity": "operator",
+            "session_id": "session-1",
+        }
+        await self.app(scope, receive, send)
+
+
+def build_composition(
     *,
     enabled=True,
-    peer="127.0.0.1",
     service_dependency=None,
     rate_limit=10,
     timeout=1,
@@ -71,6 +91,10 @@ def gateway(
         **({"observationSink": observation_sink} if observation_sink else {}),
         **({"requestIdFactory": request_id_factory} if request_id_factory else {}),
     )
+    return composition, dependency
+
+
+def build_app(composition, *, session=False):
     app = FastAPI()
     app.add_middleware(
         CORSMiddleware,
@@ -78,8 +102,53 @@ def gateway(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if session:
+        app.add_middleware(SessionMiddleware)
     app.include_router(create_browser_gateway_router(composition))
     app.add_middleware(AdvisorGatewayPreflightDenyMiddleware)
+    return app
+
+
+def build_csrf_app(composition):
+    app = FastAPI()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(SessionMiddleware)
+    app.add_middleware(
+        OperatorCsrfProtection,
+        csrf_required_paths=frozenset({"/api/ai-advisor/conversation"}),
+    )
+    app.include_router(create_browser_gateway_router(composition))
+    app.add_middleware(AdvisorGatewayPreflightDenyMiddleware)
+    return app
+
+
+def gateway(
+    *,
+    enabled=True,
+    peer="127.0.0.1",
+    service_dependency=None,
+    rate_limit=10,
+    timeout=1,
+    approved_specifications=(),
+    observation_sink=None,
+    request_id_factory=None,
+    session=False,
+):
+    composition, dependency = build_composition(
+        enabled=enabled,
+        service_dependency=service_dependency,
+        rate_limit=rate_limit,
+        timeout=timeout,
+        approved_specifications=approved_specifications,
+        observation_sink=observation_sink,
+        request_id_factory=request_id_factory,
+    )
+    app = build_app(composition, session=session)
     return TestClient(PeerMiddleware(app, peer)), dependency
 
 
@@ -340,6 +409,231 @@ class BrowserGatewayTest(unittest.TestCase):
         )
         for response in (disabled, unauthenticated, denied, invalid):
             self.assertNotIn("access-control-allow-origin", response.headers)
+
+    def test_session_identity_accepts_browser_fetch_metadata_get(self):
+        # Real browsers omit Origin on same-origin GET requests but attach
+        # Sec-Fetch-Site: same-origin. The session path must serve those.
+        api, dependency = gateway(session=True)
+        status = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "X-TradingAI-Client": "web",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json(), {"status": "OFFLINE"})
+
+        runtime = api.get(
+            "/api/ai-advisor/conversation/runtime",
+            headers={
+                "X-TradingAI-Client": "web",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(runtime.status_code, 200)
+        self.assertEqual(runtime.json()["bot"]["state"], "UNKNOWN")
+        self.assertEqual(dependency.calls, 0)
+
+    def test_session_get_without_origin_and_fetch_metadata_fails_closed(self):
+        # A session cookie alone is NOT a same-origin proof. A GET with neither
+        # Origin nor browser Fetch Metadata must fail closed.
+        api, dependency = gateway(session=True)
+        for path in (
+            "/api/ai-advisor/conversation/status",
+            "/api/ai-advisor/conversation/runtime",
+        ):
+            response = api.get(path, headers={"X-TradingAI-Client": "web"})
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(dependency.calls, 0)
+
+    def test_session_get_rejects_non_same_origin_fetch_metadata(self):
+        for fetch_site in ("cross-site", "same-site", "none", "attacker", ""):
+            api, dependency = gateway(session=True)
+            response = api.get(
+                "/api/ai-advisor/conversation/status",
+                headers={
+                    "X-TradingAI-Client": "web",
+                    "Sec-Fetch-Site": fetch_site,
+                },
+            )
+            self.assertEqual(response.status_code, 403, fetch_site)
+            self.assertEqual(dependency.calls, 0)
+
+    def test_session_get_rejects_duplicate_fetch_metadata(self):
+        api, dependency = gateway(session=True)
+        response = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers=[
+                ("X-TradingAI-Client", "web"),
+                ("Sec-Fetch-Site", "same-origin"),
+                ("Sec-Fetch-Site", "same-origin"),
+            ],
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_session_get_allowed_origin_is_allowed_and_evil_origin_denied(self):
+        api, dependency = gateway(session=True)
+        allowed = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "X-TradingAI-Client": "web",
+                "Origin": ORIGIN,
+            },
+        )
+        self.assertEqual(allowed.status_code, 200)
+
+        api, dependency = gateway(session=True)
+        evil = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "X-TradingAI-Client": "web",
+                "Origin": "https://evil.invalid",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(evil.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_unauthenticated_get_denied_even_with_fetch_metadata(self):
+        api, dependency = gateway(session=False)
+        response = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "X-TradingAI-Client": "web",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_session_identity_rejects_wrong_origin_when_present(self):
+        api, dependency = gateway(session=True)
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": "Explain the system."},
+            headers={
+                "X-TradingAI-Client": "web",
+                "Origin": "https://attacker.invalid",
+                "Content-Type": "application/json",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_session_post_without_origin_denied(self):
+        # Missing Origin must never be accepted for POST even with a valid
+        # session and same-origin Fetch Metadata.
+        api, dependency = gateway(session=True)
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": "Explain the system."},
+            headers={
+                "X-TradingAI-Client": "web",
+                "Content-Type": "application/json",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_session_post_with_disallowed_origin_denied(self):
+        api, dependency = gateway(session=True)
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": "Explain the system."},
+            headers={
+                "X-TradingAI-Client": "web",
+                "Content-Type": "application/json",
+                "Origin": "https://evil.invalid",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_trusted_proxy_fetch_metadata_does_not_bypass_origin(self):
+        # The trusted-proxy identity path keeps requiring an explicit exact
+        # Origin. Browser Fetch Metadata is only a same-origin proof for the
+        # session path and must not widen the trusted-proxy contract.
+        api, dependency = gateway()
+        response = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "X-TradingAI-Client": "web",
+                "X-TradingAI-Authenticated-User": "operator-1",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_post_without_csrf_denied(self):
+        composition, dependency = build_composition()
+        app = build_csrf_app(composition)
+        api = TestClient(
+            PeerMiddleware(app, "127.0.0.1"),
+            raise_server_exceptions=False,
+        )
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": "Explain the system."},
+            headers=headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_valid_post_security_contract_passes_with_mock_service(self):
+        # Full POST security contract (session + exact Origin + CSRF + client
+        # header) passes authorization using only the fake Advisor service.
+        # No real OpenAI request is ever made.
+        composition, dependency = build_composition()
+        app = build_csrf_app(composition)
+        api = TestClient(
+            PeerMiddleware(app, "127.0.0.1"),
+            raise_server_exceptions=False,
+        )
+        token = generate_csrf_token()
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": "Explain the system."},
+            cookies={CSRF_TOKEN_COOKIE: token},
+            headers={
+                "Origin": ORIGIN,
+                "X-TradingAI-Client": "web",
+                "Content-Type": "application/json",
+                CSRF_TOKEN_HEADER: token,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "SUCCEEDED")
+        self.assertEqual(dependency.calls, 1)
+        self.assertNotIn("Authorization", response.text)
+
+    def test_session_identity_still_requires_client_header(self):
+        api, dependency = gateway(session=True)
+        response = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers={
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
+
+    def test_trusted_proxy_still_requires_explicit_origin(self):
+        # The trusted-proxy path must keep requiring an explicit, exact Origin
+        # even when the identity header is present.
+        api, dependency = gateway()
+        request_headers = headers()
+        request_headers.pop("Origin")
+        response = api.get(
+            "/api/ai-advisor/conversation/status",
+            headers=request_headers,
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dependency.calls, 0)
 
 
 if __name__ == "__main__":

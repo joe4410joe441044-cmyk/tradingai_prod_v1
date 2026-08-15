@@ -36,6 +36,7 @@ from backend.ai_advisor.credential_loader import (
 from backend.ai_advisor.live_connectivity import OPENAI_OFFICIAL_ENDPOINT
 from backend.ai_advisor.openai_sdk_transport import OpenAIClientFactory
 from backend.ai_advisor.production_composition import (
+    ProviderInteractionPolicy,
     ProductionCompositionResult,
     build_ai_advisor_production_composition,
 )
@@ -666,6 +667,7 @@ class IsolatedSmokeTestRunner:
         if mode is SmokeTestMode.LIVE_ONE_SHOT and self._liveComposition is not None:
             return self._liveComposition, config, None
         composition = build_ai_advisor_production_composition(
+            provider_interaction_policy=ProviderInteractionPolicy.LIVE_TEST,
             config_loader=_LoadedConfig(loaded),
             authentication_credential_loader=self.authenticationCredentialLoader,
             provider_credential_loader=self.providerCredentialLoader,

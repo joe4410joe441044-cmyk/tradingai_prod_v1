@@ -507,6 +507,28 @@ class AdvisorSourceReference(AdvisorContractModel):
         return self
 
 
+class AdvisorKnowledgeExcerpt(AdvisorContractModel):
+    sourceId: Identifier
+    authorityLevel: Literal["CONSTITUTION", "ADR", "MASTER_SPEC", "FEATURE_SPEC"]
+    topics: Annotated[
+        Tuple[ShortText, ...],
+        Field(min_length=1, max_length=12, strict=False),
+    ]
+    knowledgeKind: Literal["STATIC"] = "STATIC"
+    content: BodyText
+
+    @field_validator("sourceId", "content")
+    @classmethod
+    def validate_safe_text(cls, value: str) -> str:
+        return _reject_control_characters(value, multiline=True)
+
+    @model_validator(mode="after")
+    def validate_topics(self) -> "AdvisorKnowledgeExcerpt":
+        if len(set(self.topics)) != len(self.topics):
+            raise ValueError("knowledge topics must be unique")
+        return self
+
+
 class AdvisorRuntimeContext(AdvisorContractModel):
     schemaVersion: Literal["1.0"]
     sourceId: Identifier
@@ -579,6 +601,10 @@ class AdvisorContextEnvelope(AdvisorContractModel):
         Field(max_length=MAX_SOURCES, strict=False),
     ]
     runtimeContext: Optional[AdvisorRuntimeContext] = None
+    knowledgeExcerpts: Annotated[
+        Tuple[AdvisorKnowledgeExcerpt, ...],
+        Field(default_factory=tuple, max_length=MAX_SOURCES, strict=False),
+    ]
     conversationHistory: Annotated[
         Tuple[AdvisorConversationMessage, ...],
         Field(
@@ -623,6 +649,19 @@ class AdvisorContextEnvelope(AdvisorContractModel):
         ):
             raise ValueError("conversation history exceeds total character limit")
         known_sources = set(source_ids)
+        excerpt_source_ids = [item.sourceId for item in self.knowledgeExcerpts]
+        if len(set(excerpt_source_ids)) != len(excerpt_source_ids):
+            raise ValueError("knowledge excerpt source IDs must be unique")
+        source_by_id = {source.sourceId: source for source in self.sources}
+        for excerpt in self.knowledgeExcerpts:
+            source = source_by_id.get(excerpt.sourceId)
+            if (
+                source is None
+                or source.sourceType is not AdvisorSourceType.SPECIFICATION
+                or source.authority is not AdvisorSourceAuthority.SPECIFICATION_AUTHORITATIVE
+                or source.approved is not True
+            ):
+                raise ValueError("knowledge excerpt requires an approved specification")
         for message in self.conversationHistory:
             if len(set(message.sourceReferences)) != len(message.sourceReferences):
                 raise ValueError("message source references must be unique")

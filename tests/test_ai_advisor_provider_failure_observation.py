@@ -5,9 +5,13 @@ from pydantic import ValidationError
 
 from backend.ai_advisor.provider_failure_observation import (
     ProviderFailureObservation,
+    ProviderFailureCategory,
+    ProviderErrorCode,
+    ProviderErrorType,
     ProviderFailureStage,
     ProviderSafeReason,
     RecordingProviderFailureObservationSink,
+    StructuredLoggingProviderFailureObservationSink,
     ResponseContractField,
     ResponseTopLevelType,
     ResponseValidationCode,
@@ -121,6 +125,61 @@ class ProviderFailureObservationTest(unittest.TestCase):
                 validationCode=ResponseValidationCode.JSON_DECODE_FAILED,
                 topLevelType=ResponseTopLevelType.UNKNOWN,
             )
+
+
+    def test_structured_logging_sink_serializes_only_allowlisted_fields(self):
+        class FakeLogger:
+            def __init__(self):
+                self.calls = []
+
+            def warning(self, template, payload):
+                self.calls.append((template, payload))
+
+        logger = FakeLogger()
+        sink = StructuredLoggingProviderFailureObservationSink(logger=logger)
+        sink.observe(ProviderFailureObservation(
+            model="gpt-test",
+            requestId="request-safe-1",
+            providerRequestId="provider-safe-1",
+            category=ProviderFailureCategory.STRUCTURED_OUTPUT_OR_RESPONSE_FORMAT,
+            safeReason=ProviderSafeReason.LIVE_PROVIDER_BAD_REQUEST,
+            failureStage=ProviderFailureStage.PROVIDER_INVOCATION,
+            httpStatus=400,
+            providerErrorType=ProviderErrorType.INVALID_REQUEST_ERROR,
+            providerErrorCode=ProviderErrorCode.INVALID_RESPONSE_FORMAT,
+            retryable=False,
+            durationMilliseconds=17,
+            liveInvocationAttempted=True,
+        ))
+        self.assertEqual(len(logger.calls), 1)
+        rendered = logger.calls[0][1]
+        decoded = json.loads(rendered)
+        self.assertEqual(decoded["model"], "gpt-test")
+        self.assertEqual(decoded["requestId"], "request-safe-1")
+        self.assertEqual(decoded["providerErrorCode"], "invalid_response_format")
+        for sentinel in (
+            "FAKE_OPENAI_KEY_DO_NOT_LEAK",
+            "FAKE_AUTH_TOKEN_DO_NOT_LEAK",
+            "FAKE_SESSION_DO_NOT_LEAK",
+            "FAKE_PROMPT_DO_NOT_LEAK",
+            "FAKE_PROVIDER_BODY_DO_NOT_LEAK",
+            "Authorization",
+        ):
+            self.assertNotIn(sentinel, rendered)
+
+    def test_observation_rejects_unallowlisted_provider_metadata(self):
+        values = dict(
+            safeReason=ProviderSafeReason.LIVE_PROVIDER_UNKNOWN_FAILURE,
+            failureStage=ProviderFailureStage.UNKNOWN,
+            liveInvocationAttempted=True,
+        )
+        for field, sentinel in (
+            ("providerErrorType", "FAKE_AUTH_TOKEN_DO_NOT_LEAK"),
+            ("providerErrorCode", "FAKE_PROVIDER_BODY_DO_NOT_LEAK"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError):
+                    ProviderFailureObservation(**values, **{field: sentinel})
 
 
 if __name__ == "__main__":

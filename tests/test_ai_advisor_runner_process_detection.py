@@ -7,15 +7,21 @@ from unittest.mock import patch
 
 from backend.ai_advisor.runner_process_detection import (
     RUNNER_MODULE,
+    DetectionReason,
+    DetectionResult,
     ProcessMetadata,
     RunnerDetection,
     UnitClassification,
+    UnitResult,
     classify_process,
+    classify_process_result,
     classify_unit,
     combine_detection,
     detect_existing_runner,
+    detect_existing_runner_result,
     main,
     read_unit_classification,
+    read_unit_result,
 )
 
 
@@ -37,6 +43,14 @@ def metadata(
 
 
 class RunnerProcessDetectionTest(unittest.TestCase):
+    @staticmethod
+    def write_process(proc_root, *, pid=100, comm="python", ppid=10):
+        process = proc_root / str(pid)
+        process.mkdir()
+        (process / "status").write_text(f"PPid:\t{ppid}\n", encoding="utf-8")
+        (process / "comm").write_text(f"{comm}\n", encoding="utf-8")
+        return process
+
     def test_shell_heredoc_grep_and_pgrep_text_are_not_runner(self):
         values = (
             metadata(comm="bash", exe="/bin/bash", argv=("bash", "-c", RUNNER_MODULE)),
@@ -108,6 +122,8 @@ class RunnerProcessDetectionTest(unittest.TestCase):
             classify_process(metadata(), self_pid=1, parent_pid=2),
             RunnerDetection.RUNNER_PRESENT,
         )
+        result = classify_process_result(metadata(), self_pid=1, parent_pid=2)
+        self.assertEqual(result.reason, DetectionReason.EXACT_MODULE_MATCH)
 
     def test_invalid_or_unavailable_process_metadata_is_indeterminate(self):
         values = (
@@ -199,16 +215,18 @@ class RunnerProcessDetectionTest(unittest.TestCase):
             ),
             RunnerDetection.INDETERMINATE,
         )
+        self.assertEqual(
+            detect_existing_runner_result(
+                unit=UnitClassification.ACTIVE,
+                proc_root=missing_proc,
+            ).reason,
+            DetectionReason.UNIT_ACTIVE,
+        )
 
     def test_proc_cmdline_or_exe_failure_is_indeterminate(self):
         with tempfile.TemporaryDirectory() as directory:
             proc_root = Path(directory)
-            process = proc_root / "100"
-            process.mkdir()
-            (process / "status").write_text(
-                "Name:\tpython\nPPid:\t10\n",
-                encoding="utf-8",
-            )
+            self.write_process(proc_root)
             self.assertEqual(
                 detect_existing_runner(
                     unit=UnitClassification.INACTIVE,
@@ -222,16 +240,10 @@ class RunnerProcessDetectionTest(unittest.TestCase):
     def test_non_python_proc_does_not_require_cmdline(self):
         with tempfile.TemporaryDirectory() as directory:
             proc_root = Path(directory)
-            process = proc_root / "100"
-            process.mkdir()
-            (process / "status").write_text(
-                "Name:\tbash\nPPid:\t10\n",
-                encoding="utf-8",
-            )
+            self.write_process(proc_root, comm="bash")
             with patch(
                 "backend.ai_advisor.runner_process_detection.os.readlink",
-                return_value="/usr/bin/bash",
-            ):
+            ) as exe_reader:
                 self.assertEqual(
                     detect_existing_runner(
                         unit=UnitClassification.INACTIVE,
@@ -241,6 +253,100 @@ class RunnerProcessDetectionTest(unittest.TestCase):
                     ),
                     RunnerDetection.RUNNER_ABSENT,
                 )
+            exe_reader.assert_not_called()
+
+    def test_non_python_pid_one_ignores_unreadable_exe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc_root = Path(directory)
+            self.write_process(proc_root, pid=1, comm="systemd", ppid=0)
+            with patch(
+                "backend.ai_advisor.runner_process_detection.os.readlink",
+                side_effect=PermissionError,
+            ) as exe_reader:
+                result = detect_existing_runner_result(
+                    unit=UnitClassification.NOT_FOUND,
+                    proc_root=proc_root,
+                    self_pid=10,
+                    parent_pid=11,
+                )
+            exe_reader.assert_not_called()
+            self.assertEqual(result.classification, RunnerDetection.RUNNER_ABSENT)
+            self.assertEqual(result.reason, DetectionReason.NO_RUNNER_CANDIDATE)
+
+    def test_python_candidate_exe_permission_is_indeterminate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc_root = Path(directory)
+            self.write_process(proc_root)
+            error = PermissionError(13, "suppressed", str(proc_root / "100" / "exe"))
+            with patch(
+                "backend.ai_advisor.runner_process_detection.os.readlink",
+                side_effect=error,
+            ):
+                result = detect_existing_runner_result(
+                    unit=UnitClassification.NOT_FOUND,
+                    proc_root=proc_root,
+                    self_pid=1,
+                    parent_pid=2,
+                )
+            self.assertEqual(result.classification, RunnerDetection.INDETERMINATE)
+            self.assertEqual(
+                result.reason,
+                DetectionReason.PYTHON_CANDIDATE_EXE_UNREADABLE,
+            )
+
+    def test_python_candidate_cmdline_permission_is_indeterminate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc_root = Path(directory)
+            process = self.write_process(proc_root)
+            error = PermissionError(13, "suppressed", str(process / "cmdline"))
+            with (
+                patch(
+                    "backend.ai_advisor.runner_process_detection.os.readlink",
+                    return_value="/usr/bin/python3",
+                ),
+                patch("pathlib.Path.read_bytes", side_effect=error),
+            ):
+                result = detect_existing_runner_result(
+                    unit=UnitClassification.NOT_FOUND,
+                    proc_root=proc_root,
+                    self_pid=1,
+                    parent_pid=2,
+                )
+            self.assertEqual(
+                result.reason,
+                DetectionReason.PYTHON_CANDIDATE_CMDLINE_UNREADABLE,
+            )
+
+    def test_process_enumeration_failure_has_safe_reason(self):
+        result = detect_existing_runner_result(
+            unit=UnitClassification.NOT_FOUND,
+            proc_root=Path("/definitely-not-a-proc-directory"),
+        )
+        self.assertEqual(result.classification, RunnerDetection.INDETERMINATE)
+        self.assertEqual(result.reason, DetectionReason.PROCESS_ENUMERATION_FAILURE)
+
+    def test_unit_process_match_is_reported_as_contradiction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc_root = Path(directory)
+            process = self.write_process(proc_root)
+            (process / "cmdline").write_bytes(
+                f"/usr/bin/python3\0-m\0{RUNNER_MODULE}\0".encode()
+            )
+            with patch(
+                "backend.ai_advisor.runner_process_detection.os.readlink",
+                return_value="/usr/bin/python3",
+            ):
+                result = detect_existing_runner_result(
+                    unit=UnitClassification.NOT_FOUND,
+                    proc_root=proc_root,
+                    self_pid=1,
+                    parent_pid=2,
+                )
+            self.assertEqual(result.classification, RunnerDetection.INDETERMINATE)
+            self.assertEqual(
+                result.reason,
+                DetectionReason.UNIT_PROCESS_CONTRADICTION,
+            )
 
     def test_unit_reader_rejects_errors_and_duplicate_metadata(self):
         cases = (
@@ -260,19 +366,90 @@ class RunnerProcessDetectionTest(unittest.TestCase):
                     UnitClassification.INDETERMINATE,
                 )
 
+    def test_unit_reader_distinguishes_timeout_and_execution_failure(self):
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(("systemctl",), 10)
+
+        timed_out = read_unit_result(runner=timeout)
+        self.assertEqual(timed_out.reason, DetectionReason.SYSTEMCTL_TIMEOUT)
+        failed = read_unit_result(
+            runner=lambda *args, **kwargs: subprocess.CompletedProcess(
+                (), 2, "", "suppressed"
+            )
+        )
+        self.assertEqual(
+            failed.reason,
+            DetectionReason.SYSTEMCTL_EXECUTION_FAILURE,
+        )
+
     def test_main_maps_indeterminate_to_fail_closed_exit(self):
         with (
             patch(
-                "backend.ai_advisor.runner_process_detection.read_unit_classification",
-                return_value=UnitClassification.INDETERMINATE,
+                "backend.ai_advisor.runner_process_detection.read_unit_result",
+                return_value=UnitResult(
+                    UnitClassification.INDETERMINATE,
+                    DetectionReason.SYSTEMD_METADATA_INVALID,
+                ),
             ),
             patch(
-                "backend.ai_advisor.runner_process_detection.detect_existing_runner",
-                return_value=RunnerDetection.INDETERMINATE,
+                "backend.ai_advisor.runner_process_detection.detect_existing_runner_result",
+                return_value=DetectionResult(
+                    RunnerDetection.INDETERMINATE,
+                    DetectionReason.SYSTEMD_METADATA_INVALID,
+                ),
             ),
-            patch("sys.stdout", StringIO()),
+            patch("sys.stdout", StringIO()) as output,
         ):
             self.assertEqual(main([]), 41)
+            self.assertEqual(
+                output.getvalue(),
+                "INDETERMINATE reason=SYSTEMD_METADATA_INVALID\n",
+            )
+
+    def test_main_preserves_all_exit_code_contracts(self):
+        cases = (
+            (
+                DetectionResult(
+                    RunnerDetection.RUNNER_ABSENT,
+                    DetectionReason.NO_RUNNER_CANDIDATE,
+                ),
+                0,
+            ),
+            (
+                DetectionResult(
+                    RunnerDetection.RUNNER_PRESENT,
+                    DetectionReason.UNIT_ACTIVE,
+                ),
+                40,
+            ),
+            (
+                DetectionResult(
+                    RunnerDetection.INDETERMINATE,
+                    DetectionReason.PROCESS_ENUMERATION_FAILURE,
+                ),
+                41,
+            ),
+        )
+        for result, exit_code in cases:
+            with (
+                self.subTest(result=result),
+                patch(
+                    "backend.ai_advisor.runner_process_detection.read_unit_result",
+                    return_value=UnitResult(UnitClassification.NOT_FOUND),
+                ),
+                patch(
+                    "backend.ai_advisor.runner_process_detection.detect_existing_runner_result",
+                    return_value=result,
+                ),
+                patch("sys.stdout", StringIO()),
+            ):
+                self.assertEqual(main([]), exit_code)
+
+    def test_reason_codes_are_fixed_and_secret_free(self):
+        for reason in DetectionReason:
+            self.assertRegex(reason.value, r"^[A-Z][A-Z0-9_]+$")
+            self.assertNotIn("SECRET", reason.value)
+            self.assertNotIn("CREDENTIAL", reason.value)
 
     def test_source_has_no_kill_credential_or_environment_access(self):
         source = (

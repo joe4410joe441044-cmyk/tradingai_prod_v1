@@ -93,6 +93,8 @@ class OpenAIProviderAdapter:
                 OpenAIProviderFailureCode.CONFIGURATION_INVALID
             )
         transport_request = OpenAITransportRequest(
+            requestId=trusted_request.requestId,
+            providerRequestId=trusted_request.providerRequestId,
             model=self.config.model,
             input=trusted_request.renderedPrompt,
             timeoutSeconds=self.config.timeoutSeconds,

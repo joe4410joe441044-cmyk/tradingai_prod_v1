@@ -9,6 +9,8 @@ from backend.ai_advisor.provider_models import AdvisorProviderContractModel
 
 
 class OpenAITransportRequest(AdvisorProviderContractModel):
+    requestId: str | None = Field(default=None, min_length=1, max_length=128)
+    providerRequestId: str | None = Field(default=None, min_length=1, max_length=128)
     model: str = Field(min_length=1, max_length=128)
     input: str = Field(min_length=1, max_length=64_000)
     timeoutSeconds: float = Field(gt=0, le=120, allow_inf_nan=False)

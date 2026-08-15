@@ -1,7 +1,8 @@
-from backend.ai.feature_engine import FeatureEngine
-from backend.ai.trade_brain import TradeBrain
-from backend.ai.lstm_model import LSTMModel
-from backend.ai.llm_engine import LLMEngine
+# Historical snapshot moved from .bak_runtime_state_llm.
+from backend.legacy_ai.feature_engine import FeatureEngine
+from backend.legacy_ai.trade_brain import TradeBrain
+from backend.legacy_ai.lstm_model import LSTMModel
+from backend.legacy_ai.llm_engine import LLMEngine
 
 
 class AIPipeline:
@@ -26,6 +27,9 @@ class AIPipeline:
                 runtime_state
             )
 
+        # ==================================
+        # Legacy Candle Mode
+        # ==================================
         else:
 
             candles = market.get("candles", [])
@@ -37,13 +41,13 @@ class AIPipeline:
                 candles
             )
 
-        market_data = {
-            "price": market.get("price"),
-            "features": features,
-            "trend": market.get("trend"),
-            "volatility": market.get("volatility"),
-            "runtime_state": runtime_state
-        }
+            market_data = {
+                "price": market.get("price"),
+                "features": features,
+                "trend": market.get("trend"),
+                "volatility": market.get("volatility"),
+                "runtime_state": runtime_state
+            }
 
         signal = self.brain.decide(
             market_data

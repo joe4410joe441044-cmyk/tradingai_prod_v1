@@ -32,6 +32,7 @@ test("runtime API performs GET and forwards an AbortSignal", async () => {
 
     assert.equal(calls[0].url, "/api/ai-advisor/conversation/runtime");
     assert.equal(calls[0].options.headers["X-TradingAI-Client"], "web");
+    assert.equal(calls[0].options.credentials, "same-origin");
     assert.equal(calls[0].options.method, "GET");
     assert.ok(calls[0].options.signal instanceof AbortSignal);
     assert.equal(result.receivedAt, 1234);
@@ -58,6 +59,26 @@ test("runtime API preserves the safe backend error contract", async () => {
             assert.equal(error.requestId, "request-1");
             assert.equal(error.httpStatus, 500);
             assert.doesNotMatch(`${error.message}\n${error.stack}`, /hidden/);
+            return true;
+        },
+    );
+});
+
+test("runtime API maps the browser gateway errorCode contract", async () => {
+    await assert.rejects(
+        () => fetchAdvisorRuntime({
+            fetchImpl: async () => response({
+                errorCode: "AUTHENTICATION_REQUIRED",
+                safeMessage: "Authentication required.",
+                retryable: false,
+            }, { ok: false, status: 401 }),
+        }),
+        (error) => {
+            assert.ok(error instanceof AdvisorRuntimeApiError);
+            assert.equal(error.code, "AUTHENTICATION_REQUIRED");
+            assert.equal(error.retryable, false);
+            assert.equal(error.httpStatus, 401);
+            assert.equal(error.message, "Authentication required.");
             return true;
         },
     );

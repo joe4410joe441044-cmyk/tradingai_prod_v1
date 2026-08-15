@@ -46,14 +46,59 @@ export function validateAdvisorPrompt(value) {
 
 export const initialAdvisorConversationState = Object.freeze({
     messages: Object.freeze([]),
+    archivedExchanges: Object.freeze([]),
     activeRequestId: null,
 });
 
 const freezeMessage = (message) => Object.freeze({ ...message });
-const nextState = (messages, activeRequestId) => Object.freeze({
+const freezeExchange = (exchange) => Object.freeze({
+    ...exchange,
+    userMessage: freezeMessage(exchange.userMessage),
+    assistantMessage: freezeMessage(exchange.assistantMessage),
+});
+const nextState = (
+    messages,
+    activeRequestId,
+    archivedExchanges = [],
+) => Object.freeze({
     messages: Object.freeze(messages.map(freezeMessage)),
+    archivedExchanges: Object.freeze(archivedExchanges.map(freezeExchange)),
     activeRequestId,
 });
+
+const TERMINAL_ASSISTANT_STATUSES = new Set([
+    ADVISOR_MESSAGE_STATUS.SUCCEEDED,
+    ADVISOR_MESSAGE_STATUS.FAILED,
+    ADVISOR_MESSAGE_STATUS.CANCELLED,
+    ADVISOR_MESSAGE_STATUS.TIMED_OUT,
+]);
+
+function archiveCurrentExchange(state) {
+    const userMessage = state.messages.find((message) => (
+        message.role === ADVISOR_MESSAGE_ROLE.USER
+    ));
+    const assistantMessage = state.messages.find((message) => (
+        message.role === ADVISOR_MESSAGE_ROLE.ASSISTANT
+        && message.requestId === userMessage?.requestId
+    ));
+    if (!userMessage
+        || !assistantMessage
+        || !TERMINAL_ASSISTANT_STATUSES.has(assistantMessage.status)) {
+        return state.archivedExchanges;
+    }
+    if (state.archivedExchanges.some((exchange) => (
+        exchange.requestId === userMessage.requestId
+    ))) {
+        return state.archivedExchanges;
+    }
+    return [{
+        requestId: userMessage.requestId,
+        createdAt: userMessage.createdAt,
+        status: assistantMessage.status,
+        userMessage,
+        assistantMessage,
+    }, ...state.archivedExchanges];
+}
 
 export function beginAdvisorRequest(state, {
     requestId,
@@ -67,9 +112,11 @@ export function beginAdvisorRequest(state, {
         message.id === userMessageId
         || message.id === assistantMessageId
         || message.requestId === requestId
+    )) || state.archivedExchanges.some((exchange) => (
+        exchange.requestId === requestId
     ))) return state;
+    const archivedExchanges = archiveCurrentExchange(state);
     return nextState([
-        ...state.messages,
         {
             id: userMessageId,
             role: ADVISOR_MESSAGE_ROLE.USER,
@@ -88,7 +135,7 @@ export function beginAdvisorRequest(state, {
             requestId,
             failureCode: null,
         },
-    ], requestId);
+    ], requestId, archivedExchanges);
 }
 
 function settle(state, requestId, status, content, failureCode = null) {
@@ -100,7 +147,7 @@ function settle(state, requestId, status, content, failureCode = null) {
             ? { ...message, status, content, failureCode }
             : message
     ));
-    return nextState(messages, null);
+    return nextState(messages, null, state.archivedExchanges);
 }
 
 export function completeAdvisorRequest(state, requestId, content, groundedResponse = null) {
@@ -119,6 +166,7 @@ export function completeAdvisorRequest(state, requestId, content, groundedRespon
                 : message
         )),
         null,
+        settled.archivedExchanges,
     );
 }
 

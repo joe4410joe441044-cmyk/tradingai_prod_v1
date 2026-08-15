@@ -1,4 +1,4 @@
-import numpy as np
+"""Archived fixed-score risk rule from the dormant development TradeCore."""
 
 class AIRiskFilter:
 

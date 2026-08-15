@@ -97,6 +97,8 @@ class AdvisorSafetyDisclosure(str, Enum):
 
 class AdvisorForbiddenClaim(str, Enum):
     SECRET_DISCLOSURE_CLAIM = "SECRET_DISCLOSURE_CLAIM"
+    UNGROUNDED_CURRENT_MARKET_CLAIM = "UNGROUNDED_CURRENT_MARKET_CLAIM"
+    UNGROUNDED_CURRENT_RUNTIME_CLAIM = "UNGROUNDED_CURRENT_RUNTIME_CLAIM"
     EXECUTION_CLAIM = "EXECUTION_CLAIM"
     ORDER_ACTION_CLAIM = "ORDER_ACTION_CLAIM"
     POSITION_ACTION_CLAIM = "POSITION_ACTION_CLAIM"
@@ -156,6 +158,16 @@ class AdvisorUnknown(AdvisorResponseContractModel):
     topic: Statement
     reason: AdvisorUnknownReason
     requiredSourceType: Optional[AdvisorSourceType] = None
+
+
+class AdvisorActionableUnknown(AdvisorResponseContractModel):
+    unknownId: Identifier
+    subject: Statement
+    reason: Statement
+    missingInformation: Statement
+    safeNextStep: Statement
+    decisionImpact: Statement
+    operationalEffect: Literal["NONE"] = "NONE"
 
 
 class AdvisorResponseWarning(AdvisorResponseContractModel):
@@ -260,6 +272,7 @@ class AdvisorResponseEnvelope(AdvisorResponseContractModel):
     ] = None
     conclusion: Optional[Summary] = None
     groundedClaims: Tuple[AdvisorGroundedClaim, ...] = ()
+    actionableUnknowns: Tuple[AdvisorActionableUnknown, ...] = ()
     citations: Tuple[AdvisorCitation, ...] = ()
     limitations: Tuple[Statement, ...] = ()
     safeAlternative: Optional[Summary] = None
@@ -294,6 +307,7 @@ class AdvisorResponseEnvelope(AdvisorResponseContractModel):
                 or self.warnings
                 or self.sourceReferences
                 or self.freshnessDisclosures
+                or self.actionableUnknowns
             ):
                 raise ValueError("rejected response cannot retain sourced content")
             if not self.forbiddenClaims or self.primaryRejectionReason is None:
@@ -316,6 +330,13 @@ class AdvisorResponseEnvelope(AdvisorResponseContractModel):
                 or self.inferences
             ):
                 raise ValueError("warning status requires warning content")
+            unknown_ids = {item.unknownId for item in self.unknowns}
+            actionable_ids = {item.unknownId for item in self.actionableUnknowns}
+            if (
+                unknown_ids != actionable_ids
+                or len(self.actionableUnknowns) != len(actionable_ids)
+            ):
+                raise ValueError("every unknown requires one actionable explanation")
         claim_ids = [claim.claimId for claim in self.groundedClaims]
         citation_ids = [citation.sourceId for citation in self.citations]
         if len(set(claim_ids)) != len(claim_ids):

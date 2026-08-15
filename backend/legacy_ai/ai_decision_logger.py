@@ -1,3 +1,5 @@
+"""Archived in-memory logger for the dormant Legacy AI development stack."""
+
 import time
 import json
 

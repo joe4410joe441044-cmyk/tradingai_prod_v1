@@ -14,6 +14,7 @@ from backend.ai_advisor.conversation_models import (
     AdvisorDataAccessScope,
     AdvisorFreshnessMetadata,
     AdvisorFreshnessState,
+    AdvisorKnowledgeExcerpt,
     AdvisorPermissionContext,
     AdvisorRuntimeContext,
     AdvisorSourceAuthority,
@@ -74,6 +75,14 @@ class SpecificationSourceInput(BuilderInputModel):
         None
     )
     approved: Literal[True] = True
+    authorityLevel: Literal[
+        "CONSTITUTION", "ADR", "MASTER_SPEC", "FEATURE_SPEC"
+    ] = "FEATURE_SPEC"
+    topics: Annotated[
+        Tuple[str, ...],
+        Field(default_factory=tuple, max_length=12, strict=False),
+    ]
+    excerpt: Optional[Annotated[str, Field(min_length=1, max_length=8_000)]] = None
 
 
 class SummarySourceInput(BuilderInputModel):
@@ -413,6 +422,23 @@ def build_advisor_context(
         if AdvisorDataAccessScope.APPROVED_LOCAL_SPECIFICATIONS not in scopes:
             raise ValueError("specifications are outside permission scope")
         sources.extend(build_specification_source(item) for item in specifications)
+    knowledge_excerpts = []
+    for item in specifications:
+        if item.excerpt is None:
+            continue
+        cleaned = sanitize_text(item.excerpt)
+        if cleaned.changed:
+            raise ValueError("knowledge excerpt contains unsafe content")
+        if not item.topics:
+            raise ValueError("knowledge excerpt requires topics")
+        knowledge_excerpts.append(
+            AdvisorKnowledgeExcerpt(
+                sourceId=item.sourceId,
+                authorityLevel=item.authorityLevel,
+                topics=item.topics,
+                content=cleaned.value,
+            )
+        )
     if market_intelligence_sources:
         if AdvisorDataAccessScope.SANITIZED_MARKET_INTELLIGENCE_SUMMARY not in scopes:
             raise ValueError("Market Intelligence is outside permission scope")
@@ -444,6 +470,9 @@ def build_advisor_context(
         capturedAt=captured,
         sources=sources,
         runtimeContext=runtime_context,
+        knowledgeExcerpts=tuple(
+            sorted(knowledge_excerpts, key=lambda item: item.sourceId)
+        ),
         conversationHistory=list(conversation),
         warnings=sorted(set(warnings), key=lambda item: item.value),
         sensitivity=SensitiveClassification.INTERNAL,

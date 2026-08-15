@@ -1,5 +1,5 @@
-from backend.ai.feature_vector import FeatureVector
-from backend.ai.runtime_state import RuntimeState
+from backend.legacy_ai.feature_vector import FeatureVector
+from backend.legacy_ai.runtime_state import RuntimeState
 
 
 class FeatureEngine:

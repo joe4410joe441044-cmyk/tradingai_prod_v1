@@ -2,6 +2,7 @@
 
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Callable, Protocol
 
 from backend.ai_advisor.advisor_service import AdvisorService
@@ -18,6 +19,8 @@ from backend.ai_advisor.credential_loader import CredentialLoader
 from backend.ai_advisor.openai_provider import OpenAIProviderAdapter
 from backend.ai_advisor.live_connectivity import (
     OPENAI_OFFICIAL_ENDPOINT,
+    InteractiveConnectivityGate,
+    InteractiveConnectivityPolicy,
     LiveConnectivityGate,
     LiveConnectivityPolicy,
 )
@@ -67,6 +70,10 @@ from backend.ai_advisor.service_models import (
     AdvisorServiceStatus,
     service_failure_message,
 )
+from backend.ai_advisor.response_safety_observation import (
+    NoOpResponseSafetyRejectionObservationSink,
+    ResponseSafetyRejectionObservationSink,
+)
 from backend.ai_advisor.usage_observation import (
     NoOpProviderMetadataObservationSink,
     NoOpUsageObservationSink,
@@ -79,6 +86,11 @@ from backend.api.ai_advisor import AdvisorAPIComposition
 class ProductionConfigLoader(Protocol):
     def load(self):
         """Return one typed production configuration load result."""
+
+
+class ProviderInteractionPolicy(str, Enum):
+    INTERACTIVE = "INTERACTIVE"
+    LIVE_TEST = "LIVE_TEST"
 
 
 class OfflineUnavailableAdvisorService:
@@ -156,6 +168,8 @@ def _provider_service(
     usage_observation_sink: UsageObservationSink,
     metadata_observation_sink: ProviderMetadataObservationSink,
     failure_observation_sink: ProviderFailureObservationSink,
+    provider_interaction_policy: ProviderInteractionPolicy,
+    response_safety_observation_sink: ResponseSafetyRejectionObservationSink,
 ):
     connection = ProviderConnectionConfig(
         configVersion=PROVIDER_CONNECTION_CONFIG_VERSION,
@@ -169,38 +183,51 @@ def _provider_service(
         responseFormat=ProviderResponseFormat.STRICT_JSON,
         enabled=True,
     )
-    live_gate = LiveConnectivityGate(
-        LiveConnectivityPolicy(
-            endpointEnabled=configuration.endpointEnabled,
-            networkInvocationAllowed=configuration.networkInvocationAllowed,
-            liveTestExplicitlyAllowed=configuration.liveTestExplicitlyAllowed,
-            killSwitchActive=configuration.liveKillSwitchActive,
-            authenticationReady=readiness.authenticationReady,
-            providerReady=readiness.providerReady,
-            credentialReferenceReady=readiness.credentialReady,
-            provider=ProviderName.OPENAI,
-            model=configuration.model,
-            allowedModels=(configuration.model,),
-            providerEndpoint=configuration.baseUrl,
-            allowedProviderEndpoints=(OPENAI_OFFICIAL_ENDPOINT,),
-            maximumLiveTestRequests=1,
-            maximumInputBytes=configuration.liveMaximumInputBytes,
-            maximumInputTokens=configuration.liveMaximumInputTokens,
-            maximumOutputTokens=configuration.liveMaximumOutputTokens,
-            timeoutSeconds=configuration.providerTimeoutSeconds,
-            retryCount=0,
-            streamingAllowed=False,
-            toolCallingAllowed=False,
-            backgroundInvocationAllowed=False,
-            batchInvocationAllowed=False,
-        )
+    common_policy = dict(
+        endpointEnabled=configuration.endpointEnabled,
+        networkInvocationAllowed=configuration.networkInvocationAllowed,
+        killSwitchActive=configuration.liveKillSwitchActive,
+        authenticationReady=readiness.authenticationReady,
+        providerReady=readiness.providerReady,
+        credentialReferenceReady=readiness.credentialReady,
+        provider=ProviderName.OPENAI,
+        model=configuration.model,
+        allowedModels=(configuration.model,),
+        providerEndpoint=configuration.baseUrl,
+        allowedProviderEndpoints=(OPENAI_OFFICIAL_ENDPOINT,),
+        maximumInputBytes=configuration.liveMaximumInputBytes,
+        maximumInputTokens=configuration.liveMaximumInputTokens,
+        maximumOutputTokens=configuration.liveMaximumOutputTokens,
+        timeoutSeconds=configuration.providerTimeoutSeconds,
+        retryCount=0,
+        streamingAllowed=False,
+        toolCallingAllowed=False,
+        backgroundInvocationAllowed=False,
+        batchInvocationAllowed=False,
     )
+    if provider_interaction_policy is ProviderInteractionPolicy.INTERACTIVE:
+        connectivity_gate = InteractiveConnectivityGate(
+            InteractiveConnectivityPolicy(
+                **common_policy,
+                interactiveInvocationExplicitlyAllowed=True,
+            )
+        )
+    elif provider_interaction_policy is ProviderInteractionPolicy.LIVE_TEST:
+        connectivity_gate = LiveConnectivityGate(
+            LiveConnectivityPolicy(
+                **common_policy,
+                liveTestExplicitlyAllowed=configuration.liveTestExplicitlyAllowed,
+                maximumLiveTestRequests=1,
+            )
+        )
+    else:
+        raise ValueError("provider interaction policy is not classified")
     transport = OpenAISDKTransport(
         config=connection,
         credentialLoader=provider_credential_loader,
         clientFactory=client_factory,
         allowNetworkInvocation=configuration.networkInvocationAllowed,
-        liveConnectivityGate=live_gate,
+        liveConnectivityGate=connectivity_gate,
         usageObservationSink=usage_observation_sink,
         metadataObservationSink=metadata_observation_sink,
         failureObservationSink=failure_observation_sink,
@@ -241,11 +268,13 @@ def _provider_service(
             supportsFiles=False,
         ),
         failureObservationSink=failure_observation_sink,
+        responseSafetyObservationSink=response_safety_observation_sink,
     )
 
 
 def build_ai_advisor_production_composition(
     *,
+    provider_interaction_policy: ProviderInteractionPolicy,
     config_loader: ProductionConfigLoader,
     authentication_credential_loader: CredentialLoader,
     provider_credential_loader: CredentialLoader,
@@ -259,8 +288,13 @@ def build_ai_advisor_production_composition(
     failure_observation_sink: ProviderFailureObservationSink = (
         NoOpProviderFailureObservationSink()
     ),
+    response_safety_observation_sink: ResponseSafetyRejectionObservationSink = (
+        NoOpResponseSafetyRejectionObservationSink()
+    ),
     clock: Callable[[], float] = time.monotonic,
 ) -> ProductionCompositionResult:
+    if not isinstance(provider_interaction_policy, ProviderInteractionPolicy):
+        raise ValueError("provider interaction policy is not classified")
     loaded = config_loader.load()
     configuration = loaded.configuration
     if not loaded.succeeded or configuration is None:
@@ -338,6 +372,10 @@ def build_ai_advisor_production_composition(
                 usage_observation_sink=usage_observation_sink,
                 metadata_observation_sink=metadata_observation_sink,
                 failure_observation_sink=failure_observation_sink,
+                provider_interaction_policy=provider_interaction_policy,
+                response_safety_observation_sink=(
+                    response_safety_observation_sink
+                ),
             )
         except Exception:
             readiness = ProductionReadiness(

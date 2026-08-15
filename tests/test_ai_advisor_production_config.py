@@ -111,7 +111,7 @@ class ProductionConfigTest(unittest.TestCase):
                 "AI_ADVISOR_ENDPOINT_ENABLED": "false",
                 "UNRELATED_SECRET": "must-not-be-read",
             },
-            clear=False,
+            clear=True,
         ):
             result = EnvironmentProductionConfigLoader().load()
         self.assertTrue(result.succeeded)

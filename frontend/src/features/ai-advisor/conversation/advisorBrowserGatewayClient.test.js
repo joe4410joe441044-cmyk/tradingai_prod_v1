@@ -57,6 +57,26 @@ test("status uses its fixed same-origin path and validates coarse state", async 
     assert.equal(calls[0][1].credentials, "same-origin");
 });
 
+test("conversation POST forwards the CSRF token from the cookie", async () => {
+    globalThis.document = {
+        cookie: "tradingai_csrf=csrf-token-123",
+    };
+    try {
+        const calls = [];
+        const client = createAdvisorBrowserGatewayClient({
+            fetchImpl: async (...args) => {
+                calls.push(args);
+                return response(200, { status: "SUCCEEDED", advisorResponse: envelope });
+            },
+        });
+        await client.requestAdvice("Hello");
+        const [, options] = calls[0];
+        assert.equal(options.headers["X-TradingAI-CSRF"], "csrf-token-123");
+    } finally {
+        delete globalThis.document;
+    }
+});
+
 test("gateway HTTP failures map safely with no retries", async () => {
     const cases = [
         [401, "AUTHENTICATION_REQUIRED", "AUTHENTICATION_REQUIRED"],
@@ -205,4 +225,37 @@ test("missing, fake, path, and URL citations fail closed", async () => {
             code: "INVALID_PROVIDER_RESPONSE",
         });
     }
+});
+
+test("human-actionable UNKNOWN is validated and retained", async () => {
+    const unknownEnvelope = {
+        ...envelope,
+        status: "VALID_WITH_WARNINGS",
+        groundedClaims: [{
+            claimId: "unknown-1",
+            claimType: "UNKNOWN",
+            text: "現在のRisk State",
+            citationSourceIds: [],
+        }],
+        citations: [],
+        limitations: [],
+        actionableUnknowns: [{
+            unknownId: "unknown-1",
+            subject: "現在のRisk State",
+            reason: "現在情報が提供されていません。",
+            missingInformation: "現在の権威あるRisk State",
+            safeNextStep: "読み取り専用のRuntime表示で確認してください。",
+            decisionImpact: "確認できるまで判断を見送ってください。",
+            operationalEffect: "NONE",
+        }],
+    };
+    const client = createAdvisorBrowserGatewayClient({
+        fetchImpl: async () => response(200, {
+            status: "SUCCEEDED",
+            advisorResponse: unknownEnvelope,
+        }),
+    });
+    const result = await client.requestAdvice("現在のRisk Stateは？");
+    assert.equal(result.actionableUnknowns[0].operationalEffect, "NONE");
+    assert.match(result.actionableUnknowns[0].safeNextStep, /読み取り専用/);
 });

@@ -84,6 +84,57 @@ test("intentional AbortError does not create a visible error", async () => {
     poller.stop();
 });
 
+test("poller.reset invalidates last-good runtime state", async () => {
+    const state = stateHarness();
+    const timers = [];
+    let attempt = 0;
+    const poller = createAdvisorRuntimePoller({
+        request: async () => {
+            attempt += 1;
+            return { data: { id: attempt }, receivedAt: attempt * 100 };
+        },
+        onState: state.set,
+        setTimer: (callback) => {
+            timers.push(callback);
+            return timers.length;
+        },
+        clearTimer: () => {},
+    });
+
+    await poller.start();
+    assert.equal(state.get().connectionState, "CONNECTED");
+    assert.deepEqual(state.get().data, { id: 1 });
+
+    poller.reset();
+    assert.equal(state.get().connectionState, "DISCONNECTED");
+    assert.equal(state.get().data, null);
+    assert.equal(state.get().error, null);
+    assert.equal(state.get().lastSuccessfulAt, null);
+    poller.stop();
+});
+
+test("poller reset aborts an in-flight request", async () => {
+    const state = stateHarness();
+    let requestSignal;
+    const request = (signal) => {
+        requestSignal = signal;
+        return new Promise((resolve) => resolve({ data: { id: 1 }, receivedAt: 10 }));
+    };
+    const poller = createAdvisorRuntimePoller({
+        request,
+        onState: state.set,
+        setTimer: () => 1,
+        clearTimer: () => {},
+    });
+
+    const first = poller.start();
+    assert.equal(requestSignal.aborted, false);
+    poller.reset();
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(state.get().connectionState, "DISCONNECTED");
+    await first;
+});
+
 test("poller retries after error and preserves last-good data when degraded", async () => {
     const state = stateHarness();
     const timers = [];

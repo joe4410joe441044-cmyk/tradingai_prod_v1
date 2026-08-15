@@ -1,6 +1,10 @@
 """Secret-free, internal-only provider failure observation contracts."""
 
+import json
+import logging
+
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
 from typing import Annotated, Literal, Optional, Protocol, Tuple
@@ -25,6 +29,11 @@ class ProviderSafeReason(str, Enum):
     LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED = (
         "LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED"
     )
+    LIVE_PROVIDER_MODEL_CONTRACT_FAILED = "LIVE_PROVIDER_MODEL_CONTRACT_FAILED"
+    LIVE_PROVIDER_STATUS_CONTRACT_FAILED = "LIVE_PROVIDER_STATUS_CONTRACT_FAILED"
+    LIVE_PROVIDER_OUTPUT_TEXT_CONTRACT_FAILED = (
+        "LIVE_PROVIDER_OUTPUT_TEXT_CONTRACT_FAILED"
+    )
     LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED = (
         "LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED"
     )
@@ -32,6 +41,37 @@ class ProviderSafeReason(str, Enum):
         "LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE"
     )
     LIVE_PROVIDER_UNKNOWN_FAILURE = "LIVE_PROVIDER_UNKNOWN_FAILURE"
+
+
+class ProviderFailureCategory(str, Enum):
+    AUTHENTICATION = "AUTHENTICATION"
+    PERMISSION = "PERMISSION"
+    RATE_LIMIT = "RATE_LIMIT"
+    MODEL_NOT_FOUND_OR_UNAVAILABLE = "MODEL_NOT_FOUND_OR_UNAVAILABLE"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    STRUCTURED_OUTPUT_OR_RESPONSE_FORMAT = "STRUCTURED_OUTPUT_OR_RESPONSE_FORMAT"
+    TIMEOUT = "TIMEOUT"
+    NETWORK_OR_TRANSPORT = "NETWORK_OR_TRANSPORT"
+    PROVIDER_SERVER_ERROR = "PROVIDER_SERVER_ERROR"
+    RESPONSE_VALIDATION = "RESPONSE_VALIDATION"
+    CLIENT_CONFIGURATION = "CLIENT_CONFIGURATION"
+    CREDENTIAL_UNAVAILABLE = "CREDENTIAL_UNAVAILABLE"
+    UNKNOWN_PROVIDER_FAILURE = "UNKNOWN_PROVIDER_FAILURE"
+
+
+class ProviderErrorType(str, Enum):
+    INVALID_REQUEST_ERROR = "invalid_request_error"
+    AUTHENTICATION_ERROR = "authentication_error"
+    PERMISSION_ERROR = "permission_error"
+    RATE_LIMIT_ERROR = "rate_limit_error"
+    SERVER_ERROR = "server_error"
+
+
+class ProviderErrorCode(str, Enum):
+    MODEL_NOT_FOUND = "model_not_found"
+    MODEL_NOT_AVAILABLE = "model_not_available"
+    INVALID_RESPONSE_FORMAT = "invalid_response_format"
+    UNSUPPORTED_RESPONSE_FORMAT = "unsupported_response_format"
 
 
 class ProviderFailureStage(str, Enum):
@@ -140,9 +180,19 @@ class ProviderFailureObservation(AdvisorProviderContractModel):
         hide_input_in_errors=True,
     )
 
+    provider: Literal["OPENAI"] = "OPENAI"
+    model: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    requestId: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    providerRequestId: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    category: ProviderFailureCategory = ProviderFailureCategory.UNKNOWN_PROVIDER_FAILURE
     safeReason: ProviderSafeReason
     failureStage: ProviderFailureStage
     httpStatus: Optional[int] = Field(default=None, ge=400, le=599)
+    providerErrorType: Optional[ProviderErrorType] = None
+    providerErrorCode: Optional[ProviderErrorCode] = None
+    retryable: Optional[bool] = None
+    durationMilliseconds: Optional[int] = Field(default=None, ge=0, le=120_000)
+    observedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     providerRequestUpperBound: Literal[1] = 1
     retryPerformed: Literal[False] = False
     liveInvocationAttempted: bool
@@ -194,6 +244,16 @@ class ProviderFailureObservationSink(Protocol):
 class NoOpProviderFailureObservationSink:
     def observe(self, observation: ProviderFailureObservation) -> None:
         return None
+
+
+@dataclass
+class StructuredLoggingProviderFailureObservationSink:
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("TradingAI.AIAdvisor"))
+
+    def observe(self, observation: ProviderFailureObservation) -> None:
+        trusted = ProviderFailureObservation.model_validate(observation.model_dump(warnings=False))
+        payload = trusted.model_dump(mode="json", exclude_none=True)
+        self.logger.warning("ai_advisor_provider_failure %s", json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 @dataclass

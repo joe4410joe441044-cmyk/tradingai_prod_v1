@@ -1,3 +1,5 @@
+"""Archived Legacy AI log DTO."""
+
 from dataclasses import dataclass
 
 @dataclass

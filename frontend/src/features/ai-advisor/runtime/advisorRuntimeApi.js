@@ -23,14 +23,20 @@ export class AdvisorRuntimeApiError extends Error {
 
 const safeError = (body, httpStatus) => {
     const detail = body?.error;
+    const wireCode = typeof body?.errorCode === "string" ? body.errorCode : null;
+    const code = typeof detail?.code === "string"
+        ? detail.code
+        : wireCode || "ADVISOR_RUNTIME_REQUEST_FAILED";
+    const message = typeof detail?.message === "string"
+        ? detail.message
+        : typeof body?.safeMessage === "string"
+            ? body.safeMessage
+            : "Runtime status is unavailable.";
+    const retryable = detail?.retryable === true || body?.retryable === true;
     return new AdvisorRuntimeApiError({
-        code: typeof detail?.code === "string"
-            ? detail.code
-            : "ADVISOR_RUNTIME_REQUEST_FAILED",
-        message: typeof detail?.message === "string"
-            ? detail.message
-            : "Runtime status is unavailable.",
-        retryable: detail?.retryable === true,
+        code,
+        message,
+        retryable,
         requestId: typeof detail?.requestId === "string"
             ? detail.requestId
             : null,
@@ -60,6 +66,7 @@ export async function fetchAdvisorRuntime({
     try {
         const response = await fetchImpl(API.aiAdvisorRuntime(), {
             method: "GET",
+            credentials: "same-origin",
             headers: {
                 Accept: "application/json",
                 "X-TradingAI-Client": "web",

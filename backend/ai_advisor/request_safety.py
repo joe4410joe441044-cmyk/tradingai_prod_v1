@@ -52,11 +52,16 @@ _RULES = (
     ),
     (
         AdvisorSafetyRefusalCategory.ORDER_EXECUTION,
-        r"(send|submit|cancel|execute).{0,20}(order|trade)|注文.{0,12}(送信|実行|取消)",
+        r"(send|submit|cancel|execute).{0,20}(order|trade)|"
+        r"(?:open|close).{0,20}(?:position|long|short)|"
+        r"注文.{0,12}(送信|実行|取消)|ポジション.{0,12}(開始|決済)",
     ),
     (
         AdvisorSafetyRefusalCategory.BOT_OPERATION,
-        r"(start|stop|restart|turn on).{0,16}(bot|loop)|bot.{0,12}(開始|停止)|ループをオン",
+        r"(start|stop|restart|turn on).{0,16}(bot|loop)|"
+        r"enable.{0,16}(?:live trading|auto trade|execution)|"
+        r"bot.{0,12}(開始|停止)|ループをオン|"
+        r"(?:ライブ取引|自動売買|実行).{0,12}(?:有効化|オン)",
     ),
     (
         AdvisorSafetyRefusalCategory.EMERGENCY_UNLOCK,

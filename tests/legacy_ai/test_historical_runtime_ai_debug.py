@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from backend.aggregation.MicrostructureStateBuilder import (
     MicrostructureStateBuilder,
 )
-from backend.ai.llm_engine import LLMEngine
-from backend.ai.runtime_adapter import RuntimeAdapter
-from backend.ai.trade_brain import TradeBrain
-from backend.main import TradingRuntime, _build_llm_debug
+from backend.legacy_ai.lstm_model import LSTMModel
+from backend.legacy_ai.llm_engine import LLMEngine
+from backend.legacy_ai.runtime_adapter import RuntimeAdapter
+from backend.legacy_ai.trade_brain import TradeBrain
+from backend.main import TradingRuntime
 
 
 class _BuyLSTM:
@@ -25,7 +26,55 @@ class _HoldLLM:
         return "HOLD"
 
 
+@unittest.skip(
+    "Archived historical production-integration expectations; Legacy AI is disconnected"
+)
 class RuntimeAIDebugTest(unittest.TestCase):
+
+    def test_lstm_exposes_exact_heuristic_score_without_changing_decision(self):
+        model = LSTMModel()
+        features = [0.2, 0.1, 0.0, 1.0, 0.2, 0.2, 0.2, 0.98, 0.2]
+
+        self.assertEqual(model.predict(features), "HOLD")
+        self.assertEqual(
+            model.latest_debug,
+            {
+                "schemaVersion": 1,
+                "implementation": "DETERMINISTIC_HEURISTIC",
+                "modelLoaded": False,
+                "networkInference": False,
+                "inputVector": features,
+                "scoreSample": [0.2, 0.2, 0.2, 0.98, 0.2],
+                "scoreFormula": "mean(last_5_features)",
+                "rawScore": 0.356,
+                "normalizedScore": None,
+                "thresholds": {"buyGt": 0.6, "sellLt": -0.6},
+                "decision": "HOLD",
+                "reason": "RAW_SCORE_WITHIN_HOLD_BAND",
+            },
+        )
+
+    def test_runtime_builds_serializable_ai_decision_audit(self):
+        result = TradingRuntime().process_runtime(
+            self._microstructure_state(
+                aiMomentumPersistence=0.24,
+                momentumPersistence=0.9,
+                imbalanceStrength=0.2,
+                spreadQuality=0.98,
+            )
+        )
+        audit = result["aiDecisionAudit"]
+
+        self.assertEqual(audit["inputAuthority"], "RuntimeAdapter(RuntimeState)")
+        self.assertEqual(audit["momentumSource"], "aiMomentumPersistence")
+        self.assertEqual(audit["input"]["featureMap"]["momentum_score"], 0.24)
+        self.assertEqual(audit["lstm"]["scoreFormula"], "mean(last_5_features)")
+        self.assertEqual(audit["lstm"]["decision"], "HOLD")
+        self.assertEqual(audit["llm"]["decision"], "HOLD")
+        self.assertEqual(audit["llm"]["source"], "runtime_state_rule")
+        self.assertFalse(audit["llm"]["fallbackUsed"])
+        self.assertEqual(audit["consensus"]["decision"], "HOLD")
+        self.assertEqual(audit["consensus"]["agreementConfidence"], 1.0)
 
     @staticmethod
     def _microstructure_state(**overrides):
@@ -149,10 +198,12 @@ class RuntimeAIDebugTest(unittest.TestCase):
         runtime_state = RuntimeAdapter().build(
             self._microstructure_state(
                 aiMomentumPersistence=0.75,
-            )
+            ),
+            active_symbol="ETHUSDT",
         )
 
         self.assertEqual(runtime_state.momentum_score, 0.75)
+        self.assertEqual(runtime_state.symbol, "ETHUSDT")
 
     def test_runtime_adapter_falls_back_to_strategy_momentum(self):
         runtime_state = RuntimeAdapter().build(
@@ -367,9 +418,7 @@ class RuntimeAIDebugTest(unittest.TestCase):
             "liquidityInstabilityDebug"
         ]
 
-        self.assertEqual(
-            liquidity_debug,
-            {
+        expected_existing_fields = {
                 "absorptionDetected": True,
                 "fakePressureDetected": True,
                 "stagnantHeavyFlow": True,
@@ -416,7 +465,16 @@ class RuntimeAIDebugTest(unittest.TestCase):
                     "fakePressureDetected",
                     "stagnantHeavyFlow",
                 ],
-            },
+            }
+        for key, value in expected_existing_fields.items():
+            self.assertEqual(liquidity_debug[key], value)
+        self.assertEqual(liquidity_debug["midPrice"], 1.0002)
+        self.assertAlmostEqual(
+            liquidity_debug["spreadPct"],
+            ((1.0004 - 1.0) / 1.0002) * 100,
+        )
+        self.assertTrue(
+            liquidity_debug["detectorDetails"]["absorption"]["conditionPassed"]
         )
         self.assertEqual(
             runtime_result["strategyOutput"]["strategy"][

@@ -9,6 +9,7 @@ from urllib.parse import unquote
 from pydantic import ValidationError
 
 from backend.ai_advisor.context_builder import sanitize_text
+from backend.ai_advisor.actionable_unknown import project_actionable_unknown
 from backend.ai_advisor.conversation_models import (
     AdvisorContextEnvelope,
     AdvisorFreshnessState,
@@ -35,6 +36,8 @@ from backend.ai_advisor.response_parser import parse_advisor_response
 
 FORBIDDEN_CLAIM_PRIORITY = (
     AdvisorForbiddenClaim.SECRET_DISCLOSURE_CLAIM,
+    AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,
+    AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,
     AdvisorForbiddenClaim.EXECUTION_CLAIM,
     AdvisorForbiddenClaim.ORDER_ACTION_CLAIM,
     AdvisorForbiddenClaim.POSITION_ACTION_CLAIM,
@@ -146,7 +149,38 @@ _CLAIM_PATTERNS = (
 _NEGATED_CLAIMS = (
     re.compile(r"(?i)\bi\s+did\s+not\s+execute\s+the\s+trade\b"),
     re.compile(r"(?i)\bno\s+order\s+was\s+submitted\b"),
+    re.compile(
+        r"(?i)\b(?:do\s+not|don't|never|avoid|should\s+not|must\s+not)\s+"
+        r"(?:submit|send|place|execute|cancel)\s+"
+        r"(?:(?:this|the|an?|any)\s+)?(?:order|trade)\b"
+    ),
+    re.compile(
+        r"(?i)\b(?:do\s+not|don't|never|avoid|should\s+not|must\s+not)\s+"
+        r"(?:enable|start|turn\s+on)\s+"
+        r"(?:live\s+trading|auto\s+trade|the\s+loop|the\s+bot)\b"
+    ),
     re.compile(r"取引は実行していません"),
+    re.compile(r"(?:取引|注文)(?:を)?(?:実行|送信|発注)?(?:しない|しません|せず|しないで|見送る)"),
+    re.compile(r"(?:自動売買|ライブ取引|ループ|Bot)(?:を)?(?:有効化|開始)?(?:しない|しません|せず|しないで)"),
+)
+_CURRENT_MARKET_CLAIM = re.compile(
+    r"(?is)(?:\b[A-Z0-9]{5,20}\b.{0,80}\b(?:is\s+currently|is\s+now)\s+"
+    r"(?:bullish|bearish|rising|falling|trending)|"
+    r"\b(?:currently|right\s+now)\b.{0,80}\b[A-Z0-9]{5,20}\b.{0,80}"
+    r"\b(?:bullish|bearish|rising|falling|trending)|"
+    r"\b[A-Z0-9]{5,20}\b.{0,80}(?:現在|現時点).{0,40}"
+    r"(?:強気|弱気|上昇|下落|トレンド))"
+)
+_CURRENT_RUNTIME_CLAIM = re.compile(
+    r"(?is)(?:\b(?:current|currently|right\s+now)\b.{0,50}"
+    r"\b(?:bot|loop|auto\s*trade|risk\s*state|runtime|execution\s*mode|"
+    r"position|balance|recorder|governance|emergency)\b.{0,50}(?:\bis\b|=)|"
+    r"\b(?:bot|loop|auto\s*trade|risk\s*state|runtime|execution\s*mode|"
+    r"position|balance|recorder|governance|emergency)\b.{0,50}"
+    r"\b(?:is\s+currently|is\s+now)\b|"
+    r"(?:現在|現時点)(?:の)?(?:Bot|Loop|Auto\s*Trade|Risk\s*State|"
+    r"リスク状態|Runtime|実行モード|Execution\s*Mode|ポジション|残高|"
+    r"Market\s*Recorder|Recorder|Governance|Emergency).{0,60}(?:は|=|です))"
 )
 _ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\u2060\ufeff]")
 _INVALID_UNICODE = re.compile("[\ud800-\udfff]")
@@ -221,6 +255,44 @@ def _detect_claims(
     return tuple(code for code in FORBIDDEN_CLAIM_PRIORITY if code in detected)
 
 
+def _has_ungrounded_current_market_claim(
+    candidate: AdvisorResponseCandidate,
+    context: AdvisorContextEnvelope,
+) -> bool:
+    if not any(_CURRENT_MARKET_CLAIM.search(text) for text in _text_values(candidate)):
+        return False
+    referenced = set(candidate.sourceReferences)
+    return not any(
+        source.sourceId in referenced
+        and source.sourceType is AdvisorSourceType.MARKET_INTELLIGENCE
+        and source.freshness.state is AdvisorFreshnessState.FRESH
+        for source in context.sources
+    )
+
+
+def _has_ungrounded_current_runtime_claim(
+    candidate: AdvisorResponseCandidate,
+    context: AdvisorContextEnvelope,
+) -> bool:
+    if not any(_CURRENT_RUNTIME_CLAIM.search(text) for text in _text_values(candidate)):
+        return False
+    referenced = set(candidate.sourceReferences)
+    current_source_types = {
+        AdvisorSourceType.RUNTIME,
+        AdvisorSourceType.MARKET_INTELLIGENCE,
+        AdvisorSourceType.TRADING_DECISION,
+        AdvisorSourceType.MONEY_MANAGEMENT,
+        AdvisorSourceType.GOVERNANCE,
+        AdvisorSourceType.EXECUTION_RESULT,
+    }
+    return not any(
+        source.sourceId in referenced
+        and source.sourceType in current_source_types
+        and source.freshness.state is AdvisorFreshnessState.FRESH
+        for source in context.sources
+    )
+
+
 def _duplicates(values: Iterable[str]) -> bool:
     materialized = tuple(values)
     return len(materialized) != len(set(materialized))
@@ -293,6 +365,10 @@ def validate_advisor_response(
             prompt_version=prompt_envelope.promptVersion,
         )
     claims = _detect_claims(candidate)
+    if _has_ungrounded_current_market_claim(candidate, context):
+        claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,)
+    if _has_ungrounded_current_runtime_claim(candidate, context):
+        claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
     if (
         raw_response.requestId != request.requestId
         or raw_response.requestId != candidate.requestId
@@ -483,6 +559,9 @@ def validate_advisor_response(
         ),
         conclusion=candidate.summary,
         groundedClaims=grounded_claims,
+        actionableUnknowns=tuple(
+            project_actionable_unknown(item) for item in unknowns
+        ),
         citations=citations,
         limitations=(
             "Read-only explanation; no order execution or configuration changes.",

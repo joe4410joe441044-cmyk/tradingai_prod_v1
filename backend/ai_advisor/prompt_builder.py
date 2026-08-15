@@ -155,6 +155,23 @@ def _source_line(source: AdvisorSourceReference) -> str:
     return _lines(values)
 
 
+def _knowledge_line(context: AdvisorContextEnvelope, source_id: str) -> str:
+    excerpt = next(
+        (item for item in context.knowledgeExcerpts if item.sourceId == source_id),
+        None,
+    )
+    if excerpt is None:
+        return "approvedKnowledge=METADATA_ONLY"
+    return _lines(
+        (
+            ("knowledgeKind", excerpt.knowledgeKind),
+            ("authorityLevel", excerpt.authorityLevel),
+            ("topics", ",".join(excerpt.topics)),
+            ("approvedKnowledge", excerpt.content),
+        )
+    )
+
+
 def _specification_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
     sources = tuple(
         sorted(
@@ -173,10 +190,13 @@ def _specification_section(context: AdvisorContextEnvelope) -> AdvisorPromptSect
             key=lambda item: item.sourceId,
         )
     )
-    content = "\n---\n".join(_source_line(source) for source in sources)
+    content = "\n---\n".join(
+        _source_line(source) + "\n" + _knowledge_line(context, source.sourceId)
+        for source in sources
+    )
     return _section(
         AdvisorPromptSectionType.SPECIFICATION_REFERENCE,
-        "Approved Source References (metadata only; no source body)",
+        "Approved Static Knowledge (validated excerpts and source metadata)",
         content or "status=NOT_AVAILABLE",
         authority=(
             AdvisorSourceAuthority.SPECIFICATION_AUTHORITATIVE

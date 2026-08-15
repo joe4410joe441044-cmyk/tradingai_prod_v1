@@ -75,6 +75,8 @@ MAX_BROWSER_BODY_BYTES = 12_128
 IDENTITY_HEADER = b"x-tradingai-authenticated-user"
 CLIENT_HEADER = b"x-tradingai-client"
 ORIGIN_HEADER = b"origin"
+SEC_FETCH_SITE_HEADER = b"sec-fetch-site"
+SAFE_GET_METHODS = frozenset({"GET", "HEAD"})
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
 
 
@@ -230,10 +232,30 @@ def _trusted_identity(request: Request, config: AdvisorBrowserGatewayConfig) -> 
     return identity
 
 
-def _valid_origin(request: Request, config: AdvisorBrowserGatewayConfig) -> bool:
-    values = _header_values(request, ORIGIN_HEADER)
+def _session_identity(request: Request) -> str | None:
+    session_data = request.scope.get("operator_session")
+    if isinstance(session_data, dict):
+        identity = session_data.get("identity")
+        if isinstance(identity, str) and identity:
+            return identity
+    return None
+
+
+def _valid_client(
+    request: Request,
+    config: AdvisorBrowserGatewayConfig,
+) -> bool:
     clients = _header_values(request, CLIENT_HEADER)
-    if len(values) != 1 or clients != [config.clientHeaderValue]:
+    return clients == [config.clientHeaderValue]
+
+
+def _exact_allowed_origin(
+    request: Request,
+    config: AdvisorBrowserGatewayConfig,
+) -> bool:
+    """A present Origin must be a single, well-formed, exact allowed origin."""
+    values = _header_values(request, ORIGIN_HEADER)
+    if len(values) != 1:
         return False
     origin = values[0]
     try:
@@ -250,6 +272,46 @@ def _valid_origin(request: Request, config: AdvisorBrowserGatewayConfig) -> bool
     except ValueError:
         return False
     return bool(valid_shape and origin in config.allowedOrigins)
+
+
+def _browser_same_origin_fetch_metadata(request: Request) -> bool:
+    """Browsers omit Origin on same-origin GET/HEAD but attach Fetch Metadata.
+
+    ``Sec-Fetch-Site: same-origin`` is the browser-controlled same-origin proof
+    for the session path. Any other value, a missing header, or a duplicate
+    header fails closed.
+    """
+    values = _header_values(request, SEC_FETCH_SITE_HEADER)
+    if len(values) != 1:
+        return False
+    return values[0] == "same-origin"
+
+
+def _authorized_request(
+    request: Request,
+    config: AdvisorBrowserGatewayConfig,
+    *,
+    via_session: bool,
+) -> bool:
+    """Fail-closed browser authorization for the conversation gateway.
+
+    - Every request must present the exact web client header.
+    - If Origin is present, it must exactly match an allowed origin (all
+      methods, including the trusted-proxy identity path).
+    - For session-authenticated GET/HEAD, a missing Origin is accepted only
+      when the browser Fetch Metadata proves same-origin
+      (``Sec-Fetch-Site: same-origin``).
+    - POST (and any trusted-proxy or non-browser request) with a missing Origin
+      fails closed. There is no internal-client contract that permits it.
+    """
+    if not _valid_client(request, config):
+        return False
+    method = (request.method or "GET").upper()
+    if _header_values(request, ORIGIN_HEADER):
+        return _exact_allowed_origin(request, config)
+    if method in SAFE_GET_METHODS and via_session:
+        return _browser_same_origin_fetch_metadata(request)
+    return False
 
 
 def _load_json_strict(body: bytes):
@@ -433,19 +495,36 @@ def create_browser_gateway_router(
     def authorize(request: Request):
         if composition.config.enabled is not True:
             return None, _error(503, "ENDPOINT_DISABLED")
+
+        identity: str | None = None
+        try_trusted = False
         try:
             identity = _trusted_identity(request, composition.config)
         except BrowserGatewayAuthenticationError:
-            composition.observationSink.record(
-                AdvisorObservation(
-                    requestId=composition.requestIdFactory(),
-                    status="FAILED",
-                    failureCode="AUTHENTICATION_REQUIRED",
-                    securityEventCategory=AdvisorSecurityEventCategory.AUTHN_FAILED,
+            try_trusted = True
+
+        via_session = False
+        if identity is None:
+            identity = _session_identity(request)
+            via_session = identity is not None
+
+        if identity is None:
+            if try_trusted:
+                composition.observationSink.record(
+                    AdvisorObservation(
+                        requestId=composition.requestIdFactory(),
+                        status="FAILED",
+                        failureCode="AUTHENTICATION_REQUIRED",
+                        securityEventCategory=AdvisorSecurityEventCategory.AUTHN_FAILED,
+                    )
                 )
-            )
             return None, _error(401, "AUTHENTICATION_REQUIRED")
-        if not _valid_origin(request, composition.config):
+
+        if not _authorized_request(
+            request,
+            composition.config,
+            via_session=via_session,
+        ):
             composition.observationSink.record(
                 AdvisorObservation(
                     requestId=composition.requestIdFactory(),

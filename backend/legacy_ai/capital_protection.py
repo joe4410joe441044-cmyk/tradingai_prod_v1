@@ -1,3 +1,6 @@
+"""Archived deterministic loss-streak switch; this was not AI."""
+
+
 class CapitalProtectionAI:
 
     def __init__(self):

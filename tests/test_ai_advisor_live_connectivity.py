@@ -7,6 +7,8 @@ from backend.ai_advisor.credential_loader import InjectedCredentialLoader
 from backend.ai_advisor.live_connectivity import (
     OPENAI_OFFICIAL_ENDPOINT,
     AtomicOneShotPermit,
+    InteractiveConnectivityGate,
+    InteractiveConnectivityPolicy,
     LiveConnectivityFailureCode,
     LiveConnectivityGate,
     LiveConnectivityPolicy,
@@ -57,6 +59,15 @@ def policy(**overrides):
     return LiveConnectivityPolicy(**values)
 
 
+def interactive_policy(**overrides):
+    values = policy().model_dump(
+        exclude={"liveTestExplicitlyAllowed", "maximumLiveTestRequests"}
+    )
+    values["interactiveInvocationExplicitlyAllowed"] = True
+    values.update(overrides)
+    return InteractiveConnectivityPolicy(**values)
+
+
 def transport_request(**overrides):
     values = dict(
         model="openai-advisor-model",
@@ -72,6 +83,20 @@ def transport_request(**overrides):
 
 
 class LiveConnectivityGateTest(unittest.TestCase):
+    def test_interactive_gate_allows_multiple_requests_without_one_shot_permit(self):
+        gate = InteractiveConnectivityGate(interactive_policy())
+        self.assertFalse(hasattr(gate, "permit"))
+        results = [gate.authorize(transport_request()) for _ in range(3)]
+        self.assertTrue(all(result.allowed for result in results))
+
+    def test_live_test_permit_does_not_reduce_interactive_capacity(self):
+        live_gate = LiveConnectivityGate(policy())
+        interactive_gate = InteractiveConnectivityGate(interactive_policy())
+        self.assertTrue(live_gate.authorize(transport_request()).allowed)
+        self.assertFalse(live_gate.authorize(transport_request()).allowed)
+        self.assertTrue(interactive_gate.authorize(transport_request()).allowed)
+        self.assertTrue(interactive_gate.authorize(transport_request()).allowed)
+        self.assertTrue(interactive_gate.authorize(transport_request()).allowed)
     def test_default_and_each_missing_condition_fail_closed(self):
         cases = (
             (

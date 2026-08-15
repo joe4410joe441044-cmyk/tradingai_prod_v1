@@ -212,7 +212,8 @@ class AdvisorPromptBuilderTest(unittest.TestCase):
         response_section = prompt.contextSections[3]
         self.assertEqual(response_section.content, prompt.responseInstruction)
         self.assertTrue(response_section.content.startswith(RESPONSE_INSTRUCTION))
-        self.assertIn("one valid JSON object only", response_section.content)
+        self.assertIn("one valid json object only", response_section.content)
+        self.assertIn("json", render_advisor_prompt(prompt))
         self.assertIn("text outside the JSON object", response_section.content)
         self.assertIn("Markdown code fences", response_section.content)
         for existing_contract in (

@@ -73,7 +73,8 @@ function validateResponse(body) {
     if (envelope.groundedClaims !== undefined) {
         if (!Array.isArray(envelope.groundedClaims)
             || !Array.isArray(envelope.citations)
-            || !Array.isArray(envelope.limitations)) {
+            || !Array.isArray(envelope.limitations)
+            || !Array.isArray(envelope.actionableUnknowns)) {
             throw new AdvisorBrowserGatewayError(
                 "INVALID_PROVIDER_RESPONSE",
                 "The advisor returned invalid grounding.",
@@ -96,6 +97,35 @@ function validateResponse(body) {
                 );
             }
         }
+        const unknownClaimIds = new Set(
+            envelope.groundedClaims
+                .filter((claim) => claim?.claimType === "UNKNOWN")
+                .map((claim) => claim.claimId),
+        );
+        const actionableIds = new Set();
+        for (const item of envelope.actionableUnknowns) {
+            if (typeof item?.unknownId !== "string"
+                || !unknownClaimIds.has(item.unknownId)
+                || actionableIds.has(item.unknownId)
+                || typeof item?.subject !== "string"
+                || typeof item?.reason !== "string"
+                || typeof item?.missingInformation !== "string"
+                || typeof item?.safeNextStep !== "string"
+                || typeof item?.decisionImpact !== "string"
+                || item?.operationalEffect !== "NONE") {
+                throw new AdvisorBrowserGatewayError(
+                    "INVALID_PROVIDER_RESPONSE",
+                    "The advisor returned invalid unknown guidance.",
+                );
+            }
+            actionableIds.add(item.unknownId);
+        }
+        if (actionableIds.size !== unknownClaimIds.size) {
+            throw new AdvisorBrowserGatewayError(
+                "INVALID_PROVIDER_RESPONSE",
+                "The advisor returned incomplete unknown guidance.",
+            );
+        }
         for (const citation of envelope.citations) {
             if (typeof citation?.displayTitle !== "string"
                 || citation.displayTitle.startsWith("/")
@@ -117,6 +147,17 @@ export function createAdvisorBrowserGatewayClient({
     setTimer = setTimeout,
     clearTimer = clearTimeout,
 } = {}) {
+    const CSRF_TOKEN_COOKIE = "tradingai_csrf";
+    const CSRF_TOKEN_HEADER = "X-TradingAI-CSRF";
+
+    function readCsrfToken() {
+        if (typeof document === "undefined") return null;
+        const match = document.cookie.match(
+            new RegExp(`(?:^|;\\s*)${CSRF_TOKEN_COOKIE}=([^;]*)`),
+        );
+        return match ? decodeURIComponent(match[1]) : null;
+    }
+
     async function request(path, options, callerSignal) {
         const controller = new AbortController();
         let timedOut = false;
@@ -127,6 +168,20 @@ export function createAdvisorBrowserGatewayClient({
             timedOut = true;
             controller.abort();
         }, timeoutMs);
+
+        const headers = {
+            Accept: "application/json",
+            "X-TradingAI-Client": "web",
+            ...options.headers,
+        };
+
+        if (options.method === "POST") {
+            const csrfToken = readCsrfToken();
+            if (csrfToken) {
+                headers[CSRF_TOKEN_HEADER] = csrfToken;
+            }
+        }
+
         try {
             if (controller.signal.aborted) {
                 throw new AdvisorBrowserGatewayError("CANCELLED", "Request cancelled.");
@@ -134,11 +189,7 @@ export function createAdvisorBrowserGatewayClient({
             return await fetchImpl(path, {
                 ...options,
                 credentials: "same-origin",
-                headers: {
-                    Accept: "application/json",
-                    "X-TradingAI-Client": "web",
-                    ...options.headers,
-                },
+                headers,
                 signal: controller.signal,
             });
         } catch (error) {

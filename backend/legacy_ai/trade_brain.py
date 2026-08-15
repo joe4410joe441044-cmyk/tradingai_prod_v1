@@ -38,6 +38,12 @@ class TradeBrain:
 
         lstm_signal = self.lstm.predict(features)
 
+        lstm_debug = getattr(
+            self.lstm,
+            "latest_debug",
+            None,
+        )
+
         llm_signal = self.llm.analyze(market_data)
 
         llm_debug = getattr(
@@ -79,7 +85,8 @@ class TradeBrain:
                 "lstm": lstm_signal,
                 "llm": llm_signal,
                 "price": market_data.get("price", 0)
-            }
+            },
+            "lstmDebug": lstm_debug,
         }
 
         event.update(llm_debug)
@@ -93,6 +100,7 @@ class TradeBrain:
                 "llm": llm_signal,
             },
             "consensusReason": event["reason"],
+            "lstmDebug": lstm_debug,
             **llm_debug,
         }
 

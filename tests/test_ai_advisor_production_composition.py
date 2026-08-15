@@ -8,7 +8,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.ai_advisor.credential_loader import InjectedCredentialLoader
+from backend.ai_advisor.live_connectivity import (
+    InteractiveConnectivityGate,
+    LiveConnectivityGate,
+)
 from backend.ai_advisor.production_composition import (
+    ProviderInteractionPolicy,
     build_ai_advisor_production_composition,
 )
 from backend.ai_advisor.production_config_loader import (
@@ -19,6 +24,9 @@ from backend.ai_advisor.production_config_models import (
 )
 from backend.ai_advisor.provider_failure_observation import (
     RecordingProviderFailureObservationSink,
+)
+from backend.ai_advisor.response_safety_observation import (
+    RecordingResponseSafetyRejectionObservationSink,
 )
 from backend.api.ai_advisor import create_advice_router
 from tests.test_ai_advisor_api import headers, payload
@@ -54,8 +62,11 @@ def build(
     provider_loader=None,
     client_factory=None,
     failure_sink=None,
+    response_safety_sink=None,
+    provider_interaction_policy=ProviderInteractionPolicy.INTERACTIVE,
 ):
     return build_ai_advisor_production_composition(
+        provider_interaction_policy=provider_interaction_policy,
         config_loader=InjectedProductionConfigLoader(values),
         authentication_credential_loader=auth_loader
         or InjectedCredentialLoader({"auth-ref": AUTH_TOKEN}),
@@ -67,6 +78,11 @@ def build(
         **(
             {"failure_observation_sink": failure_sink}
             if failure_sink is not None
+            else {}
+        ),
+        **(
+            {"response_safety_observation_sink": response_safety_sink}
+            if response_safety_sink is not None
             else {}
         ),
         clock=lambda: 100.0,
@@ -171,6 +187,13 @@ class ProductionCompositionTest(unittest.TestCase):
         self.assertEqual(provider.calls, 0)
         self.assertEqual(factory.calls, 0)
 
+    def test_composition_requires_an_explicit_classified_policy(self):
+        with self.assertRaisesRegex(ValueError, "not classified"):
+            build(
+                configuration_values(network=True),
+                provider_interaction_policy="INTERACTIVE",
+            )
+
     def test_live_composition_injects_one_failure_sink_into_transport_and_service(self):
         sink = RecordingProviderFailureObservationSink()
         factory = FakeClientFactory(
@@ -185,6 +208,17 @@ class ProductionCompositionTest(unittest.TestCase):
         self.assertIs(service.failureObservationSink, sink)
         self.assertIs(service.provider.transport.failureObservationSink, sink)
         self.assertEqual(factory.calls, 0)
+
+    def test_live_composition_injects_response_safety_observation_sink(self):
+        sink = RecordingResponseSafetyRejectionObservationSink()
+        result = build(
+            configuration_values(network=True),
+            response_safety_sink=sink,
+        )
+        self.assertIs(
+            result.apiComposition.service.responseSafetyObservationSink,
+            sink,
+        )
 
     def test_live_ready_offline_client_endpoint_succeeds(self):
         auth = InjectedCredentialLoader({"auth-ref": AUTH_TOKEN})
@@ -213,6 +247,59 @@ class ProductionCompositionTest(unittest.TestCase):
         self.assertEqual(provider.calls, 1)
         self.assertEqual(factory.calls, 1)
         self.assertEqual(len(responses.calls), 1)
+
+    def test_interactive_composition_allows_three_sequential_provider_calls(self):
+        responses = FakeResponses(response=FakeResponse(fixture_text()))
+        factory = FakeClientFactory(FakeClient(responses))
+        result = build(
+            configuration_values(
+                network=True,
+                liveKillSwitchActive="false",
+            ),
+            client_factory=factory,
+        )
+        for _ in range(3):
+            response = endpoint_client(result).post(
+                "/api/ai-advisor/advice",
+                content=json.dumps(payload()),
+                headers=production_headers(),
+            )
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(responses.calls), 3)
+        self.assertIsInstance(
+            result.apiComposition.service.provider.transport.liveConnectivityGate,
+            InteractiveConnectivityGate,
+        )
+
+    def test_live_test_composition_remains_one_shot(self):
+        responses = FakeResponses(response=FakeResponse(fixture_text()))
+        factory = FakeClientFactory(FakeClient(responses))
+        result = build(
+            configuration_values(
+                network=True,
+                liveTestExplicitlyAllowed="true",
+                liveKillSwitchActive="false",
+            ),
+            client_factory=factory,
+            provider_interaction_policy=ProviderInteractionPolicy.LIVE_TEST,
+        )
+        first = endpoint_client(result).post(
+            "/api/ai-advisor/advice",
+            content=json.dumps(payload()),
+            headers=production_headers(),
+        )
+        second = endpoint_client(result).post(
+            "/api/ai-advisor/advice",
+            content=json.dumps(payload()),
+            headers=production_headers(),
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 503)
+        self.assertEqual(len(responses.calls), 1)
+        self.assertIsInstance(
+            result.apiComposition.service.provider.transport.liveConnectivityGate,
+            LiveConnectivityGate,
+        )
 
     def test_missing_references_have_fixed_readiness(self):
         missing_auth = build(

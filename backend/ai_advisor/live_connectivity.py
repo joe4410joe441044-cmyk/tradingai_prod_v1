@@ -1,9 +1,9 @@
-"""Fail-closed one-shot safety gate for explicitly permitted live tests."""
+"""Fail-closed connectivity policies for interactive and isolated live use."""
 
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Protocol, Tuple
 
 from pydantic import Field, model_validator
 
@@ -28,10 +28,9 @@ class LiveConnectivityFailureCode(str, Enum):
     LIVE_PERMIT_UNAVAILABLE = "LIVE_PERMIT_UNAVAILABLE"
 
 
-class LiveConnectivityPolicy(AdvisorProviderContractModel):
+class ConnectivitySafetyPolicy(AdvisorProviderContractModel):
     endpointEnabled: bool
     networkInvocationAllowed: bool
-    liveTestExplicitlyAllowed: bool = False
     killSwitchActive: bool = True
     authenticationReady: bool
     providerReady: bool
@@ -47,7 +46,6 @@ class LiveConnectivityPolicy(AdvisorProviderContractModel):
         repr=False,
         exclude=True,
     )
-    maximumLiveTestRequests: Literal[1] = 1
     maximumInputBytes: int = Field(ge=1, le=65_536)
     maximumInputTokens: int = Field(ge=1, le=65_536)
     maximumOutputTokens: int = Field(ge=1, le=16_384)
@@ -59,7 +57,7 @@ class LiveConnectivityPolicy(AdvisorProviderContractModel):
     batchInvocationAllowed: Literal[False] = False
 
     @model_validator(mode="after")
-    def validate_allowlists(self) -> "LiveConnectivityPolicy":
+    def validate_allowlists(self) -> "ConnectivitySafetyPolicy":
         if len(set(self.allowedModels)) != len(self.allowedModels):
             raise ValueError("model allowlist must be unique")
         if len(set(self.allowedProviderEndpoints)) != len(
@@ -67,6 +65,15 @@ class LiveConnectivityPolicy(AdvisorProviderContractModel):
         ):
             raise ValueError("endpoint allowlist must be unique")
         return self
+
+
+class InteractiveConnectivityPolicy(ConnectivitySafetyPolicy):
+    interactiveInvocationExplicitlyAllowed: bool = False
+
+
+class LiveConnectivityPolicy(ConnectivitySafetyPolicy):
+    liveTestExplicitlyAllowed: bool = False
+    maximumLiveTestRequests: Literal[1] = 1
 
 
 class LiveConnectivityDecision(AdvisorProviderContractModel):
@@ -86,6 +93,35 @@ class LiveConnectivityDecision(AdvisorProviderContractModel):
         elif self.failureCode is None or self.permitNumber is not None:
             raise ValueError("denied live decision requires failure")
         return self
+
+
+class InteractiveConnectivityDecision(AdvisorProviderContractModel):
+    allowed: bool
+    failureCode: Optional[LiveConnectivityFailureCode] = None
+    safeMessage: Literal[
+        "Interactive provider invocation allowed.",
+        "Interactive provider invocation denied.",
+    ]
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "InteractiveConnectivityDecision":
+        if (self.allowed and self.failureCode is not None) or (
+            not self.allowed and self.failureCode is None
+        ):
+            raise ValueError("interactive connectivity decision invariant failed")
+        return self
+
+
+class ProviderConnectivityDecision(Protocol):
+    allowed: bool
+
+
+class ProviderConnectivityGate(Protocol):
+    def authorize(
+        self,
+        request: OpenAITransportRequest,
+    ) -> ProviderConnectivityDecision:
+        """Return a fail-closed authorization decision for one request."""
 
 
 class LiveConnectivityDeniedError(ValueError):
@@ -118,6 +154,89 @@ class AtomicOneShotPermit:
             return True
 
 
+def _shared_failure(
+    policy: ConnectivitySafetyPolicy,
+    request: OpenAITransportRequest,
+    *,
+    explicitly_allowed: bool,
+) -> LiveConnectivityFailureCode | None:
+    if policy.killSwitchActive is not False:
+        return LiveConnectivityFailureCode.KILL_SWITCH_ACTIVE
+    try:
+        trusted = OpenAITransportRequest.model_validate(
+            request.model_dump(warnings=False)
+        )
+    except Exception:
+        return LiveConnectivityFailureCode.CONFIGURATION_INVALID
+    if (
+        policy.retryCount != 0
+        or policy.streamingAllowed is not False
+        or policy.toolCallingAllowed is not False
+        or policy.backgroundInvocationAllowed is not False
+        or policy.batchInvocationAllowed is not False
+    ):
+        return LiveConnectivityFailureCode.CONFIGURATION_INVALID
+    if (
+        policy.endpointEnabled is not True
+        or policy.networkInvocationAllowed is not True
+        or explicitly_allowed is not True
+    ):
+        return LiveConnectivityFailureCode.LIVE_DISABLED
+    if policy.authenticationReady is not True:
+        return LiveConnectivityFailureCode.AUTHENTICATION_NOT_READY
+    if policy.providerReady is not True:
+        return LiveConnectivityFailureCode.PROVIDER_NOT_READY
+    if policy.credentialReferenceReady is not True:
+        return LiveConnectivityFailureCode.CREDENTIAL_NOT_READY
+    if (
+        policy.provider is not ProviderName.OPENAI
+        or trusted.model != policy.model
+        or trusted.model not in policy.allowedModels
+    ):
+        return LiveConnectivityFailureCode.MODEL_NOT_ALLOWED
+    endpoint = policy.providerEndpoint or OPENAI_OFFICIAL_ENDPOINT
+    if endpoint not in policy.allowedProviderEndpoints:
+        return LiveConnectivityFailureCode.ENDPOINT_NOT_ALLOWED
+    input_bytes = len(trusted.input.encode("utf-8"))
+    input_token_upper_bound = input_bytes
+    if (
+        input_bytes > policy.maximumInputBytes
+        or input_token_upper_bound > policy.maximumInputTokens
+        or trusted.maxOutputTokens > policy.maximumOutputTokens
+        or trusted.maxOutputTokens < 1
+        or trusted.timeoutSeconds != policy.timeoutSeconds
+    ):
+        return LiveConnectivityFailureCode.TOKEN_BUDGET_INVALID
+    return None
+
+
+@dataclass(frozen=True)
+class InteractiveConnectivityGate:
+    """Reusable request gate; browser rate/concurrency limits remain external."""
+
+    policy: InteractiveConnectivityPolicy
+
+    def authorize(
+        self,
+        request: OpenAITransportRequest,
+    ) -> InteractiveConnectivityDecision:
+        failure = _shared_failure(
+            self.policy,
+            request,
+            explicitly_allowed=self.policy.interactiveInvocationExplicitlyAllowed,
+        )
+        if failure is not None:
+            return InteractiveConnectivityDecision(
+                allowed=False,
+                failureCode=failure,
+                safeMessage="Interactive provider invocation denied.",
+            )
+        return InteractiveConnectivityDecision(
+            allowed=True,
+            safeMessage="Interactive provider invocation allowed.",
+        )
+
+
 @dataclass(frozen=True)
 class LiveConnectivityGate:
     policy: LiveConnectivityPolicy
@@ -132,54 +251,15 @@ class LiveConnectivityGate:
         request: OpenAITransportRequest,
     ) -> LiveConnectivityDecision:
         policy = self.policy
-        if policy.killSwitchActive is not False:
-            return self._denied(LiveConnectivityFailureCode.KILL_SWITCH_ACTIVE)
-        try:
-            trusted = OpenAITransportRequest.model_validate(
-                request.model_dump(warnings=False)
-            )
-        except Exception:
+        if policy.maximumLiveTestRequests != 1:
             return self._denied(LiveConnectivityFailureCode.CONFIGURATION_INVALID)
-        if (
-            policy.retryCount != 0
-            or policy.streamingAllowed is not False
-            or policy.toolCallingAllowed is not False
-            or policy.backgroundInvocationAllowed is not False
-            or policy.batchInvocationAllowed is not False
-            or policy.maximumLiveTestRequests != 1
-        ):
-            return self._denied(LiveConnectivityFailureCode.CONFIGURATION_INVALID)
-        if (
-            policy.endpointEnabled is not True
-            or policy.networkInvocationAllowed is not True
-            or policy.liveTestExplicitlyAllowed is not True
-        ):
-            return self._denied(LiveConnectivityFailureCode.LIVE_DISABLED)
-        if policy.authenticationReady is not True:
-            return self._denied(LiveConnectivityFailureCode.AUTHENTICATION_NOT_READY)
-        if policy.providerReady is not True:
-            return self._denied(LiveConnectivityFailureCode.PROVIDER_NOT_READY)
-        if policy.credentialReferenceReady is not True:
-            return self._denied(LiveConnectivityFailureCode.CREDENTIAL_NOT_READY)
-        if (
-            policy.provider is not ProviderName.OPENAI
-            or trusted.model != policy.model
-            or trusted.model not in policy.allowedModels
-        ):
-            return self._denied(LiveConnectivityFailureCode.MODEL_NOT_ALLOWED)
-        endpoint = policy.providerEndpoint or OPENAI_OFFICIAL_ENDPOINT
-        if endpoint not in policy.allowedProviderEndpoints:
-            return self._denied(LiveConnectivityFailureCode.ENDPOINT_NOT_ALLOWED)
-        input_bytes = len(trusted.input.encode("utf-8"))
-        input_token_upper_bound = input_bytes
-        if (
-            input_bytes > policy.maximumInputBytes
-            or input_token_upper_bound > policy.maximumInputTokens
-            or trusted.maxOutputTokens > policy.maximumOutputTokens
-            or trusted.maxOutputTokens < 1
-            or trusted.timeoutSeconds != policy.timeoutSeconds
-        ):
-            return self._denied(LiveConnectivityFailureCode.TOKEN_BUDGET_INVALID)
+        failure = _shared_failure(
+            policy,
+            request,
+            explicitly_allowed=policy.liveTestExplicitlyAllowed,
+        )
+        if failure is not None:
+            return self._denied(failure)
         if self.permit.consumed != 0:
             return self._denied(LiveConnectivityFailureCode.REQUEST_BUDGET_EXHAUSTED)
         if not self.permit.try_acquire():
@@ -189,6 +269,12 @@ class LiveConnectivityGate:
             safeMessage="Live provider invocation allowed.",
             permitNumber=1,
         )
+
+    def authorize(
+        self,
+        request: OpenAITransportRequest,
+    ) -> LiveConnectivityDecision:
+        return self.authorize_and_acquire(request)
 
     @staticmethod
     def _denied(code: LiveConnectivityFailureCode) -> LiveConnectivityDecision:

@@ -29,6 +29,13 @@ from backend.ai_advisor.service_models import (
     AdvisorServiceResult,
     AdvisorServiceStatus,
 )
+from backend.ai_advisor.response_safety_observation import (
+    OperationalIntentClassification,
+    RecordingResponseSafetyRejectionObservationSink,
+    ResponseGroundingClassification,
+    ResponseSafetyRejectionRule,
+    ResponseSafetyViolationCategory,
+)
 from tests.test_ai_advisor_prompt_builder import (
     NOW,
     conversation,
@@ -93,6 +100,7 @@ def service(
     provider=None,
     provider_config=None,
     failure_sink=None,
+    response_safety_sink=None,
 ):
     provider = provider or MockAdvisorProvider(
         MockProviderFixture(responseText=response_text or fixture_text())
@@ -105,6 +113,11 @@ def service(
         **(
             {"failureObservationSink": failure_sink}
             if failure_sink is not None
+            else {}
+        ),
+        **(
+            {"responseSafetyObservationSink": response_safety_sink}
+            if response_safety_sink is not None
             else {}
         ),
     )
@@ -142,6 +155,48 @@ class AdvisorServiceTest(unittest.TestCase):
         result = service(fixture_text(payload)).generate_response(service_input())
         self.assertEqual(result.status, AdvisorServiceStatus.SUCCEEDED)
         self.assertEqual(result.response.status.value, "REJECTED")
+
+    def test_advisory_rejection_observation_is_bounded_and_content_free(self):
+        sink = RecordingResponseSafetyRejectionObservationSink()
+        payload = candidate_payload()
+        payload["summary"] = "Submit this order now."
+        result = service(
+            fixture_text(payload),
+            response_safety_sink=sink,
+        ).generate_response(service_input())
+        self.assertEqual(result.response.status.value, "REJECTED")
+        self.assertEqual(len(sink.records), 1)
+        observation = sink.records[0]
+        self.assertEqual(observation.rejectionCode.value, "ORDER_ACTION_CLAIM")
+        self.assertIs(
+            observation.rejectionRule,
+            ResponseSafetyRejectionRule.ORDER_ACTION_PATTERN,
+        )
+        self.assertIs(
+            observation.violationCategory,
+            ResponseSafetyViolationCategory.OPERATIONAL_ACTION,
+        )
+        self.assertIs(
+            observation.operationalIntent,
+            OperationalIntentClassification.ACTION_OR_EXECUTION,
+        )
+        self.assertIs(
+            observation.groundingClassification,
+            ResponseGroundingClassification.NOT_APPLICABLE,
+        )
+        rendered = observation.model_dump_json()
+        for forbidden in (
+            "Submit this order",
+            "responseText",
+            "api_key",
+            "Authorization",
+            "cookie",
+        ):
+            self.assertNotIn(forbidden, rendered)
+        with self.assertRaises(ValidationError):
+            type(observation).model_validate(
+                {**observation.model_dump(), "requestId": "api_key=SECRET"}
+            )
 
     def test_conversation_failure_mapping(self):
         request, _ = make_request()

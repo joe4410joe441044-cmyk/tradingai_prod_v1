@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+    OPERATOR_AUTH_STATE,
+    getOperatorAuthStatus,
+    subscribeOperatorAuthStatus,
+} from "../../auth/operatorAuth.js";
+import {
     AdvisorRuntimeApiError,
     fetchAdvisorRuntime,
 } from "./advisorRuntimeApi.js";
@@ -98,6 +103,18 @@ export function createAdvisorRuntimePoller({
             }
             return run();
         },
+        reset() {
+            lastGood = null;
+            lastSuccessfulAt = null;
+            controller?.abort();
+            onState({
+                data: null,
+                connectionState: "DISCONNECTED",
+                loading: false,
+                error: null,
+                lastSuccessfulAt: null,
+            });
+        },
         stop() {
             stopped = true;
             if (timer !== null) clearTimer(timer);
@@ -130,6 +147,21 @@ export default function useAdvisorRuntime() {
             poller.stop();
             pollerRef.current = null;
         };
+    }, []);
+
+    useEffect(() => {
+        const applyAuth = (status) => {
+            if (status === OPERATOR_AUTH_STATE.AUTHENTICATED) {
+                // Login success: refetch runtime immediately.
+                pollerRef.current?.retry();
+            } else {
+                // Logout/session-expiry: invalidate authenticated runtime state.
+                pollerRef.current?.reset();
+            }
+        };
+        const current = getOperatorAuthStatus();
+        if (current !== null) applyAuth(current);
+        return subscribeOperatorAuthStatus(applyAuth);
     }, []);
 
     const retry = useCallback(() => pollerRef.current?.retry(), []);

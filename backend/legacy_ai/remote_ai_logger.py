@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""Archived remote logger for the unmounted Legacy AI API."""
 
 import requests
 import threading

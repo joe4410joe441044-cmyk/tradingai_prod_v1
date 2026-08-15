@@ -1,3 +1,5 @@
+"""Archived, unmounted Legacy AI log router."""
+
 from fastapi import APIRouter
 
 router = APIRouter()

@@ -53,6 +53,31 @@ test("conversation source has no persistence, logging, endpoint, or trading cont
     }
 });
 
+test("advisor availability is re-evaluated when the operator auth status changes", async () => {
+    const source = await conversationSource();
+    assert.match(source, /subscribeOperatorAuthStatus/);
+    assert.match(source, /getOperatorAuthStatus/);
+    assert.match(source, /\[client, operatorStatus\]/);
+    assert.match(source, /client\.getStatus\(\{ signal: controller\.signal \}\)/);
+});
+
+test("logout or session-expiry invalidates advisor availability immediately", async () => {
+    const source = await conversationSource();
+    assert.match(source, /OPERATOR_AUTH_STATE\.UNAUTHENTICATED/);
+    assert.match(source, /OPERATOR_AUTH_STATE\.SESSION_EXPIRED/);
+    assert.match(source, /setAvailability\("AUTHENTICATION_REQUIRED"\)/);
+    assert.match(source, /setConversation\(initialAdvisorConversationState\)/);
+    assert.match(source, /setPrompt\(""\)/);
+    assert.match(source, /const sendDisabled = !authReady \|\| !validation\.valid \|\| sending/);
+});
+
+test("prompt Clear preserves current and archived exchanges", async () => {
+    const source = await conversationSource();
+    assert.match(source, /const clear = useCallback\(\(\) => \{\s*if \(!sending\) setPrompt\(""\);/s);
+    assert.doesNotMatch(source, /clearAdvisorConversation/);
+    assert.match(source, /onHistoryChange\?\.\(conversation\.archivedExchanges\)/);
+});
+
 test("Browser Gateway send path validates prompts and prevents duplicate requests", async () => {
     const source = await conversationSource();
     assert.match(source, /createAdvisorBrowserGatewayClient\(\)/);
@@ -134,7 +159,8 @@ test("safe failure codes never expose raw exception details", async () => {
 test("cancel and unmount abort requests while timeout remains distinct", async () => {
     const source = await conversationSource();
     assert.match(source, /const cancel = useCallback\(\(\) => \{\s*controllerRef\.current\?\.abort\(\)/s);
-    assert.match(source, /mountedRef\.current = false;\s*controller\.abort\(\);\s*controllerRef\.current\?\.abort\(\)/s);
+    assert.match(source, /mountedRef\.current = false;\s*controllerRef\.current\?\.abort\(\)/s);
+    assert.match(source, /cancelled = true;\s*controller\.abort\(\)/s);
     assert.match(source, /signal: controller\.signal/);
 
     const createPending = () => beginAdvisorRequest(
@@ -153,4 +179,21 @@ test("cancel and unmount abort requests while timeout remains distinct", async (
     assert.equal(cancelled.messages.at(-1).content, "The request was cancelled.");
     assert.equal(timedOut.messages.at(-1).status, "TIMED_OUT");
     assert.equal(timedOut.messages.at(-1).content, "The request timed out. You may try again.");
+});
+
+test("human-facing labels use bilingual English（日本語） notation", async () => {
+    const source = await conversationSource();
+    for (const label of [
+        "Prompt Input（質問入力）",
+        "Ask TradingAI...（TradingAIについて質問してください）",
+        "READ ONLY（読み取り専用）",
+        "No execution（実行なし）",
+        "No config changes（設定変更なし）",
+        ">Send（送信）<",
+        ">Cancel（キャンセル）<",
+        ">Clear（クリア）<",
+        "Ask TradingAI a question.（TradingAIについて質問してください。）",
+    ]) {
+        assert.ok(source.includes(label), `expected bilingual label: ${label}`);
+    }
 });

@@ -1,6 +1,8 @@
 """Guarded OpenAI SDK transport with lazy imports and no implicit retries."""
 
 from dataclasses import dataclass
+import re
+import time
 from typing import Any, Protocol
 
 from backend.ai_advisor.credential_loader import (
@@ -9,7 +11,7 @@ from backend.ai_advisor.credential_loader import (
     CredentialResolutionStatus,
     EphemeralCredential,
 )
-from backend.ai_advisor.live_connectivity import LiveConnectivityGate
+from backend.ai_advisor.live_connectivity import ProviderConnectivityGate
 from backend.ai_advisor.provider_config import ProviderConnectionConfig, ProviderName
 from backend.ai_advisor.provider_invocation_guard import (
     InvocationGuardInput,
@@ -19,6 +21,9 @@ from backend.ai_advisor.provider_failure_observation import (
     NoOpProviderFailureObservationSink,
     ProviderFailureObservation,
     ProviderFailureObservationSink,
+    ProviderFailureCategory,
+    ProviderErrorCode,
+    ProviderErrorType,
     ProviderFailureStage,
     ProviderSafeReason,
 )
@@ -97,6 +102,52 @@ def _safe_http_status(exception: Exception) -> int | None:
     )
 
 
+def _safe_provider_metadata(exception: Exception):
+    body = getattr(exception, "body", None)
+    if not isinstance(body, dict):
+        return None, None
+    try:
+        error_type = ProviderErrorType(body.get("type"))
+    except (TypeError, ValueError):
+        error_type = None
+    try:
+        error_code = ProviderErrorCode(body.get("code"))
+    except (TypeError, ValueError):
+        error_code = None
+    return error_type, error_code
+
+
+def _model_matches(requested: str, actual: object) -> bool:
+    """Accept the exact alias or a dated snapshot of it (e.g. gpt-4o-mini-2024-07-18)."""
+    if not isinstance(actual, str):
+        return False
+    if actual == requested:
+        return True
+    return bool(re.fullmatch(rf"{re.escape(requested)}-\d{{4}}-\d{{2}}-\d{{2}}", actual))
+
+
+def _failure_category(reason, error_code=None):
+    if error_code in {ProviderErrorCode.MODEL_NOT_FOUND, ProviderErrorCode.MODEL_NOT_AVAILABLE}:
+        return ProviderFailureCategory.MODEL_NOT_FOUND_OR_UNAVAILABLE
+    if error_code in {ProviderErrorCode.INVALID_RESPONSE_FORMAT, ProviderErrorCode.UNSUPPORTED_RESPONSE_FORMAT}:
+        return ProviderFailureCategory.STRUCTURED_OUTPUT_OR_RESPONSE_FORMAT
+    return {
+        ProviderSafeReason.LIVE_PROVIDER_AUTHENTICATION_FAILED: ProviderFailureCategory.AUTHENTICATION,
+        ProviderSafeReason.LIVE_PROVIDER_PERMISSION_DENIED: ProviderFailureCategory.PERMISSION,
+        ProviderSafeReason.LIVE_PROVIDER_RATE_OR_QUOTA_LIMITED: ProviderFailureCategory.RATE_LIMIT,
+        ProviderSafeReason.LIVE_PROVIDER_BAD_REQUEST: ProviderFailureCategory.INVALID_REQUEST,
+        ProviderSafeReason.LIVE_PROVIDER_TIMEOUT: ProviderFailureCategory.TIMEOUT,
+        ProviderSafeReason.LIVE_PROVIDER_CONNECTION_FAILED: ProviderFailureCategory.NETWORK_OR_TRANSPORT,
+        ProviderSafeReason.LIVE_PROVIDER_SERVER_ERROR: ProviderFailureCategory.PROVIDER_SERVER_ERROR,
+        ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED: ProviderFailureCategory.RESPONSE_VALIDATION,
+        ProviderSafeReason.LIVE_PROVIDER_MODEL_CONTRACT_FAILED: ProviderFailureCategory.RESPONSE_VALIDATION,
+        ProviderSafeReason.LIVE_PROVIDER_STATUS_CONTRACT_FAILED: ProviderFailureCategory.RESPONSE_VALIDATION,
+        ProviderSafeReason.LIVE_PROVIDER_OUTPUT_TEXT_CONTRACT_FAILED: ProviderFailureCategory.RESPONSE_VALIDATION,
+        ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED: ProviderFailureCategory.CLIENT_CONFIGURATION,
+        ProviderSafeReason.LIVE_PROVIDER_CREDENTIAL_UNAVAILABLE: ProviderFailureCategory.CREDENTIAL_UNAVAILABLE,
+    }.get(reason, ProviderFailureCategory.UNKNOWN_PROVIDER_FAILURE)
+
+
 def _map_sdk_exception(
     exception: Exception,
 ) -> tuple[Exception, ProviderSafeReason, int | None]:
@@ -161,7 +212,7 @@ class OpenAISDKTransport:
     credentialLoader: CredentialLoader
     clientFactory: OpenAIClientFactory
     allowNetworkInvocation: bool = False
-    liveConnectivityGate: LiveConnectivityGate | None = None
+    liveConnectivityGate: ProviderConnectivityGate | None = None
     usageObservationSink: UsageObservationSink = NoOpUsageObservationSink()
     metadataObservationSink: ProviderMetadataObservationSink = (
         NoOpProviderMetadataObservationSink()
@@ -200,13 +251,26 @@ class OpenAISDKTransport:
         *,
         attempted: bool,
         http_status: int | None = None,
+        request: OpenAITransportRequest | None = None,
+        exception: Exception | None = None,
+        duration_milliseconds: int | None = None,
     ) -> None:
         try:
+            error_type, error_code = _safe_provider_metadata(exception) if exception else (None, None)
+            category = _failure_category(reason, error_code)
             self.failureObservationSink.observe(
                 ProviderFailureObservation(
+                    model=request.model if request else self.config.model,
+                    requestId=request.requestId if request else None,
+                    providerRequestId=request.providerRequestId if request else None,
+                    category=category,
                     safeReason=reason,
                     failureStage=stage,
                     httpStatus=http_status,
+                    providerErrorType=error_type,
+                    providerErrorCode=error_code,
+                    retryable=category in {ProviderFailureCategory.RATE_LIMIT, ProviderFailureCategory.TIMEOUT, ProviderFailureCategory.NETWORK_OR_TRANSPORT, ProviderFailureCategory.PROVIDER_SERVER_ERROR},
+                    durationMilliseconds=duration_milliseconds,
                     liveInvocationAttempted=attempted,
                 )
             )
@@ -214,6 +278,7 @@ class OpenAISDKTransport:
             pass
 
     def invoke(self, request: OpenAITransportRequest) -> Any:
+        started_at = time.monotonic()
         try:
             trusted_request = OpenAITransportRequest.model_validate(
                 request.model_dump(warnings=False)
@@ -228,7 +293,7 @@ class OpenAISDKTransport:
                 "advisor provider unavailable"
             ) from None
         if self.liveConnectivityGate is not None:
-            decision = self.liveConnectivityGate.authorize_and_acquire(trusted_request)
+            decision = self.liveConnectivityGate.authorize(trusted_request)
             if decision.allowed is not True:
                 self._observe_failure(
                     ProviderSafeReason.LIVE_PROVIDER_CLIENT_CONFIGURATION_FAILED,
@@ -353,18 +418,21 @@ class OpenAISDKTransport:
                 ProviderFailureStage.PROVIDER_INVOCATION,
                 attempted=True,
                 http_status=status,
+                request=trusted_request,
+                exception=exception,
+                duration_milliseconds=max(0, min(120_000, int((time.monotonic() - started_at) * 1000))),
             )
             raise mapped from None
         try:
             response_model = getattr(response, "model", trusted_request.model)
-            if response_model != trusted_request.model:
+            if not _model_matches(trusted_request.model, response_model):
                 raise ValueError
             self.metadataObservationSink.observe(
                 project_sdk_metadata(response, model=trusted_request.model)
             )
         except Exception:
             self._observe_failure(
-                ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+                ProviderSafeReason.LIVE_PROVIDER_MODEL_CONTRACT_FAILED,
                 ProviderFailureStage.RESPONSE_VALIDATION,
                 attempted=True,
             )
@@ -375,18 +443,26 @@ class OpenAISDKTransport:
             pass
         try:
             text = response.output_text
-            status = getattr(response, "status", "completed")
             if not isinstance(text, str) or not text.strip():
                 raise ValueError
             if len(text) > 64_000:
                 raise ValueError
-            if status not in {"completed", None}:
-                raise ValueError
-            return {"output_text": text, "finish_reason": "completed"}
         except Exception:
             self._observe_failure(
-                ProviderSafeReason.LIVE_PROVIDER_RESPONSE_CONTRACT_FAILED,
+                ProviderSafeReason.LIVE_PROVIDER_OUTPUT_TEXT_CONTRACT_FAILED,
                 ProviderFailureStage.RESPONSE_VALIDATION,
                 attempted=True,
             )
             raise OpenAITransportRejectedError("advisor provider unavailable") from None
+        try:
+            status = getattr(response, "status", "completed")
+            if status not in {"completed", None}:
+                raise ValueError
+        except Exception:
+            self._observe_failure(
+                ProviderSafeReason.LIVE_PROVIDER_STATUS_CONTRACT_FAILED,
+                ProviderFailureStage.RESPONSE_VALIDATION,
+                attempted=True,
+            )
+            raise OpenAITransportRejectedError("advisor provider unavailable") from None
+        return {"output_text": text, "finish_reason": "completed"}

@@ -180,6 +180,23 @@ class RequestSafetyAndGroundingTest(unittest.TestCase):
             ).allowed
         )
 
+    def test_advisory_entry_questions_are_allowed_but_execution_is_rejected(self):
+        allowed = (
+            "What conditions should make me avoid entering a trade?",
+            "What information should I inspect before considering BTCUSDT?",
+        )
+        for prompt in allowed:
+            self.assertTrue(evaluate_advisor_request(prompt).allowed)
+        rejected = {
+            "Buy BTCUSDT now.": AdvisorSafetyRefusalCategory.TRADING_INSTRUCTION,
+            "Enable live trading.": AdvisorSafetyRefusalCategory.BOT_OPERATION,
+            "Open a long position.": AdvisorSafetyRefusalCategory.ORDER_EXECUTION,
+        }
+        for prompt, category in rejected.items():
+            decision = evaluate_advisor_request(prompt)
+            self.assertFalse(decision.allowed)
+            self.assertEqual(decision.refusalCategory, category)
+
     def test_existing_service_projects_approved_citations_and_claim_types(self):
         result = service().generate_response(service_input())
         self.assertEqual(result.status.value, "SUCCEEDED")
