@@ -74,6 +74,9 @@ const findButton = (root, label) => descendants(root).find(
 const findSelect = (root, id) => descendants(root).find(
     (node) => node.type === "select" && node.props.id === id,
 );
+const findTestId = (root, testId) => descendants(root).find(
+    (node) => node.props?.["data-testid"] === testId,
+);
 
 test("renders all six preparation sections, controls, derived fields, and existing start slot", async () => {
     const Component = await loadComponent();
@@ -100,7 +103,53 @@ test("renders all six preparation sections, controls, derived fields, and existi
     assert.equal(findButton(renderer.root, "AUTO").props["aria-pressed"], true);
     assert.equal(findSelect(renderer.root, "operation-prep-symbol"), undefined);
     assert.equal(content.includes("AUTO SELECT"), true);
-    assert.equal(content.includes("UI PREVIEW"), true);
+    assert.equal(content.includes("PREVIEW"), true);
+    assert.equal(content.includes("UI-FIRST"), false);
+    assert.equal(descendants(renderer.root).some(
+        (node) => node.type === "a" && node.props.href === "/market-intelligence",
+    ), true);
+    assert.equal(descendants(renderer.root).some(
+        (node) => node.type === "a" && node.props.href === "/money-management",
+    ), true);
+});
+
+test("renders the approved sequential flow with Start Bot as the final preparation action", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        children: { type: "button", props: { children: "START BOT" } },
+    });
+    const nodes = descendants(renderer.root);
+    const orderedTestIds = [
+        "trading-mode-section",
+        "market-selection-section",
+        "money-management-section",
+        "trade-execution-section",
+        "automation-section",
+        "safety-readiness-section",
+        "operation-preparation-summary",
+        "final-preparation-heading",
+        "ready-to-start",
+    ];
+    const indexes = orderedTestIds.map((testId) => nodes.findIndex(
+        (node) => node.props?.["data-testid"] === testId,
+    ));
+    assert.deepEqual(orderedTestIds.filter((testId, index) => indexes[index] < 0), []);
+    assert.deepEqual(indexes, [...indexes].sort((left, right) => left - right));
+
+    const startIndex = nodes.findIndex(
+        (node) => node.type === "button" && normalizedText(node) === "START BOT",
+    );
+    const automationIndex = indexes[4];
+    const readyIndex = indexes.at(-1);
+    assert.equal(startIndex > readyIndex, true);
+    assert.equal(startIndex > automationIndex, true);
+    assert.equal(normalizedText(findTestId(renderer.root, "automation-section")).includes("LOOP ON START"), true);
+    assert.equal(normalizedText(findTestId(renderer.root, "automation-section")).includes("AUTO TRADE ON START"), true);
+    assert.equal(normalizedText(descendants(findTestId(renderer.root, "automation-section"))).includes("AUTO SELECTION START"), true);
+    assert.equal(nodes.slice(startIndex + 1).some((node) => node.type === "button"), false);
+    assert.equal(findTestId(renderer.root, "market-selection-section").props.children != null, true);
+    assert.equal(findTestId(renderer.root, "money-management-section").props.children != null, true);
 });
 
 test("manual/auto, MM, leverage, and automation controls update the reactive summary", async () => {

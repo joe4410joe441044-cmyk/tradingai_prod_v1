@@ -1114,9 +1114,10 @@ export default function BotControl({
                 </div>
             </OperationPreparation>
 
-            <div className="operation-runtime-heading">CURRENT RUNTIME STATE <span>POST-START RUNTIME CONTROLS</span></div>
+            {botRunning && (
+            <section className="operation-post-start" data-testid="post-start-runtime-controls">
+            <div className="operation-runtime-heading">POST-START RUNTIME CONTROLS <span>BOT RUNNING · DIRECT RUNTIME ACTIONS</span></div>
             <div className="operation-runtime-controls">
-                <div className="operation-runtime-bot"><span>BOT</span><strong>{botRunning ? "RUNNING" : "STOPPED"}</strong></div>
 
             {/* =======================================================
                LOOP
@@ -1226,9 +1227,9 @@ export default function BotControl({
                 )}
 
             </div>
-
-                <div className="operation-runtime-market"><span>MARKET MODE</span><strong>{config?.selectionMode || "NOT EXPOSED"}</strong><span>AMS MONITORING</span><strong>{config?.autoMarketState || "NOT AVAILABLE"}</strong><span>ACTIVE SYMBOL</span><strong>{config?.displaySymbol || "UNKNOWN"}</strong></div>
             </div>
+            </section>
+            )}
 
             <div className="operation-section operation-emergency-section">
 

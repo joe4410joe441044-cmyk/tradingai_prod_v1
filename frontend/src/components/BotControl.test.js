@@ -888,6 +888,20 @@ test("BotControl delegates preparation UI and preserves the sole Start Bot actio
 test("stopped BOT exposes no active Loop or Auto Trade mutation control", async () => {
     const renderer = await renderBotControl({ botRunning: false, loopEnabled: false, executionEnabled: false });
     const toggles = findAll(renderer.root, (element) => ["Toggle trading loop", "Toggle automatic trading"].includes(element.props?.ariaLabel));
+    assert.equal(toggles.length, 0);
+    assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
+    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), false);
+    assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
+});
+
+test("running BOT exposes existing Loop and Auto Trade controls only as post-start actions", async () => {
+    const renderer = await renderBotControl({ botRunning: true, loopEnabled: true, executionEnabled: false });
+    const toggles = findAll(renderer.root, (element) => ["Toggle trading loop", "Toggle automatic trading"].includes(element.props?.ariaLabel));
     assert.equal(toggles.length, 2);
-    assert.equal(toggles.every((element) => element.props.disabled === true), true);
+    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), true);
+    assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
+    assert.equal(textIncludes(renderer.root, "MARKET MODE"), false);
+    assert.equal(textIncludes(renderer.root, "AMS MONITORING"), false);
+    assert.equal(textIncludes(renderer.root, "ACTIVE SYMBOL"), false);
+    assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
 });
