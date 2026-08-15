@@ -305,17 +305,21 @@ sudo -n /home/joe4410joe/tradingai_prod_v1/venv/bin/python \
     -m backend.ai_advisor.runner_process_detection
 ```
 
-The detector is read-only and emits exactly one state:
+The detector is read-only and emits one classification plus a fixed,
+secret-free reason code:
 
-- `RUNNER_ABSENT`, exit `0`: the independent preflight passed;
-- `RUNNER_PRESENT`, exit `40`: stop because the fixed transient unit is active;
-- `INDETERMINATE`, exit `41`: fail closed because required metadata is
+- `RUNNER_ABSENT reason=<SAFE_CODE>`, exit `0`: the independent preflight passed;
+- `RUNNER_PRESENT reason=<SAFE_CODE>`, exit `40`: stop because the fixed
+  transient unit is active;
+- `INDETERMINATE reason=<SAFE_CODE>`, exit `41`: fail closed because required metadata is
   unavailable, contradictory, or not in an explicitly accepted state.
 
 The fixed transient-unit metadata is the primary signal. Process inspection is
-limited to `/proc` metadata: positive PID, PPID, `comm`, resolved executable,
-and the NUL-delimited argv vector. A process match requires a Python
-`comm`/executable and the exact adjacent argv values
+staged: after positive PID and self/parent exclusion, `comm` is read first.
+Clearly non-Python processes are rejected without reading their executable or
+cmdline. Only Python candidates require PPID, resolved executable, and the
+NUL-delimited argv vector. A process match requires a Python `comm`/executable
+and the exact adjacent argv values
 `-m backend.ai_advisor.isolated_smoke_runner`. The detector excludes its own
 PID and parent PID. Shell, heredoc, `grep`, `pgrep`, Python `-c`, partial module
 names, and command text that merely contains a planned Runner invocation do
@@ -327,6 +331,12 @@ never means absence; it produces `INDETERMINATE`. A contradictory exact
 process match while the fixed unit is inactive or not found also produces
 `INDETERMINATE`. Never kill an existing or suspected Runner. Stop and
 investigate offline instead.
+
+Reason codes are fixed uppercase identifiers and never include argv, exception
+text, paths, environment values, credentials, or other secrets. A standalone
+helper diagnostic is not a Live Validation and grants no authority to run one.
+Any future Live retry still requires new explicit approval; an
+`INDETERMINATE` result must never proceed to Live execution.
 
 ### Sanitized journal recovery
 

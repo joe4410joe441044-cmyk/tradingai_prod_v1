@@ -44,9 +44,10 @@ The committed RC file set remains 110 unique paths.
 
 ## Post-follow-up Runner Detection delta
 
-The offline `AI-ADV-LIVE-RUNNER-DETECTION-FIX-01` delta is based on
-`fdb5f731a0b94538e4badddb360889c3af3c01dd`. It is not staged, committed,
-pushed, deployed, live-validated, or activated. Its exact five paths are:
+The offline `AI-ADV-LIVE-RUNNER-DETECTION-FIX-01` delta was based on
+`fdb5f731a0b94538e4badddb360889c3af3c01dd` and was committed and pushed as
+`d57de0439576c1134a67ce6055f65fc4a1c084e0`. It has not been deployed,
+live-validated, or activated. Its exact five paths are:
 
 ```text
 backend/ai_advisor/runner_process_detection.py
@@ -60,6 +61,24 @@ This delta replaces unstructured standalone `pgrep -f` detection with a
 read-only, fail-closed, independently executed preflight based on fixed-unit
 state and exact process metadata. It grants no Live authority. A future Live
 retry requires separate explicit approval.
+
+## Post-runner-detection Candidate Filter and Reason delta
+
+The offline `AI-ADV-RUNNER-DETECTION-CANDIDATE-FILTER-REASON-FIX-01` delta is
+based on `d57de0439576c1134a67ce6055f65fc4a1c084e0`. It is not staged, committed,
+pushed, deployed, live-validated, or activated. Its exact five paths are:
+
+```text
+backend/ai_advisor/runner_process_detection.py
+docs/ai_advisor/AI_ADVISOR_EXACT_RELEASE_MANIFEST_CANDIDATE.md
+docs/ai_advisor/systemd-credential-smoke-runbook.md
+tests/test_ai_advisor_runner_process_detection.py
+tests/test_ai_advisor_systemd_unit_contract.py
+```
+
+This delta filters clearly non-Python processes before executable or cmdline
+inspection and adds fixed secret-free diagnostic reason codes. It preserves
+fail-closed handling for Python candidates and grants no Live authority.
 
 All paths in this manifest are repository-relative. No wildcard or directory
 path represents release authorization.

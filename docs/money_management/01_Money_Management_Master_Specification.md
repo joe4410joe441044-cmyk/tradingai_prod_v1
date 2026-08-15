@@ -166,3 +166,38 @@ risk amount, raw notional, or maximum position.
 `01_Money_Management_Specification_Additions_v1.1.md` is the normative detail
 for D01--D28, formulas, enums, validation, runtime data, persistence, and
 Paper/Live controls. Only Active configuration affects runtime; Draft supports
+# Live initial baseline and managed-history boundary (AMS-7D-R3-R1)
+
+The first production Money Management state is created once, only under
+`EXPLICIT_OPERATOR_APPROVAL`, from a snapshot freshly reacquired immediately
+before initialization whose authority is `REAL_LIVE_ACCOUNT`. Approval source,
+approval time, and baseline source are bootstrap audit outputs. A previously
+observed balance must never be cached or hard-coded. If authoritative state
+already exists, initialization fails closed with
+`AUTHORITATIVE_STATE_ALREADY_EXISTS`; it never overwrites that state.
+
+The snapshot must have finite positive equity, valid available capital, a FLAT
+position, no pending orders, fresh and mutually consistent account/position/order
+observations, emergency READY, bot and loop STOPPED, AUTO TRADE and Live AUTO OFF,
+and `realOrderAllowed=false`. Any failed or unknown check aborts initialization.
+
+Initial/reference equity and, under the v1 schema, high-water mark equal that
+fresh equity. Daily, weekly, and monthly periods use the existing UTC period
+boundaries and begin accumulating at the baseline timestamp. Initial numeric
+zeroes mean “accumulated since the managed-history boundary”; they do not assert
+zero historical loss or cash flow. All earlier account and trading history is
+`OUTSIDE_TRADINGAI_MM_MANAGED_HISTORY` and is neither inferred nor reconstructed.
+
+The baseline remains immutable as the management-start reference. Current equity
+and available capital refresh from `REAL_LIVE_ACCOUNT`, and Money Management
+recalculates risk budget, exposure limits, remaining exposure, position capacity,
+and sizing through the existing capital eligibility chain. Risk authority remains
+`MONEY_MANAGEMENT`.
+
+Deposits, withdrawals, transfers, and manual account adjustments are external
+cash flow, not trading P/L. Cash-flow-adjusted equity is advanced by
+`current equity - previous equity - net external cash flow`; high-water mark and
+drawdown use this adjusted series. Deposits therefore cannot create trading
+profit, withdrawals cannot create trading loss or drawdown, and mixed cash-flow
+and trading results retain only the trading component. Unknown or unresolved
+cash flow fails closed under the existing cash-flow state contract.
