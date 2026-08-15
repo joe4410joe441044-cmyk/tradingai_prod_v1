@@ -1234,7 +1234,7 @@ export default function BotControl({
             <div className="operation-section operation-emergency-section">
 
                 <div className="operation-section-title">
-                    EMERGENCY
+                    EMERGENCY（緊急操作）
                 </div>
 
                 {emergencyStateCode !== "READY" && (

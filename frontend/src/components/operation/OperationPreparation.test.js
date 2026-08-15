@@ -96,8 +96,8 @@ test("renders all six preparation sections, controls, derived fields, and existi
     ].forEach((label) => assert.equal(content.includes(label), true, label));
     [
         "CAPITAL AUTHORITY", "AVAILABLE CAPITAL", "RISK BUDGET",
-        "SIZING READINESS", "MM RUNTIME", "MM LEVERAGE LIMIT",
-        "EFFECTIVE LEVERAGE", "REAL ORDER", "PENDING ORDER AUTHORITY",
+        "SIZING READINESS", "MM RUNTIME", "MM Leverage Limit（MMレバレッジ上限）",
+        "Effective Leverage（有効レバレッジ）", "REAL ORDER", "Pending Order Authority（保留注文権限）",
     ].forEach((label) => assert.equal(content.includes(label), true, label));
     assert.equal(findButton(renderer.root, "PAPER").props["aria-pressed"], true);
     assert.equal(findButton(renderer.root, "AUTO").props["aria-pressed"], true);

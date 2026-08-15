@@ -171,8 +171,8 @@ export default function OperationPreparation({
             </div>
 
             <div className="operation-prep-flow">
-                <Section number="1" testId="trading-mode-section" title="TRADING MODE">
-                    <span className="operation-prep-label">MODE</span>
+                <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
+                    <span className="operation-prep-label">Mode（モード）</span>
                     <SegmentedControl
                         disabled={controlsDisabled}
                         label="Trading mode"
@@ -185,7 +185,7 @@ export default function OperationPreparation({
                     )}
                 </Section>
 
-                <Section number="2" testId="market-selection-section" title="MARKET SELECTION">
+                <Section number="2" testId="market-selection-section" title="MARKET SELECTION（市場選択）">
                     <span className="operation-prep-label">SELECTION MODE</span>
                     <SegmentedControl
                         disabled={controlsDisabled}
@@ -212,12 +212,12 @@ export default function OperationPreparation({
                     <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
                 </Section>
 
-                <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT">
+                <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
                     <SelectField
                         disabled={controlsDisabled}
                         format={percentage}
                         id="operation-prep-risk"
-                        label="RISK / TRADE"
+                        label="RISK / Trade（1取引リスク）"
                         onChange={(value) => changeSetting("riskPerTrade", Number(value))}
                         options={OPERATION_PREPARATION_OPTIONS.riskPerTrade}
                         value={settings.riskPerTrade}
@@ -226,23 +226,23 @@ export default function OperationPreparation({
                     <DerivedRow label="AVAILABLE CAPITAL" source="UI PREVIEW" value="$10,000" />
                     <span className="operation-prep-label">COMPOUNDING</span>
                     <ToggleControl disabled={controlsDisabled} label="Compounding" onChange={(value) => changeSetting("compounding", value)} value={settings.compounding} />
-                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX EXPOSURE" onChange={(value) => changeSetting("maxExposure", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxExposure} value={settings.maxExposure} />
-                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX DRAWDOWN" onChange={(value) => changeSetting("maxDrawdown", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxDrawdown} value={settings.maxDrawdown} />
+                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => changeSetting("maxExposure", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxExposure} value={settings.maxExposure} />
+                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => changeSetting("maxDrawdown", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxDrawdown} value={settings.maxDrawdown} />
                     <DerivedRow label="RISK BUDGET" source="UI PREVIEW" value="$50" />
                     <DerivedRow label="SIZING READINESS" source="UI FALLBACK" status value="WAITING" />
                     <DerivedRow label="MM RUNTIME" source="RUNTIME" status value="UNKNOWN" />
                     <a className="operation-prep-link" href="/money-management">Money Management →</a>
                 </Section>
 
-                <Section bodyClassName="operation-prep-section__body--dense" number="4" testId="trade-execution-section" title="TRADE / EXECUTION">
-                    <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="REQUESTED LEVERAGE" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                    <DerivedRow label="MM LEVERAGE LIMIT" source="UI PREVIEW" value="5x" />
-                    <DerivedRow label="EFFECTIVE LEVERAGE" source="UI FALLBACK" value="NOT CONNECTED" />
-                    <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} />
+                <Section bodyClassName="operation-prep-section__body--dense" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
+                    <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
+                    <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source="UI PREVIEW" value="5x" />
+                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source="UI FALLBACK" value="NOT CONNECTED" />
+                    <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
                     <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
                 </Section>
 
-                <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION">
+                <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
                     <span className="operation-prep-label">LOOP ON START</span>
                     <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
                     <span className="operation-prep-label">AUTO TRADE ON START</span>
@@ -251,15 +251,15 @@ export default function OperationPreparation({
                     <p className="operation-prep-note">Preparation state only. Runtime start integration is intentionally deferred.</p>
                 </Section>
 
-                <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS">
+                <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS（安全性 / 開始準備）">
                     <div className="operation-prep-derived-list operation-prep-derived-list--safety">
-                        <DerivedRow label="EMERGENCY" source="RUNTIME" status value={emergencyReadiness} />
-                        <DerivedRow label="POSITION" source="RUNTIME" status value={positionState} />
-                        <DerivedRow label="PENDING ORDER AUTHORITY" source="RUNTIME" status value={orderAuthority} />
-                        <DerivedRow label="MARKET SELECTION" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
-                        <DerivedRow label="MONEY MANAGEMENT" source="UI FALLBACK" status value={mmReadiness} />
-                        <DerivedRow label="GOVERNANCE" source="RUNTIME" status value={governanceReadiness} />
-                        <DerivedRow label="EXECUTION" source="RUNTIME" status value={executionReadiness} />
+                        <DerivedRow label="Emergency（緊急停止）" source="RUNTIME" status value={emergencyReadiness} />
+                        <DerivedRow label="Position（ポジション）" source="RUNTIME" status value={positionState} />
+                        <DerivedRow label="Pending Order Authority（保留注文権限）" source="RUNTIME" status value={orderAuthority} />
+                        <DerivedRow label="Market Selection（市場選択）" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
+                        <DerivedRow label="Money Management（資金管理）" source="UI FALLBACK" status value={mmReadiness} />
+                        <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
+                        <DerivedRow label="Execution（執行）" source="RUNTIME" status value={executionReadiness} />
                     </div>
                 </Section>
             </div>
@@ -270,7 +270,7 @@ export default function OperationPreparation({
                     <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
                     <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
                     <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
-                    <DerivedRow label="RISK / TRADE" source="OPERATOR" value={summary.riskPerTrade} />
+                    <DerivedRow label="RISK / Trade（1取引リスク）" source="OPERATOR" value={summary.riskPerTrade} />
                     <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
                     <DerivedRow label="LOOP" source="OPERATOR" value={summary.loop} />
                     <DerivedRow label="AUTO TRADE" source="OPERATOR" value={summary.autoTrade} />
