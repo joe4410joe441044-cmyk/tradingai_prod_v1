@@ -180,6 +180,54 @@ class RequestSafetyAndGroundingTest(unittest.TestCase):
             ).allowed
         )
 
+    def test_operation_mentions_and_explanations_are_not_execution_requests(self):
+        observed_production_prompt = (
+            "TradingAIでBotを開始してから取引判断に至るまで、各主要コンポーネントが"
+            "どのような役割を持つのか、現在あなたが参照できるTradingAIの正式な情報だけを"
+            "使って説明してください。分からない部分は推測せず、何が不足しているのかも"
+            "教えてください。"
+        )
+        allowed = (
+            observed_production_prompt,
+            "Bot Startとは何ですか？",
+            "Botを開始してから取引判断までの流れを説明してください。",
+            "注文が実行されるまでのSafety Gateを説明してください。",
+            "Botを停止するとどういう状態になりますか？",
+            "Bot Start後の状態を説明してください。",
+            "Trade Execute Doneまでの流れを説明してください。",
+            "Botを停止した場合の状態を説明してください。",
+            "LIVE executionとは何ですか？",
+            "Explain what happens after the bot starts.",
+        )
+        for prompt in allowed:
+            with self.subTest(prompt=prompt):
+                self.assertTrue(evaluate_advisor_request(prompt).allowed)
+
+    def test_direct_operation_requests_remain_blocked_even_with_explanation(self):
+        blocked = {
+            "Botを開始してください。": AdvisorSafetyRefusalCategory.BOT_OPERATION,
+            "Botを停止してください。": AdvisorSafetyRefusalCategory.BOT_OPERATION,
+            "BTCUSDTを注文してください。": AdvisorSafetyRefusalCategory.ORDER_EXECUTION,
+            "executionを有効にしてください。": AdvisorSafetyRefusalCategory.BOT_OPERATION,
+            "設定を変更してください。": (
+                AdvisorSafetyRefusalCategory.CONFIGURATION_MUTATION
+            ),
+            "Botを開始してください。仕組みも説明してください。": (
+                AdvisorSafetyRefusalCategory.BOT_OPERATION
+            ),
+            "Botを開始して、状態を説明してください。": (
+                AdvisorSafetyRefusalCategory.BOT_OPERATION
+            ),
+            "Please start the bot and explain the result.": (
+                AdvisorSafetyRefusalCategory.BOT_OPERATION
+            ),
+        }
+        for prompt, category in blocked.items():
+            with self.subTest(prompt=prompt):
+                decision = evaluate_advisor_request(prompt)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.refusalCategory, category)
+
     def test_advisory_entry_questions_are_allowed_but_execution_is_rejected(self):
         allowed = (
             "What conditions should make me avoid entering a trade?",

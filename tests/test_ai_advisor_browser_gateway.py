@@ -322,6 +322,27 @@ class BrowserGatewayTest(unittest.TestCase):
         self.assertNotIn("Authorization", response.text)
         self.assertIsNotNone(service_input)
 
+    def test_observed_lifecycle_explanation_reaches_read_only_service(self):
+        prompt = (
+            "TradingAIでBotを開始してから取引判断に至るまで、各主要コンポーネントが"
+            "どのような役割を持つのか、現在あなたが参照できるTradingAIの正式な情報だけを"
+            "使って説明してください。分からない部分は推測せず、何が不足しているのかも"
+            "教えてください。"
+        )
+        api, dependency = gateway()
+        response = api.post(
+            "/api/ai-advisor/conversation",
+            json={"prompt": prompt},
+            headers=headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "SUCCEEDED")
+        self.assertEqual(dependency.calls, 1)
+        self.assertNotEqual(
+            response.json()["advisorResponse"].get("refusalCategory"),
+            "BOT_OPERATION",
+        )
+
     def test_status_is_coarse_and_does_not_call_service(self):
         api, dependency = gateway()
         response = api.get(
