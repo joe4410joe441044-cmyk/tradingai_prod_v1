@@ -1,4 +1,4 @@
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 export class SupervisorConversationError extends Error {
     constructor(code, message) {
@@ -69,4 +69,22 @@ export async function sendSupervisorConversation({
         globalThis.clearTimeout(timer);
         signal?.removeEventListener("abort", abortFromCaller);
     }
+}
+
+export function currentConversationStorageKey(agentId) {
+    return `tradingai.supervisor.current.${agentId}`;
+}
+
+export async function getSupervisorConversationHistory(agentId, fetchImpl = globalThis.fetch) {
+    const response = await fetchImpl(`/api/supervisor/conversation/history?agentId=${encodeURIComponent(agentId)}&limit=20`);
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.readOnly) throw new SupervisorConversationError("HISTORY_UNAVAILABLE", "Conversation history is unavailable.");
+    return body;
+}
+
+export async function getSupervisorConversationSession(agentId, conversationId, fetchImpl = globalThis.fetch) {
+    const response = await fetchImpl(`/api/supervisor/conversation/history/${encodeURIComponent(conversationId)}?agentId=${encodeURIComponent(agentId)}`);
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.readOnly || body.agentId !== agentId) throw new SupervisorConversationError("HISTORY_UNAVAILABLE", "Conversation session is unavailable.");
+    return body;
 }

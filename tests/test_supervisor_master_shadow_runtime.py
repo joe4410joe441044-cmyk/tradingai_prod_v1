@@ -9,6 +9,7 @@ from backend.supervisor.contracts import (
     DomainSnapshot,
     FieldValueObservation,
     Freshness,
+    HumanAttention,
     InputValueState,
     MoneyManagementSnapshot,
     ReadOnlySupervisorSnapshot,
@@ -16,6 +17,7 @@ from backend.supervisor.contracts import (
 )
 from backend.supervisor.failure_codes import SupervisorFailureCode
 from backend.supervisor.master_shadow_runtime import (
+    MASTER_SHADOW_PROVIDER_TIMEOUT_SECONDS,
     MasterShadowProviderStatus,
     MasterShadowRuntimeStatus,
     MasterShadowValidationStatus,
@@ -279,7 +281,7 @@ def test_valid_normal_decision_is_bound_allowlisted_and_side_effect_free():
     assert "moneyManagement" not in request["context"]
     assert "raw" not in request["context"]
     assert contract.__name__ == "MasterSupervisorDecision"
-    assert timeout == 5.0
+    assert timeout == MASTER_SHADOW_PROVIDER_TIMEOUT_SECONDS
 
 
 @pytest.mark.parametrize(
@@ -485,6 +487,41 @@ def test_human_attention_cannot_be_understated():
     )
     result, _, _ = evaluate(value=value)
     assert result.failureCode is SupervisorFailureCode.ACTION_PROHIBITED
+
+
+def test_normal_stopped_state_does_not_escalate_to_immediate_action():
+    source = snapshot(governance_enabled=False)
+    specialist = mm_result(source, mm_output(
+        state="NORMAL", direction="MAINTAIN", condition="HEALTHY"
+    ))
+    value = master_output(
+        posture="CAUTION",
+        trading="PAUSE_NEW_ENTRIES",
+        attention="IMMEDIATE_ACTION",
+        summary="現在は安全に停止しています。",
+    )
+    result, _, _ = evaluate(source, specialist, value)
+    assert result.status is MasterShadowRuntimeStatus.COMPLETED
+    assert result.decision.overallPosture.value == "CAUTION"
+    assert result.decision.humanAttention is HumanAttention.REVIEW
+    assert result.decision.humanAttention is not HumanAttention.IMMEDIATE_ACTION
+    assert result.operationalEffect == "NONE"
+
+
+def test_genuine_emergency_keeps_immediate_action():
+    source = snapshot(
+        governance_enabled=False, emergency_locked=True, emergency_state="LOCKED"
+    )
+    specialist = mm_result(source, mm_output(
+        state="LOCKED", direction="PAUSE", multiplier=None, condition="CRITICAL"
+    ))
+    value = master_output(
+        posture="LOCKED", trading="STOP", mm_direction="PAUSE", mm_multiplier=None,
+        attention="IMMEDIATE_ACTION", summary="緊急停止のため直ちに対応が必要です。",
+    )
+    result, _, _ = evaluate(source, specialist, value)
+    assert result.status is MasterShadowRuntimeStatus.COMPLETED
+    assert result.decision.humanAttention is HumanAttention.IMMEDIATE_ACTION
 
 
 def test_snapshot_mm_binding_rejects_mismatch_digest_contract_failure_and_null():

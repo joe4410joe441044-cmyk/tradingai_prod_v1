@@ -14,7 +14,11 @@ from backend.api.supervisor_history import create_supervisor_history_router
 from backend.supervisor.audit_store import SupervisorAuditStore
 from backend.supervisor.conversation_service import SupervisorConversationService
 from backend.supervisor.ollama_provider import OllamaLocalProvider
-from backend.supervisor.provider_configuration import load_supervisor_provider_configuration
+from backend.supervisor.openai_provider import OpenAIStructuredProvider
+from backend.supervisor.provider_configuration import (
+    SupervisorProviderMode,
+    load_supervisor_provider_configuration,
+)
 from backend.supervisor.provider_status import build_provider_status
 
 
@@ -34,6 +38,7 @@ def _failure_response(code: SupervisorFailureCode) -> Response:
 
 def create_supervisor_router(
     adapter: RuntimeSnapshotAdapter | None = None,
+    provider_configuration: object | None = None,
 ) -> APIRouter:
     """Create a router holding observation capability only, never commands."""
     snapshot_adapter = adapter or RuntimeSnapshotAdapter()
@@ -50,12 +55,14 @@ def create_supervisor_router(
             return _failure_response(SupervisorFailureCode.FAIL_CLOSED)
 
     audit_store = SupervisorAuditStore()
-    provider_configuration = load_supervisor_provider_configuration()
-    local_provider = (
-        OllamaLocalProvider(provider_configuration)
-        if provider_configuration.mode.value == "OLLAMA_LOCAL"
-        else None
-    )
+    if provider_configuration is None:
+        provider_configuration = load_supervisor_provider_configuration()
+    if provider_configuration.mode is SupervisorProviderMode.OPENAI:
+        local_provider = OpenAIStructuredProvider(provider_configuration)
+    elif provider_configuration.mode is SupervisorProviderMode.OLLAMA_LOCAL:
+        local_provider = OllamaLocalProvider(provider_configuration)
+    else:
+        local_provider = None
     router.include_router(create_supervisor_conversation_router(SupervisorConversationService(
         snapshot_adapter=snapshot_adapter, audit_store=audit_store, provider=local_provider,
     )))
@@ -81,10 +88,12 @@ def create_supervisor_router(
         except Exception:
             return Response(
                 content=json.dumps({
-                    "provider": "OLLAMA_LOCAL", "model": "qwen3:4b-instruct",
-                    "availability": "UNAVAILABLE", "localhostOnly": True,
+                    "provider": provider_configuration.mode.value,
+                    "model": provider_configuration.model,
+                    "availability": "UNAVAILABLE",
+                    "localhostOnly": provider_configuration.mode is SupervisorProviderMode.OLLAMA_LOCAL,
                     "mode": "SHADOW", "lastCheckedAt": None, "lastSuccessAt": None,
-                    "lastFailureCode": "SUPERVISOR_OLLAMA_UNAVAILABLE",
+                    "lastFailureCode": "SUPERVISOR_PROVIDER_UNAVAILABLE",
                     "operationalEffect": "NONE",
                 }, sort_keys=True, separators=(",", ":")),
                 media_type="application/json", status_code=503,

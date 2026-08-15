@@ -14,6 +14,7 @@ from backend.supervisor.contracts import (
 )
 from backend.supervisor.failure_codes import SupervisorFailureCode
 from backend.supervisor.mm_shadow_runtime import (
+    MM_SHADOW_PROVIDER_TIMEOUT_SECONDS,
     MMShadowProviderStatus,
     MMShadowRuntimeStatus,
     MMShadowValidationStatus,
@@ -175,7 +176,7 @@ def test_valid_shadow_assessments_complete_without_operational_effect(
     assert request["context"]["equity"] == "1000.123456789"
     assert "bot" not in request["context"]
     assert contract.__name__ == "MMSupervisorAssessment"
-    assert timeout == 5.0
+    assert timeout == MM_SHADOW_PROVIDER_TIMEOUT_SECONDS
 
 
 @pytest.mark.parametrize("mode", ["ADVISORY", "ACTIVE"])

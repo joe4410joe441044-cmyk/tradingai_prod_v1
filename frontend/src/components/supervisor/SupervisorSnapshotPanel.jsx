@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
+import SupervisorActionableUnknown from "./SupervisorActionableUnknown";
 
 import { getSupervisorSnapshot } from "../../api/supervisorClient";
 
 function DomainLine({ label, value }) {
-    const display = value === null || value === undefined || value === "" ? "UNKNOWN" : String(value);
+    const unknown = value === null || value === undefined || value === "" || value === "UNKNOWN";
+    const display = unknown ? "UNKNOWN" : String(value);
     return (
         <div className="supervisor-snapshot__line">
-            <dt>{label}</dt>
-            <dd>{display}</dd>
+            <dt>{label}</dt><dd>{display}</dd>
+            {unknown && <SupervisorActionableUnknown item={{
+                subject: label,
+                reason: "現在のSnapshotに、この項目の検証済みRuntime値がありません。",
+                missingInformation: `現在の正式な${label}`,
+                safeNextStep: "Supervisor Snapshotの読み取り専用Diagnosticsと権威ソースの更新時刻を確認してください。",
+                decisionImpact: "現在値を確認できるまで、この項目を前提とする判断は保留してください。",
+            }} />}
         </div>
     );
 }
@@ -81,7 +89,7 @@ export default function SupervisorSnapshotPanel() {
 
             {loading && <p className="supervisor-snapshot__state">Snapshot Loading…</p>}
 
-            {error && <p className="supervisor-snapshot__error" role="alert">Snapshot unavailable: {error}</p>}
+            {error && <><p className="supervisor-snapshot__error" role="alert">Snapshot unavailable: {error}</p><SupervisorActionableUnknown item={{ subject: "Supervisor Snapshot", reason: error, missingInformation: "現在の権威あるSupervisor Runtime snapshot", safeNextStep: "読み取り専用Snapshot APIの状態を再確認し、継続する場合は管理者へ確認してください。", decisionImpact: "現在状態を推測せず、依存する判断は保留してください。" }} /></>}
 
             {!loading && !error && (
                 <div className="supervisor-snapshot__content">

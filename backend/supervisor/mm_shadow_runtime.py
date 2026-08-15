@@ -32,7 +32,7 @@ from .agent_registry import Capability, DataSource
 from .validation import validate_mm_assessment
 
 
-MM_SHADOW_PROVIDER_TIMEOUT_SECONDS = 5.0
+MM_SHADOW_PROVIDER_TIMEOUT_SECONDS = 45.0
 MM_SHADOW_CONTRACT_VERSION = "1"
 PROHIBITED_CLAIMS = (
     "RISK_CHANGED",

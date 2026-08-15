@@ -13,6 +13,16 @@ def _response(value,status=200):
     return Response(content=body,media_type="application/json",status_code=status)
 def create_supervisor_history_router(store: SupervisorAuditStore):
     router=APIRouter(); replay=SupervisorReplayService(store)
+    @router.get("/conversation/history",response_class=Response)
+    def conversation_history(agentId:str,limit:int=Query(20,ge=1,le=100)):
+        try: return _response(store.list_conversation_sessions(SupervisorAgentId(agentId).value,limit))
+        except ValueError: return _response({"code":SupervisorFailureCode.INPUT_INVALID.value,"message":"Conversation history filter is invalid."},400)
+        except SupervisorBoundaryError: return _response({"code":SupervisorFailureCode.READ_FAILED.value,"message":"Conversation history is unavailable."},503)
+    @router.get("/conversation/history/{conversation_id}",response_class=Response)
+    def conversation_session(conversation_id:str,agentId:str):
+        try: return _response(store.get_conversation_session(SupervisorAgentId(agentId).value,conversation_id))
+        except SupervisorBoundaryError as e: return _response({"code":e.code.value,"message":"Conversation session is unavailable."},404 if e.code is SupervisorFailureCode.EVENT_NOT_FOUND else 503)
+        except ValueError: return _response({"code":SupervisorFailureCode.INPUT_INVALID.value,"message":"Conversation history filter is invalid."},400)
     @router.get("/history",response_class=Response)
     def history(agentId:str|None=None,eventType:str|None=None,status:str|None=None,limit:int=Query(20,ge=1,le=100),cursor:str|None=None):
         try:

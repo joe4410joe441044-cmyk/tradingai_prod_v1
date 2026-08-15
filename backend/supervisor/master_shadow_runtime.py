@@ -39,7 +39,7 @@ from .security_boundary import validate_agent_capability, validate_data_source_a
 from .validation import validate_master_decision
 
 
-MASTER_SHADOW_PROVIDER_TIMEOUT_SECONDS = 5.0
+MASTER_SHADOW_PROVIDER_TIMEOUT_SECONDS = 45.0
 MASTER_SHADOW_CONTRACT_VERSION = "1"
 MASTER_PROHIBITED_CLAIMS = (
     "RUNTIME_CHANGED",
@@ -274,7 +274,6 @@ def _hard_safety_locked(context: MasterShadowContext) -> bool:
     return (
         context.emergencyLocked is True
         or emergency_state in {"LOCKED", "ACTION_REQUIRED", "PROCESSING"}
-        or context.governanceExecutionEnabled is False
     )
 
 
@@ -434,7 +433,7 @@ def _validate_master_safety(
     context: MasterShadowContext,
     snapshot: ReadOnlySupervisorSnapshot,
     evaluated_at: datetime,
-) -> None:
+) -> MasterSupervisorDecision:
     validate_master_decision(decision, snapshot, now=evaluated_at)
     if decision.sourceEvaluatedAt != context.snapshotCapturedAt or decision.decidedAt != evaluated_at:
         raise SupervisorBoundaryError(
@@ -479,7 +478,12 @@ def _validate_master_safety(
             "CONTINUE requires fully validated normal authority",
         )
     required_attention = HumanAttention.NOT_REQUIRED
-    if locked or conflict or decision.overallPosture is SupervisorState.LOCKED:
+    emergency = (
+        locked
+        or conflict
+        or decision.overallPosture is SupervisorState.LOCKED
+    )
+    if emergency:
         required_attention = HumanAttention.IMMEDIATE_ACTION
     elif (
         nonfresh
@@ -499,6 +503,8 @@ def _validate_master_safety(
             SupervisorFailureCode.ACTION_PROHIBITED,
             "human attention is understated",
         )
+    if decision.humanAttention is HumanAttention.IMMEDIATE_ACTION and not emergency:
+        decision = decision.model_copy(update={"humanAttention": HumanAttention.REVIEW})
     if decision.humanAttention is HumanAttention.NOT_REQUIRED and (
         decision.overallPosture is not SupervisorState.NORMAL
         or not _normal_requirements_met(context)
@@ -509,6 +515,7 @@ def _validate_master_safety(
         )
     _validate_mm_consistency(decision, context)
     _validate_claims(decision)
+    return decision
 
 
 def _failure_result(
@@ -660,7 +667,7 @@ def evaluate_master_shadow(
                 SupervisorFailureCode.OUTPUT_INVALID,
                 "provider output failed Master contract validation",
             ) from exc
-        _validate_master_safety(decision, context, snapshot, evaluated_at)
+        decision = _validate_master_safety(decision, context, snapshot, evaluated_at)
     except TimeoutError:
         return _failure_result(
             snapshot=snapshot,

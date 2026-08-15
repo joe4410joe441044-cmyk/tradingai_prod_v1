@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.api.supervisor import create_supervisor_router
+from backend.supervisor.provider_configuration import SupervisorProviderConfiguration
 from backend.supervisor.runtime_snapshot_adapter import (
     RuntimeAuthorityReaders,
     RuntimeSnapshotAdapter,
@@ -82,7 +83,8 @@ def make_client(values=None):
     )
     app = FastAPI()
     app.include_router(create_supervisor_router(
-        RuntimeSnapshotAdapter(readers=readers, clock=lambda: NOW)
+        RuntimeSnapshotAdapter(readers=readers, clock=lambda: NOW),
+        provider_configuration=SupervisorProviderConfiguration(),
     ))
     return TestClient(app), app
 

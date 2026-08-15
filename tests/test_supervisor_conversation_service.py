@@ -143,3 +143,85 @@ def test_conversation_timeout_invalid_output_and_forbidden_claim_fail_closed_wit
         assert "SECRET" not in result.answer
         assert "traceback" not in result.answer.lower()
         assert result.operationalEffect == "NONE"
+
+
+class CapturingConversationProvider(ConversationProvider):
+    def __init__(self):
+        super().__init__()
+        self.inputs = []
+
+    def generate_structured_output(self, input_data, output_contract, timeout_seconds):
+        self.inputs.append((output_contract.__name__, input_data))
+        if output_contract.__name__ == "MasterSupervisorDecision":
+            return ProviderResult({
+                "schemaVersion": 1,
+                "agent": "MASTER_SUPERVISOR",
+                "mode": "SHADOW",
+                "overallPosture": "CAUTION",
+                "tradingRecommendation": "PAUSE_NEW_ENTRIES",
+                "mmRecommendation": {"riskDirection": "MAINTAIN", "riskMultiplier": "1"},
+                "humanAttention": "REVIEW",
+                "summary": "現状は安全停止状態です。",
+                "reasons": ["BotとExecutionが停止しています。"],
+                "conflicts": [],
+                "uncertainties": [],
+                "nextReviewConditions": [],
+                "sourceEvaluatedAt": NOW,
+                "decidedAt": NOW,
+            })
+        return super().generate_structured_output(input_data, output_contract, timeout_seconds)
+
+
+def _conversation_input(provider, name="SupervisorConversationProviderOutput"):
+    return next(
+        data for contract, data in provider.inputs if contract == name
+    )
+
+
+def test_mm_conversation_context_excludes_non_mm_domains():
+    provider = CapturingConversationProvider()
+    SupervisorConversationService(
+        snapshot_adapter=SnapshotAdapter(), provider=provider, clock=lambda: NOW
+    ).respond(object(), request(SupervisorAgentId.MM_SUPERVISOR))
+    system_state = _conversation_input(provider)["systemState"]
+    assert set(system_state.keys()) <= {"moneyManagement", "warnings"}
+    assert "moneyManagement" in system_state
+    for domain in ("market", "bot", "loop", "trade", "governance", "emergency",
+                   "execution", "decision", "health"):
+        assert domain not in system_state
+
+
+def test_mm_conversation_context_keeps_current_and_remaining_exposure_distinct():
+    provider = CapturingConversationProvider()
+    adapter = SnapshotAdapter()
+    adapter.value = adapter.value.model_copy(
+        update={
+            "moneyManagement": adapter.value.moneyManagement.model_copy(
+                update={
+                    "currentExposure": None,
+                    "remainingExposure": Decimal("1.583673932"),
+                    "drawdown": None,
+                }
+            )
+        }
+    )
+    SupervisorConversationService(
+        snapshot_adapter=adapter, provider=provider, clock=lambda: NOW
+    ).respond(object(), request(SupervisorAgentId.MM_SUPERVISOR))
+    money_management = _conversation_input(provider)["systemState"]["moneyManagement"]
+    assert money_management["currentExposure"] is None
+    assert money_management["remainingExposure"] == "1.583673932"
+    assert money_management["drawdown"] is None
+
+
+def test_master_conversation_context_includes_full_state():
+    provider = CapturingConversationProvider()
+    service = SupervisorConversationService(
+        snapshot_adapter=SnapshotAdapter(), provider=provider, clock=lambda: NOW
+    )
+    result = service.respond(object(), request(SupervisorAgentId.MASTER_SUPERVISOR))
+    assert result.status.value == "COMPLETED"
+    system_state = _conversation_input(provider)["systemState"]
+    for domain in ("bot", "loop", "trade", "governance", "emergency", "execution",
+                   "market", "decision", "health", "moneyManagement"):
+        assert domain in system_state

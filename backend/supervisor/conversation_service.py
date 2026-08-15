@@ -26,9 +26,10 @@ from .runtime_snapshot_adapter import RuntimeSnapshotAdapter
 from .security_boundary import validate_agent_capability
 from .audit_store import SupervisorAuditStore
 from .history_contracts import SupervisorEventType, SupervisorHistoryEvent
+from .human_actionable_unknown import build_actionable_unknowns, provider_failure_explanation
 
 
-CONVERSATION_TIMEOUT_SECONDS = 8.0
+CONVERSATION_TIMEOUT_SECONDS = 45.0
 _UNAVAILABLE_ANSWER = "Supervisor AI provider is not connected."
 _FAILED_ANSWER = "Supervisor response is unavailable. No operational change was made."
 _FORBIDDEN_CLAIMS = (
@@ -39,6 +40,44 @@ _FORBIDDEN_CLAIMS = (
     "AMS THRESHOLDを変更しました", "AMS THRESHOLD CHANGED",
 )
 _SECRET_MARKERS = ("API_KEY", "APIKEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY")
+_UNSAFE_GUIDANCE = ("START BOT", "ENABLE AUTO TRADE", "ENABLE EXECUTION", "SWITCH TO LIVE", "PLACE AN ORDER", "SUBMIT AN ORDER", "CHANGE MONEY MANAGEMENT", "BOTを開始", "AUTO TRADEを有効", "EXECUTIONを有効", "LIVEに切り替", "注文を出", "注文を送信", "MONEY MANAGEMENTを変更")
+
+
+def _compact_domain(domain) -> dict:
+    data = domain.model_dump(mode="json") if hasattr(domain, "model_dump") else {}
+    return {
+        key: value
+        for key, value in data.items()
+        if key != "fieldStates" and value is not None
+    }
+
+
+def _conversation_state(snapshot, agent_id: SupervisorAgentId | None = None) -> dict:
+    if agent_id is SupervisorAgentId.MM_SUPERVISOR:
+        mm = snapshot.moneyManagement
+        data = mm.model_dump(mode="json") if hasattr(mm, "model_dump") else {}
+        return {
+            "moneyManagement": data,
+            "warnings": [
+                warning.model_dump(mode="json")
+                for warning in snapshot.warnings
+                if warning.domain == "moneyManagement"
+            ],
+        }
+    return {
+        "overallFreshness": snapshot.overallFreshness.value,
+        "bot": _compact_domain(snapshot.bot),
+        "loop": _compact_domain(snapshot.loop),
+        "trade": _compact_domain(snapshot.trade),
+        "governance": _compact_domain(snapshot.governance),
+        "emergency": _compact_domain(snapshot.emergency),
+        "execution": _compact_domain(snapshot.execution),
+        "market": _compact_domain(snapshot.market),
+        "decision": _compact_domain(snapshot.decision),
+        "health": _compact_domain(snapshot.health),
+        "moneyManagement": _compact_domain(snapshot.moneyManagement),
+        "warnings": [warning.model_dump(mode="json") for warning in snapshot.warnings],
+    }
 
 
 class SupervisorConversationService:
@@ -80,6 +119,9 @@ class SupervisorConversationService:
         convo=SupervisorHistoryEvent(eventId=response.messageId,eventType=event_type,agentId=request.agentId,status=response.status.value,failureCode=response.failureCode,humanAttention=response.humanAttention,summary=response.answer[:300],decisionDigest=getattr(getattr(master_result,"auditEvent",None),"decisionDigest",None),assessmentDigest=mm_result.auditEvent.assessmentDigest,providerIdentity=(master_result or mm_result).providerIdentity,providerVersion=(master_result or mm_result).providerVersion,**common)
         warning=self._record(convo)
         if warning: warnings.append(warning)
+        if self._audit_store is not None:
+            try: self._audit_store.append_conversation_turn(request,response)
+            except Exception: warnings.append("Supervisor conversation history could not be stored.")
         return response.model_copy(update={"warnings":tuple((*response.warnings,*warnings))}) if warnings else response
 
     def _now(self) -> datetime:
@@ -105,22 +147,34 @@ class SupervisorConversationService:
             decisionIdentity=getattr(getattr(decision, "auditEvent", None), "eventId", None),
             assessmentIdentity=getattr(getattr(assessment, "auditEvent", None), "eventId", None),
             warnings=(),
+            actionableUnknowns=(provider_failure_explanation(code.value),),
             failureCode=code,
             respondedAt=now,
         )
 
     @staticmethod
-    def _safe_output(output: SupervisorConversationProviderOutput) -> None:
+    def _safe_output(output: SupervisorConversationProviderOutput, snapshot) -> None:
         text = " ".join((output.answer, *output.warnings)).upper().replace("_", " ")
         if any(claim.upper() in text for claim in _FORBIDDEN_CLAIMS):
             raise ValueError("prohibited operational claim")
         if any(marker in text for marker in _SECRET_MARKERS):
             raise ValueError("secret-like output")
+        if any(guidance in text for guidance in _UNSAFE_GUIDANCE):
+            raise ValueError("unsafe operator guidance")
+        authoritative = {
+            "BOT IS RUNNING": (snapshot.bot.status, "RUNNING"),
+            "BOT RUNNING": (snapshot.bot.status, "RUNNING"),
+            "EXECUTION IS ENABLED": (snapshot.governance.executionEnabled, True),
+            "EMERGENCY IS LOCKED": (snapshot.emergency.locked, True),
+            "REAL ORDERS ARE ALLOWED": (snapshot.trade.realOrderAllowed, True),
+        }
+        if any(claim in text and actual != claimed for claim, (actual, claimed) in authoritative.items()):
+            raise ValueError("provider contradicted authoritative state")
 
     def respond(self, app: object, request: SupervisorConversationRequest) -> SupervisorConversationResponse:
-        now = self._now()
         validate_agent_capability(request.agentId, Capability.ANSWER_CONVERSATION, SupervisorMode.SHADOW)
         snapshot = self._snapshot_adapter.build(app)
+        now = self._now()
         mm_result = evaluate_mm_shadow(snapshot, self._provider, now)
         master_result = None
         if request.agentId is SupervisorAgentId.MASTER_SUPERVISOR:
@@ -160,6 +214,17 @@ class SupervisorConversationService:
             "runtimeIdentity": identity,
             "operationalEffect": "NONE",
             "prohibitedClaims": list(_FORBIDDEN_CLAIMS),
+            "systemState": _conversation_state(snapshot, request.agentId),
+            "mmAssessment": (
+                mm_result.assessment.model_dump(mode="json")
+                if mm_result.assessment is not None
+                else None
+            ),
+            "masterDecision": (
+                master_result.decision.model_dump(mode="json")
+                if master_result is not None and master_result.decision is not None
+                else None
+            ),
         }
         try:
             envelope = self._provider.generate_structured_output(
@@ -182,7 +247,7 @@ class SupervisorConversationService:
             if not isinstance(raw, Mapping):
                 raise ValueError("invalid provider output")
             output = SupervisorConversationProviderOutput.model_validate(dict(raw))
-            self._safe_output(output)
+            self._safe_output(output, snapshot)
         except TimeoutError:
             response=self._failure(request, snapshot, now, SupervisorFailureCode.PROVIDER_TIMEOUT, assessment=mm_result, decision=master_result); return self._audit_events(request,snapshot,now,response,mm_result,master_result)
         except (ValidationError, ValueError, TypeError):
@@ -206,6 +271,7 @@ class SupervisorConversationService:
             decisionIdentity=master_result.auditEvent.eventId if master_result else None,
             assessmentIdentity=mm_result.auditEvent.eventId,
             warnings=output.warnings,
+            actionableUnknowns=build_actionable_unknowns(snapshot, request.agentId),
             respondedAt=now,
         )
         return self._audit_events(request,snapshot,now,response,mm_result,master_result)

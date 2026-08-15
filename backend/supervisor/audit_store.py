@@ -8,6 +8,10 @@ from .history_contracts import SupervisorHistoryEvent, SupervisorHistoryPage
 SUPERVISOR_AUDIT_MAX_EVENTS=5000
 SUPERVISOR_AUDIT_MAX_LIMIT=100
 DEFAULT_SUPERVISOR_AUDIT_PATH=Path("logs/runtime/supervisor_audit.sqlite3")
+_SECRET_MARKERS=("API_KEY","APIKEY","SECRET","TOKEN","PASSWORD","PRIVATE_KEY")
+def _safe_question(value):
+    text=str(value).strip()
+    return "[REDACTED]" if any(marker in text.upper() for marker in _SECRET_MARKERS) else text
 
 class SupervisorAuditStore:
     def __init__(self,path=DEFAULT_SUPERVISOR_AUDIT_PATH,max_events=SUPERVISOR_AUDIT_MAX_EVENTS):
@@ -18,6 +22,7 @@ class SupervisorAuditStore:
             self.path.parent.mkdir(parents=True,exist_ok=True)
             with self._connect() as db:
                 db.execute("CREATE TABLE IF NOT EXISTS supervisor_events (seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL UNIQUE,occurred_at TEXT NOT NULL,agent_id TEXT NOT NULL,event_type TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL)")
+                db.execute("CREATE TABLE IF NOT EXISTS supervisor_conversation_turns (seq INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,conversation_id TEXT NOT NULL,agent_id TEXT NOT NULL,requested_at TEXT NOT NULL,responded_at TEXT NOT NULL,question TEXT NOT NULL,answer TEXT NOT NULL,status TEXT NOT NULL,attention TEXT NOT NULL,operational_effect TEXT NOT NULL CHECK(operational_effect='NONE'))")
         except (OSError,sqlite3.Error) as e: raise SupervisorBoundaryError(SupervisorFailureCode.STORE_UNAVAILABLE,"audit store unavailable") from e
     def append(self,event: SupervisorHistoryEvent):
         payload=event.stable_json()
@@ -57,3 +62,29 @@ class SupervisorAuditStore:
             return SupervisorHistoryEvent.model_validate_json(row[0])
         except SupervisorBoundaryError: raise
         except Exception as e: raise SupervisorBoundaryError(SupervisorFailureCode.READ_FAILED,"audit read failed") from e
+
+    def append_conversation_turn(self,request,response):
+        values=(response.messageId,request.conversationId,request.agentId.value,request.requestedAt.isoformat(),response.respondedAt.isoformat(),_safe_question(request.message),response.answer,response.status.value,response.humanAttention.value,response.operationalEffect)
+        try:
+            with self._lock,self._connect() as db: db.execute("INSERT INTO supervisor_conversation_turns(message_id,conversation_id,agent_id,requested_at,responded_at,question,answer,status,attention,operational_effect) VALUES(?,?,?,?,?,?,?,?,?,?)",values)
+        except sqlite3.Error as e: raise SupervisorBoundaryError(SupervisorFailureCode.STORE_UNAVAILABLE,"conversation store unavailable") from e
+
+
+
+    def _session(self,rows):
+        first=rows[0]; last=rows[-1]; title=first[5][:60]+("…" if len(first[5])>60 else "")
+        return {"conversationId":first[1],"agentId":first[2],"startedAt":first[3],"lastUpdatedAt":last[4],"title":title,"status":last[7],"attention":last[8],"operationalEffect":"NONE","messages":[item for row in rows for item in ({"role":"USER","text":row[5],"timestamp":row[3]},{"role":"SUPERVISOR","text":row[6],"timestamp":row[4],"status":row[7],"attention":row[8]})]}
+
+    def list_conversation_sessions(self,agent_id,limit=20):
+        try:
+            with self._connect() as db:
+                ids=db.execute("SELECT conversation_id,MAX(seq) latest FROM supervisor_conversation_turns WHERE agent_id=? GROUP BY conversation_id ORDER BY latest DESC LIMIT ?",(agent_id,limit)).fetchall(); sessions=[]
+                for conversation_id,_ in ids:
+                    rows=db.execute("SELECT seq,conversation_id,agent_id,requested_at,responded_at,question,answer,status,attention,operational_effect FROM supervisor_conversation_turns WHERE agent_id=? AND conversation_id=? ORDER BY seq",(agent_id,conversation_id)).fetchall(); sessions.append(self._session(rows))
+                return {"schemaVersion":1,"sessions":sessions,"order":"NEWEST_FIRST","readOnly":True}
+        except Exception as e: raise SupervisorBoundaryError(SupervisorFailureCode.READ_FAILED,"conversation history read failed") from e
+
+    def get_conversation_session(self,agent_id,conversation_id):
+        with self._connect() as db: rows=db.execute("SELECT seq,conversation_id,agent_id,requested_at,responded_at,question,answer,status,attention,operational_effect FROM supervisor_conversation_turns WHERE agent_id=? AND conversation_id=? ORDER BY seq",(agent_id,conversation_id)).fetchall()
+        if not rows: raise SupervisorBoundaryError(SupervisorFailureCode.EVENT_NOT_FOUND,"conversation session not found")
+        return self._session(rows)|{"readOnly":True}

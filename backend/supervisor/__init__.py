@@ -14,6 +14,7 @@ from .conversation_service import SupervisorConversationService
 from .audit_store import SupervisorAuditStore
 from .history_contracts import SupervisorHistoryEvent, SupervisorHistoryPage, SupervisorReplay
 from .ollama_provider import OllamaLocalProvider
+from .openai_provider import OpenAIStructuredProvider
 from .provider_configuration import SupervisorProviderConfiguration,SupervisorProviderMode,load_supervisor_provider_configuration
 from .provider_status import (
     LLMInterpretationStatus, SupervisorCoreStatus, build_provider_status,
@@ -46,7 +47,7 @@ __all__ = [
     "ConversationStatus", "SupervisorConversationRequest", "SupervisorConversationResponse",
     "SupervisorConversationService",
     "SupervisorAuditStore", "SupervisorHistoryEvent", "SupervisorHistoryPage", "SupervisorReplay",
-    "OllamaLocalProvider", "SupervisorProviderConfiguration", "SupervisorProviderMode", "load_supervisor_provider_configuration",
+    "OllamaLocalProvider", "OpenAIStructuredProvider", "SupervisorProviderConfiguration", "SupervisorProviderMode", "load_supervisor_provider_configuration",
     "SupervisorCoreStatus", "LLMInterpretationStatus", "build_provider_status",
     "derive_core_status", "derive_llm_status",
     "build_master_shadow_context", "constitution_identity", "evaluate_master_shadow",

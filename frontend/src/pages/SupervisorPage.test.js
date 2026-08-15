@@ -5,13 +5,18 @@ import { readFile } from "node:fs/promises";
 const source = await readFile(new URL("./SupervisorPage.jsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../styles/supervisor.css", import.meta.url), "utf8");
 
-test("Supervisor page exposes its title and unobtrusive Shadow mode", function () {
-    assert.match(source, /<h1>SUPERVISOR<\/h1>/);
-    assert.match(source, /MODE: SHADOW/);
+test("Supervisor page exposes a compact title and unobtrusive Shadow mode", function () {
+    assert.match(source, /<h1>Supervisor<\/h1>/);
+    assert.match(source, /SHADOW · READ ONLY/);
     assert.match(source, /supervisor-page__mode/);
 });
 
-test("Master is primary and precedes the collapsed MM specialist", function () {
+test("legacy large title is removed and the page identity stays compact", function () {
+    assert.doesNotMatch(source, /TRADINGAI OVERSIGHT/);
+    assert.doesNotMatch(source, /<h1>SUPERVISOR<\/h1>/);
+});
+
+test("Master is primary and precedes the collapsed MM specialist and Details", function () {
     assert.ok(source.indexOf("MASTER SUPERVISOR") < source.indexOf("<MMSupervisorSection"));
     assert.ok(source.indexOf("<MMSupervisorSection") < source.indexOf("<SupervisorDetailsDisclosure"));
 });
@@ -26,11 +31,11 @@ test("overview separates Core and AI layers while the page stays SHADOW-only", a
         new URL("../components/supervisor/SupervisorOverview.jsx", import.meta.url),
         "utf8",
     );
-    assert.match(overview, /<dt>Supervisor Core<\/dt>/);
-    assert.match(overview, /<dt>AI Interpretation<\/dt>/);
-    assert.match(overview, /<dt>Operational Effect<\/dt>/);
+    assert.match(overview, /label="Core"/);
+    assert.match(overview, /label="AI"/);
+    assert.match(overview, /label="Effect"/);
     assert.match(source, /SHADOW API/);
-    assert.match(source, /MODE: SHADOW/);
+    assert.match(source, /SHADOW · READ ONLY/);
 });
 
 test("layout is bounded and collapses to one column at narrow widths", function () {

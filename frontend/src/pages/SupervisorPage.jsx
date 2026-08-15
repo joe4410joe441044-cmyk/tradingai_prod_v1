@@ -8,12 +8,9 @@ export default function SupervisorPage() {
     return (
         <main className="supervisor-page">
             <header className="supervisor-page__header">
-                <div>
-                    <p className="supervisor-page__eyebrow">TRADINGAI OVERSIGHT</p>
-                    <h1>SUPERVISOR</h1>
-                </div>
-                <span className="supervisor-page__mode" aria-label="Supervisor mode: Shadow">
-                    MODE: SHADOW
+                <h1>Supervisor</h1>
+                <span className="supervisor-page__mode" aria-label="Supervisor mode: Shadow, read only">
+                    SHADOW · READ ONLY
                 </span>
             </header>
 
@@ -21,15 +18,9 @@ export default function SupervisorPage() {
 
             <section className="supervisor-page__primary" aria-labelledby="master-supervisor-heading">
                 <div className="supervisor-page__section-heading">
-                    <div>
-                        <p className="supervisor-page__section-kicker">PRIMARY SUPERVISOR</p>
-                        <h2 id="master-supervisor-heading">MASTER SUPERVISOR</h2>
-                    </div>
+                    <h2 id="master-supervisor-heading">MASTER SUPERVISOR</h2>
                     <span className="supervisor-page__connection-state">SHADOW API</span>
                 </div>
-                <p className="supervisor-page__description">
-                    TradingAI全体の状態や総合判断について質問できます。
-                </p>
                 <SupervisorConversationShell
                     supervisorName="Master Supervisor"
                     agentId="MASTER_SUPERVISOR"

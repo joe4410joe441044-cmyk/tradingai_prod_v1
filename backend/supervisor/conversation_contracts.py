@@ -62,6 +62,19 @@ class SupervisorConversationProviderOutput(SupervisorContract):
         return values
 
 
+class HumanActionableUnknown(SupervisorContract):
+    """Deterministic operator guidance for evidence that is not current/known."""
+
+    status: Literal["UNKNOWN", "UNAVAILABLE", "STALE", "DEGRADED"]
+    subject: str = Field(min_length=1, max_length=160)
+    reason: str = Field(min_length=1, max_length=300)
+    missingInformation: str = Field(min_length=1, max_length=300)
+    safeNextStep: str = Field(min_length=1, max_length=300)
+    decisionImpact: str = Field(min_length=1, max_length=300)
+    source: str | None = Field(default=None, max_length=100)
+    evidenceField: str | None = Field(default=None, max_length=100)
+
+
 class SupervisorConversationResponse(SupervisorContract):
     schemaVersion: Literal[1] = 1
     agentId: SupervisorAgentId
@@ -77,6 +90,7 @@ class SupervisorConversationResponse(SupervisorContract):
     decisionIdentity: str | None = Field(default=None, max_length=100)
     assessmentIdentity: str | None = Field(default=None, max_length=100)
     warnings: tuple[str, ...] = Field(default=(), max_length=10)
+    actionableUnknowns: tuple[HumanActionableUnknown, ...] = Field(default=(), max_length=50)
     failureCode: SupervisorFailureCode | None = None
     respondedAt: datetime
 

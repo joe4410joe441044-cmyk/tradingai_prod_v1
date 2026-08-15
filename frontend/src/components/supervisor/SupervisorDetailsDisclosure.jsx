@@ -2,15 +2,6 @@ import { useState } from "react";
 import SupervisorHistoryPanel from "../../features/supervisor/history/SupervisorHistoryPanel";
 import SupervisorSnapshotPanel from "./SupervisorSnapshotPanel";
 
-const DETAIL_SECTIONS = [
-    "MM Assessment",
-    "Reasons and Recovery Conditions",
-    "Current Settings",
-    "Numeric Evidence",
-    "System / Runtime",
-    "Diagnostics",
-];
-
 export default function SupervisorDetailsDisclosure() {
     const [isExpanded, setIsExpanded] = useState(false);
     const contentId = "supervisor-details-content";
@@ -38,12 +29,6 @@ export default function SupervisorDetailsDisclosure() {
                 <div className="supervisor-details__content" id={contentId}>
                     <SupervisorSnapshotPanel />
                     <SupervisorHistoryPanel />
-                    {DETAIL_SECTIONS.map((title) => (
-                        <section key={title}>
-                            <h3>{title}</h3>
-                            <p>NOT CONNECTED</p>
-                        </section>
-                    ))}
                 </div>
             )}
         </section>

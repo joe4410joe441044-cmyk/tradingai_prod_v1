@@ -23,16 +23,11 @@ test("snapshot panel is mounted lazily alongside history after disclosure opens"
     assert.ok(source.indexOf("<SupervisorSnapshotPanel") < source.indexOf("<SupervisorHistoryPanel"));
 });
 
-test("details reveal only the required headings and disconnected state", function () {
-    for (const heading of [
-        "MM Assessment", "Reasons and Recovery Conditions", "Current Settings",
-        "Numeric Evidence", "System / Runtime", "Diagnostics",
-    ]) {
-        assert.match(source, new RegExp(heading.replace("/", "\\/")));
-    }
+test("details reveal only the Snapshot, Diagnostics, and History on demand", function () {
     assert.match(historySource, /Decision \/ Change History/);
     assert.match(source, /{isExpanded && \(/);
-    assert.match(source, /<p>NOT CONNECTED<\/p>/);
+    assert.doesNotMatch(source, /<p>NOT CONNECTED<\/p>/);
+    assert.doesNotMatch(source, /MM Assessment|Current Settings|Numeric Evidence|System \/ Runtime/);
 });
 
 test("details contain no mock metrics or runtime integration", function () {
