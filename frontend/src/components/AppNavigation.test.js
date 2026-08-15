@@ -12,9 +12,19 @@ const loadModule = async () => {
     const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source));
     const temporary = await mkdtemp(join(directory, ".navigation-test-"));
     const output = join(temporary, "AppNavigation.mjs");
-    const reactStub = "data:text/javascript,export const useEffect=(effect)=>effect()";
+    const modelUrl = new URL("./appNavigationModel.js", import.meta.url).href;
+    const reactStub = `data:text/javascript,${encodeURIComponent([
+        "export const useEffect=(effect)=>effect();",
+        "export const useRef=(value)=>({current:value});",
+        "export const useState=(value)=>{",
+        "let current=typeof value==='function'?value():value;",
+        "return [current,(next)=>{current=typeof next==='function'?next(current):next}];",
+        "};",
+    ].join(""))}`;
     try {
-        await writeFile(output, transformed.code.replace('from "react";', `from "${reactStub}";`));
+        await writeFile(output, transformed.code
+            .replace('from "react";', `from "${reactStub}";`)
+            .replace('from "./appNavigationModel";', `from "${modelUrl}";`));
         return await import(`${pathToFileURL(output).href}?test=navigation`);
     } finally {
         await rm(temporary, { recursive: true, force: true });
@@ -138,4 +148,119 @@ test("navigation labels and paths remain unique and preserve existing items", as
     assert.equal(new Set(labels).size, labels.length);
     assert.equal(new Set(paths).size, paths.length);
     assert.equal(paths.at(-1), "/supervisor");
+});
+
+test("tabs reorder left and right without changing identity or routes", async () => {
+    globalThis.window = {
+        location: { pathname: "/money-management" },
+        history: { pushState() {}, replaceState() {} },
+        addEventListener() {},
+        removeEventListener() {},
+        setTimeout: (callback) => callback(),
+    };
+    const { NavigationTabs } = await loadModule();
+    const { reorderNavigationItems } = await import("./appNavigationModel.js");
+    const defaults = [
+        { label: "DASHBOARD", path: "/" },
+        { label: "MARKET INTELLIGENCE", path: "/market-intelligence" },
+        { label: "AI ADVISOR", path: "/ai-advisor" },
+        { label: "MONEY MANAGEMENT", path: "/money-management" },
+        { label: "MARKET RECORDER", path: "/market-recorder" },
+        { label: "SUPERVISOR", path: "/supervisor" },
+    ];
+
+    const movedLeft = reorderNavigationItems(
+        defaults,
+        "/money-management",
+        "/market-intelligence",
+    );
+    assert.deepEqual(movedLeft.map(({ label }) => label), [
+        "DASHBOARD", "MONEY MANAGEMENT", "MARKET INTELLIGENCE",
+        "AI ADVISOR", "MARKET RECORDER", "SUPERVISOR",
+    ]);
+    const movedRight = reorderNavigationItems(
+        movedLeft,
+        "/money-management",
+        "/market-recorder",
+    );
+    assert.deepEqual(movedRight.map(({ label }) => label), [
+        "DASHBOARD", "MARKET INTELLIGENCE", "AI ADVISOR",
+        "MARKET RECORDER", "MONEY MANAGEMENT", "SUPERVISOR",
+    ]);
+    assert.deepEqual(
+        movedRight.map(({ path }) => path).sort(),
+        defaults.map(({ path }) => path).sort(),
+    );
+
+    const navigated = [];
+    const buttons = descendants(NavigationTabs({
+        currentPath: "/money-management",
+        draggedPath: null,
+        items: movedRight,
+        navigate: (_event, path) => navigated.push(path),
+        onDragEnd() {},
+        onDragEnter() {},
+        onDragOver() {},
+        onDragStart() {},
+        onDrop() {},
+    })).filter(({ type }) => type === "button");
+    const moneyManagement = buttons.find(
+        ({ props }) => props.children === "MONEY MANAGEMENT",
+    );
+    assert.equal(moneyManagement.props["aria-current"], "page");
+    assert.match(moneyManagement.props.className, /--active/);
+    moneyManagement.props.onClick({});
+    assert.equal(navigated.at(-1), "/money-management");
+    assert.equal(buttons.every(({ props }) => props.draggable === "true"), true);
+});
+
+test("drag handlers suppress navigation and add no API or persistence", async () => {
+    const timers = [];
+    globalThis.window = {
+        location: { pathname: "/" },
+        history: { pushState() {}, replaceState() {} },
+        addEventListener() {},
+        removeEventListener() {},
+        setTimeout: (callback) => timers.push(callback),
+    };
+    const { default: AppNavigation } = await loadModule();
+    const paths = [];
+    const buttons = descendants(AppNavigation({
+        currentPath: "/",
+        onPathChange: (path) => paths.push(path),
+    })).filter(({ type }) => type === "button");
+    const transfer = {
+        effectAllowed: null,
+        dropEffect: null,
+        setData(type, value) {
+            assert.equal(type, "text/plain");
+            assert.equal(value, "/money-management");
+        },
+    };
+    buttons[3].props.onDragStart({ dataTransfer: transfer });
+    assert.equal(transfer.effectAllowed, "move");
+    let prevented = false;
+    let stopped = false;
+    buttons[3].props.onClick({
+        preventDefault: () => { prevented = true; },
+        stopPropagation: () => { stopped = true; },
+    });
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    assert.notEqual(paths.at(-1), "/money-management");
+    buttons[1].props.onDragEnter();
+    buttons[1].props.onDragOver({
+        dataTransfer: transfer,
+        preventDefault() {},
+    });
+    assert.equal(transfer.dropEffect, "move");
+    buttons[1].props.onDrop({ preventDefault() {} });
+    buttons[3].props.onDragEnd();
+    assert.equal(timers.length, 1);
+
+    const source = await readFile(
+        new URL("./AppNavigation.jsx", import.meta.url),
+        "utf8",
+    );
+    assert.doesNotMatch(source, /fetch\(|axios|localStorage|sessionStorage|\/api\//);
 });
