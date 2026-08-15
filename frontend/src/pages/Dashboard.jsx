@@ -21,8 +21,6 @@ import {
 import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
-
-import TradeSettings from "../components/TradeSettings";
 import AutoMarketSelectionCard from "../components/AutoMarketSelectionCard";
 
 
@@ -338,54 +336,11 @@ useEffect(() => {
                                 selectionMode: botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
                                 displaySymbol: botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol,
                                 autoMarketState: botStatus?.autoMarketSelection?.autoRuntime?.runtimeState || "NOT AVAILABLE",
+                                executionMode: botStatus?.executionMode || botStatus?.execution_mode,
+                                realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,
+                                realOrderAuthorityKnown: typeof botStatus?.realOrderAllowed === "boolean"
+                                    || typeof botStatus?.real_order_allowed === "boolean",
                             }}
-
-                            setupColumns={(
-                                <>
-                                    <section className="operation-setup-step" data-testid="trading-mode-step">
-                                        <div className="operation-step-heading"><span>1</span><strong>TRADING MODE</strong></div>
-                                        <label className="operation-field-label" htmlFor="operation-mode">PAPER / LIVE</label>
-                                        <select
-                                            id="operation-mode"
-                                            className="config-select"
-                                            disabled={runtimeHealth.running}
-                                            value={tradeSettings.mode || "PAPER"}
-                                            onChange={(event) => setTradeSettings((previous) => ({ ...previous, mode: event.target.value }))}
-                                        >
-                                            <option value="PAPER">PAPER（模擬）</option>
-                                            <option value="LIVE">LIVE（本番）</option>
-                                        </select>
-                                        {tradeSettings.mode === "LIVE" && <div className="config-warning">LIVE selected. Existing backend permissions still govern real orders.</div>}
-                                    </section>
-
-                                    <section className="operation-setup-step" data-testid="market-selection-step">
-                                        <div className="operation-step-heading"><span>2</span><strong>MARKET SELECTION</strong></div>
-                                        <div className="operation-authority-row"><span>AUTHORITY</span><strong>{botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED"}</strong></div>
-                                        {(botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode) === "MANUAL" ? (
-                                            <>
-                                                <label className="operation-field-label" htmlFor="operation-symbol">MANUAL SYMBOL</label>
-                                                <select id="operation-symbol" className="config-select" disabled={runtimeHealth.running} value={tradeSettings.symbol || "XRPUSDTM"} onChange={(event) => setTradeSettings((previous) => ({ ...previous, symbol: event.target.value }))}>
-                                                    <option value="XRPUSDTM">XRPUSDTM</option>
-                                                    <option value="BTCUSDTM">BTCUSDTM</option>
-                                                    <option value="ETHUSDTM">ETHUSDTM</option>
-                                                </select>
-                                            </>
-                                        ) : (
-                                            <div className="operation-active-symbol"><span>ACTIVE SYMBOL</span><strong>{botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol || "UNKNOWN"}</strong><small>Selected by AMS · read only</small></div>
-                                        )}
-                                        {!(botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode) && <div className="operation-authority-note">Market selection control: NOT EXPOSED</div>}
-                                    </section>
-
-                                    <section className="operation-setup-step operation-risk-step" data-testid="risk-settings-step">
-                                        <div className="operation-step-heading"><span>3</span><strong>RISK SETTINGS</strong></div>
-                                        <TradeSettings
-                                            embedded
-                                            values={tradeSettings}
-                                            onChange={(update) => setTradeSettings((previous) => ({ ...previous, ...update }))}
-                                        />
-                                    </section>
-                                </>
-                            )}
 
                             executionEnabled={
                                 executionEnabled
@@ -422,6 +377,8 @@ useEffect(() => {
                                 botStatus?.pendingOrder
                             }
 
+                            position={position}
+
                             runtimeHealth={runtimeHealth}
 
                             onStatusRefresh={
@@ -431,6 +388,11 @@ useEffect(() => {
                             setExecutionEnabledState={
                                 setExecutionEnabled
                             }
+
+                            onLegacyConfigChange={(update) => setTradeSettings((previous) => ({
+                                ...previous,
+                                ...update,
+                            }))}
 
                         />
 

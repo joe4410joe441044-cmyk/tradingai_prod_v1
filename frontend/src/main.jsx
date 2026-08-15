@@ -11,6 +11,7 @@ import "./styles/market-intelligence.css";
 import "./styles/market-recorder.css";
 import "./styles/ai-advisor.css";
 import "./styles/money-management.css";
+import "./styles/operation-preparation.css";
 
 const HTTPS_ENFORCEMENT_EXCLUDED_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 

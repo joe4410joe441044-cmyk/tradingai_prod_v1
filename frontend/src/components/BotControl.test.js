@@ -55,6 +55,10 @@ const loadBotControl = async () => {
         tempDir,
         "OperationToggle.mjs",
     );
+    const operationPreparationFile = join(
+        tempDir,
+        "OperationPreparation.mjs",
+    );
     const apiMockFile = join(
         tempDir,
         "api.mjs",
@@ -71,6 +75,11 @@ const loadBotControl = async () => {
         await writeFile(
             operationToggleFile,
             operationToggle.code,
+        );
+
+        await writeFile(
+            operationPreparationFile,
+            "export default function OperationPreparation(){return null}",
         );
 
         await writeFile(
@@ -104,6 +113,10 @@ const loadBotControl = async () => {
             .replace(
                 'from "./common/OperationToggle";',
                 `from "${pathToFileURL(operationToggleFile).href}";`,
+            )
+            .replace(
+                'from "./operation/OperationPreparation";',
+                `from "${pathToFileURL(operationPreparationFile).href}";`,
             );
 
         await writeFile(
@@ -810,16 +823,19 @@ test("Status mismatch is reported without enabling trading locally", async () =>
 });
 
 
-test("Ready Check projects configured values and does not pass unknown Emergency authority", async () => {
+test("Preparation boundary receives configured values and preserves unknown Emergency authority", async () => {
     const renderer = await renderBotControl({
         emergency: null,
         emergencyLocked: undefined,
         emergencyState: undefined,
         config: { mode: "PAPER", symbol: "XRPUSDTM", displaySymbol: "BTCUSDTM", selectionMode: "AUTO", risk_percent: 1.25, leverage: 5 },
     });
-    assert.equal(textIncludes(renderer.root, "READY / START"), true);
-    assert.equal(textIncludes(renderer.root, "BTCUSDTM"), true);
-    assert.equal(textIncludes(renderer.root, "STATE_UNKNOWN"), true);
+    const preparation = findAll(renderer.root, (element) => (
+        element.type?.name === "OperationPreparation"
+    ))[0];
+    assert.ok(preparation);
+    assert.equal(preparation.props.config.displaySymbol, "BTCUSDTM");
+    assert.equal(preparation.props.emergencyState, "STATE_UNKNOWN");
     assert.equal(textIncludes(renderer.root, "START BOT"), true);
 });
 
@@ -858,18 +874,15 @@ test("running BOT presents STOP BOT and uses existing stop authority", async () 
 });
 
 
-test("Automation precedes the sole final Ready / Start step and stays runtime-only", async () => {
+test("BotControl delegates preparation UI and preserves the sole Start Bot action", async () => {
     const renderer = await renderBotControl({
         config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "MANUAL", risk_percent: 1, leverage: 5 },
     });
-    const steps = findAll(renderer.root, (element) => String(element.props?.className || "").includes("operation-setup-step"));
-    assert.equal(steps.length, 2);
-    assert.equal(textIncludes(steps[0], "AUTOMATION"), true);
-    assert.equal(textIncludes(steps[1], "READY / START"), true);
+    const preparation = findAll(renderer.root, (element) => (
+        element.type?.name === "OperationPreparation"
+    ));
+    assert.equal(preparation.length, 1);
     assert.equal(findAll(renderer.root, (element) => collectText(element) === "START BOT").length, 1);
-    assert.equal(textIncludes(renderer.root, "LOOP ON START"), true);
-    assert.equal(textIncludes(renderer.root, "AUTO TRADE ON START"), true);
-    assert.equal(textIncludes(renderer.root, "Runtime-only after BOT START"), true);
 });
 
 test("stopped BOT exposes no active Loop or Auto Trade mutation control", async () => {

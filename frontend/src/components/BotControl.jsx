@@ -19,6 +19,7 @@ import {
     requestBotStop,
 } from "../runtime/botLifecycle";
 import OperationToggle from "./common/OperationToggle";
+import OperationPreparation from "./operation/OperationPreparation";
 
 const formatLoopError = (
     error,
@@ -356,13 +357,15 @@ export default function BotControl({
 
     pendingOrder,
 
+    position,
+
     runtimeHealth,
 
     onStatusRefresh,
 
     setExecutionEnabledState,
 
-    setupColumns,
+    onLegacyConfigChange,
 
 }){
 
@@ -1091,38 +1094,25 @@ export default function BotControl({
 
         <div className="terminal-panel operation-console">
 
-            <div className="operation-setup-flow" data-testid="operation-setup-flow">
-                {setupColumns}
-                <section className="operation-setup-step operation-automation-step" data-testid="automation-step">
-                    <div className="operation-step-heading"><span>4</span><strong>AUTOMATION</strong></div>
-                    <div className="operation-automation-summary">
-                        <div><span>LOOP ON START</span><strong>NO</strong></div>
-                        <small>Runtime-only after BOT START</small>
-                        <div><span>AUTO TRADE ON START</span><strong>OFF</strong></div>
-                        <small>Requires BOT + LOOP running</small>
-                        <div><span>AMS ACTIVATION</span><strong>NOT STAGED</strong></div>
-                        <small>Monitoring status is read only here</small>
-                    </div>
-                </section>
-                <section className="operation-setup-step operation-ready-step" data-testid="ready-start-step">
-                    <div className="operation-step-heading"><span>5</span><strong>READY / START</strong></div>
-                    <div className="operation-ready-check" data-testid="ready-check">
-                        <div><span>Mode</span><strong>{String(config?.mode || "UNKNOWN").toUpperCase()}</strong></div>
-                        <div><span>Market</span><strong>{config?.selectionMode || "NOT EXPOSED"}</strong></div>
-                        <div><span>Symbol</span><strong>{config?.displaySymbol || config?.symbol || "UNKNOWN"}</strong></div>
-                        <div><span>Risk</span><strong>{config?.risk_percent != null ? `${config.risk_percent}%` : "UNKNOWN"}</strong></div>
-                        <div><span>Leverage</span><strong>{config?.leverage != null ? `${config.leverage}x` : "UNKNOWN"}</strong></div>
-                        <div><span>Loop</span><strong>STOPPED ON START</strong></div>
-                        <div><span>Auto Trade</span><strong>OFF ON START</strong></div>
-                        <div><span>Emergency</span><strong>{emergencyStateCode}</strong></div>
-                    </div>
+            <OperationPreparation
+                botRunning={botRunning}
+                config={config}
+                emergencyState={emergencyStateCode}
+                executionEnabled={executionEnabled}
+                governanceStatus={runtimeHealth?.governance?.status}
+                onLegacyConfigChange={onLegacyConfigChange}
+                pendingOrder={pendingOrder}
+                position={position}
+                realOrderAllowed={config?.realOrderAllowed === true}
+            >
+                <div className="operation-prep-existing-start" data-testid="ready-start-step">
                     <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || emergencyBlocksOperations} onClick={handleBotLifecycle} type="button">
                         {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? "STOP BOT" : "START BOT")}
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
                     {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
-                </section>
-            </div>
+                </div>
+            </OperationPreparation>
 
             <div className="operation-runtime-heading">CURRENT RUNTIME STATE <span>POST-START RUNTIME CONTROLS</span></div>
             <div className="operation-runtime-controls">
