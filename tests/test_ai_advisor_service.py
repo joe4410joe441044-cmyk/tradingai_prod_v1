@@ -22,6 +22,10 @@ from backend.ai_advisor.provider_failure_observation import (
     ResponseTopLevelType,
     ResponseValidationCode,
 )
+from backend.ai_advisor.response_models import (
+    AdvisorResponseIntegrityField,
+    AdvisorResponseIntegrityViolationCode,
+)
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
     AdvisorServiceFailureCode,
@@ -198,6 +202,33 @@ class AdvisorServiceTest(unittest.TestCase):
                 {**observation.model_dump(), "requestId": "api_key=SECRET"}
             )
 
+    def test_contract_rejection_observation_has_exact_secret_safe_invariant(self):
+        sink = RecordingResponseSafetyRejectionObservationSink()
+        payload = candidate_payload()
+        payload["inferences"] = []
+        result = service(
+            fixture_text(payload),
+            response_safety_sink=sink,
+        ).generate_response(service_input())
+        self.assertEqual(result.response.status.value, "REJECTED")
+        observation = sink.records[0]
+        self.assertEqual(
+            observation.integrityViolationCode,
+            AdvisorResponseIntegrityViolationCode.
+            SOURCE_USAGE_REFERENCE_SET_MISMATCH,
+        )
+        self.assertEqual(
+            observation.integrityField,
+            AdvisorResponseIntegrityField.SOURCE_REFERENCES,
+        )
+        self.assertEqual(
+            observation.integrityStage,
+            "POST_PARSE_RESPONSE_INTEGRITY",
+        )
+        rendered = observation.model_dump_json()
+        for excluded in ("responseText", "summary", "facts", "api_key", "cookie"):
+            self.assertNotIn(excluded, rendered)
+
     def test_conversation_failure_mapping(self):
         request, _ = make_request()
         denied = request.permissionContext.model_copy(
@@ -344,7 +375,8 @@ class AdvisorServiceTest(unittest.TestCase):
 
     def test_response_validation_exception_mapping(self):
         with patch(
-            "backend.ai_advisor.advisor_service.validate_advisor_response",
+            "backend.ai_advisor.advisor_service."
+            "validate_advisor_response_with_diagnostic",
             side_effect=ValueError("raw response validation detail"),
         ):
             result = service().generate_response(service_input())

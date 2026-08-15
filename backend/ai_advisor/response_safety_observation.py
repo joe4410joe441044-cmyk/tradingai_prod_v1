@@ -6,12 +6,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, Protocol
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, field_validator, model_validator
 
 from backend.ai_advisor.provider_models import AdvisorProviderContractModel
 from backend.ai_advisor.response_models import (
     AdvisorForbiddenClaim,
     AdvisorResponseEnvelope,
+    AdvisorResponseIntegrityDiagnostic,
+    AdvisorResponseIntegrityField,
+    AdvisorResponseIntegrityViolationCode,
     AdvisorResponseStatus,
 )
 from backend.ai_advisor.usage_observation import safe_metadata_identifier
@@ -152,6 +155,20 @@ class ResponseSafetyRejectionObservation(AdvisorProviderContractModel):
     violationCategory: ResponseSafetyViolationCategory
     operationalIntent: OperationalIntentClassification
     groundingClassification: ResponseGroundingClassification
+    integrityViolationCode: AdvisorResponseIntegrityViolationCode | None = None
+    integrityField: AdvisorResponseIntegrityField | None = None
+    integrityStage: Literal["POST_PARSE_RESPONSE_INTEGRITY"] | None = None
+
+    @model_validator(mode="after")
+    def validate_integrity_fields(self):
+        presence = (
+            self.integrityViolationCode is not None,
+            self.integrityField is not None,
+            self.integrityStage is not None,
+        )
+        if any(presence) and not all(presence):
+            raise ValueError("integrity diagnostic fields must be all present or absent")
+        return self
 
     @field_validator("requestId", "providerRequestId")
     @classmethod
@@ -205,6 +222,7 @@ def project_response_safety_rejection(
     response: AdvisorResponseEnvelope,
     *,
     provider_request_id: str,
+    integrity_diagnostic: AdvisorResponseIntegrityDiagnostic | None = None,
 ) -> ResponseSafetyRejectionObservation:
     trusted = AdvisorResponseEnvelope.model_validate(
         response.model_dump(warnings=False)
@@ -217,6 +235,10 @@ def project_response_safety_rejection(
     rule, category, intent, grounding = _RULE_BY_CLAIM[
         trusted.primaryRejectionReason
     ]
+    if integrity_diagnostic is not None:
+        integrity_diagnostic = AdvisorResponseIntegrityDiagnostic.model_validate(
+            integrity_diagnostic.model_dump(warnings=False)
+        )
     return ResponseSafetyRejectionObservation(
         requestId=trusted.requestId,
         providerRequestId=provider_request_id,
@@ -225,4 +247,9 @@ def project_response_safety_rejection(
         violationCategory=category,
         operationalIntent=intent,
         groundingClassification=grounding,
+        integrityViolationCode=(
+            integrity_diagnostic.violationCode if integrity_diagnostic else None
+        ),
+        integrityField=integrity_diagnostic.field if integrity_diagnostic else None,
+        integrityStage=integrity_diagnostic.stage if integrity_diagnostic else None,
     )

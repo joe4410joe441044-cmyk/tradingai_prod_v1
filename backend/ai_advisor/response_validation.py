@@ -3,6 +3,7 @@
 import html
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import unquote
 
@@ -27,6 +28,9 @@ from backend.ai_advisor.response_models import (
     AdvisorRawResponse,
     AdvisorResponseCandidate,
     AdvisorResponseEnvelope,
+    AdvisorResponseIntegrityDiagnostic,
+    AdvisorResponseIntegrityField,
+    AdvisorResponseIntegrityViolationCode,
     AdvisorResponseStatus,
     AdvisorUncertainty,
     AdvisorResponseWarningCode,
@@ -298,6 +302,141 @@ def _duplicates(values: Iterable[str]) -> bool:
     return len(materialized) != len(set(materialized))
 
 
+@dataclass(frozen=True)
+class AdvisorResponseValidationOutcome:
+    response: AdvisorResponseEnvelope
+    integrityDiagnostic: AdvisorResponseIntegrityDiagnostic | None = None
+
+
+def _diagnostic(
+    code: AdvisorResponseIntegrityViolationCode,
+    field: AdvisorResponseIntegrityField,
+) -> AdvisorResponseIntegrityDiagnostic:
+    return AdvisorResponseIntegrityDiagnostic(violationCode=code, field=field)
+
+
+def _first_integrity_violation(
+    *,
+    raw_response: AdvisorRawResponse,
+    request: AdvisorRequest,
+    context: AdvisorContextEnvelope,
+    prompt_envelope: AdvisorPromptEnvelope,
+    candidate: AdvisorResponseCandidate,
+) -> AdvisorResponseIntegrityDiagnostic | None:
+    """Return the first violation in stable contract order without content."""
+
+    if (
+        raw_response.requestId != request.requestId
+        or raw_response.requestId != candidate.requestId
+        or prompt_envelope.requestId != request.requestId
+    ):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.REQUEST_IDENTITY_MISMATCH,
+            AdvisorResponseIntegrityField.REQUEST_ID,
+        )
+    if (
+        raw_response.promptVersion != prompt_envelope.promptVersion
+        or candidate.promptVersion != prompt_envelope.promptVersion
+    ):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.PROMPT_IDENTITY_MISMATCH,
+            AdvisorResponseIntegrityField.PROMPT_VERSION,
+        )
+    if request.contextEnvelope != context:
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.CONTEXT_IDENTITY_MISMATCH,
+            AdvisorResponseIntegrityField.CONTEXT_ENVELOPE,
+        )
+    if _duplicates(fact.factId for fact in candidate.facts):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_FACT_ID,
+            AdvisorResponseIntegrityField.FACT_ID,
+        )
+    if _duplicates(item.inferenceId for item in candidate.inferences):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_INFERENCE_ID,
+            AdvisorResponseIntegrityField.INFERENCE_ID,
+        )
+    if _duplicates(item.unknownId for item in candidate.unknowns):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_UNKNOWN_ID,
+            AdvisorResponseIntegrityField.UNKNOWN_ID,
+        )
+    if any(_duplicates(fact.sourceIds) for fact in candidate.facts):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_FACT_SOURCE_ID,
+            AdvisorResponseIntegrityField.FACT_SOURCE_IDS,
+        )
+    if any(
+        _duplicates(item.basedOnSourceIds) for item in candidate.inferences
+    ):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_INFERENCE_SOURCE_ID,
+            AdvisorResponseIntegrityField.INFERENCE_SOURCE_IDS,
+        )
+    referenced = tuple(candidate.sourceReferences)
+    if _duplicates(referenced):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_SOURCE_REFERENCE,
+            AdvisorResponseIntegrityField.SOURCE_REFERENCES,
+        )
+    if _duplicates(item.sourceId for item in candidate.freshnessDisclosures):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.DUPLICATE_FRESHNESS_DISCLOSURE,
+            AdvisorResponseIntegrityField.FRESHNESS_DISCLOSURES,
+        )
+    known_sources = {source.sourceId: source for source in context.sources}
+    if not set(referenced) <= set(known_sources):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.SOURCE_REFERENCE_NOT_TRUSTED,
+            AdvisorResponseIntegrityField.SOURCE_REFERENCES,
+        )
+    used = tuple(
+        source_id for fact in candidate.facts for source_id in fact.sourceIds
+    ) + tuple(
+        source_id
+        for inference in candidate.inferences
+        for source_id in inference.basedOnSourceIds
+    )
+    if set(used) != set(referenced):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.SOURCE_USAGE_REFERENCE_SET_MISMATCH,
+            AdvisorResponseIntegrityField.SOURCE_REFERENCES,
+        )
+    disclosures = {item.sourceId: item for item in candidate.freshnessDisclosures}
+    if set(disclosures) != set(referenced):
+        return _diagnostic(
+            AdvisorResponseIntegrityViolationCode.FRESHNESS_REFERENCE_SET_MISMATCH,
+            AdvisorResponseIntegrityField.FRESHNESS_DISCLOSURES,
+        )
+    for source_id in referenced:
+        if (
+            disclosures[source_id].freshness
+            is not known_sources[source_id].freshness.state
+        ):
+            return _diagnostic(
+                AdvisorResponseIntegrityViolationCode.SOURCE_FRESHNESS_MISMATCH,
+                AdvisorResponseIntegrityField.FRESHNESS_DISCLOSURES,
+            )
+    for fact in candidate.facts:
+        states = {
+            known_sources[source_id].freshness.state
+            for source_id in fact.sourceIds
+            if source_id in known_sources
+        }
+        if len(states) != 1:
+            return _diagnostic(
+                AdvisorResponseIntegrityViolationCode.FACT_SOURCE_FRESHNESS_AMBIGUOUS,
+                AdvisorResponseIntegrityField.FACT_SOURCE_IDS,
+            )
+        if fact.freshness not in states:
+            return _diagnostic(
+                AdvisorResponseIntegrityViolationCode.FACT_FRESHNESS_MISMATCH,
+                AdvisorResponseIntegrityField.FACT_FRESHNESS,
+            )
+    return None
+
+
 def _fallback(
     raw: AdvisorRawResponse,
     claims: tuple[AdvisorForbiddenClaim, ...],
@@ -329,13 +468,13 @@ def _fallback(
     )
 
 
-def validate_advisor_response(
+def validate_advisor_response_with_diagnostic(
     *,
     raw_response: AdvisorRawResponse,
     request: AdvisorRequest,
     context: AdvisorContextEnvelope,
     prompt_envelope: AdvisorPromptEnvelope,
-) -> AdvisorResponseEnvelope:
+) -> AdvisorResponseValidationOutcome:
     """Parse, compare, classify, and return a deterministic safe envelope."""
 
     if not isinstance(raw_response, AdvisorRawResponse):
@@ -358,73 +497,44 @@ def validate_advisor_response(
     try:
         candidate = parse_advisor_response(raw_response)
     except ValueError:
-        return _fallback(
-            raw_response,
-            (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,),
-            request_id=request.requestId,
-            prompt_version=prompt_envelope.promptVersion,
+        return AdvisorResponseValidationOutcome(
+            response=_fallback(
+                raw_response,
+                (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,),
+                request_id=request.requestId,
+                prompt_version=prompt_envelope.promptVersion,
+            ),
+            integrityDiagnostic=_diagnostic(
+                AdvisorResponseIntegrityViolationCode.PARSE_CONTRACT_INVALID,
+                AdvisorResponseIntegrityField.RESPONSE_TEXT,
+            ),
         )
     claims = _detect_claims(candidate)
     if _has_ungrounded_current_market_claim(candidate, context):
         claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,)
     if _has_ungrounded_current_runtime_claim(candidate, context):
         claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
-    if (
-        raw_response.requestId != request.requestId
-        or raw_response.requestId != candidate.requestId
-        or prompt_envelope.requestId != request.requestId
-        or raw_response.promptVersion != prompt_envelope.promptVersion
-        or candidate.promptVersion != prompt_envelope.promptVersion
-        or request.contextEnvelope != context
-    ):
+    integrity_diagnostic = _first_integrity_violation(
+        raw_response=raw_response,
+        request=request,
+        context=context,
+        prompt_envelope=prompt_envelope,
+        candidate=candidate,
+    )
+    if integrity_diagnostic is not None:
         claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
+    if claims:
+        return AdvisorResponseValidationOutcome(
+            response=_fallback(
+                raw_response,
+                tuple(set(claims)),
+                request_id=request.requestId,
+                prompt_version=prompt_envelope.promptVersion,
+            ),
+            integrityDiagnostic=integrity_diagnostic,
+        )
     known_sources = {source.sourceId: source for source in context.sources}
     referenced = tuple(candidate.sourceReferences)
-    used = tuple(
-        source_id for fact in candidate.facts for source_id in fact.sourceIds
-    ) + tuple(
-        source_id
-        for inference in candidate.inferences
-        for source_id in inference.basedOnSourceIds
-    )
-    if (
-        _duplicates(fact.factId for fact in candidate.facts)
-        or _duplicates(item.inferenceId for item in candidate.inferences)
-        or _duplicates(item.unknownId for item in candidate.unknowns)
-        or any(_duplicates(fact.sourceIds) for fact in candidate.facts)
-        or any(_duplicates(item.basedOnSourceIds) for item in candidate.inferences)
-        or _duplicates(referenced)
-        or _duplicates(item.sourceId for item in candidate.freshnessDisclosures)
-        or not set(referenced) <= set(known_sources)
-        or set(used) != set(referenced)
-    ):
-        claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
-    disclosures = {item.sourceId: item for item in candidate.freshnessDisclosures}
-    if set(disclosures) != set(referenced):
-        claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
-    for source_id in referenced:
-        if (
-            source_id in known_sources
-            and source_id in disclosures
-            and disclosures[source_id].freshness
-            is not known_sources[source_id].freshness.state
-        ):
-            claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
-    for fact in candidate.facts:
-        states = {
-            known_sources[source_id].freshness.state
-            for source_id in fact.sourceIds
-            if source_id in known_sources
-        }
-        if len(states) != 1 or fact.freshness not in states:
-            claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
-    if claims:
-        return _fallback(
-            raw_response,
-            tuple(set(claims)),
-            request_id=request.requestId,
-            prompt_version=prompt_envelope.promptVersion,
-        )
     facts = tuple(sorted(candidate.facts, key=lambda item: item.factId))
     inferences = tuple(sorted(candidate.inferences, key=lambda item: item.inferenceId))
     unknowns = tuple(sorted(candidate.unknowns, key=lambda item: item.unknownId))
@@ -570,10 +680,33 @@ def validate_advisor_response(
         refusalCategory=None,
     )
     if len(result.model_dump_json()) > MAX_SERIALIZED_RESPONSE_CHARACTERS:
-        return _fallback(
-            raw_response,
-            (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,),
-            request_id=request.requestId,
-            prompt_version=prompt_envelope.promptVersion,
+        return AdvisorResponseValidationOutcome(
+            response=_fallback(
+                raw_response,
+                (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,),
+                request_id=request.requestId,
+                prompt_version=prompt_envelope.promptVersion,
+            ),
+            integrityDiagnostic=_diagnostic(
+                AdvisorResponseIntegrityViolationCode.SERIALIZED_RESPONSE_TOO_LARGE,
+                AdvisorResponseIntegrityField.RESPONSE_ENVELOPE,
+            ),
         )
-    return result
+    return AdvisorResponseValidationOutcome(response=result)
+
+
+def validate_advisor_response(
+    *,
+    raw_response: AdvisorRawResponse,
+    request: AdvisorRequest,
+    context: AdvisorContextEnvelope,
+    prompt_envelope: AdvisorPromptEnvelope,
+) -> AdvisorResponseEnvelope:
+    """Compatibility wrapper returning only the public response envelope."""
+
+    return validate_advisor_response_with_diagnostic(
+        raw_response=raw_response,
+        request=request,
+        context=context,
+        prompt_envelope=prompt_envelope,
+    ).response

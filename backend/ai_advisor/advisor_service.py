@@ -42,7 +42,9 @@ from backend.ai_advisor.response_parser import (
     AdvisorResponseParsingError,
     parse_advisor_response,
 )
-from backend.ai_advisor.response_validation import validate_advisor_response
+from backend.ai_advisor.response_validation import (
+    validate_advisor_response_with_diagnostic,
+)
 from backend.ai_advisor.response_models import AdvisorResponseStatus
 from backend.ai_advisor.response_safety_observation import (
     NoOpResponseSafetyRejectionObservationSink,
@@ -222,12 +224,13 @@ class AdvisorService:
             return _failure(AdvisorServiceFailureCode.ADVISOR_PARSE_FAILURE)
 
         try:
-            response = validate_advisor_response(
+            validation_outcome = validate_advisor_response_with_diagnostic(
                 raw_response=raw_response,
                 request=request,
                 context=context,
                 prompt_envelope=prompt,
             )
+            response = validation_outcome.response
         except Exception:
             return _failure(AdvisorServiceFailureCode.ADVISOR_RESPONSE_INVALID)
         if response.status is AdvisorResponseStatus.REJECTED:
@@ -236,6 +239,9 @@ class AdvisorService:
                     project_response_safety_rejection(
                         response,
                         provider_request_id=service_input.providerRequestId,
+                        integrity_diagnostic=(
+                            validation_outcome.integrityDiagnostic
+                        ),
                     )
                 )
             except Exception:

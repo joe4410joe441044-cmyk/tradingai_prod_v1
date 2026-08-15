@@ -111,6 +111,53 @@ class AdvisorForbiddenClaim(str, Enum):
     RESPONSE_CONTRACT_INVALID = "RESPONSE_CONTRACT_INVALID"
 
 
+class AdvisorResponseIntegrityViolationCode(str, Enum):
+    PARSE_CONTRACT_INVALID = "PARSE_CONTRACT_INVALID"
+    REQUEST_IDENTITY_MISMATCH = "REQUEST_IDENTITY_MISMATCH"
+    PROMPT_IDENTITY_MISMATCH = "PROMPT_IDENTITY_MISMATCH"
+    CONTEXT_IDENTITY_MISMATCH = "CONTEXT_IDENTITY_MISMATCH"
+    DUPLICATE_FACT_ID = "DUPLICATE_FACT_ID"
+    DUPLICATE_INFERENCE_ID = "DUPLICATE_INFERENCE_ID"
+    DUPLICATE_UNKNOWN_ID = "DUPLICATE_UNKNOWN_ID"
+    DUPLICATE_FACT_SOURCE_ID = "DUPLICATE_FACT_SOURCE_ID"
+    DUPLICATE_INFERENCE_SOURCE_ID = "DUPLICATE_INFERENCE_SOURCE_ID"
+    DUPLICATE_SOURCE_REFERENCE = "DUPLICATE_SOURCE_REFERENCE"
+    DUPLICATE_FRESHNESS_DISCLOSURE = "DUPLICATE_FRESHNESS_DISCLOSURE"
+    SOURCE_REFERENCE_NOT_TRUSTED = "SOURCE_REFERENCE_NOT_TRUSTED"
+    SOURCE_USAGE_REFERENCE_SET_MISMATCH = (
+        "SOURCE_USAGE_REFERENCE_SET_MISMATCH"
+    )
+    FRESHNESS_REFERENCE_SET_MISMATCH = "FRESHNESS_REFERENCE_SET_MISMATCH"
+    SOURCE_FRESHNESS_MISMATCH = "SOURCE_FRESHNESS_MISMATCH"
+    FACT_SOURCE_FRESHNESS_AMBIGUOUS = "FACT_SOURCE_FRESHNESS_AMBIGUOUS"
+    FACT_FRESHNESS_MISMATCH = "FACT_FRESHNESS_MISMATCH"
+    SERIALIZED_RESPONSE_TOO_LARGE = "SERIALIZED_RESPONSE_TOO_LARGE"
+
+
+class AdvisorResponseIntegrityField(str, Enum):
+    RESPONSE_TEXT = "responseText"
+    REQUEST_ID = "requestId"
+    PROMPT_VERSION = "promptVersion"
+    CONTEXT_ENVELOPE = "contextEnvelope"
+    FACT_ID = "facts.factId"
+    INFERENCE_ID = "inferences.inferenceId"
+    UNKNOWN_ID = "unknowns.unknownId"
+    FACT_SOURCE_IDS = "facts.sourceIds"
+    INFERENCE_SOURCE_IDS = "inferences.basedOnSourceIds"
+    SOURCE_REFERENCES = "sourceReferences"
+    FRESHNESS_DISCLOSURES = "freshnessDisclosures"
+    FACT_FRESHNESS = "facts.freshness"
+    RESPONSE_ENVELOPE = "responseEnvelope"
+
+
+class AdvisorResponseIntegrityDiagnostic(AdvisorResponseContractModel):
+    violationCode: AdvisorResponseIntegrityViolationCode
+    field: AdvisorResponseIntegrityField
+    stage: Literal["POST_PARSE_RESPONSE_INTEGRITY"] = (
+        "POST_PARSE_RESPONSE_INTEGRITY"
+    )
+
+
 class AdvisorRawResponse(AdvisorResponseContractModel):
     requestId: Identifier
     promptVersion: Annotated[str, StringConstraints(min_length=1, max_length=64)]
