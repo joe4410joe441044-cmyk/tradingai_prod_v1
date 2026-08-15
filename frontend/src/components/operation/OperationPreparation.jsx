@@ -170,7 +170,7 @@ export default function OperationPreparation({
                 <strong>PREPARE → VERIFY → REVIEW → START</strong>
             </div>
 
-            <div className="operation-prep-flow">
+            <div className="operation-prep-card-grid">
                 <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
                     <span className="operation-prep-label">Mode（モード）</span>
                     <SegmentedControl
