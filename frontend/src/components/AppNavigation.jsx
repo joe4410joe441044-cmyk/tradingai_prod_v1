@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import { reorderNavigationItems } from "./appNavigationModel";
+import {
+    loadNavigationItems,
+    reorderAndPersistNavigationItems,
+} from "./appNavigationModel";
 
 const DASHBOARD_PATH = "/";
 const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
@@ -70,8 +73,18 @@ export function NavigationTabs({
     });
 }
 
+const resolveNavigationStorage = () => {
+    try {
+        return window.localStorage;
+    } catch {
+        return null;
+    }
+};
+
 export default function AppNavigation({ currentPath, onPathChange }) {
-    const [items, setItems] = useState(() => [...NAVIGATION_ITEMS]);
+    const [items, setItems] = useState(() => (
+        loadNavigationItems(NAVIGATION_ITEMS, resolveNavigationStorage())
+    ));
     const [draggedPath, setDraggedPath] = useState(null);
     const draggedPathRef = useRef(null);
     const lastDragTargetRef = useRef(null);
@@ -115,7 +128,12 @@ export default function AppNavigation({ currentPath, onPathChange }) {
             return;
         }
         setItems((current) => (
-            reorderNavigationItems(current, sourcePath, targetPath)
+            reorderAndPersistNavigationItems(
+                current,
+                sourcePath,
+                targetPath,
+                resolveNavigationStorage(),
+            )
         ));
     };
 

@@ -214,13 +214,18 @@ test("tabs reorder left and right without changing identity or routes", async ()
     assert.equal(buttons.every(({ props }) => props.draggable === "true"), true);
 });
 
-test("drag handlers suppress navigation and add no API or persistence", async () => {
+test("drag handlers suppress navigation and automatically persist path order", async () => {
     const timers = [];
+    const writes = [];
     globalThis.window = {
         location: { pathname: "/" },
         history: { pushState() {}, replaceState() {} },
         addEventListener() {},
         removeEventListener() {},
+        localStorage: {
+            getItem: () => null,
+            setItem: (key, value) => writes.push([key, value]),
+        },
         setTimeout: (callback) => timers.push(callback),
     };
     const { default: AppNavigation } = await loadModule();
@@ -254,6 +259,13 @@ test("drag handlers suppress navigation and add no API or persistence", async ()
         preventDefault() {},
     });
     assert.equal(transfer.dropEffect, "move");
+    assert.deepEqual(writes, [[
+        "tradingai.navigation.tabOrder.v1",
+        JSON.stringify([
+            "/", "/money-management", "/market-intelligence",
+            "/ai-advisor", "/market-recorder", "/supervisor",
+        ]),
+    ]]);
     buttons[1].props.onDrop({ preventDefault() {} });
     buttons[3].props.onDragEnd();
     assert.equal(timers.length, 1);
@@ -262,5 +274,103 @@ test("drag handlers suppress navigation and add no API or persistence", async ()
         new URL("./AppNavigation.jsx", import.meta.url),
         "utf8",
     );
-    assert.doesNotMatch(source, /fetch\(|axios|localStorage|sessionStorage|\/api\//);
+    assert.doesNotMatch(source, /fetch\(|axios|sessionStorage|\/api\//);
+});
+
+test("saved order restores canonical tabs, routes, and active identity", async () => {
+    globalThis.window = {
+        location: { pathname: "/money-management" },
+        history: { pushState() {}, replaceState() {} },
+        addEventListener() {},
+        removeEventListener() {},
+        localStorage: {
+            getItem: () => JSON.stringify([
+                "/", "/money-management", "/market-intelligence",
+                "/ai-advisor", "/market-recorder", "/supervisor",
+            ]),
+            setItem() {},
+        },
+    };
+    const { default: AppNavigation } = await loadModule();
+    const navigated = [];
+    globalThis.window.history.pushState = (_state, _title, path) => {
+        navigated.push(path);
+    };
+    const buttons = descendants(AppNavigation({
+        currentPath: "/money-management",
+        onPathChange() {},
+    })).filter(({ type }) => type === "button");
+
+    assert.deepEqual(buttons.map(({ props }) => props.children), [
+        "DASHBOARD", "MONEY MANAGEMENT", "MARKET INTELLIGENCE",
+        "AI ADVISOR", "MARKET RECORDER", "SUPERVISOR",
+    ]);
+    assert.equal(buttons[1].props["aria-current"], "page");
+    buttons[1].props.onClick();
+    assert.equal(navigated.length, 0);
+    buttons[2].props.onClick();
+    assert.equal(navigated.at(-1), "/market-intelligence");
+});
+
+test("restore ignores invalid, unknown, and duplicate paths and appends current tabs", async () => {
+    const {
+        loadNavigationItems,
+        restoreNavigationItems,
+    } = await import("./appNavigationModel.js");
+    const canonical = [
+        { label: "A", path: "/a" },
+        { label: "B", path: "/b" },
+        { label: "C", path: "/c" },
+        { label: "NEW", path: "/new" },
+    ];
+
+    assert.deepEqual(
+        restoreNavigationItems(
+            canonical,
+            JSON.stringify(["/c", "/unknown", "/c", "/a"]),
+        ).map(({ path }) => path),
+        ["/c", "/a", "/b", "/new"],
+    );
+    assert.deepEqual(
+        restoreNavigationItems(canonical, "not json").map(({ path }) => path),
+        ["/a", "/b", "/c", "/new"],
+    );
+    assert.deepEqual(
+        restoreNavigationItems(canonical, JSON.stringify({ path: "/c" }))
+            .map(({ path }) => path),
+        ["/a", "/b", "/c", "/new"],
+    );
+    assert.deepEqual(
+        loadNavigationItems(canonical, null).map(({ path }) => path),
+        ["/a", "/b", "/c", "/new"],
+    );
+});
+
+test("storage read and write failures keep navigation reorderable", async () => {
+    const {
+        loadNavigationItems,
+        reorderAndPersistNavigationItems,
+    } = await import("./appNavigationModel.js");
+    const canonical = [
+        { label: "A", path: "/a" },
+        { label: "B", path: "/b" },
+        { label: "C", path: "/c" },
+    ];
+    const readFailure = {
+        getItem() { throw new Error("blocked"); },
+    };
+    const writeFailure = {
+        setItem() { throw new Error("quota"); },
+    };
+
+    assert.deepEqual(loadNavigationItems(canonical, readFailure), canonical);
+    assert.deepEqual(
+        reorderAndPersistNavigationItems(
+            canonical,
+            "/c",
+            "/a",
+            writeFailure,
+        ).map(({ path }) => path),
+        ["/c", "/a", "/b"],
+    );
 });
