@@ -250,6 +250,83 @@
 }
 
 /* =====================================================
+   BOTTOM ROW — 3 equal-height columns
+   ===================================================== */
+
+.operation-bottom-row {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+    flex-gap: 8px;
+}
+
+.operation-bottom-col {
+    flex: 1 0 0%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: stretch;
+}
+
+@media (min-width: 1600px) {
+    .operation-bottom-col { flex-basis: 33.333%; }
+}
+
+@media (min-width: 1200px) and (max-width: 1599px) {
+    .operation-bottom-col { flex-basis: 33.333%; }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+    .operation-bottom-col { flex-basis: 50%; }
+}
+
+@media (max-width: 767px) {
+    .operation-bottom-col { flex-basis: 100%; }
+}
+
+/* =====================================================
+   LANE WRAPPERS
+   ===================================================== */
+
+.operation-lane-left,
+.operation-lane-center,
+.operation-lane-right {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Wide desktop — 1600px+: 3 lanes */
+@media (min-width: 1600px) {
+    .operation-lane-left { flex-basis: 33.333%; }
+    .operation-lane-center { flex-basis: 33.333%; }
+    .operation-lane-right { flex-basis: 33.333%; }
+}
+
+/* Desktop — 1200–1599px: 3 lanes */
+@media (min-width: 1200px) and (max-width: 1599px) {
+    .operation-lane-left { flex-basis: 33.333%; }
+    .operation-lane-center { flex-basis: 33.333%; }
+    .operation-lane-right { flex-basis: 33.333%; }
+}
+
+/* Tablet / narrow desktop — 768–1199px: 2 lanes (left + center), right stacks below */
+@media (min-width: 768px) and (max-width: 1199px) {
+    .operation-lane-left { flex-basis: 50%; }
+    .operation-lane-center { flex-basis: 50%; }
+    .operation-lane-right { flex-basis: 100%; order: 3; }
+}
+
+/* Mobile — below 768px: single column logical order */
+@media (max-width: 767px) {
+    .operation-lane-left,
+    .operation-lane-center,
+    .operation-lane-right {
+        flex-basis: 100%;
+        order: inherit;
+    }
+}
+
+/* =====================================================
    RESPONSIVE LAYOUT — flex wrap with content-sized sections
    ===================================================== */
 
