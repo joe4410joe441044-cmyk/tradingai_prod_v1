@@ -7,9 +7,94 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as React from "react";
 import { transformWithOxc } from "vite";
 
+const moduleUrl = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
+
 const sourceUrl = new URL("./OperationPreparation.jsx", import.meta.url);
 const sourceDir = dirname(fileURLToPath(sourceUrl));
 
+// Stub model - plain string, matches operationPreparationModel.js exports
+// This is the exact source code from operationPreparationModel.js, encoded for data URI
+const modelSource =
+'export const OPERATION_PREPARATION_OPTIONS = Object.freeze({' + "\n" +
+'    tradingModes: ["PAPER", "LIVE"],' + "\n" +
+'    selectionModes: ["MANUAL", "AUTO"],' + "\n" +
+'    symbols: ["XRPUSDTM", "BTCUSDTM", "ETHUSDTM"],' + "\n" +
+'    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2],' + "\n" +
+'    maxExposure: [10, 20, 30, 40, 50],' + "\n" +
+'    maxDrawdown: [2, 3, 5, 7, 10],' + "\n" +
+'    requestedLeverage: [1, 2, 3, 4, 5],' + "\n" +
+' });' + "\n" +
+"\n" +
+'const supportedValue = (values, candidate, fallback) => (' + "\n" +
+'    values.includes(candidate) ? candidate : fallback' + "\n" +
+' );' + "\n" +
+"\n" +
+'export const createOperationPreparationSettings = (config = {}) => ({' + "\n" +
+'    tradingMode: supportedValue(' + "\n" +
+'        OPERATION_PREPARATION_OPTIONS.tradingModes,' + "\n" +
+'        String(config.mode || "").toUpperCase(),' + "\n" +
+'        "PAPER",' + "\n" +
+'    ),' + "\n" +
+'    selectionMode: supportedValue(' + "\n" +
+'        OPERATION_PREPARATION_OPTIONS.selectionModes,' + "\n" +
+'        String(config.selectionMode || "").toUpperCase(),' + "\n" +
+'    ),' + "\n" +
+'    manualSymbol: supportedValue(' + "\n" +
+'        OPERATION_PREPARATION_OPTIONS.symbols,' + "\n" +
+'        String(config.symbol || "").toUpperCase(),' + "\n" +
+'        "XRPUSDTM",' + "\n" +
+'    ),' + "\n" +
+'    riskPerTrade: 0.5,' + "\n" +
+'    compounding: false,' + "\n" +
+'    maxExposure: 30,' + "\n" +
+'    maxDrawdown: 5,' + "\n" +
+'    requestedLeverage: 3,' + "\n" +
+'    loopOnStart: false,' + "\n" +
+'    autoTradeOnStart: false,' + "\n" +
+' });' + "\n" +
+"\n" +
+'export const operationPreparationSummary = (settings, selectedSymbol) => ({' + "\n" +
+'    mode: settings.tradingMode,' + "\n" +
+'    market: settings.selectionMode,' + "\n" +
+'    symbol: settings.selectionMode === "MANUAL"' + "\n" +
+'        ? settings.manualSymbol' + "\n" +
+'        : selectedSymbol || "AUTO SELECT",' + "\n" +
+'    riskPerTrade: "0.50%",' + "\n" +
+'    requestedLeverage: "3x",' + "\n" +
+'    loop: settings.loopOnStart ? "ON" : "OFF",' + "\n" +
+'    autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",' + "\n" +
+' });' + "\n" +
+"\n" +
+'export const normalizeReadiness = (value, readyValues = []) => {' + "\n" +
+'    const normalized = String(value ?? "UNKNOWN").trim().toUpperCase();' + "\n" +
+'    if (readyValues.includes(normalized)) return "READY";' + "\n" +
+'    if (["BLOCKED", "ERROR", "FAILED", "LOCKED"].includes(normalized)) {' + "\n" +
+'        return normalized === "FAILED" || normalized === "LOCKED"' + "\n" +
+'            ? "BLOCKED"' + "\n" +
+'            : normalized;' + "\n" +
+'    }' + "\n" +
+'    if (["WAITING", "PENDING", "PROCESSING", "STARTING"].includes(normalized)) {' + "\n" +
+'        return "WAITING";' + "\n" +
+'    }' + "\n" +
+'    return normalized || "UNKNOWN";' + "\n" +
+' };' + "\n" +
+"\n" +
+'export const positionReadiness = (position) => {' + "\n" +
+'    const normalized = String(position ?? "UNKNOWN").trim().toUpperCase();' + "\n" +
+'    if (["FLAT", "NONE", "CLOSED", "NO POSITION"].includes(normalized)) {' + "\n" +
+'        return "FLAT";' + "\n" +
+'    }' + "\n" +
+'    if (["LONG", "SHORT", "OPEN"].includes(normalized)) return "BLOCKED";' + "\n" +
+'    return "UNKNOWN";' + "\n" +
+' };' + "\n" +
+"\n" +
+'export const pendingOrderReadiness = (pendingOrder) => {' + "\n" +
+'    if (pendingOrder === false) return "SAFE";' + "\n" +
+'    if (pendingOrder === true) return "BLOCKED";' + "\n" +
+'    return "UNKNOWN";' + "\n" +
+' };' + "\n";
+
+// Fixed loadComponent - stub-based, avoids brittle string replacement that breaks JSX conditionals
 const loadComponent = async () => {
     const transformed = await transformWithOxc(
         await readFile(sourceUrl, "utf8"),
@@ -17,12 +102,16 @@ const loadComponent = async () => {
     );
     const temporary = await mkdtemp(join(sourceDir, ".operation-preparation-test-"));
     const output = join(temporary, "OperationPreparation.mjs");
-    const modelUrl = new URL("./operationPreparationModel.js", import.meta.url).href;
     try {
-        await writeFile(output, transformed.code.replace(
-            'from "./operationPreparationModel";',
-            `from "${modelUrl}";`,
-        ));
+        // Use stub-based import rewriting (App.test.js pattern):
+        // Replace import paths with inline stub modules via data URIs
+        let code = transformed.code
+            .replace('from "react";', `from "react";`)
+            .replace(
+                'from "./operationPreparationModel";',
+                `from "${moduleUrl(modelSource)}";`,
+            );
+        await writeFile(output, code);
         return (await import(`${pathToFileURL(output).href}?t=${Date.now()}`)).default;
     } finally {
         await rm(temporary, { force: true, recursive: true });

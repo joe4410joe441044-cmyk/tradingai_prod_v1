@@ -108,6 +108,15 @@ export default function OperationPreparation({
     pendingOrder,
     position,
     realOrderAllowed = false,
+    loopChecked,
+    loopState,
+    loopStateTone,
+    loopDisabled,
+    handleLoopChange,
+    autoTradeChecked,
+    autoTradeStateText,
+    autoTradeDisabled,
+    handleAutoTradeChange,
 }) {
     const [settings, setSettings] = useState(() => (
         createOperationPreparationSettings(config)
@@ -164,6 +173,11 @@ export default function OperationPreparation({
     const controlsDisabled = botRunning === true;
 
     {botRunning && <div className="operation-prep-running-indicator" />}
+
+    const loopValue = loopState ? String(loopState) : summary.loop;
+    const loopStatus = botRunning ? loopStateTone !== undefined : false;
+    const autoTradeValue = botRunning ? autoTradeStateText : summary.autoTrade;
+    const autoTradeStatus = botRunning ? autoTradeStateText.includes("ON") : false;
 
     return (
         <div className="operation-preparation" data-testid="operation-preparation">
@@ -266,8 +280,8 @@ export default function OperationPreparation({
                     <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
                     <DerivedRow label="RISK / Trade（1取引リスク）" source="OPERATOR" value={summary.riskPerTrade} />
                     <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
-                    <DerivedRow label="LOOP" source="OPERATOR" value={summary.loop} />
-                    <DerivedRow label="AUTO TRADE" source="OPERATOR" value={summary.autoTrade} />
+                    <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
+                    <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
                     <DerivedRow label="READINESS" source="UI REVIEW" status value={reviewReadiness} />
                 </div>
                 <div className="operation-prep-start" data-testid="ready-to-start">
