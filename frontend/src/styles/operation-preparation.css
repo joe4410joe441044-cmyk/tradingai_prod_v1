@@ -250,39 +250,39 @@
 }
 
 /* =====================================================
-   BOTTOM ROW — 3 equal-height columns
+   BOTTOM ROW — 3 equal-height grid columns
    ===================================================== */
 
 .operation-bottom-row {
-    display: flex;
+    display: grid;
     width: 100%;
-    flex-wrap: wrap;
-    flex-gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
     align-items: stretch;
 }
 
 .operation-bottom-col {
-    flex: 1 0 0%;
     min-width: 0;
     display: flex;
     flex-direction: column;
     justify-content: stretch;
+    overflow: hidden;
 }
 
 @media (min-width: 1600px) {
-    .operation-bottom-col { flex-basis: 33.333%; }
+    .operation-bottom-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-bottom-col { flex-basis: 33.333%; }
+    .operation-bottom-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (min-width: 768px) and (max-width: 1199px) {
-    .operation-bottom-col { flex-basis: 50%; }
+    .operation-bottom-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 767px) {
-    .operation-bottom-col { flex-basis: 100%; }
+    .operation-bottom-row { grid-template-columns: 1fr; }
 }
 
 /* =====================================================
