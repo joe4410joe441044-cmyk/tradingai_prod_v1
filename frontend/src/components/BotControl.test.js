@@ -263,6 +263,22 @@ const textIncludes = (
     text
 ) => normalizeText(root).includes(text);
 
+const descendants = (
+    node
+) => {
+    if (node == null || typeof node === "boolean") return [];
+    if (Array.isArray(node)) return node.flatMap(descendants);
+    if (typeof node.type === "function") return descendants(node.type(node.props));
+    return [node, ...descendants(node.props?.children)];
+};
+
+const findTestId = (
+    root,
+    testId
+) => descendants(root).find(
+    (node) => node.props?.["data-testid"] === testId,
+);
+
 const createHookRenderer = (
     Component,
     props
@@ -894,14 +910,10 @@ test("stopped BOT exposes no active Loop or Auto Trade mutation control", async 
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
 });
 
-test("running BOT exposes existing Loop and Auto Trade controls only as post-start actions", async () => {
+test("running BOT exposes Loop and Auto Trade controls in AUTOMATION section", async () => {
     const renderer = await renderBotControl({ botRunning: true, loopEnabled: true, executionEnabled: false });
-    const toggles = findAll(renderer.root, (element) => ["Toggle trading loop", "Toggle automatic trading"].includes(element.props?.ariaLabel));
-    assert.equal(toggles.length, 2);
-    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), true);
+    // UI-8: POST-START RUNTIME CONTROLS block must be absent
+    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), false);
     assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
-    assert.equal(textIncludes(renderer.root, "MARKET MODE"), false);
-    assert.equal(textIncludes(renderer.root, "AMS MONITORING"), false);
-    assert.equal(textIncludes(renderer.root, "ACTIVE SYMBOL"), false);
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
 });

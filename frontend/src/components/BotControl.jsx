@@ -1104,6 +1104,15 @@ export default function BotControl({
                 pendingOrder={pendingOrder}
                 position={position}
                 realOrderAllowed={config?.realOrderAllowed === true}
+                loopChecked={loopChecked}
+                loopState={loopStateText}
+                loopStateTone={loopStateTone}
+                loopDisabled={loopDisabled}
+                handleLoopChange={handleLoopChange}
+                autoTradeChecked={autoTradeChecked}
+                autoTradeStateText={autoTradeStateText}
+                autoTradeDisabled={autoTradeDisabled}
+                handleAutoTradeChange={handleAutoTradeChange}
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
                     <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || emergencyBlocksOperations} onClick={handleBotLifecycle} type="button">
@@ -1114,122 +1123,7 @@ export default function BotControl({
                 </div>
             </OperationPreparation>
 
-            {botRunning && (
-            <section className="operation-post-start" data-testid="post-start-runtime-controls">
-            <div className="operation-runtime-heading">POST-START RUNTIME CONTROLS <span>BOT RUNNING · DIRECT RUNTIME ACTIONS</span></div>
-            <div className="operation-runtime-controls">
 
-            {/* =======================================================
-               LOOP
-            ======================================================= */}
-
-            <div className="operation-section operation-section--loop">
-
-                <OperationToggle
-                    ariaLabel="Toggle trading loop"
-                    checked={loopChecked}
-                    disabled={loopDisabled}
-                    label="LOOP"
-                    loading={loopPending}
-                    offText="OFF"
-                    onChange={handleLoopChange}
-                    onText="ON"
-                />
-
-                <div className="operation-state-row">
-
-                    <span className="operation-state-label">
-                        LOOP STATE（ループ状態）
-                    </span>
-
-                    <span
-                        className={
-                            "operation-state-value "
-                            + `operation-state-value--${loopStateTone}`
-                        }
-                    >
-                        {loopStateDisplay}
-                    </span>
-                </div>
-
-                {loopPending && loopPendingAction && (
-                    <div className="operation-state-reason operation-state-reason--pending">
-                        Operation: {loopStatusText}
-                    </div>
-                )}
-
-                {emergencyOperationGuardReason && (
-                    <div className="operation-state-reason operation-state-reason--warning">
-                        {emergencyOperationGuardReason}
-                    </div>
-                )}
-
-                {loopError && (
-                    <div
-                        className="operation-inline-error"
-                        data-testid="loop-error"
-                        role="alert"
-                    >
-                        {loopError}
-                    </div>
-                )}
-
-            </div>
-
-            <div className="operation-section operation-section--auto-trade">
-
-                <OperationToggle
-                    ariaLabel="Toggle automatic trading"
-                    checked={autoTradeChecked}
-                    disabled={autoTradeDisabled}
-                    label="AUTO TRADE"
-                    loading={autoTradePending}
-                    offText="OFF"
-                    onChange={handleAutoTradeChange}
-                    onText="ON"
-                />
-
-                <div className="operation-state-row">
-
-                    <span className="operation-state-label">
-                        AUTO TRADE STATE（自動注文状態）
-                    </span>
-
-                    <span
-                        className={
-                            "operation-state-value "
-                            + (
-                                autoTradeChecked
-                                    ? "operation-state-value--enabled"
-                                    : "operation-state-value--disabled"
-                            )
-                        }
-                    >
-                        {autoTradeStateText}
-                    </span>
-
-                </div>
-
-                {autoTradeStateReason && (
-                    <div className="operation-state-reason">
-                        {autoTradeStateReason}
-                    </div>
-                )}
-
-                {autoTradeError && (
-                    <div
-                        className="operation-auto-trade-error"
-                        data-testid="auto-trade-error"
-                        role="alert"
-                    >
-                        {autoTradeError}
-                    </div>
-                )}
-
-            </div>
-            </div>
-            </section>
-            )}
 
             <div className="operation-section operation-emergency-section">
 
