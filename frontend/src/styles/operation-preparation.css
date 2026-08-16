@@ -1,20 +1,11 @@
 .operation-preparation {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: auto auto;
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    flex-gap: 8px;
+    color: #d7e1ef;
+    font-family: "Consolas", monospace;
+    justify-content: flex-start;
 }
-
-/* Grid placement for six sections creating three vertical lanes:
-   Column 1: ① trading-mode (row 1) + ④ trade-execution (row 2)
-   Column 2: ② market-selection (row 1) + ⑤ automation (row 2)
-   Column 3: ③ money-management (row 1) + ⑥ safety-readiness (row 2) */
-[data-testid="trading-mode-section"] { grid-row: 1; grid-column: 1; }
-[data-testid="market-selection-section"] { grid-row: 1; grid-column: 2; }
-[data-testid="money-management-section"] { grid-row: 1; grid-column: 3; }
-[data-testid="trade-execution-section"] { grid-row: 2; grid-column: 1; }
-[data-testid="automation-section"] { grid-row: 2; grid-column: 2; }
-[data-testid="safety-readiness-section"] { grid-row: 2; grid-column: 3; }
 
 .operation-prep-section {
     min-width: 0;
@@ -24,11 +15,23 @@
     background: rgba(8, 14, 24, 0.6);
     border-radius: 4px;
     border: 1px solid #2d405e;
-    min-height: 0;
-    align-self: stretch;
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
-/* Section header: number circle + title */
+.operation-prep-section h3,
+.operation-prep-final > h3 {
+    margin: 0;
+    color: #edf6ff;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    max-width: 100%;
+}
+
 .operation-prep-section > header {
     display: flex;
     align-items: flex-start;
@@ -247,63 +250,27 @@
 }
 
 /* =====================================================
-   RESPONSIVE LAYOUT — grid-based lane layout
+   RESPONSIVE LAYOUT — flex wrap with content-sized sections
    ===================================================== */
 
-/* Desktop — 1600px+: 3 lanes, content-aware column sizing */
+/* Wide desktop — 1600px+: 4 columns */
 @media (min-width: 1600px) {
-    .operation-preparation {
-        grid-template-columns: repeat(3, 1fr);
-        grid-template-rows: auto auto;
-    }
-    [data-testid="trading-mode-section"] { grid-row: 1; grid-column: 1; }
-    [data-testid="market-selection-section"] { grid-row: 1; grid-column: 2; }
-    [data-testid="money-management-section"] { grid-row: 1; grid-column: 3; }
-    [data-testid="trade-execution-section"] { grid-row: 2; grid-column: 1; }
-    [data-testid="automation-section"] { grid-row: 2; grid-column: 2; }
-    [data-testid="safety-readiness-section"] { grid-row: 2; grid-column: 3; }
+    .operation-prep-section { flex-basis: 25%; }
 }
 
-/* Desktop — 1200–1599px: 3 lanes */
+/* Desktop — 1200–1599px: 3 columns */
 @media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-preparation {
-        grid-template-columns: repeat(3, 1fr);
-        grid-template-rows: auto auto;
-    }
-    [data-testid="trading-mode-section"] { grid-row: 1; grid-column: 1; }
-    [data-testid="market-selection-section"] { grid-row: 1; grid-column: 2; }
-    [data-testid="money-management-section"] { grid-row: 1; grid-column: 3; }
-    [data-testid="trade-execution-section"] { grid-row: 2; grid-column: 1; }
-    [data-testid="automation-section"] { grid-row: 2; grid-column: 2; }
-    [data-testid="safety-readiness-section"] { grid-row: 2; grid-column: 3; }
+    .operation-prep-section { flex-basis: 33.333%; }
 }
 
-/* Tablet / narrow desktop — 768–1199px: single column, logical order preserved */
+/* Tablet / narrow desktop — 768–1199px: 2 columns */
 @media (min-width: 768px) and (max-width: 1199px) {
-    .operation-preparation {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto auto auto;
-    }
-    [data-testid="trading-mode-section"] { grid-row: 1; grid-column: 1; }
-    [data-testid="market-selection-section"] { grid-row: 2; grid-column: 1; }
-    [data-testid="money-management-section"] { grid-row: 3; grid-column: 1; }
-    [data-testid="trade-execution-section"] { grid-row: 4; grid-column: 1; }
-    [data-testid="automation-section"] { grid-row: 5; grid-column: 1; }
-    [data-testid="safety-readiness-section"] { grid-row: 6; grid-column: 1; }
+    .operation-prep-section { flex-basis: 50%; }
 }
 
-/* Mobile — below 768px: single column, logical order preserved */
+/* Mobile — below 768px: 1 column */
 @media (max-width: 767px) {
-    .operation-preparation {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto auto auto;
-    }
-    [data-testid="trading-mode-section"] { grid-row: 1; grid-column: 1; }
-    [data-testid="market-selection-section"] { grid-row: 2; grid-column: 1; }
-    [data-testid="money-management-section"] { grid-row: 3; grid-column: 1; }
-    [data-testid="trade-execution-section"] { grid-row: 4; grid-column: 1; }
-    [data-testid="automation-section"] { grid-row: 5; grid-column: 1; }
-    [data-testid="safety-readiness-section"] { grid-row: 6; grid-column: 1; }
+    .operation-prep-section { flex-basis: 100%; }
 }
 
 /* =====================================================
