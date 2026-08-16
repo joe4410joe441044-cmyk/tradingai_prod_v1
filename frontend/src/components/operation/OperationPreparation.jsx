@@ -163,6 +163,8 @@ export default function OperationPreparation({
         : "UI REVIEW READY";
     const controlsDisabled = botRunning === true;
 
+    {botRunning && <div className="operation-prep-running-indicator" />}
+
     return (
         <div className="operation-preparation" data-testid="operation-preparation">
             <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
@@ -269,8 +271,12 @@ export default function OperationPreparation({
                     <DerivedRow label="READINESS" source="UI REVIEW" status value={reviewReadiness} />
                 </div>
                 <div className="operation-prep-start" data-testid="ready-to-start">
-                    <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness === "BLOCKED" ? "blocked" : "ready"}`}><i aria-hidden="true" /></span><strong>READY TO START</strong></div>
-                    <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
+                    {botRunning ? null : (
+                        <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness === "BLOCKED" ? "blocked" : "ready"}`}><i aria-hidden="true" /></span><strong>READY TO START</strong></div>
+                    )}
+                    {botRunning ? null : (
+                        <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
+                    )}
                     {children}
                 </div>
             </section>

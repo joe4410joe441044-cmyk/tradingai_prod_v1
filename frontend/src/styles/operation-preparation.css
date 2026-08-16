@@ -1,19 +1,22 @@
 .operation-preparation {
-    display: grid;
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    flex-gap: 8px;
     color: #d7e1ef;
     font-family: "Consolas", monospace;
+    justify-content: flex-start;
 }
 
 .operation-prep-section {
     min-width: 0;
     height: auto;
+    min-height: 0;
     padding: 12px 16px;
     background: rgba(8, 14, 24, 0.6);
     border-radius: 4px;
     border: 1px solid #2d405e;
-    border-inline-end: 1px solid #2d405e;
-    border-bottom: 1px solid rgba(45, 64, 94, 0.3);
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 .operation-prep-section h3,
@@ -247,45 +250,27 @@
 }
 
 /* =====================================================
-   RESPONSIVE LAYOUT — vertical dividers by breakpoint
+   RESPONSIVE LAYOUT — flex wrap with content-sized sections
    ===================================================== */
 
 /* Wide desktop — 1600px+: 4 columns */
 @media (min-width: 1600px) {
-    .operation-preparation {
-        grid-template-columns: repeat(4, minmax(220px, 1fr));
-    }
-    .operation-prep-section:nth-child(4n+4) { border-inline-end: none; }
-    .operation-prep-section:nth-child(4n)   { border-bottom: 1px solid #2d405e; }
+    .operation-prep-section { flex-basis: 25%; }
 }
 
 /* Desktop — 1200–1599px: 3 columns */
 @media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-preparation {
-        grid-template-columns: repeat(3, minmax(260px, 1fr));
-    }
-    .operation-prep-section:nth-child(3n+3) { border-inline-end: none; }
+    .operation-prep-section { flex-basis: 33.333%; }
 }
 
 /* Tablet / narrow desktop — 768–1199px: 2 columns */
 @media (min-width: 768px) and (max-width: 1199px) {
-    .operation-preparation {
-        grid-template-columns: repeat(2, minmax(320px, 1fr));
-    }
-    .operation-prep-section:nth-child(2n+2) { border-inline-end: none; }
+    .operation-prep-section { flex-basis: 50%; }
 }
 
-/* Mobile — below 768px: 1 column, no vertical dividers */
+/* Mobile — below 768px: 1 column */
 @media (max-width: 767px) {
-    .operation-preparation {
-        grid-template-columns: 1fr;
-    }
-    .operation-prep-section { border-inline-end: none; border-bottom: 1px solid rgba(45, 64, 94, 0.3); }
-}
-
-/* Horizontal divider after section ④ in wide desktop */
-.operation-prep-section--wide-divider {
-    border-bottom: 1px solid #2d405e;
+    .operation-prep-section { flex-basis: 100%; }
 }
 
 /* =====================================================
