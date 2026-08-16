@@ -165,11 +165,6 @@ export default function OperationPreparation({
 
     return (
         <div className="operation-preparation" data-testid="operation-preparation">
-            <div className="operation-preparation__heading">
-                <div><span>OPERATION</span><h2>BOT START PREPARATION</h2></div>
-                <strong>PREPARE → VERIFY → REVIEW → START</strong>
-            </div>
-
             <div className="operation-prep-card-grid">
                 <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
                     <span className="operation-prep-label">Mode（モード）</span>
@@ -248,7 +243,6 @@ export default function OperationPreparation({
                     <span className="operation-prep-label">AUTO TRADE ON START</span>
                     <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
                     <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
-                    <p className="operation-prep-note">Preparation state only. Runtime start integration is intentionally deferred.</p>
                 </Section>
 
                 <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS（安全性 / 開始準備）">
