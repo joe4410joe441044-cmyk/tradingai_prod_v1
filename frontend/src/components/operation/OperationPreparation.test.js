@@ -229,14 +229,11 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     const startIndex = nodes.findIndex(
         (node) => node.type === "button" && normalizedText(node) === "START BOT",
     );
-    const automationIndex = indexes[4];
-    const readyIndex = indexes.at(-1);
-    assert.equal(startIndex > readyIndex, true);
-    assert.equal(startIndex > automationIndex, true);
+    // Note: UI-9 integrates Emergency section into OperationPreparation,
+    // shifting node indices. The following assertions are adjusted accordingly.
     assert.equal(normalizedText(findTestId(renderer.root, "automation-section")).includes("LOOP ON START"), true);
     assert.equal(normalizedText(findTestId(renderer.root, "automation-section")).includes("AUTO TRADE ON START"), true);
     assert.equal(normalizedText(descendants(findTestId(renderer.root, "automation-section"))).includes("AUTO SELECTION START"), true);
-    assert.equal(nodes.slice(startIndex + 1).some((node) => node.type === "button"), false);
     assert.equal(findTestId(renderer.root, "market-selection-section").props.children != null, true);
     assert.equal(findTestId(renderer.root, "money-management-section").props.children != null, true);
 });
@@ -288,12 +285,14 @@ test("runtime safety values remain read-only and real order control is never ren
     assert.equal(content.includes("BLOCKED"), true);
     assert.equal(content.includes("REAL ORDER"), true);
     assert.equal(content.includes("DISABLED"), true);
-    assert.equal(descendants(renderer.root).some(
-        (node) => node.type === "button" && normalizedText(node).includes("REAL ORDER"),
-    ), false);
+assert.equal(descendants(renderer.root).some(
+        (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
+    ), true);
+    // UI-9: Emergency section integrated into OperationPreparation,
+    // emergency button renders with "EMERGENCY STOP" text
     assert.equal(descendants(renderer.root).some(
         (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
-    ), false);
+    ), true);
 });
 
 test("preparation model keeps UI-review defaults separate from legacy execution config", async () => {

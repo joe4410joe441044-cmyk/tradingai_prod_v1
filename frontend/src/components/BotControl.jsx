@@ -1098,6 +1098,11 @@ export default function BotControl({
                 botRunning={botRunning}
                 config={config}
                 emergencyState={emergencyStateCode}
+                lockedFacts={lockedFacts}
+                actionWarnings={actionWarnings}
+                emergencyPath={emergencyPath}
+                emergencyError={emergencyError}
+                unlockError={unlockError}
                 executionEnabled={executionEnabled}
                 governanceStatus={runtimeHealth?.governance?.status}
                 onLegacyConfigChange={onLegacyConfigChange}
@@ -1122,9 +1127,6 @@ export default function BotControl({
                     {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
                 </div>
             </OperationPreparation>
-
-
-
             <div className="operation-section operation-emergency-section">
 
                 <div className="operation-section-title">

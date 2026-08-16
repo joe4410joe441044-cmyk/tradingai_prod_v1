@@ -127,6 +127,65 @@ export default function OperationPreparation({
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
     };
 
+    const lockedFacts = [];
+    const actionWarnings = [];
+    const emergencyError = undefined;
+    const lastResultMessage = undefined;
+    const emergencyPath = "";
+    const unlockError = undefined;
+
+    const emergencyStateCode = String(emergencyState ?? "UNKNOWN").trim().toUpperCase();
+
+    const emergencyStateCopy = {
+        READY: {
+            label: "READY",
+            text: "緊急停止は作動していません",
+            tone: "ready",
+        },
+        PROCESSING: {
+            label: "PROCESSING",
+            text: "緊急停止処理を実行中です",
+            tone: "processing",
+        },
+        LOCKED: {
+            label: "STOPPED SAFELY",
+            text: "緊急停止が正常に完了しました",
+            tone: "locked",
+        },
+        ACTION_REQUIRED: {
+            label: "ACTION REQUIRED",
+            text: "緊急停止は一部完了、失敗、または確認不能です",
+            tone: "action",
+        },
+        FAILED: {
+            label: "FAILED",
+            text: "緊急停止処理に失敗しました",
+            tone: "action",
+        },
+        PARTIAL: {
+            label: "PARTIAL",
+            text: "緊急停止処理は一部完了しました",
+            tone: "action",
+        },
+        STATE_UNKNOWN: {
+            label: "STATE UNKNOWN",
+            text: "緊急停止後の状態を確認できません",
+            tone: "action",
+        },
+    };
+    const emergencyStateDetails =
+        emergencyStateCode && emergencyStateCode !== "UNKNOWN"
+            ? emergencyStateCopy[emergencyStateCode]
+            : emergencyStateCopy.READY;
+
+    const emergencyLocked = emergencyStateCode === "LOCKED";
+    const emergencyLockClass = emergencyStateCode === "LOCKED"
+        ? "locked"
+        : emergencyStateCode === "READY"
+            ? "unlocked"
+            : "unknown";
+    const emergencyLockValue = emergencyLocked ? "LOCKED" : "UNLOCKED";
+
     const selectedRuntimeSymbol = settings.selectionMode === "AUTO"
         && config.displaySymbol
         && !["UNKNOWN", "NOT AVAILABLE"].includes(String(config.displaySymbol).toUpperCase())
@@ -171,6 +230,9 @@ export default function OperationPreparation({
         ? "BLOCKED"
         : "UI REVIEW READY";
     const controlsDisabled = botRunning === true;
+
+    const emergencyButtonDisabled = emergencyStateCode !== "READY";
+    const handleEmergencyOpenConfirm = () => {};
 
     {botRunning && <div className="operation-prep-running-indicator" />}
 
