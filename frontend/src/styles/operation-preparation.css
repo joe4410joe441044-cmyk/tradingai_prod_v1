@@ -258,6 +258,7 @@
     width: 100%;
     flex-wrap: wrap;
     flex-gap: 8px;
+    align-items: stretch;
 }
 
 .operation-bottom-col {
@@ -282,6 +283,19 @@
 
 @media (max-width: 767px) {
     .operation-bottom-col { flex-basis: 100%; }
+}
+
+/* =====================================================
+   EMERGENCY CARD
+   ===================================================== */
+.operation-emergency-section {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(255, 80, 80, .3);
+    border-radius: 4px;
+    background: rgba(30, 8, 8, .56);
+    flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 /* =====================================================
@@ -362,6 +376,8 @@
     border: 1px solid rgba(63, 212, 139, .3);
     border-radius: 4px;
     background: rgba(10, 28, 28, .56);
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .operation-prep-final > h3 {
@@ -391,6 +407,9 @@
     padding-top: 8px;
     border-top: 1px solid rgba(63, 212, 139, .3);
     text-align: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .operation-prep-start > div {
