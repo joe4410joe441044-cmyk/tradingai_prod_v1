@@ -1,6 +1,7 @@
 import React, {
     useRef,
     useState,
+    useEffect,
 } from "react";
 
 import {
@@ -18,6 +19,9 @@ import {
 import {
     requestBotStop,
 } from "../runtime/botLifecycle";
+import {
+    useMoneyManagement,
+} from "../features/money-management/hooks/useMoneyManagement";
 import OperationToggle from "./common/OperationToggle";
 import OperationPreparation from "./operation/OperationPreparation";
 
@@ -371,6 +375,7 @@ export default function BotControl({
 
     const [, forceUpdate] =
         useState(0);
+    const [riskPerTrade, setRiskPerTrade] = useState(1);
     const [
         loopPending,
         setLoopPending,
@@ -422,6 +427,21 @@ export default function BotControl({
     const botPendingRef = useRef(false);
     const autoTradePendingRef =
         useRef(false);
+    const emergencyPendingRef =
+        useRef(false);
+    const unlockPendingRef =
+        useRef(false);
+    const { status: mmStatus } = useMoneyManagement();
+    const lifecycleState = mmStatus?.lifecycleState;
+    const capitalAuthorityStatus = mmStatus?.capitalAuthorityStatus;
+    const availableCapital = mmStatus?.capitalEligibility?.availableCapital;
+    const riskBudget = mmStatus?.capitalEligibility?.riskBudget;
+    const executionEntryAllowed = mmStatus?.executionEntryAllowed;
+    const recommendedAction = mmStatus?.recommendedAction;
+    const riskState = mmStatus?.riskState;
+
+    /* =======================================================
+       STATUS
     const emergencyPendingRef =
         useRef(false);
     const unlockPendingRef =
@@ -759,7 +779,7 @@ export default function BotControl({
                 body: botRunning ? undefined : JSON.stringify({
                     symbol: config?.symbol,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
-                    risk_percent: config?.risk_percent ?? 1,
+                    risk_percent: riskPerTrade,
                     position_size: config?.positionSize ?? 0,
                     max_drawdown_pct: config?.maxDd ?? 5,
                     sl_percent: config?.sl ?? 1,
@@ -1118,6 +1138,16 @@ export default function BotControl({
                 autoTradeStateText={autoTradeStateText}
                 autoTradeDisabled={autoTradeDisabled}
                 handleAutoTradeChange={handleAutoTradeChange}
+                riskPerTrade={riskPerTrade}
+                onRiskPerTradeChange={setRiskPerTrade}
+                mmRuntime={lifecycleState || "UNKNOWN"}
+                lifecycleState={lifecycleState}
+                capitalAuthorityStatus={capitalAuthorityStatus}
+                availableCapital={availableCapital}
+                riskBudget={riskBudget}
+                executionEntryAllowed={executionEntryAllowed}
+                recommendedAction={recommendedAction}
+                riskState={riskState}
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
                     <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || emergencyBlocksOperations} onClick={handleBotLifecycle} type="button">

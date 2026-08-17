@@ -175,6 +175,14 @@ test("renders all six preparation sections, controls, derived fields, and existi
         governanceStatus: "READY",
         pendingOrder: false,
         position: "FLAT",
+        mmRuntime: "RUNNING",
+        lifecycleState: "RUNNING",
+        capitalAuthorityStatus: "AVAILABLE",
+        availableCapital: "10000",
+        riskBudget: "50",
+        executionEntryAllowed: true,
+        recommendedAction: "CONTINUE",
+        riskState: "NORMAL",
         children: { type: "button", props: { children: "START BOT" } },
     });
     const content = normalizedText(descendants(renderer.root));

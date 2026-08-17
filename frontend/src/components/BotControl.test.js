@@ -59,6 +59,10 @@ const loadBotControl = async () => {
         tempDir,
         "OperationPreparation.mjs",
     );
+    const moneyManagementHookFile = join(
+        tempDir,
+        "useMoneyManagement.mjs",
+    );
     const apiMockFile = join(
         tempDir,
         "api.mjs",
@@ -80,6 +84,22 @@ const loadBotControl = async () => {
         await writeFile(
             operationPreparationFile,
             "export default function OperationPreparation(){return null}",
+        );
+
+        await writeFile(
+            moneyManagementHookFile,
+            [
+                "export function useMoneyManagement() {",
+                "  return { status: {",
+                "    lifecycleState: 'RUNNING',",
+                "    capitalAuthorityStatus: 'AVAILABLE',",
+                "    capitalEligibility: { availableCapital: '10000', riskBudget: '50' },",
+                "    executionEntryAllowed: true,",
+                "    recommendedAction: 'CONTINUE',",
+                "    riskState: 'NORMAL',",
+                "  } };",
+                "}",
+            ].join("\n"),
         );
 
         await writeFile(
@@ -113,6 +133,10 @@ const loadBotControl = async () => {
             .replace(
                 'from "./common/OperationToggle";',
                 `from "${pathToFileURL(operationToggleFile).href}";`,
+            )
+            .replace(
+                'from "../features/money-management/hooks/useMoneyManagement";',
+                `from "${pathToFileURL(moneyManagementHookFile).href}";`,
             )
             .replace(
                 'from "./operation/OperationPreparation";',
@@ -852,6 +876,14 @@ test("Preparation boundary receives configured values and preserves unknown Emer
     assert.ok(preparation);
     assert.equal(preparation.props.config.displaySymbol, "BTCUSDTM");
     assert.equal(preparation.props.emergencyState, "STATE_UNKNOWN");
+    assert.equal(preparation.props.mmRuntime, "RUNNING");
+    assert.equal(preparation.props.lifecycleState, "RUNNING");
+    assert.equal(preparation.props.capitalAuthorityStatus, "AVAILABLE");
+    assert.equal(preparation.props.availableCapital, "10000");
+    assert.equal(preparation.props.riskBudget, "50");
+    assert.equal(preparation.props.executionEntryAllowed, true);
+    assert.equal(preparation.props.recommendedAction, "CONTINUE");
+    assert.equal(preparation.props.riskState, "NORMAL");
     assert.equal(textIncludes(renderer.root, "START BOT"), true);
 });
 

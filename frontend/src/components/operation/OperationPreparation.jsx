@@ -9,6 +9,7 @@ import {
     positionReadiness,
 } from "./operationPreparationModel";
 
+
 const percentage = (value) => `${Number(value).toFixed(2)}%`;
 const wholePercentage = (value) => `${value}%`;
 const leverage = (value) => `${value}x`;
@@ -105,6 +106,7 @@ export default function OperationPreparation({
     executionEnabled = false,
     governanceStatus = "UNKNOWN",
     onLegacyConfigChange = () => {},
+    onRiskPerTradeChange = () => {},
     pendingOrder,
     position,
     realOrderAllowed = false,
@@ -117,6 +119,15 @@ export default function OperationPreparation({
     autoTradeStateText,
     autoTradeDisabled,
     handleAutoTradeChange,
+    riskPerTrade,
+    mmRuntime = "UNKNOWN",
+    lifecycleState,
+    capitalAuthorityStatus = "NOT CONNECTED",
+    availableCapital = undefined,
+    riskBudget = undefined,
+    executionEntryAllowed,
+    recommendedAction,
+    riskState,
 }) {
     const [settings, setSettings] = useState(() => (
         createOperationPreparationSettings(config)
@@ -125,6 +136,7 @@ export default function OperationPreparation({
         setSettings((current) => ({ ...current, [key]: value }));
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
+        if (key === "riskPerTrade") onRiskPerTradeChange(value);
     };
 
     const lockedFacts = [];
@@ -215,7 +227,7 @@ export default function OperationPreparation({
         || (settings.tradingMode === "PAPER" ? "PAPER / SIMULATION" : "NOT CONNECTED");
     const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
-    const mmReadiness = "WAITING";
+    const mmReadiness = mmRuntime;
     const readinessValues = [
         emergencyReadiness,
         positionState,
@@ -225,10 +237,15 @@ export default function OperationPreparation({
         governanceReadiness,
         executionReadiness,
     ];
-    const reviewReadiness = readinessValues.includes("BLOCKED")
-        || readinessValues.includes("ERROR")
-        ? "BLOCKED"
-        : "UI REVIEW READY";
+const reviewReadiness =
+        readinessValues.includes("BLOCKED") ||
+        readinessValues.includes("ERROR") ||
+        mmReadiness === "UNAVAILABLE" ||
+        mmReadiness === "UNKNOWN"
+            ? "BLOCKED"
+            : mmReadiness === "READY" || mmReadiness === "RUNNING"
+                ? "READY"
+                : "WAITING";
     const controlsDisabled = botRunning === true;
 
     const emergencyButtonDisabled = emergencyStateCode !== "READY";
@@ -297,15 +314,15 @@ return (
                         options={OPERATION_PREPARATION_OPTIONS.riskPerTrade}
                         value={settings.riskPerTrade}
                     />
-                    <DerivedRow label="CAPITAL AUTHORITY" source="UI PREVIEW" value={settings.tradingMode === "PAPER" ? "PAPER ACCOUNT" : "NOT CONNECTED"} />
-                    <DerivedRow label="AVAILABLE CAPITAL" source="UI PREVIEW" value="$10,000" />
+                    <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
+                    <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
                     <span className="operation-prep-label">COMPOUNDING</span>
                     <ToggleControl disabled={controlsDisabled} label="Compounding" onChange={(value) => changeSetting("compounding", value)} value={settings.compounding} />
                     <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => changeSetting("maxExposure", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxExposure} value={settings.maxExposure} />
                     <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => changeSetting("maxDrawdown", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxDrawdown} value={settings.maxDrawdown} />
-                    <DerivedRow label="RISK BUDGET" source="UI PREVIEW" value="$50" />
-                    <DerivedRow label="SIZING READINESS" source="UI FALLBACK" status value="WAITING" />
-                    <DerivedRow label="MM RUNTIME" source="RUNTIME" status value="UNKNOWN" />
+                    <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                    <DerivedRow label="SIZING READINESS" source={executionEntryAllowed === true ? "RUNTIME" : "SETTING_STATUS"} value={executionEntryAllowed === true ? "ENTRY ALLOWED" : recommendedAction === "BLOCK_EXECUTION" ? "BLOCKED" : recommendedAction === "HOLD_NEW_ENTRIES" ? "ON HOLD" : (riskState === "NORMAL" || riskState === "CAUTION" ? "READY" : "WAITING")} />
+                    <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                     <a className="operation-prep-link" href="/money-management">Money Management →</a>
                 </Section>
             </div>
@@ -358,7 +375,7 @@ return (
                         </div>
                         <div className="operation-prep-start" data-testid="ready-to-start">
                             {botRunning ? null : (
-                                <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness === "BLOCKED" ? "blocked" : "ready"}`}><i aria-hidden="true" /></span><strong>READY TO START</strong></div>
+                                <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
                             )}
                         </div>
                         {botRunning ? null : (
