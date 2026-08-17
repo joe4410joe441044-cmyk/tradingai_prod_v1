@@ -77,3 +77,43 @@ export const pendingOrderReadiness = (pendingOrder) => {
     if (pendingOrder === true) return "BLOCKED";
     return "UNKNOWN";
 };
+
+export const deriveMmReadiness = ({
+    executionEntryAllowed,
+    recommendedAction,
+    riskState,
+} = {}) => {
+    if (executionEntryAllowed === true) {
+        return Object.freeze({ state: "READY", label: "ENTRY ALLOWED" });
+    }
+    if (executionEntryAllowed === false) {
+        if (recommendedAction === "BLOCK_EXECUTION" || riskState === "LOCKED") {
+            return Object.freeze({ state: "BLOCKED", label: "BLOCKED" });
+        }
+        if (recommendedAction === "HOLD_NEW_ENTRIES") {
+            return Object.freeze({ state: "WAITING", label: "ON HOLD" });
+        }
+        return Object.freeze({ state: "WAITING", label: "WAITING" });
+    }
+    return Object.freeze({ state: "UNKNOWN", label: "UNKNOWN" });
+};
+
+const POSITIVE_READINESS = new Set(["READY", "SAFE", "FLAT"]);
+const BLOCKING_READINESS = new Set([
+    "BLOCKED",
+    "ERROR",
+    "FAILED",
+    "LOCKED",
+    "UNAVAILABLE",
+    "UNKNOWN",
+]);
+
+export const deriveReviewReadiness = (readinessValues = []) => {
+    if (readinessValues.some((value) => BLOCKING_READINESS.has(value))) {
+        return "BLOCKED";
+    }
+    if (readinessValues.every((value) => POSITIVE_READINESS.has(value))) {
+        return "READY";
+    }
+    return "WAITING";
+};

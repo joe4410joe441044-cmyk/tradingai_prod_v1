@@ -92,6 +92,35 @@ const modelSource =
 '    if (pendingOrder === false) return "SAFE";' + "\n" +
 '    if (pendingOrder === true) return "BLOCKED";' + "\n" +
 '    return "UNKNOWN";' + "\n" +
+' };' + "\n" +
+"\n" +
+'export const deriveMmReadiness = ({ executionEntryAllowed, recommendedAction, riskState } = {}) => {' + "\n" +
+'    if (executionEntryAllowed === true) {' + "\n" +
+'        return Object.freeze({ state: "READY", label: "ENTRY ALLOWED" });' + "\n" +
+'    }' + "\n" +
+'    if (executionEntryAllowed === false) {' + "\n" +
+'        if (recommendedAction === "BLOCK_EXECUTION" || riskState === "LOCKED") {' + "\n" +
+'            return Object.freeze({ state: "BLOCKED", label: "BLOCKED" });' + "\n" +
+'        }' + "\n" +
+'        if (recommendedAction === "HOLD_NEW_ENTRIES") {' + "\n" +
+'            return Object.freeze({ state: "WAITING", label: "ON HOLD" });' + "\n" +
+'        }' + "\n" +
+'        return Object.freeze({ state: "WAITING", label: "WAITING" });' + "\n" +
+'    }' + "\n" +
+'    return Object.freeze({ state: "UNKNOWN", label: "UNKNOWN" });' + "\n" +
+' };' + "\n" +
+"\n" +
+'const POSITIVE_READINESS = new Set(["READY", "SAFE", "FLAT"]);' + "\n" +
+'const BLOCKING_READINESS = new Set(["BLOCKED", "ERROR", "FAILED", "LOCKED", "UNAVAILABLE", "UNKNOWN"]);' + "\n" +
+"\n" +
+'export const deriveReviewReadiness = (readinessValues = []) => {' + "\n" +
+'    if (readinessValues.some((value) => BLOCKING_READINESS.has(value))) {' + "\n" +
+'        return "BLOCKED";' + "\n" +
+'    }' + "\n" +
+'    if (readinessValues.every((value) => POSITIVE_READINESS.has(value))) {' + "\n" +
+'        return "READY";' + "\n" +
+'    }' + "\n" +
+'    return "WAITING";' + "\n" +
 ' };' + "\n";
 
 // Fixed loadComponent - stub-based, avoids brittle string replacement that breaks JSX conditionals
@@ -189,8 +218,11 @@ test("renders all six preparation sections, controls, derived fields, and existi
     [
         "TRADING MODE", "MARKET SELECTION", "MONEY MANAGEMENT",
         "TRADE / EXECUTION", "AUTOMATION", "SAFETY / START READINESS",
-        "READY TO START", "START BOT",
+        "START BOT",
     ].forEach((label) => assert.equal(content.includes(label), true, label));
+    // Readiness is fail-closed: AUTO mode without a runtime-selected symbol
+    // is not READY, so READY TO START must not be shown here.
+    assert.equal(content.includes("READY TO START"), false);
     [
         "CAPITAL AUTHORITY", "AVAILABLE CAPITAL", "RISK BUDGET",
         "SIZING READINESS", "MM RUNTIME", "MM Leverage Limit（MMレバレッジ上限）",
@@ -301,6 +333,87 @@ assert.equal(descendants(renderer.root).some(
     assert.equal(descendants(renderer.root).some(
         (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
     ), true);
+});
+
+test("MM lifecycle RUNNING with entry not allowed stays non-ready in Section 6 and Final", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        mmRuntime: "RUNNING",
+        lifecycleState: "RUNNING",
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        realOrderAllowed: false,
+        children: { type: "button", props: { children: "START BOT" } },
+    });
+    const section3 = normalizedText(descendants(findTestId(renderer.root, "money-management-section")));
+    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
+    assert.equal(section3.includes("MM RUNTIME"), true);
+    assert.equal(section3.includes("RUNNING"), true);
+    assert.equal(section3.includes("WAITING"), true);
+    assert.equal(section6.includes("WAITING"), true);
+    assert.equal(readyToStart.includes("READY TO START"), false);
+});
+
+test("MM entry allowed with all safety inputs ready renders READY TO START", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        mmRuntime: "RUNNING",
+        lifecycleState: "RUNNING",
+        executionEntryAllowed: true,
+        recommendedAction: "CONTINUE",
+        riskState: "NORMAL",
+        realOrderAllowed: false,
+        children: { type: "button", props: { children: "START BOT" } },
+    });
+    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
+    assert.equal(section6.includes("READY"), true);
+    assert.equal(readyToStart.includes("READY TO START"), true);
+});
+
+test("MM unavailable renders non-ready Section 6 and Final", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        realOrderAllowed: false,
+        children: { type: "button", props: { children: "START BOT" } },
+    });
+    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
+    assert.equal(section6.includes("UNKNOWN"), true);
+    assert.equal(readyToStart.includes("READY TO START"), false);
+});
+
+test("MM execution-entry readiness mapper is fail-closed and shared", async () => {
+    const { deriveMmReadiness, deriveReviewReadiness } = await import("./operationPreparationModel.js");
+    assert.deepEqual(
+        { ...deriveMmReadiness({ executionEntryAllowed: false, recommendedAction: "UNKNOWN", riskState: "UNKNOWN" }) },
+        { state: "WAITING", label: "WAITING" },
+    );
+    assert.equal(deriveMmReadiness({ executionEntryAllowed: true, recommendedAction: "CONTINUE", riskState: "NORMAL" }).state, "READY");
+    assert.equal(deriveMmReadiness({ executionEntryAllowed: false, recommendedAction: "BLOCK_EXECUTION", riskState: "LOCKED" }).state, "BLOCKED");
+    assert.equal(deriveMmReadiness({ executionEntryAllowed: false, recommendedAction: "HOLD_NEW_ENTRIES", riskState: "CAUTION" }).state, "WAITING");
+    assert.equal(deriveMmReadiness({}).state, "UNKNOWN");
+    assert.equal(deriveReviewReadiness(["READY", "FLAT", "SAFE", "READY", "READY", "READY", "SAFE"]), "READY");
+    assert.equal(deriveReviewReadiness(["READY", "FLAT", "SAFE", "READY", "WAITING", "READY", "SAFE"]), "WAITING");
+    assert.equal(deriveReviewReadiness(["BLOCKED"]), "BLOCKED");
+    assert.equal(deriveReviewReadiness(["UNKNOWN"]), "BLOCKED");
 });
 
 test("preparation model keeps UI-review defaults separate from legacy execution config", async () => {

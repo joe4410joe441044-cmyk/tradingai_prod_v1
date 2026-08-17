@@ -3,6 +3,8 @@ import { useState } from "react";
 import {
     OPERATION_PREPARATION_OPTIONS,
     createOperationPreparationSettings,
+    deriveMmReadiness,
+    deriveReviewReadiness,
     normalizeReadiness,
     operationPreparationSummary,
     pendingOrderReadiness,
@@ -227,7 +229,15 @@ export default function OperationPreparation({
         || (settings.tradingMode === "PAPER" ? "PAPER / SIMULATION" : "NOT CONNECTED");
     const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
-    const mmReadiness = mmRuntime;
+    const mmEntryReadiness = deriveMmReadiness({
+        executionEntryAllowed,
+        recommendedAction,
+        riskState,
+    });
+    const mmReadiness = mmEntryReadiness.state;
+    const mmReadinessSource = executionEntryAllowed === true || executionEntryAllowed === false
+        ? "RUNTIME"
+        : "NOT CONNECTED";
     const readinessValues = [
         emergencyReadiness,
         positionState,
@@ -237,15 +247,7 @@ export default function OperationPreparation({
         governanceReadiness,
         executionReadiness,
     ];
-const reviewReadiness =
-        readinessValues.includes("BLOCKED") ||
-        readinessValues.includes("ERROR") ||
-        mmReadiness === "UNAVAILABLE" ||
-        mmReadiness === "UNKNOWN"
-            ? "BLOCKED"
-            : mmReadiness === "READY" || mmReadiness === "RUNNING"
-                ? "READY"
-                : "WAITING";
+    const reviewReadiness = deriveReviewReadiness(readinessValues);
     const controlsDisabled = botRunning === true;
 
     const emergencyButtonDisabled = emergencyStateCode !== "READY";
@@ -321,7 +323,7 @@ return (
                     <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => changeSetting("maxExposure", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxExposure} value={settings.maxExposure} />
                     <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => changeSetting("maxDrawdown", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxDrawdown} value={settings.maxDrawdown} />
                     <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
-                    <DerivedRow label="SIZING READINESS" source={executionEntryAllowed === true ? "RUNTIME" : "SETTING_STATUS"} value={executionEntryAllowed === true ? "ENTRY ALLOWED" : recommendedAction === "BLOCK_EXECUTION" ? "BLOCKED" : recommendedAction === "HOLD_NEW_ENTRIES" ? "ON HOLD" : (riskState === "NORMAL" || riskState === "CAUTION" ? "READY" : "WAITING")} />
+                    <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                     <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                     <a className="operation-prep-link" href="/money-management">Money Management →</a>
                 </Section>
@@ -353,7 +355,7 @@ return (
                             <DerivedRow label="Position（ポジション）" source="RUNTIME" status value={positionState} />
                             <DerivedRow label="Pending Order Authority（保留注文権限）" source="RUNTIME" status value={orderAuthority} />
                             <DerivedRow label="Market Selection（市場選択）" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
-                            <DerivedRow label="Money Management（資金管理）" source="UI FALLBACK" status value={mmReadiness} />
+                            <DerivedRow label="Money Management（資金管理）" source={mmReadinessSource} status value={mmReadiness} />
                             <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
                             <DerivedRow label="Execution（執行）" source="RUNTIME" status value={executionReadiness} />
                         </div>
