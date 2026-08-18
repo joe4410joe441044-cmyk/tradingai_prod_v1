@@ -24,6 +24,10 @@ import {
 } from "../features/money-management/hooks/useMoneyManagement";
 import OperationToggle from "./common/OperationToggle";
 import OperationPreparation from "./operation/OperationPreparation";
+import {
+    createOperationPreparationSettings,
+    deriveOperationReadiness,
+} from "./operation/operationPreparationModel";
 
 const formatLoopError = (
     error,
@@ -753,6 +757,23 @@ export default function BotControl({
                 : "unknown"
     );
 
+    const effectiveSelectionMode = createOperationPreparationSettings(config).selectionMode;
+    const startReadiness = deriveOperationReadiness({
+        selectionMode: effectiveSelectionMode,
+        autoMarketState: config?.autoMarketState,
+        displaySymbol: config?.displaySymbol,
+        emergencyState: emergencyStateCode,
+        position,
+        pendingOrder,
+        governanceStatus: runtimeHealth?.governance?.status,
+        realOrderAllowed: config?.realOrderAllowed === true,
+        executionEnabled,
+        executionEntryAllowed,
+        recommendedAction,
+        riskState,
+    });
+    const startReady = startReadiness.reviewReadiness === "READY";
+
     const refreshStatusSafely = async () => {
         if (typeof onStatusRefresh !== "function") {
             return;
@@ -767,6 +788,7 @@ export default function BotControl({
 
     const handleBotLifecycle = async () => {
         if (botPendingRef.current || emergencyBlocksOperations) return;
+        if (!botRunning && startReady !== true) return;
 
         botPendingRef.current = true;
         setBotPending(true);
@@ -778,6 +800,7 @@ export default function BotControl({
                 headers: botRunning ? undefined : { "Content-Type": "application/json" },
                 body: botRunning ? undefined : JSON.stringify({
                     symbol: config?.symbol,
+                    selection_mode: effectiveSelectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
                     risk_percent: riskPerTrade,
                     position_size: config?.positionSize ?? 0,
@@ -1150,7 +1173,7 @@ export default function BotControl({
                 riskState={riskState}
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
-                    <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || emergencyBlocksOperations} onClick={handleBotLifecycle} type="button">
+                    <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || (botRunning ? emergencyBlocksOperations : !startReady)} onClick={handleBotLifecycle} type="button">
                         {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? "STOP BOT" : "START BOT")}
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>

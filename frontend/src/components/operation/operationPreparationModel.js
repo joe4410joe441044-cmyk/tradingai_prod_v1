@@ -117,3 +117,78 @@ export const deriveReviewReadiness = (readinessValues = []) => {
     }
     return "WAITING";
 };
+
+export const deriveOperationReadiness = ({
+    selectionMode,
+    autoMarketState,
+    displaySymbol,
+    emergencyState,
+    position,
+    pendingOrder,
+    governanceStatus,
+    realOrderAllowed,
+    executionEnabled,
+    executionEntryAllowed,
+    recommendedAction,
+    riskState,
+} = {}) => {
+    const selectionRuntime = normalizeReadiness(
+        autoMarketState,
+        ["READY", "RUNNING", "AVAILABLE"],
+    );
+    const selectedRuntimeSymbol = selectionMode === "AUTO"
+        && displaySymbol
+        && !["UNKNOWN", "NOT AVAILABLE"].includes(String(displaySymbol).toUpperCase())
+        ? displaySymbol
+        : null;
+    const selectionReadiness = selectionMode === "MANUAL"
+        ? "READY"
+        : selectedRuntimeSymbol
+            ? "READY"
+            : selectionRuntime === "READY" ? "WAITING" : selectionRuntime;
+    const emergencyReadiness = normalizeReadiness(emergencyState, ["READY"]);
+    const positionState = positionReadiness(position);
+    const orderAuthority = pendingOrderReadiness(pendingOrder);
+    const governanceReadiness = normalizeReadiness(
+        governanceStatus,
+        ["READY", "OK", "ALLOWED", "PASS"],
+    );
+    const executionReadiness = realOrderAllowed || executionEnabled
+        ? "BLOCKED"
+        : "SAFE";
+    const mmEntryReadiness = deriveMmReadiness({
+        executionEntryAllowed,
+        recommendedAction,
+        riskState,
+    });
+    const mmReadiness = mmEntryReadiness.state;
+    const mmReadinessSource = (
+        executionEntryAllowed === true || executionEntryAllowed === false
+    ) ? "RUNTIME" : "NOT CONNECTED";
+    const readinessValues = [
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        selectionReadiness,
+        mmReadiness,
+        governanceReadiness,
+        executionReadiness,
+    ];
+    const reviewReadiness = deriveReviewReadiness(readinessValues);
+
+    return {
+        reviewReadiness,
+        readinessValues,
+        selectionRuntime,
+        selectedRuntimeSymbol,
+        selectionReadiness,
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        governanceReadiness,
+        executionReadiness,
+        mmEntryReadiness,
+        mmReadiness,
+        mmReadinessSource,
+    };
+};

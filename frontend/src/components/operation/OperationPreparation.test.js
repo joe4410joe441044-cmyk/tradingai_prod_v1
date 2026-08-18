@@ -121,6 +121,55 @@ const modelSource =
 '        return "READY";' + "\n" +
 '    }' + "\n" +
 '    return "WAITING";' + "\n" +
+' };' + "\n" +
+"\n" +
+'export const deriveOperationReadiness = ({' + "\n" +
+'    selectionMode,' + "\n" +
+'    autoMarketState,' + "\n" +
+'    displaySymbol,' + "\n" +
+'    emergencyState,' + "\n" +
+'    position,' + "\n" +
+'    pendingOrder,' + "\n" +
+'    governanceStatus,' + "\n" +
+'    realOrderAllowed,' + "\n" +
+'    executionEnabled,' + "\n" +
+'    executionEntryAllowed,' + "\n" +
+'    recommendedAction,' + "\n" +
+'    riskState,' + "\n" +
+'} = {}) => {' + "\n" +
+'    const selectionRuntime = normalizeReadiness(autoMarketState, ["READY", "RUNNING", "AVAILABLE"]);' + "\n" +
+'    const selectedRuntimeSymbol = selectionMode === "AUTO"' + "\n" +
+'        && displaySymbol' + "\n" +
+'        && !["UNKNOWN", "NOT AVAILABLE"].includes(String(displaySymbol).toUpperCase())' + "\n" +
+'        ? displaySymbol' + "\n" +
+'        : null;' + "\n" +
+'    const selectionReadiness = selectionMode === "MANUAL"' + "\n" +
+'        ? "READY"' + "\n" +
+'        : selectedRuntimeSymbol' + "\n" +
+'            ? "READY"' + "\n" +
+'            : selectionRuntime === "READY" ? "WAITING" : selectionRuntime;' + "\n" +
+'    const emergencyReadiness = normalizeReadiness(emergencyState, ["READY"]);' + "\n" +
+'    const positionState = positionReadiness(position);' + "\n" +
+'    const orderAuthority = pendingOrderReadiness(pendingOrder);' + "\n" +
+'    const governanceReadiness = normalizeReadiness(governanceStatus, ["READY", "OK", "ALLOWED", "PASS"]);' + "\n" +
+'    const executionReadiness = realOrderAllowed || executionEnabled' + "\n" +
+'        ? "BLOCKED"' + "\n" +
+'        : "SAFE";' + "\n" +
+'    const mmEntryReadiness = deriveMmReadiness({ executionEntryAllowed, recommendedAction, riskState });' + "\n" +
+'    const mmReadiness = mmEntryReadiness.state;' + "\n" +
+'    const mmReadinessSource = (executionEntryAllowed === true || executionEntryAllowed === false)' + "\n" +
+'        ? "RUNTIME"' + "\n" +
+'        : "NOT CONNECTED";' + "\n" +
+'    const readinessValues = [' + "\n" +
+'        emergencyReadiness, positionState, orderAuthority, selectionReadiness,' + "\n" +
+'        mmReadiness, governanceReadiness, executionReadiness,' + "\n" +
+'    ];' + "\n" +
+'    const reviewReadiness = deriveReviewReadiness(readinessValues);' + "\n" +
+'    return {' + "\n" +
+'        reviewReadiness, readinessValues, selectionRuntime, selectedRuntimeSymbol,' + "\n" +
+'        selectionReadiness, emergencyReadiness, positionState, orderAuthority,' + "\n" +
+'        governanceReadiness, executionReadiness, mmEntryReadiness, mmReadiness, mmReadinessSource,' + "\n" +
+'    };' + "\n" +
 ' };' + "\n";
 
 // Fixed loadComponent - stub-based, avoids brittle string replacement that breaks JSX conditionals
@@ -307,6 +356,23 @@ test("manual/auto, MM, leverage, and automation controls update the reactive sum
     assert.equal(content.includes("AUTO MODE → ON START"), false);
     assert.equal(content.includes("MANUAL MODE"), true);
     assert.deepEqual(legacyChanges.at(-1), { symbol: "BTCUSDTM" });
+});
+
+test("selectionMode changes propagate to legacy config as the single source", async () => {
+    const legacyChanges = [];
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        onLegacyConfigChange: (update) => legacyChanges.push(update),
+    });
+
+    findButton(renderer.root, "AUTO").props.onClick();
+    renderer.render();
+    assert.deepEqual(legacyChanges.at(-1), { selectionMode: "AUTO" });
+
+    findButton(renderer.root, "MANUAL").props.onClick();
+    renderer.render();
+    assert.deepEqual(legacyChanges.at(-1), { selectionMode: "MANUAL" });
 });
 
 test("runtime safety values remain read-only and real order control is never rendered", async () => {

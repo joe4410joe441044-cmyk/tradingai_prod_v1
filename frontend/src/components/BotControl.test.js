@@ -34,6 +34,9 @@ const telemetryUrl = pathToFileURL(
 const botLifecycleUrl = pathToFileURL(
     join(sourceDir, "../runtime/botLifecycle.js")
 ).href;
+const operationPreparationModelUrl = pathToFileURL(
+    join(sourceDir, "./operation/operationPreparationModel.js")
+).href;
 
 const transformJsxFile = async (
     inputUrl
@@ -81,23 +84,30 @@ const loadBotControl = async () => {
             operationToggle.code,
         );
 
+        const operationPreparation = await transformJsxFile(
+            new URL("./operation/OperationPreparation.jsx", import.meta.url)
+        );
         await writeFile(
             operationPreparationFile,
-            "export default function OperationPreparation(){return null}",
+            operationPreparation.code.replace(
+                'from "./operationPreparationModel";',
+                `from "${operationPreparationModelUrl}";`,
+            ),
         );
 
         await writeFile(
             moneyManagementHookFile,
             [
                 "export function useMoneyManagement() {",
-                "  return { status: {",
+                "  const mm = globalThis.__MM_STATUS__ || {",
                 "    lifecycleState: 'RUNNING',",
                 "    capitalAuthorityStatus: 'AVAILABLE',",
                 "    capitalEligibility: { availableCapital: '10000', riskBudget: '50' },",
                 "    executionEntryAllowed: true,",
                 "    recommendedAction: 'CONTINUE',",
                 "    riskState: 'NORMAL',",
-                "  } };",
+                "  };",
+                "  return { status: mm };",
                 "}",
             ].join("\n"),
         );
@@ -141,6 +151,10 @@ const loadBotControl = async () => {
             .replace(
                 'from "./operation/OperationPreparation";',
                 `from "${pathToFileURL(operationPreparationFile).href}";`,
+            )
+            .replace(
+                'from "./operation/operationPreparationModel";',
+                `from "${operationPreparationModelUrl}";`,
             );
 
         await writeFile(
@@ -313,6 +327,7 @@ const createHookRenderer = (
     const hookRefs = [];
     let currentProps = props;
     let root = null;
+    let componentElements = [];
     let hookIndex = 0;
     let refIndex = 0;
 
@@ -352,6 +367,45 @@ const createHookRenderer = (
         },
     };
 
+    const expand = (
+        node
+    ) => {
+        if (
+            node === null
+            || node === undefined
+            || typeof node === "boolean"
+        ) {
+            return node;
+        }
+
+        if (Array.isArray(node)) {
+            return node.map(expand);
+        }
+
+        if (
+            typeof node === "object"
+            && typeof node.type === "function"
+        ) {
+            componentElements.push(node);
+
+            return expand(node.type(node.props));
+        }
+
+        if (typeof node === "object") {
+            return {
+                ...node,
+                props: node.props == null
+                    ? node.props
+                    : {
+                        ...node.props,
+                        children: expand(node.props.children),
+                    },
+            };
+        }
+
+        return node;
+    };
+
     const render = (
         nextProps
     ) => {
@@ -364,12 +418,13 @@ const createHookRenderer = (
 
         hookIndex = 0;
         refIndex = 0;
+        componentElements = [];
 
         const previousDispatcher = internals.H;
         internals.H = dispatcher;
 
         try {
-            root = Component(currentProps);
+            root = expand(Component(currentProps));
         } finally {
             internals.H = previousDispatcher;
         }
@@ -382,6 +437,9 @@ const createHookRenderer = (
     return {
         get root() {
             return root;
+        },
+        get componentElements() {
+            return componentElements;
         },
         render,
     };
@@ -463,6 +521,40 @@ const defaultProps = (
         ...overrides,
     };
 };
+
+const setMmStatus = (
+    overrides = {}
+) => {
+    globalThis.__MM_STATUS__ = {
+        lifecycleState: "RUNNING",
+        capitalAuthorityStatus: "AVAILABLE",
+        capitalEligibility: { availableCapital: "10000", riskBudget: "50" },
+        executionEntryAllowed: true,
+        recommendedAction: "CONTINUE",
+        riskState: "NORMAL",
+        ...overrides,
+    };
+};
+
+const clearMmStatus = () => {
+    delete globalThis.__MM_STATUS__;
+};
+
+const readyStartProps = (
+    overrides = {}
+) => ({
+    config: {
+        symbol: "XRPUSDTM",
+        exchange: "kucoin",
+        mode: "paper",
+        selectionMode: "MANUAL",
+        ...overrides.config,
+    },
+    position: "FLAT",
+    pendingOrder: false,
+    runtimeHealth: { governance: { status: "READY" } },
+    ...overrides,
+});
 
 const renderBotControl = async (
     props = {}
@@ -870,9 +962,9 @@ test("Preparation boundary receives configured values and preserves unknown Emer
         emergencyState: undefined,
         config: { mode: "PAPER", symbol: "XRPUSDTM", displaySymbol: "BTCUSDTM", selectionMode: "AUTO", risk_percent: 1.25, leverage: 5 },
     });
-    const preparation = findAll(renderer.root, (element) => (
+    const preparation = renderer.componentElements.find((element) => (
         element.type?.name === "OperationPreparation"
-    ))[0];
+    ));
     assert.ok(preparation);
     assert.equal(preparation.props.config.displaySymbol, "BTCUSDTM");
     assert.equal(preparation.props.emergencyState, "STATE_UNKNOWN");
@@ -894,7 +986,7 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         return response.promise;
     });
     try {
-        const renderer = await renderBotControl();
+        const renderer = await renderBotControl(readyStartProps());
         const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         renderer.render();
         const pending = findButton(renderer.root, "STARTING...");
@@ -905,6 +997,26 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         assert.equal(JSON.parse(mock.requests[0].options.body).mode, "paper");
         response.resolve(jsonResponse({ body: { success: true, status: "started" } }));
         await first;
+    } finally { mock.restore(); }
+});
+
+test("START payload uses the single effective selectionMode source", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const manualRenderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL" },
+        }));
+        await clickAndRender(manualRenderer, findButton(manualRenderer.root, "START BOT"));
+        assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "MANUAL");
+
+        const autoRenderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "AUTO", displaySymbol: "BTCUSDTM" },
+        }));
+        await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
+        assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
     } finally { mock.restore(); }
 });
 
@@ -926,7 +1038,7 @@ test("BotControl delegates preparation UI and preserves the sole Start Bot actio
     const renderer = await renderBotControl({
         config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "MANUAL", risk_percent: 1, leverage: 5 },
     });
-    const preparation = findAll(renderer.root, (element) => (
+    const preparation = renderer.componentElements.filter((element) => (
         element.type?.name === "OperationPreparation"
     ));
     assert.equal(preparation.length, 1);
@@ -948,4 +1060,168 @@ test("running BOT exposes Loop and Auto Trade controls in AUTOMATION section", a
     assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), false);
     assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
+});
+
+test("START BOT is enabled when MM, Emergency, and remaining readiness are READY", async () => {
+    setMmStatus({ executionEntryAllowed: true });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, false);
+    } finally {
+        clearMmStatus();
+    }
+});
+
+test("START BOT is disabled when MM is WAITING", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "HOLD_NEW_ENTRIES",
+        riskState: "CAUTION",
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        assert.equal(findButton(renderer.root, "START BOT").props.disabled, true);
+    } finally {
+        clearMmStatus();
+    }
+});
+
+test("START BOT is disabled when MM is UNKNOWN", async () => {
+    setMmStatus({ executionEntryAllowed: undefined });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        assert.equal(findButton(renderer.root, "START BOT").props.disabled, true);
+    } finally {
+        clearMmStatus();
+    }
+});
+
+test("START BOT is disabled when Emergency is BLOCKED", async () => {
+    const renderer = await renderBotControl(readyStartProps({
+        emergency: emergencyStatus("LOCKED"),
+        emergencyLocked: true,
+        emergencyState: "LOCKED",
+    }));
+    assert.equal(findButton(renderer.root, "START BOT").props.disabled, true);
+});
+
+test("START BOT is disabled while a start request is pending", async () => {
+    const response = deferred();
+    const mock = installFetchMock(() => response.promise);
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        const pending = findButton(renderer.root, "STARTING...");
+        assert.ok(pending);
+        assert.equal(pending.props.disabled, true);
+        response.resolve(jsonResponse({ body: { status: "started" } }));
+    } finally {
+        mock.restore();
+    }
+});
+
+test("START handler reaches START action when startReady is READY", async () => {
+    const response = deferred();
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return response.promise;
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/start");
+        response.resolve(jsonResponse({ body: { status: "started" } }));
+        await first;
+    } finally {
+        mock.restore();
+    }
+});
+
+test("START handler is blocked when readiness is WAITING", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "HOLD_NEW_ENTRIES",
+        riskState: "CAUTION",
+    });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmStatus();
+        mock.restore();
+    }
+});
+
+test("START handler is blocked when MM is UNKNOWN", async () => {
+    setMmStatus({ executionEntryAllowed: undefined });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmStatus();
+        mock.restore();
+    }
+});
+
+test("START handler is blocked when Emergency blocks operations", async () => {
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            emergency: emergencyStatus("LOCKED"),
+            emergencyLocked: true,
+            emergencyState: "LOCKED",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        mock.restore();
+    }
+});
+
+test("STOP handler remains available when startReady is false", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "HOLD_NEW_ENTRIES",
+        riskState: "CAUTION",
+    });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/stop");
+        return jsonResponse({ body: { success: true, status: "stopped" } });
+    });
+    try {
+        const renderer = await renderBotControl({
+            botRunning: true,
+            loopEnabled: true,
+        });
+        const stop = findButton(renderer.root, "STOP BOT");
+        assert.ok(stop);
+        assert.equal(stop.props.disabled, false);
+        await clickAndRender(renderer, stop);
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/stop");
+    } finally {
+        clearMmStatus();
+        mock.restore();
+    }
+});
+
+test("BotControl reuses shared readiness without re-implementing MM readiness", async () => {
+    const source = await readFile(sourceUrl, "utf8");
+    assert.doesNotMatch(source, /deriveMmReadiness|deriveReviewReadiness/);
+    assert.match(source, /deriveOperationReadiness/);
+    assert.match(source, /startReady/);
 });

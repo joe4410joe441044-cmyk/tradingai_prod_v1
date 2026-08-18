@@ -3,12 +3,8 @@ import { useState } from "react";
 import {
     OPERATION_PREPARATION_OPTIONS,
     createOperationPreparationSettings,
-    deriveMmReadiness,
-    deriveReviewReadiness,
-    normalizeReadiness,
+    deriveOperationReadiness,
     operationPreparationSummary,
-    pendingOrderReadiness,
-    positionReadiness,
 } from "./operationPreparationModel";
 
 
@@ -137,6 +133,7 @@ export default function OperationPreparation({
     const changeSetting = (key, value) => {
         setSettings((current) => ({ ...current, [key]: value }));
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
+        if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
         if (key === "riskPerTrade") onRiskPerTradeChange(value);
     };
@@ -200,54 +197,39 @@ export default function OperationPreparation({
             : "unknown";
     const emergencyLockValue = emergencyLocked ? "LOCKED" : "UNLOCKED";
 
-    const selectedRuntimeSymbol = settings.selectionMode === "AUTO"
-        && config.displaySymbol
-        && !["UNKNOWN", "NOT AVAILABLE"].includes(String(config.displaySymbol).toUpperCase())
-        ? config.displaySymbol
-        : null;
-    const summary = operationPreparationSummary(settings, selectedRuntimeSymbol);
-    const selectionRuntime = normalizeReadiness(
-        config.autoMarketState,
-        ["READY", "RUNNING", "AVAILABLE"],
-    );
-    const selectionReadiness = settings.selectionMode === "MANUAL"
-        ? "READY"
-        : selectedRuntimeSymbol
-            ? "READY"
-            : selectionRuntime === "READY" ? "WAITING" : selectionRuntime;
-    const emergencyReadiness = normalizeReadiness(emergencyState, ["READY"]);
-    const positionState = positionReadiness(position);
-    const orderAuthority = pendingOrderReadiness(pendingOrder);
-    const governanceReadiness = normalizeReadiness(
-        governanceStatus,
-        ["READY", "OK", "ALLOWED", "PASS"],
-    );
-    const executionReadiness = realOrderAllowed || executionEnabled
-        ? "BLOCKED"
-        : "SAFE";
     const executionMode = config.executionMode
         || (settings.tradingMode === "PAPER" ? "PAPER / SIMULATION" : "NOT CONNECTED");
     const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
-    const mmEntryReadiness = deriveMmReadiness({
+
+    const {
+        reviewReadiness,
+        selectionRuntime,
+        selectedRuntimeSymbol,
+        selectionReadiness,
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        governanceReadiness,
+        executionReadiness,
+        mmEntryReadiness,
+        mmReadiness,
+        mmReadinessSource,
+    } = deriveOperationReadiness({
+        selectionMode: settings.selectionMode,
+        autoMarketState: config.autoMarketState,
+        displaySymbol: config.displaySymbol,
+        emergencyState,
+        position,
+        pendingOrder,
+        governanceStatus,
+        realOrderAllowed,
+        executionEnabled,
         executionEntryAllowed,
         recommendedAction,
         riskState,
     });
-    const mmReadiness = mmEntryReadiness.state;
-    const mmReadinessSource = executionEntryAllowed === true || executionEntryAllowed === false
-        ? "RUNTIME"
-        : "NOT CONNECTED";
-    const readinessValues = [
-        emergencyReadiness,
-        positionState,
-        orderAuthority,
-        selectionReadiness,
-        mmReadiness,
-        governanceReadiness,
-        executionReadiness,
-    ];
-    const reviewReadiness = deriveReviewReadiness(readinessValues);
+    const summary = operationPreparationSummary(settings, selectedRuntimeSymbol);
     const controlsDisabled = botRunning === true;
 
     const emergencyButtonDisabled = emergencyStateCode !== "READY";
