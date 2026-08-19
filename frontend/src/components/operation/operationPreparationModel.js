@@ -2,9 +2,9 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     tradingModes: ["PAPER", "LIVE"],
     selectionModes: ["MANUAL", "AUTO"],
     symbols: ["XRPUSDTM", "BTCUSDTM", "ETHUSDTM"],
-    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2],
+    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],
     maxExposure: [10, 20, 30, 40, 50],
-    maxDrawdown: [2, 3, 5, 7, 10],
+    maxDrawdown: [5, 7, 10],
     requestedLeverage: [1, 2, 3, 4, 5],
 });
 
@@ -28,22 +28,21 @@ export const createOperationPreparationSettings = (config = {}) => ({
         String(config.symbol || "").toUpperCase(),
         "XRPUSDTM",
     ),
-    riskPerTrade: 0.5,
     compounding: false,
-    maxExposure: 30,
-    maxDrawdown: 5,
     requestedLeverage: 3,
     loopOnStart: false,
     autoTradeOnStart: false,
 });
 
-export const operationPreparationSummary = (settings, selectedSymbol) => ({
+export const operationPreparationSummary = (settings, selectedSymbol, riskPerTradePercent) => ({
     mode: settings.tradingMode,
     market: settings.selectionMode,
     symbol: settings.selectionMode === "MANUAL"
         ? settings.manualSymbol
         : selectedSymbol || "AUTO SELECT",
-    riskPerTrade: `${settings.riskPerTrade.toFixed(2)}%`,
+    riskPerTrade: Number.isFinite(Number(riskPerTradePercent))
+        ? `${Number(riskPerTradePercent).toFixed(2)}%`
+        : "UNAVAILABLE",
     requestedLeverage: `${settings.requestedLeverage}x`,
     loop: settings.loopOnStart ? "ON" : "OFF",
     autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",

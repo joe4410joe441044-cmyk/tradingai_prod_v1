@@ -19,9 +19,9 @@ const modelSource =
 '    tradingModes: ["PAPER", "LIVE"],' + "\n" +
 '    selectionModes: ["MANUAL", "AUTO"],' + "\n" +
 '    symbols: ["XRPUSDTM", "BTCUSDTM", "ETHUSDTM"],' + "\n" +
-'    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2],' + "\n" +
+'    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],' + "\n" +
 '    maxExposure: [10, 20, 30, 40, 50],' + "\n" +
-'    maxDrawdown: [2, 3, 5, 7, 10],' + "\n" +
+'    maxDrawdown: [5, 7, 10],' + "\n" +
 '    requestedLeverage: [1, 2, 3, 4, 5],' + "\n" +
 ' });' + "\n" +
 "\n" +
@@ -44,22 +44,21 @@ const modelSource =
 '        String(config.symbol || "").toUpperCase(),' + "\n" +
 '        "XRPUSDTM",' + "\n" +
 '    ),' + "\n" +
-'    riskPerTrade: 0.5,' + "\n" +
 '    compounding: false,' + "\n" +
-'    maxExposure: 30,' + "\n" +
-'    maxDrawdown: 5,' + "\n" +
 '    requestedLeverage: 3,' + "\n" +
 '    loopOnStart: false,' + "\n" +
 '    autoTradeOnStart: false,' + "\n" +
 ' });' + "\n" +
 "\n" +
-'export const operationPreparationSummary = (settings, selectedSymbol) => ({' + "\n" +
+'export const operationPreparationSummary = (settings, selectedSymbol, riskPerTradePercent) => ({' + "\n" +
 '    mode: settings.tradingMode,' + "\n" +
 '    market: settings.selectionMode,' + "\n" +
 '    symbol: settings.selectionMode === "MANUAL"' + "\n" +
 '        ? settings.manualSymbol' + "\n" +
 '        : selectedSymbol || "AUTO SELECT",' + "\n" +
-'    riskPerTrade: "0.50%",' + "\n" +
+'    riskPerTrade: Number.isFinite(Number(riskPerTradePercent))' + "\n" +
+'        ? `${Number(riskPerTradePercent).toFixed(2)}%`' + "\n" +
+'        : "UNAVAILABLE",' + "\n" +
 '    requestedLeverage: "3x",' + "\n" +
 '    loop: settings.loopOnStart ? "ON" : "OFF",' + "\n" +
 '    autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",' + "\n" +
@@ -245,6 +244,29 @@ const findTestId = (root, testId) => descendants(root).find(
     (node) => node.props?.["data-testid"] === testId,
 );
 
+const mmDraft = (overrides = {}) => ({
+    enabled: true,
+    dailyWarningPercent: "1.00",
+    dailyBlockPercent: "1.50",
+    weeklyWarningPercent: "2.00",
+    weeklyBlockPercent: "3.00",
+    monthlyWarningPercent: "3.50",
+    monthlyBlockPercent: "4.00",
+    maximumDrawdownPercent: "5.00",
+    totalExposurePercent: "20.00",
+    riskPerTradePercent: "0.50",
+    maximumPositionNotional: "100.00",
+    singleSymbolExposurePercent: "10.00",
+    ...overrides,
+});
+
+const mmConfig = (overrides = {}) => ({
+    riskPerTradePercent: "0.50",
+    totalExposurePercent: "20.00",
+    maximumDrawdownPercent: "5.00",
+    ...overrides,
+});
+
 test("renders all six preparation sections, controls, derived fields, and existing start slot", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
@@ -327,7 +349,7 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     assert.equal(findTestId(renderer.root, "money-management-section").props.children != null, true);
 });
 
-test("manual/auto, MM, leverage, and automation controls update the reactive summary", async () => {
+test("manual/auto, leverage, and automation controls update the reactive summary", async () => {
     const legacyChanges = [];
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
@@ -339,9 +361,6 @@ test("manual/auto, MM, leverage, and automation controls update the reactive sum
     findButton(renderer.root, "MANUAL").props.onClick();
     renderer.render();
     findSelect(renderer.root, "operation-prep-symbol").props.onChange({ target: { value: "BTCUSDTM" } });
-    findSelect(renderer.root, "operation-prep-risk").props.onChange({ target: { value: "1.5" } });
-    findSelect(renderer.root, "operation-prep-exposure").props.onChange({ target: { value: "40" } });
-    findSelect(renderer.root, "operation-prep-drawdown").props.onChange({ target: { value: "7" } });
     findSelect(renderer.root, "operation-prep-leverage").props.onChange({ target: { value: "4" } });
     const onButtons = descendants(renderer.root).filter(
         (node) => node.type === "button" && normalizedText(node) === "ON",
@@ -351,7 +370,6 @@ test("manual/auto, MM, leverage, and automation controls update the reactive sum
 
     const content = normalizedText(descendants(renderer.root));
     assert.equal(content.includes("BTCUSDTM"), true);
-    assert.equal(content.includes("1.50%"), true);
     assert.equal(content.includes("4x"), true);
     assert.equal(content.includes("AUTO MODE → ON START"), false);
     assert.equal(content.includes("MANUAL MODE"), true);
@@ -495,7 +513,9 @@ test("preparation model keeps UI-review defaults separate from legacy execution 
     });
     assert.equal(settings.tradingMode, "LIVE");
     assert.equal(settings.manualSymbol, "ETHUSDTM");
-    assert.equal(settings.riskPerTrade, 0.5);
+    assert.equal(settings.riskPerTrade, undefined);
+    assert.equal(settings.maxExposure, undefined);
+    assert.equal(settings.maxDrawdown, undefined);
     assert.equal(settings.requestedLeverage, 3);
     assert.equal(settings.loopOnStart, false);
     assert.equal(settings.autoTradeOnStart, false);
@@ -510,4 +530,126 @@ test("preparation model keeps UI-review defaults separate from legacy execution 
         `${componentSource}\n${modelSource}`,
         /fetch\(|axios|\/api\/|setExecutionEnabled|botStart|loopStart/,
     );
+});
+
+test("MM RISK/Exposure/Drawdown display authoritative draft and route changes to onMmDraftChange", async () => {
+    const draftChanges = [];
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft({
+            riskPerTradePercent: "0.75",
+            totalExposurePercent: "40",
+            maximumDrawdownPercent: "7",
+        }),
+        mmConfiguration: mmConfig({
+            riskPerTradePercent: "0.75",
+            totalExposurePercent: "40",
+            maximumDrawdownPercent: "7",
+        }),
+        onMmDraftChange: (patch) => draftChanges.push(patch),
+    });
+
+    const risk = findSelect(renderer.root, "operation-prep-risk");
+    const exposure = findSelect(renderer.root, "operation-prep-exposure");
+    const drawdown = findSelect(renderer.root, "operation-prep-drawdown");
+    assert.equal(risk.props.disabled, false);
+    assert.equal(risk.props.value, 0.75);
+    assert.equal(exposure.props.value, 40);
+    assert.equal(drawdown.props.value, 7);
+
+    risk.props.onChange({ target: { value: "1" } });
+    assert.deepEqual(draftChanges.at(-1), { riskPerTradePercent: "1" });
+    exposure.props.onChange({ target: { value: "30" } });
+    assert.deepEqual(draftChanges.at(-1), { totalExposurePercent: "30" });
+    drawdown.props.onChange({ target: { value: "5" } });
+    assert.deepEqual(draftChanges.at(-1), { maximumDrawdownPercent: "5" });
+});
+
+test("MM Save and Reset route to the shared save/reset handlers", async () => {
+    let saved = 0;
+    let reset = 0;
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft(),
+        mmConfiguration: mmConfig(),
+        onMmSave: () => { saved += 1; },
+        onMmReset: () => { reset += 1; },
+    });
+    const save = findButton(renderer.root, "Save MM");
+    const resetButton = findButton(renderer.root, "Reset MM");
+    assert.ok(save);
+    assert.equal(save.props.disabled, false);
+    assert.ok(resetButton);
+    save.props.onClick();
+    resetButton.props.onClick();
+    assert.equal(saved, 1);
+    assert.equal(reset, 1);
+});
+
+test("Compounding stays non-authoritative and never writes to MM", async () => {
+    const draftChanges = [];
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft(),
+        mmConfiguration: mmConfig(),
+        onMmDraftChange: (patch) => draftChanges.push(patch),
+    });
+    assert.equal(normalizedText(descendants(renderer.root)).includes("NOT CONNECTED"), true);
+    const compoundingGroup = descendants(renderer.root).find(
+        (node) => node.props?.["aria-label"] === "Compounding",
+    );
+    const onButton = descendants(compoundingGroup).find(
+        (node) => node.type === "button" && normalizedText(node) === "ON",
+    );
+    onButton.props.onClick();
+    renderer.render();
+    assert.equal(draftChanges.length, 0);
+});
+
+test("MM controls are disabled and honest when configuration is unavailable", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+    });
+    assert.equal(findSelect(renderer.root, "operation-prep-risk").props.disabled, true);
+    assert.equal(findButton(renderer.root, "Save MM").props.disabled, true);
+    assert.equal(normalizedText(descendants(renderer.root)).includes("UNAVAILABLE"), true);
+    assert.equal(
+        normalizedText(descendants(findTestId(renderer.root, "operation-preparation-summary"))).includes("NOT CONNECTED"),
+        true,
+    );
+});
+
+test("MM update error is surfaced without a fake saved state", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft(),
+        mmConfiguration: mmConfig(),
+        mmUpdateError: { message: "Revision conflict" },
+    });
+    assert.equal(normalizedText(findTestId(renderer.root, "mm-save-state")), "UPDATE FAILED");
+    assert.equal(normalizedText(descendants(renderer.root)).includes("Revision conflict"), true);
+});
+
+test("MM conflict and dirty states are reported instead of a fake saved state", async () => {
+    const Component = await loadComponent();
+    const dirtyRenderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft({ riskPerTradePercent: "1" }),
+        mmConfiguration: mmConfig({ riskPerTradePercent: "0.50" }),
+    });
+    assert.equal(normalizedText(findTestId(dirtyRenderer.root, "mm-save-state")), "UNSAVED CHANGES");
+
+    const conflictRenderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "AUTO" },
+        mmDraft: mmDraft(),
+        mmConfiguration: mmConfig(),
+        mmConflict: { active: true },
+    });
+    assert.equal(normalizedText(findTestId(conflictRenderer.root, "mm-save-state")), "CONFLICT");
+    assert.equal(findButton(conflictRenderer.root, "Save MM").props.disabled, true);
 });

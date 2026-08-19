@@ -249,6 +249,42 @@
     line-height: 1.5;
 }
 
+.operation-prep-mm-save {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.operation-prep-mm-state {
+    flex: 1 1 auto;
+    color: #e8b45f;
+    font-size: 8px;
+    font-weight: 800;
+}
+
+.operation-prep-mm-save button {
+    padding: 3px 7px;
+    border: 1px solid rgba(102, 214, 244, .5);
+    border-radius: 3px;
+    background: transparent;
+    color: #66d6f4;
+    font-size: 8px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.operation-prep-mm-save button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}
+
+.operation-prep-error {
+    margin: 0;
+    color: #ff737a;
+    font-size: 8px;
+    line-height: 1.5;
+}
+
 /* =====================================================
    BOTTOM ROW — 3 equal-height grid columns
    ===================================================== */

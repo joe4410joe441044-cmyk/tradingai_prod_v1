@@ -104,7 +104,6 @@ export default function OperationPreparation({
     executionEnabled = false,
     governanceStatus = "UNKNOWN",
     onLegacyConfigChange = () => {},
-    onRiskPerTradeChange = () => {},
     pendingOrder,
     position,
     realOrderAllowed = false,
@@ -117,7 +116,6 @@ export default function OperationPreparation({
     autoTradeStateText,
     autoTradeDisabled,
     handleAutoTradeChange,
-    riskPerTrade,
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
@@ -126,6 +124,16 @@ export default function OperationPreparation({
     executionEntryAllowed,
     recommendedAction,
     riskState,
+    mmDraft = null,
+    mmConfiguration = null,
+    mmUpdating = false,
+    mmLoading = false,
+    mmConfigurationError = null,
+    mmUpdateError = null,
+    mmConflict = null,
+    onMmDraftChange = () => {},
+    onMmSave = () => {},
+    onMmReset = () => {},
 }) {
     const [settings, setSettings] = useState(() => (
         createOperationPreparationSettings(config)
@@ -135,7 +143,6 @@ export default function OperationPreparation({
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
-        if (key === "riskPerTrade") onRiskPerTradeChange(value);
     };
 
     const lockedFacts = [];
@@ -229,8 +236,61 @@ export default function OperationPreparation({
         recommendedAction,
         riskState,
     });
-    const summary = operationPreparationSummary(settings, selectedRuntimeSymbol);
+    const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const controlsDisabled = botRunning === true;
+
+    const mmAvailable = Boolean(mmDraft);
+    const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
+    const mmExposureValue = mmDraft ? Number(mmDraft.totalExposurePercent) : undefined;
+    const mmDrawdownValue = mmDraft ? Number(mmDraft.maximumDrawdownPercent) : undefined;
+    const mmControlsDisabled = controlsDisabled || !mmAvailable || mmUpdating;
+
+    const MM_CONNECTED_FIELDS = [
+        "riskPerTradePercent",
+        "totalExposurePercent",
+        "maximumDrawdownPercent",
+    ];
+    const mmDirty = mmAvailable
+        && Boolean(mmConfiguration)
+        && MM_CONNECTED_FIELDS.some(
+            (key) => mmDraft[key] !== mmConfiguration[key],
+        );
+
+    const withCurrentOption = (options, value) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && !options.includes(numeric)) {
+            return [...options, numeric].sort((left, right) => left - right);
+        }
+        return options;
+    };
+
+    const mmRiskOptions = mmAvailable
+        ? withCurrentOption(OPERATION_PREPARATION_OPTIONS.riskPerTrade, mmRiskValue)
+        : OPERATION_PREPARATION_OPTIONS.riskPerTrade;
+    const mmExposureOptions = mmAvailable
+        ? withCurrentOption(OPERATION_PREPARATION_OPTIONS.maxExposure, mmExposureValue)
+        : OPERATION_PREPARATION_OPTIONS.maxExposure;
+    const mmDrawdownOptions = mmAvailable
+        ? withCurrentOption(OPERATION_PREPARATION_OPTIONS.maxDrawdown, mmDrawdownValue)
+        : OPERATION_PREPARATION_OPTIONS.maxDrawdown;
+
+    const mmDraftState = mmUpdating
+        ? "SAVING"
+        : mmConflict
+            ? "CONFLICT"
+            : mmUpdateError
+                ? "UPDATE FAILED"
+                : mmDirty
+                    ? "UNSAVED CHANGES"
+                    : mmAvailable
+                        ? "SAVED"
+                        : mmLoading
+                            ? "LOADING"
+                            : "UNAVAILABLE";
+    const mmSaveDisabled = !mmAvailable
+        || mmUpdating
+        || Boolean(mmConflict)
+        || Boolean(mmConfigurationError);
 
     const emergencyButtonDisabled = emergencyStateCode !== "READY";
     const handleEmergencyOpenConfirm = () => {};
@@ -290,21 +350,29 @@ return (
             <div className="operation-lane-center">
                 <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
                     <SelectField
-                        disabled={controlsDisabled}
+                        disabled={mmControlsDisabled}
                         format={percentage}
                         id="operation-prep-risk"
                         label="RISK / Trade（1取引リスク）"
-                        onChange={(value) => changeSetting("riskPerTrade", Number(value))}
-                        options={OPERATION_PREPARATION_OPTIONS.riskPerTrade}
-                        value={settings.riskPerTrade}
+                        onChange={(value) => onMmDraftChange({ riskPerTradePercent: String(value) })}
+                        options={mmRiskOptions}
+                        value={mmAvailable ? mmRiskValue : ""}
                     />
                     <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
                     <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                    <span className="operation-prep-label">COMPOUNDING</span>
+                    <span className="operation-prep-label">COMPOUNDING {sourceBadge("NOT CONNECTED")}</span>
                     <ToggleControl disabled={controlsDisabled} label="Compounding" onChange={(value) => changeSetting("compounding", value)} value={settings.compounding} />
-                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => changeSetting("maxExposure", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxExposure} value={settings.maxExposure} />
-                    <SelectField disabled={controlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => changeSetting("maxDrawdown", Number(value))} options={OPERATION_PREPARATION_OPTIONS.maxDrawdown} value={settings.maxDrawdown} />
+                    <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
+                    <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
                     <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                    <div className="operation-prep-mm-save" data-testid="mm-save-controls">
+                        <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
+                        <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
+                        <button disabled={mmSaveDisabled} onClick={onMmSave} type="button">Save MM</button>
+                    </div>
+                    {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
+                    {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
+                    {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
                     <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                     <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                     <a className="operation-prep-link" href="/money-management">Money Management →</a>
@@ -351,7 +419,7 @@ return (
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
                             <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
                             <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
-                            <DerivedRow label="RISK / Trade（1取引リスク）" source="OPERATOR" value={summary.riskPerTrade} />
+                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={summary.riskPerTrade} />
                             <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
                             <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
                             <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />

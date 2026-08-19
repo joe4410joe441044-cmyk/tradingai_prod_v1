@@ -379,7 +379,6 @@ export default function BotControl({
 
     const [, forceUpdate] =
         useState(0);
-    const [riskPerTrade, setRiskPerTrade] = useState(1);
     const [
         loopPending,
         setLoopPending,
@@ -435,7 +434,19 @@ export default function BotControl({
         useRef(false);
     const unlockPendingRef =
         useRef(false);
-    const { status: mmStatus } = useMoneyManagement();
+    const {
+        status: mmStatus,
+        configuration: mmConfiguration,
+        configurationDraft: mmDraft,
+        isUpdatingConfiguration: mmUpdating,
+        isInitialLoading: mmLoading,
+        configurationError: mmConfigurationError,
+        updateError: mmUpdateError,
+        configurationConflict: mmConflict,
+        updateConfigurationDraft,
+        saveConfiguration,
+        resetConfigurationDraft,
+    } = useMoneyManagement();
     const lifecycleState = mmStatus?.lifecycleState;
     const capitalAuthorityStatus = mmStatus?.capitalAuthorityStatus;
     const availableCapital = mmStatus?.capitalEligibility?.availableCapital;
@@ -443,6 +454,10 @@ export default function BotControl({
     const executionEntryAllowed = mmStatus?.executionEntryAllowed;
     const recommendedAction = mmStatus?.recommendedAction;
     const riskState = mmStatus?.riskState;
+
+    const handleMmDraftChange = (patch) => updateConfigurationDraft(patch);
+    const handleMmSave = () => saveConfiguration();
+    const handleMmReset = () => resetConfigurationDraft();
 
     /* =======================================================
        STATUS
@@ -802,7 +817,7 @@ export default function BotControl({
                     symbol: config?.symbol,
                     selection_mode: effectiveSelectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
-                    risk_percent: riskPerTrade,
+                    risk_percent: config?.risk_percent ?? 1,
                     position_size: config?.positionSize ?? 0,
                     max_drawdown_pct: config?.maxDd ?? 5,
                     sl_percent: config?.sl ?? 1,
@@ -1161,8 +1176,16 @@ export default function BotControl({
                 autoTradeStateText={autoTradeStateText}
                 autoTradeDisabled={autoTradeDisabled}
                 handleAutoTradeChange={handleAutoTradeChange}
-                riskPerTrade={riskPerTrade}
-                onRiskPerTradeChange={setRiskPerTrade}
+                mmDraft={mmDraft}
+                mmConfiguration={mmConfiguration}
+                mmUpdating={mmUpdating}
+                mmLoading={mmLoading}
+                mmConfigurationError={mmConfigurationError}
+                mmUpdateError={mmUpdateError}
+                mmConflict={mmConflict}
+                onMmDraftChange={handleMmDraftChange}
+                onMmSave={handleMmSave}
+                onMmReset={handleMmReset}
                 mmRuntime={lifecycleState || "UNKNOWN"}
                 lifecycleState={lifecycleState}
                 capitalAuthorityStatus={capitalAuthorityStatus}
