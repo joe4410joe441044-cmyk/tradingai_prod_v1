@@ -110,11 +110,13 @@ export default function OperationPreparation({
     loopChecked,
     loopState,
     loopStateTone,
+    loopPending = false,
     loopDisabled,
     handleLoopChange,
     autoTradeChecked,
     autoTradeStateText,
     autoTradeDisabled,
+    autoTradePending = false,
     handleAutoTradeChange,
     mmRuntime = "UNKNOWN",
     lifecycleState,
@@ -134,6 +136,24 @@ export default function OperationPreparation({
     onMmDraftChange = () => {},
     onMmSave = () => {},
     onMmReset = () => {},
+    lockedFacts = [],
+    actionWarnings = [],
+    emergencyPath = "",
+    emergencyError,
+    unlockError,
+    lastResultMessage,
+    emergencyLocked,
+    emergencyConfirmOpen = false,
+    emergencyPending = false,
+    unlockPending = false,
+    unlockAllowed,
+    emergencyButtonDisabled,
+    emergencyLockValue,
+    emergencyLockClass,
+    openEmergencyConfirm,
+    cancelEmergencyConfirm,
+    confirmEmergency,
+    handleReturnToNormal,
 }) {
     const [settings, setSettings] = useState(() => (
         createOperationPreparationSettings(config)
@@ -144,13 +164,6 @@ export default function OperationPreparation({
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
     };
-
-    const lockedFacts = [];
-    const actionWarnings = [];
-    const emergencyError = undefined;
-    const lastResultMessage = undefined;
-    const emergencyPath = "";
-    const unlockError = undefined;
 
     const emergencyStateCode = String(emergencyState ?? "UNKNOWN").trim().toUpperCase();
 
@@ -196,13 +209,38 @@ export default function OperationPreparation({
             ? emergencyStateCopy[emergencyStateCode]
             : emergencyStateCopy.READY;
 
-    const emergencyLocked = emergencyStateCode === "LOCKED";
-    const emergencyLockClass = emergencyStateCode === "LOCKED"
-        ? "locked"
-        : emergencyStateCode === "READY"
-            ? "unlocked"
-            : "unknown";
-    const emergencyLockValue = emergencyLocked ? "LOCKED" : "UNLOCKED";
+    const resolvedEmergencyLocked = (
+        typeof emergencyLocked === "boolean"
+            ? emergencyLocked
+            : emergencyStateCode === "LOCKED"
+    );
+    const resolvedEmergencyLockClass = (
+        emergencyLockClass
+        || (
+            emergencyStateCode === "LOCKED"
+                ? "locked"
+                : emergencyStateCode === "READY"
+                    ? "unlocked"
+                    : "unknown"
+        )
+    );
+    const resolvedEmergencyLockValue = (
+        emergencyLockValue
+        || (resolvedEmergencyLocked ? "LOCKED" : "UNLOCKED")
+    );
+    const resolvedUnlockAllowed = (
+        typeof unlockAllowed === "boolean"
+            ? unlockAllowed
+            : (
+                emergencyStateCode !== "READY"
+                && emergencyStateCode !== "PROCESSING"
+            )
+    );
+    const resolvedEmergencyButtonDisabled = (
+        typeof emergencyButtonDisabled === "boolean"
+            ? emergencyButtonDisabled
+            : emergencyStateCode !== "READY"
+    );
 
     const executionMode = config.executionMode
         || (settings.tradingMode === "PAPER" ? "PAPER / SIMULATION" : "NOT CONNECTED");
@@ -291,9 +329,6 @@ export default function OperationPreparation({
         || mmUpdating
         || Boolean(mmConflict)
         || Boolean(mmConfigurationError);
-
-    const emergencyButtonDisabled = emergencyStateCode !== "READY";
-    const handleEmergencyOpenConfirm = () => {};
 
     {botRunning && <div className="operation-prep-running-indicator" />}
 
@@ -393,6 +428,14 @@ return (
                     <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
                     <span className="operation-prep-label">AUTO TRADE ON START</span>
                     <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
+                    {botRunning && (
+                        <div className="operation-prep-runtime-controls">
+                            <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
+                            <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
+                            <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
+                            <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
+                        </div>
+                    )}
                     <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
                 </Section>
             </div>
@@ -499,18 +542,56 @@ return (
 
                         <button
                             className="emergency-stop-button operation-emergency-button"
-                            disabled={emergencyButtonDisabled}
-                            onClick={handleEmergencyOpenConfirm}
-                            aria-busy="false"
+                            disabled={resolvedEmergencyButtonDisabled}
+                            onClick={openEmergencyConfirm}
+                            aria-busy={emergencyPending ? "true" : "false"}
                             type="button"
                         >
 
-                            {emergencyStateCode !== "READY"
-                                ? "EMERGENCY STOP（緊急停止）"
+                            {emergencyPending
+                                ? "EMERGENCY IN PROGRESS...（処理中）"
                                 : "EMERGENCY STOP（緊急停止）"
                             }
 
                         </button>
+
+                        {emergencyConfirmOpen && (
+                            <div
+                                className="operation-emergency-confirm"
+                                role="dialog"
+                                aria-modal="false"
+                                aria-label="Confirm emergency stop"
+                            >
+                                <div className="operation-emergency-confirm__title">
+                                    EMERGENCY STOP
+                                </div>
+
+                                <div className="operation-emergency-confirm__body">
+                                    This action will activate Emergency Lock, disable Auto Trade,
+                                    cancel eligible open orders, and flatten eligible positions.
+                                </div>
+
+                                <div className="operation-emergency-confirm__actions">
+                                    <button
+                                        className="operation-emergency-confirm__cancel"
+                                        disabled={emergencyPending}
+                                        onClick={cancelEmergencyConfirm}
+                                        type="button"
+                                    >
+                                        CANCEL
+                                    </button>
+
+                                    <button
+                                        className="operation-emergency-confirm__confirm"
+                                        disabled={emergencyPending}
+                                        onClick={confirmEmergency}
+                                        type="button"
+                                    >
+                                        CONFIRM EMERGENCY
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {emergencyStateCode === "LOCKED" && (
                             <div className="operation-emergency-note">
@@ -521,11 +602,11 @@ return (
                         {emergencyStateCode !== "READY" && (
                             <button
                                 className="operation-emergency-unlock"
-                                disabled={!emergencyLocked}
-                                onClick={() => {}}
+                                disabled={unlockPending || !resolvedUnlockAllowed}
+                                onClick={handleReturnToNormal}
                                 type="button"
                             >
-                                {emergencyLocked ? "通常に戻す" : "復帰中..."}
+                                {unlockPending ? "復帰中..." : "通常に戻す"}
                             </button>
                         )}
 
@@ -534,8 +615,8 @@ return (
                                 EMERGENCY LOCK（緊急ロック）
                             </span>
 
-                            <strong className={emergencyLockClass}>
-                                {emergencyLockValue}
+                            <strong className={resolvedEmergencyLockClass}>
+                                {resolvedEmergencyLockValue}
                             </strong>
                         </div>
 

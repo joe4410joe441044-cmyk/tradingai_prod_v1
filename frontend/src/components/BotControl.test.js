@@ -118,6 +118,8 @@ const loadBotControl = async () => {
                 "export const API = {",
                 "  botStart: () => '/api/bot/start',",
                 "  botStop: () => '/api/bot/stop',",
+                "  loopStart: () => '/api/bot/loop/start',",
+                "  loopStop: () => '/api/bot/loop/stop',",
                 "};",
             ].join("\n"),
         );
@@ -294,6 +296,28 @@ const findLastButton = (
     );
 
     return matches[matches.length - 1] || null;
+};
+
+const findGroupButton = (
+    root,
+    groupLabel,
+    buttonLabel
+) => {
+    const group = findAll(
+        root,
+        (element) => (
+            element.props?.role === "group"
+            && element.props?.["aria-label"] === groupLabel
+        ),
+    )[0];
+
+    if (!group) {
+        return null;
+    }
+
+    return buttons(group).find(
+        (button) => buttonName(button) === buttonLabel,
+    ) || null;
 };
 
 const textIncludes = (
@@ -1047,19 +1071,105 @@ test("BotControl delegates preparation UI and preserves the sole Start Bot actio
 
 test("stopped BOT exposes no active Loop or Auto Trade mutation control", async () => {
     const renderer = await renderBotControl({ botRunning: false, loopEnabled: false, executionEnabled: false });
-    const toggles = findAll(renderer.root, (element) => ["Toggle trading loop", "Toggle automatic trading"].includes(element.props?.ariaLabel));
-    assert.equal(toggles.length, 0);
-    assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
-    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), false);
+    const runtimeLoopGroup = findGroupButton(renderer.root, "Runtime loop", "ON");
+    const runtimeAutoTradeGroup = findGroupButton(renderer.root, "Runtime auto trade", "ON");
+    assert.equal(runtimeLoopGroup, null);
+    assert.equal(runtimeAutoTradeGroup, null);
+    assert.equal(textIncludes(renderer.root, "RUNTIME LOOP（実行中ループ）"), false);
+    assert.equal(textIncludes(renderer.root, "RUNTIME AUTO TRADE（実行中自動取引）"), false);
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
 });
 
 test("running BOT exposes Loop and Auto Trade controls in AUTOMATION section", async () => {
     const renderer = await renderBotControl({ botRunning: true, loopEnabled: true, executionEnabled: false });
-    // UI-8: POST-START RUNTIME CONTROLS block must be absent
-    assert.equal(textIncludes(renderer.root, "POST-START RUNTIME CONTROLS"), false);
-    assert.equal(textIncludes(renderer.root, "CURRENT RUNTIME STATE"), false);
+    // Preparation-only settings remain; runtime controls appear only while running
+    assert.equal(textIncludes(renderer.root, "LOOP ON START"), true);
+    assert.equal(textIncludes(renderer.root, "AUTO TRADE ON START"), true);
+    assert.equal(textIncludes(renderer.root, "RUNTIME LOOP（実行中ループ）"), true);
+    assert.equal(textIncludes(renderer.root, "RUNTIME AUTO TRADE（実行中自動取引）"), true);
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
+});
+
+test("running BOT Runtime Loop control reaches the existing loop handler", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/loop/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+
+    try {
+        const renderer = await renderBotControl({
+            botRunning: true,
+            loopEnabled: false,
+            loopState: "STOPPED",
+        });
+        const onButton = findGroupButton(renderer.root, "Runtime loop", "ON");
+        assert.ok(onButton);
+        assert.equal(onButton.props.disabled, false);
+
+        clickAndRender(renderer, onButton);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/loop/start");
+        assert.equal(mock.requests[0].options.method, "POST");
+    } finally {
+        mock.restore();
+    }
+});
+
+test("running BOT Runtime Loop stop reaches the existing loop handler", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/loop/stop");
+        return jsonResponse({ body: { status: "stopped" } });
+    });
+
+    try {
+        const renderer = await renderBotControl({
+            botRunning: true,
+            loopEnabled: true,
+            loopState: "RUNNING",
+        });
+        const offButton = findGroupButton(renderer.root, "Runtime loop", "OFF");
+        assert.ok(offButton);
+        assert.equal(offButton.props.disabled, false);
+
+        clickAndRender(renderer, offButton);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/loop/stop");
+        assert.equal(mock.requests[0].options.method, "POST");
+    } finally {
+        mock.restore();
+    }
+});
+
+test("running BOT Runtime Auto Trade reaches the existing Governance handler", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/governance/execution");
+        return jsonResponse({ body: { success: true, execution_enabled: true } });
+    });
+
+    try {
+        const renderer = await renderBotControl({
+            botRunning: true,
+            loopEnabled: true,
+            executionEnabled: false,
+        });
+        const onButton = findGroupButton(renderer.root, "Runtime auto trade", "ON");
+        assert.ok(onButton);
+        assert.equal(onButton.props.disabled, false);
+
+        clickAndRender(renderer, onButton);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/governance/execution");
+        assert.equal(mock.requests[0].options.method, "POST");
+        assert.equal(JSON.parse(mock.requests[0].options.body).enabled, true);
+    } finally {
+        mock.restore();
+    }
 });
 
 test("START BOT is enabled when MM, Emergency, and remaining readiness are READY", async () => {
