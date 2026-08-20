@@ -107,7 +107,11 @@ const loadBotControl = async () => {
                 "    recommendedAction: 'CONTINUE',",
                 "    riskState: 'NORMAL',",
                 "  };",
-                "  return { status: mm };",
+                "  return {",
+                "    status: mm,",
+                "    configuration: globalThis.__MM_CONFIGURATION__,",
+                "    configurationDraft: globalThis.__MM_DRAFT__,",
+                "  };",
                 "}",
             ].join("\n"),
         );
@@ -564,6 +568,25 @@ const clearMmStatus = () => {
     delete globalThis.__MM_STATUS__;
 };
 
+const setMmConfiguration = (
+    overrides = {}
+) => {
+    globalThis.__MM_CONFIGURATION__ = {
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20.00",
+        maximumDrawdownPercent: "5.00",
+        ...overrides,
+    };
+};
+
+const clearMmConfiguration = () => {
+    delete globalThis.__MM_CONFIGURATION__;
+};
+
+const clearMmDraft = () => {
+    delete globalThis.__MM_DRAFT__;
+};
+
 const readyStartProps = (
     overrides = {}
 ) => ({
@@ -1009,6 +1032,7 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         assert.equal(url, "/api/bot/start");
         return response.promise;
     });
+    setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
         const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
@@ -1021,7 +1045,7 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         assert.equal(JSON.parse(mock.requests[0].options.body).mode, "paper");
         response.resolve(jsonResponse({ body: { success: true, status: "started" } }));
         await first;
-    } finally { mock.restore(); }
+    } finally { clearMmConfiguration(); mock.restore(); }
 });
 
 test("START payload uses the single effective selectionMode source", async () => {
@@ -1029,6 +1053,7 @@ test("START payload uses the single effective selectionMode source", async () =>
         assert.equal(url, "/api/bot/start");
         return jsonResponse({ body: { status: "started" } });
     });
+    setMmConfiguration();
     try {
         const manualRenderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL" },
@@ -1041,7 +1066,114 @@ test("START payload uses the single effective selectionMode source", async () =>
         }));
         await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
         assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
-    } finally { mock.restore(); }
+    } finally { clearMmConfiguration(); mock.restore(); }
+});
+
+test("START payload risk_percent uses saved MM configuration, ignoring legacy config and MM draft", async () => {
+    setMmConfiguration({ riskPerTradePercent: "2.00" });
+    globalThis.__MM_DRAFT__ = { riskPerTradePercent: "3.00", totalExposurePercent: "20.00", maximumDrawdownPercent: "5.00" };
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", risk_percent: 2.5 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 2);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+    }
+});
+
+test("START payload risk_percent is 0.50 when saved MM risk is 0.50", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.5);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+    }
+});
+
+test("START payload risk_percent is 0.75 when saved MM risk is 0.75", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.75" });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.75);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+    }
+});
+
+test("START payload risk_percent uses saved MM risk over unsaved draft", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    globalThis.__MM_DRAFT__ = { riskPerTradePercent: "0.75", totalExposurePercent: "20.00", maximumDrawdownPercent: "5.00" };
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.5);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+    }
+});
+
+test("START payload risk_percent uses saved MM risk over legacy config risk_percent", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", risk_percent: 1 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.5);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+    }
+});
+
+test("START fails closed when saved MM risk is unavailable", async () => {
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+        assert.equal(textIncludes(renderer.root, "risk-per-trade is unavailable"), true);
+    } finally {
+        mock.restore();
+    }
 });
 
 test("running BOT presents STOP BOT and uses existing stop authority", async () => {
@@ -1220,6 +1352,7 @@ test("START BOT is disabled when Emergency is BLOCKED", async () => {
 test("START BOT is disabled while a start request is pending", async () => {
     const response = deferred();
     const mock = installFetchMock(() => response.promise);
+    setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
         clickAndRender(renderer, findButton(renderer.root, "START BOT"));
@@ -1229,6 +1362,7 @@ test("START BOT is disabled while a start request is pending", async () => {
         assert.equal(pending.props.disabled, true);
         response.resolve(jsonResponse({ body: { status: "started" } }));
     } finally {
+        clearMmConfiguration();
         mock.restore();
     }
 });
@@ -1239,6 +1373,7 @@ test("START handler reaches START action when startReady is READY", async () => 
         assert.equal(url, "/api/bot/start");
         return response.promise;
     });
+    setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
         const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
@@ -1247,6 +1382,7 @@ test("START handler reaches START action when startReady is READY", async () => 
         response.resolve(jsonResponse({ body: { status: "started" } }));
         await first;
     } finally {
+        clearMmConfiguration();
         mock.restore();
     }
 });

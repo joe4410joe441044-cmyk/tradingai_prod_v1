@@ -788,6 +788,11 @@ export default function BotControl({
         riskState,
     });
     const startReady = startReadiness.reviewReadiness === "READY";
+    const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
+    const startRiskAvailable = (
+        Number.isFinite(startRiskPercent)
+        && startRiskPercent > 0
+    );
 
     const refreshStatusSafely = async () => {
         if (typeof onStatusRefresh !== "function") {
@@ -804,6 +809,10 @@ export default function BotControl({
     const handleBotLifecycle = async () => {
         if (botPendingRef.current || emergencyBlocksOperations) return;
         if (!botRunning && startReady !== true) return;
+        if (!botRunning && !startRiskAvailable) {
+            setBotError("START failed: authoritative Money Management risk-per-trade is unavailable.");
+            return;
+        }
 
         botPendingRef.current = true;
         setBotPending(true);
@@ -817,7 +826,7 @@ export default function BotControl({
                     symbol: config?.symbol,
                     selection_mode: effectiveSelectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
-                    risk_percent: config?.risk_percent ?? 1,
+                    risk_percent: startRiskPercent,
                     position_size: config?.positionSize ?? 0,
                     max_drawdown_pct: config?.maxDd ?? 5,
                     sl_percent: config?.sl ?? 1,
