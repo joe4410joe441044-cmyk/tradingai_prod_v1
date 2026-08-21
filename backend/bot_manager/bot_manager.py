@@ -2489,6 +2489,24 @@ class BotManager:
             }
         return deepcopy(self.auto_market_selection_lifecycle.get_status())
 
+    def _handoff_selection_mode(self, requested):
+        """Hand off operator MANUAL/AUTO selection to runtime/AMS authority.
+
+        START authority is operator selection; runtime authority is the
+        BotManager/AMS lifecycle.  AUTO reuses the existing PAPER AUTO
+        lifecycle contract (fail-closed to MANUAL when not READY).  MANUAL
+        never starts AUTO selection.
+        """
+        requested = str(requested or "MANUAL").strip().upper()
+        if requested not in ("MANUAL", "AUTO"):
+            requested = "MANUAL"
+        self.selection_mode = "MANUAL"
+        if requested == "AUTO":
+            self.start_auto_market_selection_runtime()
+        else:
+            self.stop_auto_market_selection_runtime()
+        return self.selection_mode
+
     def _pause_new_entries_for_safe_switch(self, transaction_id):
         if not transaction_id or not self.symbol_switch_lock.acquire(blocking=False):
             return False
@@ -2902,6 +2920,13 @@ class BotManager:
                     "position_check_ok",
                     False,
                 )
+            )
+
+            # Operator selection (MANUAL/AUTO) hands off to runtime authority.
+            # AUTO reuses the existing PAPER AUTO lifecycle; MANUAL stays on
+            # the operator symbol and never starts AUTO selection.
+            self._handoff_selection_mode(
+                config.get("selection_mode", "MANUAL")
             )
 
             runtime_metrics = (

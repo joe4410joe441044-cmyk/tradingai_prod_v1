@@ -25,6 +25,11 @@ class Exchange(str, Enum):
     binance = "binance"
 
 
+class SelectionMode(str, Enum):
+    manual = "MANUAL"
+    auto = "AUTO"
+
+
 class PaperCapitalSource(str, Enum):
     dashboard_manual = "DASHBOARD_MANUAL"
     real_available_preset = "REAL_AVAILABLE_PRESET"
@@ -66,6 +71,7 @@ class StartConfig(BaseModel):
     trailing_stop: bool = False
     dry_run: bool = True
     mode: Mode
+    selection_mode: SelectionMode = SelectionMode.manual
 
 
 # =========================
@@ -335,6 +341,10 @@ def start_bot(config: StartConfig):
     config_dict["exchange"] = str(
         config_dict["exchange"]
     ).split(".")[-1].lower()
+
+    config_dict["selection_mode"] = str(
+        config_dict["selection_mode"]
+    ).split(".")[-1].upper().strip()
 
     runtime_debug("Normalized API mode=%s", config_dict["mode"])
 
