@@ -163,6 +163,8 @@ export default function OperationPreparation({
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
+        if (key === "loopOnStart") onLegacyConfigChange({ loopOnStart: value });
+        if (key === "autoTradeOnStart") onLegacyConfigChange({ autoTradeOnStart: value });
     };
 
     const emergencyStateCode = String(emergencyState ?? "UNKNOWN").trim().toUpperCase();

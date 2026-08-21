@@ -373,7 +373,9 @@ test("manual/auto, leverage, and automation controls update the reactive summary
     assert.equal(content.includes("4x"), true);
     assert.equal(content.includes("AUTO MODE → ON START"), false);
     assert.equal(content.includes("MANUAL MODE"), true);
-    assert.deepEqual(legacyChanges.at(-1), { symbol: "BTCUSDTM" });
+    assert.deepEqual(legacyChanges.filter((change) => "symbol" in change).at(-1), { symbol: "BTCUSDTM" });
+    assert.ok(legacyChanges.some((change) => change.loopOnStart === true));
+    assert.ok(legacyChanges.some((change) => change.autoTradeOnStart === true));
 });
 
 test("selectionMode changes propagate to legacy config as the single source", async () => {

@@ -30,8 +30,8 @@ export const createOperationPreparationSettings = (config = {}) => ({
     ),
     compounding: false,
     requestedLeverage: 3,
-    loopOnStart: false,
-    autoTradeOnStart: false,
+    loopOnStart: Boolean(config.loopOnStart),
+    autoTradeOnStart: Boolean(config.autoTradeOnStart),
 });
 
 export const operationPreparationSummary = (settings, selectedSymbol, riskPerTradePercent) => ({

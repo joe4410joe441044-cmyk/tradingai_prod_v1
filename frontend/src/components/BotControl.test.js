@@ -1465,6 +1465,245 @@ test("STOP handler remains available when startReady is false", async () => {
     }
 });
 
+test("L1: Loop on Start OFF triggers no Loop activation after START success", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL" },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/start");
+        assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("L2: Loop on Start ON invokes the existing Loop authority exactly once after START success", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/bot/loop/start") return jsonResponse({ body: { status: "started" } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests[0].url, "/api/bot/start");
+        const loopRequests = mock.requests.filter((request) => request.url === "/api/bot/loop/start");
+        assert.equal(loopRequests.length, 1);
+        assert.equal(loopRequests[0].options.method, "POST");
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("L3: Loop on Start ON does not activate Loop when START fails", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ ok: false, status: 400, body: { reason: "START_REJECTED" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 0);
+        assert.equal(textIncludes(renderer.root, "START failed"), true);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("L4: Loop on Start activation failure surfaces a truthful error without fake enabled state", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/bot/loop/start") return jsonResponse({ body: { status: "error", reason: "LOOP_BLOCKED_BY_EMERGENCY_LOCK" } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        assert.equal(textIncludes(renderer.root, "Failed to start Loop."), true);
+        assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 1);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("AT1: Auto Trade on Start OFF triggers no Auto Trade activation after START success", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL" },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("AT2: Auto Trade on Start ON invokes the existing Governance authority exactly once after START success", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/bot/loop/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/governance/execution") return jsonResponse({ body: { success: true, execution_enabled: true } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const autoTradeRequests = mock.requests.filter((request) => request.url === "/api/governance/execution");
+        assert.equal(autoTradeRequests.length, 1);
+        assert.equal(autoTradeRequests[0].options.method, "POST");
+        assert.equal(JSON.parse(autoTradeRequests[0].options.body).enabled, true);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("AT3: Auto Trade on Start ON does not activate when START fails", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ ok: false, status: 400, body: { reason: "START_REJECTED" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("AT4: Auto Trade on Start activation failure surfaces a truthful error without fake enabled state", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/governance/execution") return jsonResponse({
+            ok: false,
+            status: 409,
+            body: { detail: { reason: "AUTO_TRADE_REQUIRES_LOOP_ON" } },
+        });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        assert.equal(textIncludes(renderer.root, "Loop must be running before Auto Trade can be enabled."), true);
+        assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 1);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("AT5: Auto Trade on Start cannot bypass the MM readiness gate", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "HOLD_NEW_ENTRIES",
+        riskState: "CAUTION",
+    });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmStatus();
+        mock.restore();
+    }
+});
+
+test("Sequencing: START succeeds, then Loop, then Auto Trade in deterministic order", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/bot/loop/start") return jsonResponse({ body: { status: "started" } });
+        if (url === "/api/governance/execution") return jsonResponse({ body: { success: true, execution_enabled: true } });
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "AUTO", displaySymbol: "BTCUSDTM", loopOnStart: true, autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 3);
+        assert.equal(mock.requests[0].url, "/api/bot/start");
+        assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "AUTO");
+        assert.equal(mock.requests[1].url, "/api/bot/loop/start");
+        assert.equal(mock.requests[2].url, "/api/governance/execution");
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("START lifecycle stays single-flight while automation is applied", async () => {
+    const response = deferred();
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return response.promise;
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
+        }));
+        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        renderer.render();
+        const pending = findButton(renderer.root, "STARTING...");
+        assert.ok(pending);
+        assert.equal(pending.props.disabled, true);
+        pending.props.onClick();
+        assert.equal(mock.requests.length, 1);
+        response.resolve(jsonResponse({ body: { status: "started" } }));
+        await first;
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
 test("BotControl reuses shared readiness without re-implementing MM readiness", async () => {
     const source = await readFile(sourceUrl, "utf8");
     assert.doesNotMatch(source, /deriveMmReadiness|deriveReviewReadiness/);

@@ -817,6 +817,8 @@ export default function BotControl({
         botPendingRef.current = true;
         setBotPending(true);
         setBotError(null);
+        setLoopError(null);
+        setAutoTradeError(null);
 
         try {
             const response = await fetch(botRunning ? API.botStop() : API.botStart(), {
@@ -847,6 +849,45 @@ export default function BotControl({
             if (!response.ok || !lifecycleConfirmed) {
                 throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
             }
+
+            if (!botRunning) {
+                const startIntent = createOperationPreparationSettings(config);
+
+                if (startIntent.loopOnStart) {
+                    try {
+                        await startLoop();
+                    } catch (error) {
+                        console.error("LOOP ON START ERROR", error);
+                        setLoopError(formatLoopError(error, true));
+                    }
+                }
+
+                if (startIntent.autoTradeOnStart) {
+                    try {
+                        const executionResult = await setExecutionEnabled(true);
+
+                        if (executionResult.execution_enabled !== true) {
+                            const error = new Error("Governance response did not confirm Auto Trade state.");
+                            error.code = "AUTO_TRADE_STATE_MISMATCH";
+                            error.status = 200;
+                            error.data = executionResult;
+                            throw error;
+                        }
+
+                        updateExecutionRuntimeTelemetry({
+                            executionAllowed: true,
+                            governanceReason: "START_AUTO_TRADE_ENABLE",
+                            suppressionReason: "NONE",
+                        });
+
+                        setExecutionEnabledState(true);
+                    } catch (error) {
+                        console.error("AUTO TRADE ON START ERROR", error);
+                        setAutoTradeError(formatAutoTradeError(error));
+                    }
+                }
+            }
+
             await refreshStatusSafely();
         } catch (error) {
             setBotError(`${botRunning ? "STOP" : "START"} failed: ${error?.message || "UNKNOWN ERROR"}`);
@@ -1225,6 +1266,8 @@ export default function BotControl({
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
                     {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
+                    {loopError && <div className="operation-inline-error" role="alert">{loopError}</div>}
+                    {autoTradeError && <div className="operation-inline-error" role="alert">{autoTradeError}</div>}
                 </div>
             </OperationPreparation>
 
