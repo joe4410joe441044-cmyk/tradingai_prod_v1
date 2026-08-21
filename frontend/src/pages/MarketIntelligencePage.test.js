@@ -15,11 +15,13 @@ const loadPage = async () => {
     const output = join(temporary, "MarketIntelligencePage.mjs");
     const componentStub = (label, named = "") => moduleUrl(`export default()=>({type:'section',props:{children:'${label}'}});${named}`);
     const aiWorkspaceStub = moduleUrl("export default ({finalDecision})=>({type:'section',props:{children:['AI INTELLIGENCE','Real-time Market Recognition & AI Decision Engine',finalDecision,'Detector Summary','Feature Snapshot','Strategy','AI Review','Governance','EXECUTION / POSITION']}})");
+    const autoMarketSelectionStub = componentStub("AUTO MARKET SELECTION COLLAPSIBLE");
     const boundaryStub = moduleUrl("export default ({children})=>children");
     const providerStub = moduleUrl("export const MarketIntelligenceProvider=({children})=>children");
     const workspaceStub = moduleUrl("export default ({bottomPanel,leftPanel,rightPanel})=>({type:'section',props:{children:[leftPanel,rightPanel,bottomPanel]}})");
     let code = transformed.code.replace('from "../components/market-intelligence/AIIntelligenceWorkspace";',
-        `from "${aiWorkspaceStub}";`);
+        `from "${aiWorkspaceStub}";`)
+        .replace('from "../components/market-intelligence/AutoMarketSelectionPanel";', `from "${autoMarketSelectionStub}";`);
     const replacements = [
         ["DecisionRailway", "DECISION RAILWAY", "export const DecisionRailwaySummary=()=>({type:'section',props:{children:'AI FINAL DECISION'}})"], ["MarketIntelligenceHeader", "MI HEADER"],
         ["MarketIntelligenceStatusLayer", "PAGE STATUS"], ["MarketIntelligenceToolbar", "MI TOOLBAR"],
@@ -56,14 +58,21 @@ test("MarketIntelligencePage integrates components in responsive logical order",
     const text = textOf(Page());
     for (const expected of ["MARKET INTELLIGENCE（市場インテリジェンス）", "MI TOOLBAR", "REPLAY MARKET VIEW", "MARKER OVERLAY",
         "AI INTELLIGENCE", "Real-time Market Recognition & AI Decision Engine", "AI FINAL DECISION", "Detector Summary",
-        "Feature Snapshot", "Strategy", "AI Review", "Governance", "EXECUTION / POSITION", "REPLAY CONTROLLER",
+        "Feature Snapshot", "Strategy", "AI Review", "Governance", "EXECUTION / POSITION", "AUTO MARKET SELECTION COLLAPSIBLE", "REPLAY CONTROLLER",
         "DECISION RAILWAY", "REPLAY INSPECTOR", "POSITION TIMELINE", "REPLAY TIMELINE"])
         assert.match(text, new RegExp(expected));
     assert.doesNotMatch(text, /MI HEADER|PAGE STATUS/);
     assert.equal(text.indexOf("REPLAY MARKET VIEW") < text.indexOf("AI INTELLIGENCE"), true);
-    assert.equal(text.indexOf("AI INTELLIGENCE") < text.indexOf("REPLAY CONTROLLER"), true);
+    assert.equal(text.indexOf("AI INTELLIGENCE") < text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE"), true);
+    assert.equal(text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE") < text.indexOf("REPLAY CONTROLLER"), true);
     assert.equal(text.indexOf("REPLAY CONTROLLER") < text.indexOf("DECISION RAILWAY"), true);
     assert.equal(text.indexOf("DECISION RAILWAY") < text.indexOf("REPLAY INSPECTOR"), true);
     assert.equal(text.indexOf("REPLAY INSPECTOR") < text.indexOf("POSITION TIMELINE"), true);
     assert.equal(text.indexOf("POSITION TIMELINE") < text.indexOf("REPLAY TIMELINE"), true);
+});
+
+test("Dashboard no longer renders the standalone Auto Market Selection card", async () => {
+    const dashboard = await readFile(new URL("./Dashboard.jsx", import.meta.url), "utf8");
+    assert.doesNotMatch(dashboard, /AutoMarketSelectionCard/);
+    assert.doesNotMatch(dashboard, /data-testid=["']auto-market-selection-card/);
 });

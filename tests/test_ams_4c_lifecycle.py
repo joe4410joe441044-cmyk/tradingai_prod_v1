@@ -93,6 +93,31 @@ def test_unsafe_configuration_blocks_start(config, reason):
     assert manager.activeSymbol == "ETHUSDT" and e2e.calls == []
 
 
+
+
+
+def test_missing_dry_run_uses_bot_manager_safe_default():
+    service, _, _ = lifecycle(config={
+        "unrelated": True, "realOrderAllowed": False,
+    })
+    assert service.start()["amsRuntimeState"] == "READY"
+
+
+def test_missing_mode_uses_bot_manager_paper_default():
+    service, _, _ = lifecycle(config={
+        "dry_run": True, "realOrderAllowed": False,
+    })
+    assert service.start()["amsRuntimeState"] == "READY"
+
+
+def test_authoritative_mode_wins_over_stale_trade_mode_alias():
+    service, _, _ = lifecycle(config={
+        "mode": "paper", "tradeMode": "live", "dry_run": True,
+        "realOrderAllowed": False,
+    })
+    assert service.start()["amsRuntimeState"] == "READY"
+
+
 def test_mm_emergency_and_dependency_readiness_block_start():
     for key, reason in (
         ("dependenciesAvailable", "AUTO_RUNTIME_DEPENDENCIES_UNAVAILABLE"),
@@ -186,3 +211,42 @@ def test_lifecycle_source_has_no_scheduler_symbol_trade_or_bypass_mutation():
         "sleep(", "interval", "cooldown", ".activeSymbol =", "._active_symbol =",
         "create_order", "submit_order", "governance_bypass", "execution_bypass",
     ))
+
+
+def test_status_projects_initial_proposal_commit_lock_and_counts():
+    service, manager, _ = lifecycle()
+    manager.activeSymbol = "BTCUSDT"
+    manager.auto_market_selection_observation = {
+        "autoSelectionCycle": {
+            "autoSelectionCycleId": "ams-cycle-1",
+            "topCandidateSymbol": "BTCUSDT",
+            "evaluatedAt": "2026-08-09T03:00:00Z",
+        },
+        "scannerResult": {
+            "universeCount": 10, "evaluatedCount": 9,
+            "eligibleCount": 3, "rejectedCount": 6,
+        },
+        "rankingResult": {
+            "topCandidate": {"symbol": "BTCUSDT", "rankingScore": "0.91"},
+        },
+        "selectionProposal": {
+            "currentActiveSymbol": None, "proposedSymbol": "BTCUSDT",
+        },
+        "switchResult": {
+            "previousSymbol": None, "proposedSymbol": "BTCUSDT",
+            "committedSymbol": "BTCUSDT", "state": "COMPLETED",
+            "success": True, "committedAt": "2026-08-09T03:00:01Z",
+            "completedAt": "2026-08-09T03:00:02Z",
+        },
+    }
+    service.start()
+    status = service.get_status()
+    assert status["selectionMode"] == "INITIAL_SELECTION"
+    assert status["selectionCycleId"] == "ams-cycle-1"
+    assert (status["universeCount"], status["evaluatedCount"],
+            status["eligibleCount"], status["rejectedCount"]) == (10, 9, 3, 6)
+    assert status["proposedSymbol"] == status["requestedSymbol"] == "BTCUSDT"
+    assert status["previousSymbol"] is None
+    assert status["committedSymbol"] == status["lockedSymbol"] == "BTCUSDT"
+    assert status["lockOnState"] == "LOCKED"
+    assert status["lockedAt"] == "2026-08-09T03:00:01Z"

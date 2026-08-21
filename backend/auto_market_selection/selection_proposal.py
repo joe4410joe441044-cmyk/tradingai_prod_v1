@@ -172,6 +172,7 @@ def build_selection_proposal(
     ranking_result, audit_event, *, active_symbol_authority,
     position_state, pending_order_state, mm_authority, emergency_safe,
     proposed_at=None, maximum_proposal_age_seconds=300,
+    allow_initial_selection=False,
 ):
     """Build a deterministic proposal. No switch, I/O, or runtime mutation occurs."""
     if not isinstance(ranking_result, RankingCycleResult):
@@ -199,7 +200,7 @@ def build_selection_proposal(
     reasons = []
     if top is None:
         reasons.append(SelectionProposalReason.NO_TOP_CANDIDATE)
-    if active_symbol is None:
+    if active_symbol is None and allow_initial_selection is not True:
         reasons.append(SelectionProposalReason.ACTIVE_SYMBOL_UNAVAILABLE)
     if proposed_symbol is not None and proposed_symbol == active_symbol:
         reasons.append(SelectionProposalReason.NO_SWITCH_REQUIRED)

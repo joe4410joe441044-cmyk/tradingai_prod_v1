@@ -28,8 +28,12 @@ from .selection_proposal import (
     SelectionProposal, SelectionProposalReason, build_selection_proposal,
     snapshot_active_symbol_authority,
 )
-from .safe_switch import SafeSymbolSwitch, SwitchReason, SwitchResult, SwitchState
-from .bot_manager_switch_runtime import BotManagerSwitchRuntime, PreparedFeed
+from .safe_switch import (
+    InitialSymbolCommit, SafeSymbolSwitch, SwitchReason, SwitchResult, SwitchState,
+)
+from .bot_manager_switch_runtime import (
+    BotManagerSwitchRuntime, InitialBotManagerCommitRuntime, PreparedFeed,
+)
 from .dashboard_status import build_auto_market_selection_status
 from .recorder_integration import (
     AMS_RANKING, AMS_RECORDER_PAYLOAD_VERSION, AMS_SCAN, AMS_SELECTION_AUDIT,
@@ -113,10 +117,12 @@ __all__ = [
     "build_selection_proposal",
     "snapshot_active_symbol_authority",
     "SafeSymbolSwitch",
+    "InitialSymbolCommit",
     "SwitchReason",
     "SwitchResult",
     "SwitchState",
     "BotManagerSwitchRuntime",
+    "InitialBotManagerCommitRuntime",
     "PreparedFeed",
     "build_auto_market_selection_status",
     "AMS_SCAN", "AMS_RANKING", "AMS_SELECTION_AUDIT",

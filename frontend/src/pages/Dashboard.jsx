@@ -21,7 +21,6 @@ import {
 import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
-import AutoMarketSelectionCard from "../components/AutoMarketSelectionCard";
 
 
 const fetchBotStatus = async () => {
@@ -333,7 +332,7 @@ useEffect(() => {
 
                             config={{
                                 ...tradeSettings,
-                                selectionMode: botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
+                                selectionMode: tradeSettings.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
                                 displaySymbol: botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol,
                                 autoMarketState: botStatus?.autoMarketSelection?.autoRuntime?.runtimeState || "NOT AVAILABLE",
                                 executionMode: botStatus?.executionMode || botStatus?.execution_mode,
@@ -426,11 +425,6 @@ useEffect(() => {
             </div>
 
         </div>
-
-        <AutoMarketSelectionCard
-            status={botStatus?.autoMarketSelection}
-            requestedSymbol={tradeSettings.symbol}
-        />
 
         <TradingDecisionCard decision={botStatus?.tradingDecision} />
 

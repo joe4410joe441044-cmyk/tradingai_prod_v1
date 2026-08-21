@@ -2071,9 +2071,9 @@ class BotManager:
             raise TypeError("Money Management config provider required")
         self.production_ams_mm_config_provider = mm_config_provider
 
-    def get_official_mm_capital_authority(self):
+    def get_official_mm_capital_authority(self, *, force=False):
         """Return the MM-owned monitoring contract shared with AMS."""
-        observation = self.refresh_production_ams_read_model()
+        observation = self.refresh_production_ams_read_model(force=force)
         capital = observation.get("capitalEligibilityContract") if isinstance(
             observation, dict
         ) else None

@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.auto_market_selection import (
-    AutoMarketSelectionRuntime, AutoSelectionCycleStatus, SafeSymbolSwitch,
+    AutoMarketSelectionRuntime, AutoSelectionCycleStatus, InitialSymbolCommit,
+    SafeSymbolSwitch,
 )
 from backend.auto_market_selection.candidate_ranking import (
     CandidateRankingEngine, RankingReason, RankingStatus,
@@ -71,6 +72,7 @@ def runtime(*, manager=None, source=None, position="FLAT", pending=False,
         emergency_provider=marked("emergency", emergency),
         ranking_engine=ranking_engine,
         safe_switch_factory=lambda: SafeSymbolSwitch(switch_runtime),
+        initial_commit_factory=lambda: InitialSymbolCommit(switch_runtime),
         clock=lambda: NOW,
     ), manager, switch_runtime, calls
 
@@ -91,6 +93,41 @@ def test_paper_dry_run_executes_exact_flow_and_confirms_synchronization():
     assert switch_runtime.events == ["revalidate", "pause", "prepare", "snapshot",
                                      "revalidate", "commit", "sync", "old_cleanup", "resume"]
     assert service.get_status()["cycle"] == result.to_dict()
+
+
+def test_initial_selection_commits_ranked_candidate_from_null_authority():
+    service, manager, switch_runtime, _ = runtime(manager=Manager(active=None))
+    manager.selection_mode = "AUTO"
+    result = service.run_cycle(started_at=NOW)
+    assert result.status is AutoSelectionCycleStatus.COMPLETED
+    assert result.current_active_symbol is None
+    assert result.proposed_symbol == result.final_active_symbol == "BTCUSDT"
+    assert manager.activeSymbol == "BTCUSDT"
+    switch = manager.auto_market_selection_observation["switchResult"]
+    assert switch["previousSymbol"] is None
+    assert switch["committedSymbol"] == "BTCUSDT"
+    assert switch_runtime.events == [
+        "revalidate", "pause", "prepare", "snapshot", "revalidate",
+        "commit", "sync", "old_cleanup", "resume",
+    ]
+
+
+@pytest.mark.parametrize("position,pending,emergency,reason", [
+    ("OPEN", False, True, "POSITION_NOT_FLAT"),
+    ("FLAT", True, True, "PENDING_ORDER_EXISTS"),
+    ("FLAT", None, True, "PENDING_ORDER_UNKNOWN"),
+    ("FLAT", False, False, "EMERGENCY_UNSAFE"),
+])
+def test_initial_selection_remains_fail_closed(position, pending, emergency, reason):
+    service, manager, switch_runtime, _ = runtime(
+        manager=Manager(active=None), position=position, pending=pending,
+        emergency=emergency,
+    )
+    manager.selection_mode = "AUTO"
+    result = service.run_cycle(started_at=NOW)
+    assert result.status is AutoSelectionCycleStatus.SWITCH_BLOCKED
+    assert reason in result.reason_codes
+    assert manager.activeSymbol is None and switch_runtime.events == []
 
 
 @pytest.mark.parametrize("config,reason", [

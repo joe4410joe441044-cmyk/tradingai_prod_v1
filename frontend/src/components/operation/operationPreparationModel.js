@@ -29,7 +29,11 @@ export const createOperationPreparationSettings = (config = {}) => ({
         "XRPUSDTM",
     ),
     compounding: false,
-    requestedLeverage: 3,
+    requestedLeverage: supportedValue(
+        OPERATION_PREPARATION_OPTIONS.requestedLeverage,
+        Number(config.leverage),
+        3,
+    ),
     loopOnStart: Boolean(config.loopOnStart),
     autoTradeOnStart: Boolean(config.autoTradeOnStart),
 });

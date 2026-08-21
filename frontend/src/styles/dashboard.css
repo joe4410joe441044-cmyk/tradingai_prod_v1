@@ -5079,6 +5079,54 @@ Collapsed by default; expands to show runtime diagnostics.
 .ams-card-header {
     justify-content: space-between;
     margin-bottom: 14px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.ams-card-header:disabled {
+    opacity: 1;
+}
+
+.ams-card--collapsible .ams-card-header {
+    cursor: pointer;
+}
+
+.ams-card--collapsible .ams-card-header:focus-visible {
+    outline: 2px solid #57b8ff;
+    outline-offset: 5px;
+}
+
+.ams-card-heading,
+.ams-card-header-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ams-card-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ams-card-subtitle {
+    color: #788394;
+    font: 10px "Consolas", monospace;
+}
+
+.ams-disclosure-icon {
+    color: #57b8ff;
+    font-size: 14px;
+}
+
+.ams-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
 }
 
 .ams-read-status {
@@ -5187,14 +5235,16 @@ Collapsed by default; expands to show runtime diagnostics.
 }
 
 @media (max-width: 1279px) {
-    .ams-symbol-grid {
+    .ams-symbol-grid,
+    .ams-summary {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 760px) {
     .ams-symbol-grid,
-    .ams-section-grid {
+    .ams-section-grid,
+    .ams-summary {
         grid-template-columns: minmax(0, 1fr);
     }
 }

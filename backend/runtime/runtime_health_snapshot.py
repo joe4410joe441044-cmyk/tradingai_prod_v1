@@ -462,7 +462,7 @@ def build_runtime_health_snapshot(
     )
     adapter_reached = False
     runtime_state_reached = False
-    strategy_reached = active and bool(result.get("strategyRuntimeReached"))
+    strategy_reached = active and result.get("strategyRuntimeReached", True)
     ai_reached = False
     money_reached = active and bool(result.get("moneyManagementReached"))
     governance_reached = active and bool(result.get("governanceRuntimeReached"))

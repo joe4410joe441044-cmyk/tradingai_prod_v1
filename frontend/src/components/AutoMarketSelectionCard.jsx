@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { buildAutoMarketSelectionModel, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
 
 const statusClass = (value) => {
@@ -15,7 +17,8 @@ const Field = ({ label, value, className = "" }) => (
     </div>
 );
 
-export default function AutoMarketSelectionCard({ status, requestedSymbol }) {
+export default function AutoMarketSelectionCard({ status, requestedSymbol, collapsible = false }) {
+    const [expanded, setExpanded] = useState(!collapsible);
     const model = buildAutoMarketSelectionModel(status, requestedSymbol);
     const top = model.topCandidate;
     const capital = model.capitalEligibility;
@@ -26,11 +29,35 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol }) {
         .slice(0, 3);
 
     return (
-        <section className="panel-card ams-card" aria-labelledby="ams-card-title" data-testid="auto-market-selection-card">
-            <div className="ams-card-header">
-                <div id="ams-card-title" className="governance-card-title">AUTO MARKET SELECTION</div>
-                <span className={`ams-read-status ${statusClass(model.availability)}`}>{model.availability}</span>
-            </div>
+        <section className={`panel-card ams-card${collapsible ? " ams-card--collapsible" : ""}`} aria-labelledby="ams-card-title" data-testid="auto-market-selection-card">
+            <button
+                className="ams-card-header"
+                type="button"
+                aria-expanded={expanded}
+                aria-controls="ams-card-details"
+                onClick={() => collapsible && setExpanded((value) => !value)}
+                disabled={!collapsible}
+            >
+                <span className="ams-card-heading">
+                    <span id="ams-card-title" className="governance-card-title">AUTO MARKET SELECTION</span>
+                    <span className="ams-card-subtitle">Market Scanner / Ranking / Selection</span>
+                </span>
+                <span className="ams-card-header-status">
+                    <span className={`ams-read-status ${statusClass(model.availability)}`}>{model.availability}</span>
+                    {collapsible && <span className="ams-disclosure-icon" aria-hidden="true">{expanded ? "▴" : "▾"}</span>}
+                </span>
+            </button>
+
+            {collapsible && !expanded && (
+                <div className="ams-summary" data-testid="auto-market-selection-summary">
+                    <Field label="MODE" value={model.selectionMode} />
+                    <Field label="TOP CANDIDATE" value={top.symbol} />
+                    <Field label="ACTIVE SYMBOL" value={model.activeSymbol} className="ams-active-symbol" />
+                    <Field label="SELECTION STATE" value={autoRuntime.runtimeState} className={statusClass(autoRuntime.runtimeState)} />
+                </div>
+            )}
+
+            {expanded && <div id="ams-card-details" data-testid="auto-market-selection-details">
 
             <div className="ams-symbol-grid">
                 <Field label="SELECTION MODE" value={model.selectionMode} />
@@ -97,6 +124,7 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol }) {
                     <strong>{primaryReasons.length ? primaryReasons.join(" · ") : "—"}</strong>
                 </div>
             </div>
+            </div>}
         </section>
     );
 }

@@ -1,4 +1,5 @@
 import AIIntelligenceWorkspace from "../components/market-intelligence/AIIntelligenceWorkspace";
+import AutoMarketSelectionPanel from "../components/market-intelligence/AutoMarketSelectionPanel";
 import DecisionRailway, { DecisionRailwaySummary } from "../components/market-intelligence/DecisionRailway";
 import MarketIntelligenceErrorBoundary from "../components/market-intelligence/MarketIntelligenceErrorBoundary";
 import MarketIntelligenceToolbar from "../components/market-intelligence/MarketIntelligenceToolbar";
@@ -21,6 +22,7 @@ export default function MarketIntelligencePage() {
                         leftPanel={<ReplayMarketView />}
                         rightPanel={<AIIntelligenceWorkspace finalDecision={<DecisionRailwaySummary />} />}
                         bottomPanel={<>
+                            <AutoMarketSelectionPanel />
                             <ReplayController />
                             <div className="mi-replay-workspace__analysis">
                                 <DecisionRailway showSummary={false} />

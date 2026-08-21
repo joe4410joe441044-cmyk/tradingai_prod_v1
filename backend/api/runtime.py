@@ -18,3 +18,31 @@ def refresh_stopped_paper_safety_authority():
     """Explicitly revalidate stopped-PAPER safety without starting trading."""
 
     return get_bot_manager().refresh_stopped_paper_safety_authority()
+
+
+@router.post("/paper-auto/start")
+def start_paper_auto_selection():
+    """Enable the attached PAPER AUTO lifecycle; no cycle runs implicitly."""
+
+    return get_bot_manager().start_auto_market_selection_runtime()
+
+
+@router.get("/paper-auto/status")
+def paper_auto_selection_status():
+    """Project the attached singleton lifecycle control status."""
+
+    return get_bot_manager().get_auto_market_selection_runtime_status()
+
+
+@router.post("/paper-auto/cycle")
+def run_paper_auto_selection_cycle():
+    """Run one selection cycle through the attached singleton lifecycle."""
+
+    return get_bot_manager().run_auto_market_selection_cycle()
+
+
+@router.post("/paper-auto/stop")
+def stop_paper_auto_selection():
+    """Disable PAPER AUTO without interrupting an in-flight safe transaction."""
+
+    return get_bot_manager().stop_auto_market_selection_runtime()

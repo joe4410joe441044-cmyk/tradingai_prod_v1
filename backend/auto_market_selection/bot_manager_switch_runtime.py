@@ -136,8 +136,8 @@ class BotManagerSwitchRuntime:
     def commit_active_symbol(self, expected, proposed, handle, transaction_id):
         # AMS-2B is deliberately unavailable outside dry-run Paper runtime.
         config = self.manager.config
-        if (str(config.get("mode", "")).lower() != "paper"
-                or config.get("dry_run") is not True):
+        if (str(config.get("mode", "paper")).lower() != "paper"
+                or config.get("dry_run", True) is not True):
             return False
         return self.manager._commit_active_symbol_for_safe_switch(
             expected, proposed, handle.feed, handle.runtime_id,
@@ -189,4 +189,24 @@ class BotManagerSwitchRuntime:
     def cleanup_new_feed(handle):
         if handle.feed is not None:
             handle.feed.stop()
+        return True
+
+
+class InitialBotManagerCommitRuntime(BotManagerSwitchRuntime):
+    """Initial commit sync before the normal Bot Start creates an engine."""
+
+    def sync_downstream(self, symbol, handle):
+        snapshot = handle.snapshot
+        return bool(
+            self.manager.engine is None
+            and self.manager.activeSymbol == symbol
+            and self.manager.active_runtime_id == handle.runtime_id
+            and isinstance(snapshot, dict)
+            and snapshot.get("symbol") == symbol
+        )
+
+
+    @staticmethod
+    def cleanup_old_feed(handle):
+        del handle
         return True

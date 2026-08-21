@@ -158,13 +158,14 @@ export default function OperationPreparation({
     const [settings, setSettings] = useState(() => (
         createOperationPreparationSettings(config)
     ));
-    const changeSetting = (key, value) => {
+     const changeSetting = (key, value) => {
         setSettings((current) => ({ ...current, [key]: value }));
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });
         if (key === "loopOnStart") onLegacyConfigChange({ loopOnStart: value });
         if (key === "autoTradeOnStart") onLegacyConfigChange({ autoTradeOnStart: value });
+        if (key === "requestedLeverage") onLegacyConfigChange({ leverage: value });
     };
 
     const emergencyStateCode = String(emergencyState ?? "UNKNOWN").trim().toUpperCase();
@@ -417,10 +418,9 @@ return (
             </div>
 
             <div className="operation-lane-right">
-                <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
+                 <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
                     <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                    <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source="UI PREVIEW" value="5x" />
-                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source="UI FALLBACK" value="NOT CONNECTED" />
+                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source="OPERATOR" value={leverage(settings.requestedLeverage)} />
                     <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
                     <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
                 </Section>

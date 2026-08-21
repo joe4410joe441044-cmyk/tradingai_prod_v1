@@ -5,11 +5,15 @@ from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 import json
+import logging
 import math
 import threading
 from typing import Optional, Tuple
 
 from .selection_proposal import ProposalStatus, SelectionProposal
+
+
+logger = logging.getLogger(__name__)
 
 
 class SwitchState(str, Enum):
@@ -228,6 +232,7 @@ class SafeSymbolSwitch:
                 resumed=resumed,
             )
         except Exception:
+            logger.exception("Safe symbol transaction exception state=%s", self.state.value)
             reason = (SwitchReason.OLD_FEED_CLEANUP_FAILED if committed
                       else SwitchReason.NEW_FEED_SUBSCRIBE_FAILED)
             if committed:
@@ -352,3 +357,19 @@ class SafeSymbolSwitch:
         if callable(publisher):
             publisher(result)
         return result
+
+
+class InitialSymbolCommit(SafeSymbolSwitch):
+    """Fail-closed transaction for an AUTO initial symbol commit."""
+
+    def _validate_input(self, proposal, now):
+        if (not isinstance(proposal, SelectionProposal)
+                or proposal.proposal_status is not ProposalStatus.PROPOSED
+                or proposal.switch_eligible is not True
+                or not proposal.proposed_symbol
+                or proposal.current_active_symbol is not None):
+            return SwitchReason.PROPOSAL_NOT_ELIGIBLE
+        age = (now - _utc(proposal.proposed_at)).total_seconds()
+        if age < 0 or age > self.maximum_proposal_age_seconds:
+            return SwitchReason.PROPOSAL_STALE
+        return None

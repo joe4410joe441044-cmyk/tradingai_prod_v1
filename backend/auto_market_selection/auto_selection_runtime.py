@@ -9,10 +9,12 @@ import json
 import threading
 from typing import Optional, Tuple
 
-from .bot_manager_switch_runtime import BotManagerSwitchRuntime
+from .bot_manager_switch_runtime import (
+    BotManagerSwitchRuntime, InitialBotManagerCommitRuntime,
+)
 from .candidate_ranking import CandidateRankingEngine
 from .market_scanner import MarketScanner, ScannerInput, ScannerStatus
-from .safe_switch import SafeSymbolSwitch
+from .safe_switch import InitialSymbolCommit, SafeSymbolSwitch
 from .selection_audit import build_selection_audit_event
 from .selection_proposal import build_selection_proposal, snapshot_active_symbol_authority
 
@@ -93,7 +95,7 @@ class AutoMarketSelectionRuntime:
         self, bot_manager, *, universe_provider, ticker_provider, capital_provider,
         eligibility_provider, position_provider, pending_order_provider,
         emergency_provider, scanner=None, ranking_engine=None,
-        safe_switch_factory=None, clock=None,
+        safe_switch_factory=None, initial_commit_factory=None, clock=None,
     ):
         providers = (
             universe_provider, ticker_provider, capital_provider,
@@ -113,6 +115,7 @@ class AutoMarketSelectionRuntime:
         self.scanner = scanner or MarketScanner()
         self.ranking_engine = ranking_engine or CandidateRankingEngine()
         self.safe_switch_factory = safe_switch_factory or self._default_safe_switch
+        self.initial_commit_factory = initial_commit_factory or self._default_initial_commit
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._cycle_lock = threading.Lock()
         self._last_result = None
@@ -206,6 +209,7 @@ class AutoMarketSelectionRuntime:
             position_state=position, pending_order_state=pending,
             mm_authority=capital, emergency_safe=emergency,
             proposed_at=evaluated,
+            allow_initial_selection=active is None,
         )
         common = dict(active=active, scanner=scanner_result, ranking=ranking,
                       audit=audit, proposal=proposal)
@@ -220,7 +224,9 @@ class AutoMarketSelectionRuntime:
                 tuple(reason.value for reason in proposal.reason_codes), **common,
             ), scanner=scanner_result, ranking=ranking, audit=audit, proposal=proposal)
 
-        switch_result = self.safe_switch_factory().execute(proposal, started_at=evaluated)
+        switch = (self.initial_commit_factory() if active is None
+                  else self.safe_switch_factory())
+        switch_result = switch.execute(proposal, started_at=evaluated)
         final_active = self._active_symbol()
         synchronized = bool(
             switch_result.success
@@ -253,14 +259,22 @@ class AutoMarketSelectionRuntime:
         )
         return SafeSymbolSwitch(adapter)
 
+    def _default_initial_commit(self):
+        adapter = InitialBotManagerCommitRuntime(
+            self.manager, position_provider=self.position_provider,
+            mm_provider=self.capital_provider,
+            emergency_provider=self.emergency_provider, clock=self.clock,
+        )
+        return InitialSymbolCommit(adapter)
+
     def _paper_safety_reason(self):
         config = getattr(self.manager, "config", None)
         if not isinstance(config, dict):
             return "AUTO_SELECTION_MODE_UNAVAILABLE"
-        mode = str(config.get("tradeMode", config.get("mode", ""))).strip().lower()
+        mode = str(config.get("mode", config.get("tradeMode", "paper"))).strip().lower()
         if mode != "paper":
             return "AUTO_SELECTION_PAPER_ONLY"
-        if config.get("dryRun", config.get("dry_run")) is not True:
+        if config.get("dryRun", config.get("dry_run", True)) is not True:
             return "AUTO_SELECTION_DRY_RUN_REQUIRED"
         return None
 

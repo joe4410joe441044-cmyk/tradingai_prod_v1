@@ -3463,6 +3463,63 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(bot.account_snapshot, before)
         self.assertFalse(os.path.exists(path))
 
+    def test_stopped_paper_explicit_refresh_reacquires_fresh_authority(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        now = 1_800_000_000.0
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_stale_after = 90.0
+            bot.account_snapshot["last_update"] = now - 91.0
+            with patch(
+                "backend.bot_manager.bot_manager.time.time",
+                return_value=now,
+            ):
+                before = bot.get_authoritative_pending_order_state()
+                refreshed = bot.refresh_stopped_paper_safety_authority()
+                after = bot.get_authoritative_pending_order_state()
+
+            self.assertFalse(before["known"])
+            self.assertEqual(before["reason"], "SNAPSHOT_STALE")
+            self.assertTrue(refreshed["refreshed"])
+            self.assertTrue(refreshed["known"])
+            self.assertFalse(refreshed["pending"])
+            self.assertTrue(refreshed["safe"])
+            self.assertTrue(refreshed["freshness"]["valid"])
+            self.assertTrue(after["known"])
+            self.assertFalse(after["pending"])
+            self.assertTrue(after["safe"])
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertNotEqual(bot.loop_state, "RUNNING")
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertFalse(refreshed["runtime"]["realOrderAllowed"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_stopped_paper_explicit_refresh_failure_remains_blocked(self):
+        state_before = self._set_governance(
+            execution_enabled=False,
+            emergency_stop=False,
+        )
+        try:
+            bot = self._stopped_paper_bot()
+            bot.account_snapshot["pendingOrder"] = None
+            bot.account_snapshot["pending_order"] = None
+            result = bot.refresh_stopped_paper_safety_authority()
+
+            self.assertFalse(result["refreshed"])
+            self.assertFalse(result["known"])
+            self.assertIsNone(result["pending"])
+            self.assertFalse(result["safe"])
+            self.assertEqual(result["reason"], "PENDING_ORDER_UNKNOWN")
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+            self.assertNotEqual(bot.loop_state, "RUNNING")
+            self.assertFalse(governance_state["execution_enabled"])
+        finally:
+            self._restore_governance(state_before)
+
     def test_stopped_paper_snapshot_inspection_rejects_tampering(self):
         path = self._temporary_durable_snapshot_path()
         bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
@@ -3517,6 +3574,23 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
         bot.get_stopped_paper_snapshot_status.assert_called_once_with()
+
+    def test_runtime_stopped_paper_refresh_endpoint_is_explicit_post(self):
+        from backend.api import runtime as runtime_api
+
+        bot = Mock()
+        expected = {
+            "refreshed": True,
+            "known": True,
+            "pending": False,
+            "safe": True,
+        }
+        bot.refresh_stopped_paper_safety_authority.return_value = expected
+        with patch.object(runtime_api, "get_bot_manager", return_value=bot):
+            actual = runtime_api.refresh_stopped_paper_safety_authority()
+
+        self.assertEqual(actual, expected)
+        bot.refresh_stopped_paper_safety_authority.assert_called_once_with()
 
     def test_offline_snapshot_validator_origin_and_exit_codes(self):
         from tools import validate_stopped_paper_snapshot as validator
@@ -9926,6 +10000,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
     def test_stopped_paper_bootstrap_rejects_execution_and_registry(self):
         from backend.routers import positions as positions_router
         from backend.runtime import runtime_registry
+        from backend import main as production_main
+
+        self.assertIs(
+            runtime_registry.trading_runtime,
+            production_main.registry.trading_runtime,
+        )
+        self.assertIsNotNone(runtime_registry.trading_runtime)
 
         for name in (
             "execution-enabled",

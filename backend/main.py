@@ -511,6 +511,10 @@ async def startup_event():
     get_bot_manager().configure_production_ams_read_model(
         lambda: get_money_management_config(app)
     )
+    from backend.auto_market_selection.paper_production import (
+        attach_production_paper_auto_selection,
+    )
+    attach_production_paper_auto_selection(get_bot_manager())
     register_money_management_runtime_hook(
         app,
         get_bot_manager,

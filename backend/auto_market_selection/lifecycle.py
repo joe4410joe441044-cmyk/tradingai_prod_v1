@@ -114,14 +114,64 @@ class PaperAutoSelectionLifecycle:
         cycle = cycle if isinstance(cycle, Mapping) else {}
         switch = observation.get("switchResult")
         switch = switch if isinstance(switch, Mapping) else {}
+        scanner = observation.get("scannerResult")
+        scanner = scanner if isinstance(scanner, Mapping) else {}
+        ranking = observation.get("rankingResult")
+        ranking = ranking if isinstance(ranking, Mapping) else {}
+        proposal = observation.get("selectionProposal")
+        proposal = proposal if isinstance(proposal, Mapping) else {}
+        active = getattr(self.manager, "activeSymbol", None)
+        enabled = self._enabled or self._state is AutoSelectionLifecycleState.RUNNING_CYCLE
+        committed = switch.get("committedSymbol")
+        locked = bool(switch.get("success") is True and committed and active == committed)
+        initial_committed = (
+            "previousSymbol" in switch
+            and switch.get("previousSymbol") is None
+            and switch.get("committedSymbol") is not None
+        )
+        selection_mode = (
+            "INITIAL_SELECTION" if enabled and (active is None or initial_committed)
+            else "SYMBOL_SWITCH" if enabled
+            else "MANUAL"
+        )
+        cycle_state = (
+            "EVALUATING" if self._state is AutoSelectionLifecycleState.RUNNING_CYCLE
+            else "WAITING_SELECTION" if enabled and active is None
+            else last.get("status")
+        )
+        top = ranking.get("topCandidate")
+        top = top if isinstance(top, Mapping) else {}
+        last_updated = (switch.get("completedAt") or cycle.get("evaluatedAt")
+                        or last.get("completedAt"))
         return {
+            "attached": True,
+            "running": enabled,
+            "runtimeState": self._state.value,
+            "cycleState": cycle_state,
+            "selectionMode": selection_mode,
+            "selectionCycleId": cycle.get("autoSelectionCycleId"),
+            "universeCount": scanner.get("universeCount"),
+            "evaluatedCount": scanner.get("evaluatedCount"),
+            "eligibleCount": scanner.get("eligibleCount"),
+            "rejectedCount": scanner.get("rejectedCount"),
+            "topScore": top.get("rankingScore"),
+            "previousSymbol": switch.get("previousSymbol", proposal.get("currentActiveSymbol")),
+            "requestedSymbol": proposal.get("proposedSymbol"),
+            "proposedSymbol": proposal.get("proposedSymbol"),
+            "committedSymbol": committed,
+            "safeSwitchState": switch.get("state") or "IDLE",
+            "lockOnState": "LOCKED" if locked else "UNLOCKED",
+            "lockedSymbol": committed if locked else None,
+            "lockedAt": switch.get("committedAt") if locked else None,
+            "lastReason": self._reason_codes[0] if self._reason_codes else None,
+            "lastUpdatedAt": last_updated,
             "amsMode": "AUTO_PAPER" if self._enabled or self._state is AutoSelectionLifecycleState.RUNNING_CYCLE else "MANUAL",
             "amsRuntimeState": self._state.value,
             "currentCycleId": self._current_cycle_id,
             "lastCycleId": last.get("e2eCycleId"),
             "lastCycleStatus": last.get("status"),
             "lastEvaluatedAt": last.get("completedAt"),
-            "activeSymbol": getattr(self.manager, "activeSymbol", None),
+            "activeSymbol": active,
             "topCandidate": cycle.get("topCandidateSymbol"),
             "switchState": switch.get("state") or "IDLE",
             "reasonCodes": list(self._reason_codes),
@@ -133,15 +183,13 @@ class PaperAutoSelectionLifecycle:
         config = getattr(self.manager, "config", None)
         if not isinstance(config, Mapping):
             return "AUTO_RUNTIME_MODE_UNAVAILABLE"
-        mode = str(config.get("tradeMode", config.get("mode", ""))).lower()
+        mode = str(config.get("mode", config.get("tradeMode", "paper"))).lower()
         if mode != "paper":
             return "AUTO_RUNTIME_LIVE_BLOCKED"
-        if config.get("dryRun", config.get("dry_run")) is not True:
+        if config.get("dryRun", config.get("dry_run", True)) is not True:
             return "AUTO_RUNTIME_DRY_RUN_REQUIRED"
         if config.get("realOrderAllowed", config.get("real_order_allowed", False)) is not False:
             return "AUTO_RUNTIME_REAL_ORDER_FORBIDDEN"
-        if not getattr(self.manager, "activeSymbol", None):
-            return "AUTO_RUNTIME_ACTIVE_SYMBOL_UNKNOWN"
         return None
 
     @staticmethod
@@ -153,7 +201,16 @@ class PaperAutoSelectionLifecycle:
             ("mmAvailable", "AUTO_RUNTIME_MM_UNAVAILABLE"),
             ("emergencySafe", "AUTO_RUNTIME_EMERGENCY_UNSAFE"),
         )
+        optional = (
+            ("positionFlat", "AUTO_RUNTIME_POSITION_NOT_FLAT"),
+            ("pendingKnown", "AUTO_RUNTIME_PENDING_UNKNOWN"),
+            ("pendingClear", "AUTO_RUNTIME_PENDING_EXISTS"),
+            ("pendingSafe", "AUTO_RUNTIME_PENDING_UNSAFE"),
+        )
         for key, reason in required:
             if value.get(key) is not True:
+                return reason
+        for key, reason in optional:
+            if key in value and value.get(key) is not True:
                 return reason
         return None

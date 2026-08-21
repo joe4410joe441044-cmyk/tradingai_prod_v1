@@ -183,6 +183,35 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
                 **{**snapshot.__dict__, "current_equity": D("NaN")}
             )
 
+    def test_restore_rolls_stale_checkpoint_periods_forward(self):
+        checkpoint_at = datetime(2026, 7, 19, 12, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 7, 26, 12, tzinfo=timezone.utc)
+        state = AuthoritativeLossRuntimeMetricsState("runtime-1")
+
+        snapshot = state.restore(
+            persisted(at=checkpoint_at, pnl=D("-25")),
+            StateSource.PERSISTED_STATE,
+            restore_at,
+        )
+
+        self.assertEqual(snapshot.daily_realized_pnl, D("0"))
+        self.assertEqual(snapshot.weekly_realized_pnl, D("0"))
+        self.assertEqual(snapshot.monthly_realized_pnl, D("-25"))
+        self.assertIsNone(snapshot.trade_count_daily)
+        self.assertEqual(snapshot.source_state, "RESTORED_PERSISTED_STATE")
+
+    def test_restore_rejects_checkpoint_from_future_period(self):
+        checkpoint_at = datetime(2026, 8, 2, 12, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 7, 26, 12, tzinfo=timezone.utc)
+        state = AuthoritativeLossRuntimeMetricsState("runtime-1")
+
+        with self.assertRaisesRegex(ValueError, "period boundary mismatch"):
+            state.restore(
+                persisted(at=checkpoint_at),
+                StateSource.PERSISTED_STATE,
+                restore_at,
+            )
+
     def test_known_zero_is_complete_and_source_reads_available(self):
         snapshot = observe(self.new_state())
         self.assertTrue(snapshot.available)
