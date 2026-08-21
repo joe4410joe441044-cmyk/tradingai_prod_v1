@@ -334,9 +334,27 @@ class LossRuntimeUpdateDispatcher:
                 if not cached_metrics:
                     self._last_metrics_result = metrics_result
                 if metrics_result.status is not LossRuntimeMetricsReadStatus.AVAILABLE:
+                    # If metrics are UNAVAILABLE (specifically) but this is the first dispatch (no prior snapshot),
+                    # allow baseline dispatch to proceed with existing runtime state
+                    if self._last_snapshot is None and metrics_result.status == LossRuntimeMetricsReadStatus.UNAVAILABLE:
+                        # This is a baseline dispatch - use existing runtime state without metrics
+                        event_id = f"{request.source}:baseline:{event_type.value}"
+                        if reevaluation_token is not None:
+                            event_id = f"{event_id}:REEVALUATE:{reevaluation_token.strip()}"
+                        # For baseline dispatch, we skip metrics evaluation and event adaptation
+                        # Just return IDEMPOTENT to indicate we're using the existing baseline state
+                        return _result(
+                            LossRuntimeDispatchStatus.IDEMPOTENT,
+                            ("baseline dispatch - metrics unavailable",),
+                            snapshot=runtime_snapshot,
+                        )
+                    # For other metrics statuses or subsequent dispatches, return appropriate status
                     target = {
                         LossRuntimeMetricsReadStatus.STALE: LossRuntimeDispatchStatus.STALE,
                         LossRuntimeMetricsReadStatus.FAILED: LossRuntimeDispatchStatus.FAILED,
+                        LossRuntimeMetricsReadStatus.PARTIAL: LossRuntimeDispatchStatus.UNAVAILABLE,
+                        LossRuntimeMetricsReadStatus.INCONSISTENT: LossRuntimeDispatchStatus.UNAVAILABLE,
+                        LossRuntimeMetricsReadStatus.UNAVAILABLE: LossRuntimeDispatchStatus.UNAVAILABLE,
                     }.get(
                         metrics_result.status,
                         LossRuntimeDispatchStatus.UNAVAILABLE,

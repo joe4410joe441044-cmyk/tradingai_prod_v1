@@ -456,7 +456,16 @@ def register_money_management_runtime_hook(
             hook.stop()
             return None
         setattr(state, APPLICATION_STATE_ATTRIBUTE, hook_registration)
-        _safe_log(logger, "debug", "Registered")
+        _safe_log(
+            logger,
+            "info",
+            (
+                f"Registered runtimeIdentity={getattr(bot_manager, 'runtime_instance_id', None)} "
+                f"botIdentity={id(bot_manager)} hookIdentity={id(hook)} "
+                f"authoritySource={type(registration.lifecycle_adapter).__name__} "
+                f"registeredAt={hook_registration.registered_at.isoformat()}"
+            ),
+        )
         return hook_registration
     except Exception:
         _safe_log(logger, "warning", "Registration Failed")

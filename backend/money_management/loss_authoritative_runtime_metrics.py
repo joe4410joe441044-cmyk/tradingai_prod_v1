@@ -276,15 +276,19 @@ class AuthoritativeLossRuntimeMetricsState:
         with self._lock:
             if self._initialized:
                 return self._snapshot_locked()
-            if (
-                state.daily_state.period_id != daily_key
-                or state.weekly_state.period_id != weekly_key
-                or state.monthly_state.period_id != monthly_key
+            periods = (
+                (state.daily_state, daily_key),
+                (state.weekly_state, weekly_key),
+                (state.monthly_state, monthly_key),
+            )
+            if any(
+                period.period_id != current_key and at < period.period_end
+                for period, current_key in periods
             ):
                 raise ValueError("persisted period boundary mismatch")
-            self._daily_key = daily_key
-            self._weekly_key = weekly_key
-            self._monthly_key = monthly_key
+            self._daily_key = state.daily_state.period_id
+            self._weekly_key = state.weekly_state.period_id
+            self._monthly_key = state.monthly_state.period_id
             self._daily_pnl = state.daily_state.net_realized_pnl
             self._weekly_pnl = state.weekly_state.net_realized_pnl
             self._monthly_pnl = state.monthly_state.net_realized_pnl
@@ -295,6 +299,7 @@ class AuthoritativeLossRuntimeMetricsState:
             self._trade_count_daily = 0 if counts_known else None
             self._trade_count_weekly = 0 if counts_known else None
             self._trade_count_monthly = 0 if counts_known else None
+            self._roll_periods_locked(at)
             self._as_of = at
             self._source_state = f"RESTORED_{source.value}"
             self._initialized = True

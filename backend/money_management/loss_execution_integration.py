@@ -24,6 +24,7 @@ from .loss_governance_projection_dispatcher import (
 from .loss_runtime_hook import (
     APPLICATION_STATE_ATTRIBUTE as RUNTIME_HOOK_STATE_ATTRIBUTE,
     MoneyManagementRuntimeHookRegistration,
+    register_money_management_runtime_hook,
 )
 from .loss_runtime_update_dispatcher import LossRuntimeDispatchStatus
 
@@ -330,6 +331,30 @@ class MoneyManagementExecutionEntryGate:
                     RUNTIME_HOOK_STATE_ATTRIBUTE,
                     None,
                 )
+                need_reinit = False
+                if (
+                    not isinstance(
+                        runtime_hook_registration,
+                        MoneyManagementRuntimeHookRegistration,
+                    )
+                    or runtime_hook_registration.hook.last_dispatch_status
+                    not in (
+                        LossRuntimeDispatchStatus.APPLIED,
+                        LossRuntimeDispatchStatus.IDEMPOTENT,
+                    )
+                ):
+                    need_reinit = True
+                if need_reinit:
+                    new_hook = _ensure_valid_runtime_hook(self._app)
+                    if new_hook is not None:
+                        runtime_hook_registration = new_hook
+                    else:
+                        return _admission(
+                            operation,
+                            LossExecutionEntryDecision.UNKNOWN,
+                            LossExecutionAdmissionReason.MONEY_MANAGEMENT_UNKNOWN,
+                            now,
+                        )
                 if (
                     not isinstance(
                         runtime_hook_registration,
@@ -489,6 +514,29 @@ def register_money_management_execution_entry_gate(
         return registration
     except Exception:
         return None
+
+
+def _ensure_valid_runtime_hook(app):
+    """Ensure a valid MoneyManagementRuntimeHookRegistration exists on app.state."""
+    state = getattr(app, "state", None)
+    if state is None:
+        return None
+    hook_registration = getattr(state, "money_management_runtime_hook", None)
+    if (
+        hook_registration is not None
+        and isinstance(hook_registration, MoneyManagementRuntimeHookRegistration)
+        and hook_registration.hook is not None
+        and hook_registration.hook.last_dispatch_status
+        in (
+            LossRuntimeDispatchStatus.APPLIED,
+            LossRuntimeDispatchStatus.IDEMPOTENT,
+        )
+    ):
+        return hook_registration
+    return register_money_management_runtime_hook(
+        app,
+        getattr(app, "bot_manager", None),
+    )
 
 
 def unregister_money_management_execution_entry_gate(app):
