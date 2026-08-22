@@ -316,14 +316,6 @@ useEffect(() => {
 
             <div className="operations-top-card left-column panel-card">
 
-                <div className="operations-top-card-header">
-
-                    <div className="left-card-title section-number-title">
-                        OPERATION
-                    </div>
-
-                </div>
-
                 <div className="operations-top-body">
 
                     <div className="operations-top-section operations-bot-control">
