@@ -5373,3 +5373,284 @@ Collapsed by default; expands to show runtime diagnostics.
     .operation-setup-step { border-right: 0; border-bottom: 1px solid #243149; }
     .operation-setup-step:last-child { border-bottom: 0; }
 }
+
+/* =========================================================
+TRADING CYCLE
+========================================================= */
+.trading-cycle-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.trading-cycle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.trading-cycle-stage-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.trading-cycle-stage {
+    min-width: 120px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #2a3139;
+    background: #151a21;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+.trading-cycle-stage--pass {
+    border-color: #59c37a;
+    background: rgba(89, 195, 122, 0.1);
+}
+
+.trading-cycle-stage--active {
+    border-color: #57b8ff;
+    background: rgba(87, 184, 255, 0.1);
+    animation: pulse 2s infinite;
+}
+
+.trading-cycle-stage--blocked {
+    border-color: #d8a657;
+    background: rgba(216, 166, 87, 0.1);
+}
+
+.trading-cycle-stage--idle {
+    border-color: #2a3139;
+    background: #151a21;
+    opacity: 0.6;
+}
+
+.trading-cycle-stage--unknown {
+    border-color: #526176;
+    background: rgba(82, 97, 118, 0.1);
+}
+
+.trading-cycle-stage-index {
+    font-size: 10px;
+    color: #8d96a5;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}
+
+.trading-cycle-stage-label {
+    font-size: 11px;
+    color: #d7dde5;
+    font-weight: 600;
+    margin: 4px 0;
+}
+
+.trading-cycle-stage-status {
+    font-size: 9px;
+    color: #8d96a5;
+    font-family: "Consolas", monospace;
+}
+
+.trading-cycle-connector {
+    color: #526176;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.trading-cycle-vertical-connector {
+    text-align: center;
+    color: #526176;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(87, 184, 255, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(87, 184, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(87, 184, 255, 0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .trading-cycle-stage--active {
+        animation: none;
+    }
+}
+
+/* =========================================================
+CURRENT ACTIVITY PANEL
+========================================================= */
+.current-activity-panel {
+    margin: 16px 0;
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid #2a3139;
+    background: #151a21;
+}
+
+.current-activity-panel h3 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #dfe6f0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a3139;
+    margin-bottom: 12px;
+}
+
+.current-activity-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.current-activity-grid div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.current-activity-grid span {
+    font-size: 10px;
+    color: #8d96a5;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.current-activity-grid strong {
+    font-size: 12px;
+    color: #d7dde5;
+    font-weight: 600;
+}
+
+/* =========================================================
+LOWER STATUS PANEL
+========================================================= */
+.lower-status-panel {
+    margin: 16px 0;
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid #2a3139;
+    background: #151a21;
+}
+
+.lower-status-panel h3 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #dfe6f0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a3139;
+    margin-bottom: 12px;
+}
+
+.lower-status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.lower-status-grid div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.lower-status-grid span {
+    font-size: 10px;
+    color: #8d96a5;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.lower-status-grid strong {
+    font-size: 12px;
+    color: #d7dde5;
+    font-weight: 600;
+}
+
+/* =========================================================
+RUNTIME META COMPACT
+========================================================= */
+.runtime-meta-compact {
+    margin: 16px 0;
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid #2a3139;
+    background: #151a21;
+}
+
+.runtime-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.runtime-meta-grid div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.runtime-meta-grid span {
+    font-size: 10px;
+    color: #8d96a5;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.runtime-meta-grid strong {
+    font-size: 12px;
+    color: #d7dde5;
+    font-weight: 600;
+}
+
+/* =========================================================
+RESPONSIVE DESIGN
+========================================================= */
+@media (max-width: 768px) {
+    .trading-cycle-row {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .trading-cycle-stage-wrapper {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .trading-cycle-connector {
+        transform: rotate(90deg);
+    }
+
+    .current-activity-grid,
+    .lower-status-grid,
+    .runtime-meta-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .trading-cycle-stage {
+        min-width: 100px;
+        padding: 8px;
+    }
+
+    .trading-cycle-stage-label {
+        font-size: 10px;
+    }
+}
