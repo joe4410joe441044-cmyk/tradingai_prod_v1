@@ -117,8 +117,26 @@ const createTradingCycleModel = (decision) => {
     let selectedSymbol = snapshot.selectedSymbol || getSelectedSymbol(decision);
     let nextStage = null;
 
+    // Handle STOPPED state specially
+    if (currentStageIndex === null) {
+        // No current stage when stopped
+        const stageStatuses = STAGES.map(stage => ({
+            ...stage,
+            status: STATUS.NOT_REACHED,
+        }));
+        
+        return {
+            stages: stageStatuses,
+            currentStage: null,
+            currentStageIndex: null,
+            currentActivity: currentActivity || 'BOT_STOPPED',
+            nextStage: null,
+            selectedSymbol,
+        };
+    }
+
     // Fallback to frontend logic if backend values not available
-    if (currentStageIndex === null || currentStageIndex === undefined) {
+    if (currentStageIndex === undefined) {
         currentStageIndex = determineCurrentStage(decision);
     }
 
