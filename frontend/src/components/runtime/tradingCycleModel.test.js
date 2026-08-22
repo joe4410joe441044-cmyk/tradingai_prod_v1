@@ -1,4 +1,4 @@
-import { STAGES, STATUS, createTradingCycleModel } from './tradingCycleModel';
+import { STAGES, STATUS, createTradingCycleModel } from './tradingCycleModel.js';
 
 describe('tradingCycleModel', () => {
     describe('STAGES', () => {
