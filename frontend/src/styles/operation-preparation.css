@@ -1,10 +1,49 @@
 .operation-preparation {
     display: flex;
-    flex-wrap: wrap;
-    flex-gap: 8px;
+    flex-direction: column;
+    gap: 8px;
     color: #d7e1ef;
     font-family: "Consolas", monospace;
     justify-content: flex-start;
+}
+
+/* 顶部紧急操作栏 */
+.operation-top-emergency {
+    width: 100%;
+}
+
+.operation-emergency-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.operation-emergency-section {
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid rgba(255, 80, 80, .3);
+    border-radius: 4px;
+    background: rgba(30, 8, 8, .56);
+}
+
+/* 主网格布局 */
+.operation-main-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
+.operation-column-left,
+.operation-column-center,
+.operation-column-right {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
 }
 
 .operation-prep-section {
@@ -334,46 +373,22 @@
     align-self: flex-start;
 }
 
-/* =====================================================
-   LANE WRAPPERS
-   ===================================================== */
-
-.operation-lane-left,
-.operation-lane-center,
-.operation-lane-right {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-/* Wide desktop — 1600px+: 3 lanes */
+/* 响应式布局 */
 @media (min-width: 1600px) {
-    .operation-lane-left { flex-basis: 33.333%; }
-    .operation-lane-center { flex-basis: 33.333%; }
-    .operation-lane-right { flex-basis: 33.333%; }
+    .operation-main-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-/* Desktop — 1200–1599px: 3 lanes */
 @media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-lane-left { flex-basis: 33.333%; }
-    .operation-lane-center { flex-basis: 33.333%; }
-    .operation-lane-right { flex-basis: 33.333%; }
+    .operation-main-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-/* Tablet / narrow desktop — 768–1199px: 2 lanes (left + center), right stacks below */
 @media (min-width: 768px) and (max-width: 1199px) {
-    .operation-lane-left { flex-basis: 50%; }
-    .operation-lane-center { flex-basis: 50%; }
-    .operation-lane-right { flex-basis: 100%; order: 3; }
+    .operation-main-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .operation-column-right { grid-column: 1 / -1; }
 }
 
-/* Mobile — below 768px: single column logical order */
 @media (max-width: 767px) {
-    .operation-lane-left,
-    .operation-lane-center,
-    .operation-lane-right {
-        flex-basis: 100%;
-        order: inherit;
-    }
+    .operation-main-grid { grid-template-columns: 1fr; }
 }
 
 /* =====================================================
