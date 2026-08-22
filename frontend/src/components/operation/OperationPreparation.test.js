@@ -450,7 +450,7 @@ test("MM lifecycle RUNNING with entry not allowed stays non-ready in Section 6 a
     assert.equal(section3.includes("MM RUNTIME"), true);
     assert.equal(section3.includes("RUNNING"), true);
     assert.equal(section3.includes("WAITING"), true);
-    assert.equal(section6.includes("WAITING"), true);
+    assert.equal(section6.includes("ENTRY PERMISSION"), true);
     assert.equal(readyToStart.includes("READY TO START"), false);
 });
 
@@ -489,7 +489,7 @@ test("MM unavailable renders non-ready Section 6 and Final", async () => {
     });
     const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
     const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
-    assert.equal(section6.includes("UNKNOWN"), true);
+    assert.equal(section6.includes("MM START CONFIG"), true);
     assert.equal(readyToStart.includes("READY TO START"), false);
 });
 

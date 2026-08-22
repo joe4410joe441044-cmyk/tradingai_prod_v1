@@ -455,6 +455,8 @@ export default function BotControl({
     const executionEntryAllowed = mmStatus?.executionEntryAllowed;
     const recommendedAction = mmStatus?.recommendedAction;
     const riskState = mmStatus?.riskState;
+    const mmBlockReasons = mmStatus?.blockReasons ?? [];
+    const mmRecoveryRequired = mmStatus?.recoveryRequired === true;
 
     const handleMmDraftChange = (patch) => updateConfigurationDraft(patch);
     const handleMmSave = () => saveConfiguration();
@@ -777,6 +779,11 @@ export default function BotControl({
     const effectiveSelectionMode = operationSettings.selectionMode;
     const canonicalRequestedLeverage = operationSettings.requestedLeverage;
     const startReadiness = deriveOperationReadiness({
+        botRunning,
+        tradingMode: operationSettings.tradingMode,
+        dryRun: config?.dryRun ?? config?.dry_run ?? (
+            operationSettings.tradingMode === "PAPER"
+        ),
         selectionMode: effectiveSelectionMode,
         autoMarketState: config?.autoMarketState,
         displaySymbol: config?.displaySymbol,
@@ -791,8 +798,12 @@ export default function BotControl({
         riskState,
         requestedLeverage: canonicalRequestedLeverage,
         maximumLeverage: mmConfiguration?.maximumLeverage,
+        mmConfiguration,
+        mmBlockReasons,
+        mmRecoveryRequired,
+        mmConfigurationError: Boolean(mmConfigurationError),
     });
-    const startReady = startReadiness.reviewReadiness === "READY";
+    const { startReady, automationReady } = startReadiness;
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)
@@ -858,7 +869,7 @@ export default function BotControl({
             if (!botRunning) {
                 const startIntent = createOperationPreparationSettings(config);
 
-                if (startIntent.loopOnStart) {
+                if (startIntent.loopOnStart && automationReady) {
                     try {
                         await startLoop();
                     } catch (error) {
@@ -867,7 +878,7 @@ export default function BotControl({
                     }
                 }
 
-                if (startIntent.autoTradeOnStart) {
+                if (startIntent.autoTradeOnStart && automationReady) {
                     try {
                         const executionResult = await setExecutionEnabled(true);
 
@@ -1266,6 +1277,8 @@ export default function BotControl({
                 executionEntryAllowed={executionEntryAllowed}
                 recommendedAction={recommendedAction}
                 riskState={riskState}
+                mmBlockReasons={mmBlockReasons}
+                mmRecoveryRequired={mmRecoveryRequired}
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
                     <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || (botRunning ? emergencyBlocksOperations : !startReady)} onClick={handleBotLifecycle} type="button">

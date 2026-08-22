@@ -1205,9 +1205,9 @@ test("START fails closed when saved MM risk is unavailable", async () => {
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const start = findButton(renderer.root, "START BOT");
+        assert.equal(start.props.disabled, true);
         assert.equal(mock.requests.length, 0);
-        assert.equal(textIncludes(renderer.root, "risk-per-trade is unavailable"), true);
     } finally {
         clearMmConfiguration();
         mock.restore();
@@ -1377,6 +1377,52 @@ test("START BOT is disabled when MM is UNKNOWN", async () => {
         assert.equal(findButton(renderer.root, "START BOT").props.disabled, true);
     } finally {
         clearMmStatus();
+    }
+});
+
+test("PAPER START is enabled while runtime-only MM authority waits and entry stays waiting", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        blockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        assert.equal(findButton(renderer.root, "START BOT").props.disabled, false);
+        assert.equal(textIncludes(renderer.root, "START READINESS READY"), true);
+        assert.equal(textIncludes(renderer.root, "ENTRY READINESS WAITING"), true);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+    }
+});
+
+test("PAPER runtime-only MM wait starts Bot without starting automation", async () => {
+    setMmStatus({
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        blockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    });
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") {
+            return jsonResponse({ body: { status: "started" } });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.deepEqual(mock.requests.map((request) => request.url), ["/api/bot/start"]);
+    } finally {
+        mock.restore();
+        clearMmStatus();
+        clearMmConfiguration();
     }
 });
 

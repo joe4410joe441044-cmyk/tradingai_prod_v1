@@ -131,6 +131,8 @@ export default function OperationPreparation({
     executionEntryAllowed,
     recommendedAction,
     riskState,
+    mmBlockReasons = [],
+    mmRecoveryRequired = false,
     mmDraft = null,
     mmConfiguration = null,
     leverageAuthority = null,
@@ -258,6 +260,8 @@ export default function OperationPreparation({
 
     const {
         reviewReadiness,
+        startReadiness,
+        entryReadiness,
         selectionRuntime,
         selectedRuntimeSymbol,
         selectionReadiness,
@@ -268,9 +272,15 @@ export default function OperationPreparation({
         executionReadiness,
         mmEntryReadiness,
         mmReadiness,
+        startMmReadiness,
         mmReadinessSource,
         leverageReadiness,
     } = deriveOperationReadiness({
+        botRunning,
+        tradingMode: settings.tradingMode,
+        dryRun: config.dryRun ?? config.dry_run ?? (
+            settings.tradingMode === "PAPER"
+        ),
         selectionMode: settings.selectionMode,
         autoMarketState: config.autoMarketState,
         displaySymbol: config.displaySymbol,
@@ -285,6 +295,10 @@ export default function OperationPreparation({
         riskState,
         requestedLeverage: settings.requestedLeverage,
         maximumLeverage: mmConfiguration?.maximumLeverage,
+        mmConfiguration,
+        mmBlockReasons,
+        mmRecoveryRequired,
+        mmConfigurationError: Boolean(mmConfigurationError),
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);
@@ -644,7 +658,8 @@ return (
                             <DerivedRow label="Position（ポジション）" source="RUNTIME" status value={positionState} />
                             <DerivedRow label="Pending Order Authority（保留注文権限）" source="RUNTIME" status value={orderAuthority} />
                             <DerivedRow label="Market Selection（市場選択）" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
-                            <DerivedRow label="Money Management（資金管理）" source={mmReadinessSource} status value={mmReadiness} />
+                            <DerivedRow label="MM START CONFIG（開始設定）" source="MM CONFIG" status value={startMmReadiness} />
+                            <DerivedRow label="ENTRY PERMISSION（エントリー権限）" source={mmReadinessSource} status value={entryReadiness} />
                             <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
                             <DerivedRow label="Execution（執行）" source="RUNTIME" status value={executionReadiness} />
                             <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
@@ -664,7 +679,8 @@ return (
                             <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
                             <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
                             <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="READINESS" source="UI REVIEW" status value={reviewReadiness} />
+                            <DerivedRow label="START READINESS" source="UI REVIEW" status value={startReadiness} />
+                            <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={entryReadiness} />
                         </div>
                         <div className="operation-prep-start" data-testid="ready-to-start">
                             {botRunning ? null : (

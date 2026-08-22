@@ -4,6 +4,9 @@ import test from "node:test";
 import { deriveOperationReadiness } from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
+    botRunning: false,
+    tradingMode: "PAPER",
+    dryRun: true,
     selectionMode: "MANUAL",
     emergencyState: "READY",
     position: "FLAT",
@@ -16,6 +19,12 @@ const readyInputs = (overrides = {}) => ({
     riskState: "NORMAL",
     requestedLeverage: 3,
     maximumLeverage: 5,
+    mmConfiguration: {
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20",
+        maximumDrawdownPercent: "5",
+        maximumLeverage: "5",
+    },
     ...overrides,
 });
 
@@ -40,3 +49,72 @@ for (const [name, requestedLeverage, maximumLeverage, expected] of [
         assert.equal(result.reviewReadiness, expected);
     });
 }
+
+test("PAPER stopped runtime-only MM unavailability permits START but not entry", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    }));
+    assert.equal(result.stoppedPaperRuntimeMetricsOnly, true);
+    assert.equal(result.startReady, true);
+    assert.equal(result.entryReady, false);
+    assert.equal(result.entryReadiness, "WAITING");
+});
+
+for (const [name, overrides] of [
+    ["Pending UNKNOWN", { pendingOrder: null }],
+    ["Pending exists", { pendingOrder: true }],
+    ["Position UNKNOWN", { position: null }],
+    ["Position OPEN", { position: "OPEN" }],
+    ["Emergency unsafe", { emergencyState: "LOCKED" }],
+    ["saved MM invalid", { mmConfiguration: { maximumLeverage: 5 } }],
+    ["leverage over maximum", { requestedLeverage: 7 }],
+]) {
+    test(`${name} blocks PAPER START`, () => {
+        const result = deriveOperationReadiness(readyInputs({
+            executionEntryAllowed: false,
+            mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+            ...overrides,
+        }));
+        assert.equal(result.startReady, false);
+    });
+}
+
+test("running runtime authority allows entry only with MM and execution authority", () => {
+    const allowed = deriveOperationReadiness(readyInputs({
+        botRunning: true,
+        executionEnabled: true,
+    }));
+    assert.equal(allowed.entryReady, true);
+
+    const blocked = deriveOperationReadiness(readyInputs({
+        botRunning: true,
+        executionEnabled: true,
+        executionEntryAllowed: false,
+        recommendedAction: "BLOCK_EXECUTION",
+        riskState: "LOCKED",
+        mmBlockReasons: ["DAILY_LOSS_LIMIT"],
+    }));
+    assert.equal(blocked.entryReady, false);
+});
+
+test("runtime-only exception is PAPER pre-start only", () => {
+    const inputs = {
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    };
+    assert.equal(deriveOperationReadiness(readyInputs({
+        ...inputs, tradingMode: "LIVE", dryRun: false, realOrderAllowed: true,
+    })).startReady, false);
+    assert.equal(deriveOperationReadiness(readyInputs({
+        ...inputs, mmRecoveryRequired: true,
+    })).startReady, false);
+    assert.equal(deriveOperationReadiness(readyInputs({
+        ...inputs, mmBlockReasons: [
+            "TRADING_RUNTIME_METRICS_UNAVAILABLE",
+            "MM_CONFIGURATION_INVALID",
+        ],
+    })).startReady, false);
+});

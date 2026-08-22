@@ -99,6 +99,21 @@ export const deriveMmReadiness = ({
     return Object.freeze({ state: "UNKNOWN", label: "UNKNOWN" });
 };
 
+export const savedMmConfigurationReadiness = (configuration) => {
+    if (!configuration || typeof configuration !== "object") return "BLOCKED";
+
+    const requiredPositiveFields = [
+        "riskPerTradePercent",
+        "totalExposurePercent",
+        "maximumDrawdownPercent",
+        "maximumLeverage",
+    ];
+    return requiredPositiveFields.every((field) => {
+        const value = Number(configuration[field]);
+        return Number.isFinite(value) && value > 0;
+    }) ? "READY" : "BLOCKED";
+};
+
 const POSITIVE_READINESS = new Set(["READY", "SAFE", "FLAT"]);
 const BLOCKING_READINESS = new Set([
     "BLOCKED",
@@ -120,6 +135,9 @@ export const deriveReviewReadiness = (readinessValues = []) => {
 };
 
 export const deriveOperationReadiness = ({
+    botRunning = false,
+    tradingMode,
+    dryRun,
     selectionMode,
     autoMarketState,
     displaySymbol,
@@ -134,6 +152,10 @@ export const deriveOperationReadiness = ({
     riskState,
     requestedLeverage,
     maximumLeverage,
+    mmConfiguration,
+    mmBlockReasons = [],
+    mmRecoveryRequired = false,
+    mmConfigurationError = false,
 } = {}) => {
     const selectionRuntime = normalizeReadiness(
         autoMarketState,
@@ -168,6 +190,11 @@ export const deriveOperationReadiness = ({
     const mmReadinessSource = (
         executionEntryAllowed === true || executionEntryAllowed === false
     ) ? "RUNTIME" : "NOT CONNECTED";
+    const savedMmReadiness = (
+        mmConfigurationError
+            ? "BLOCKED"
+            : savedMmConfigurationReadiness(mmConfiguration)
+    );
     const requestedLeverageValue = Number(requestedLeverage);
     const maximumLeverageValue = Number(maximumLeverage);
     const leverageReadiness = (
@@ -177,7 +204,65 @@ export const deriveOperationReadiness = ({
         && maximumLeverageValue > 0
         && requestedLeverageValue <= maximumLeverageValue
     ) ? "READY" : "BLOCKED";
-    const readinessValues = [
+    const entryExecutionReadiness = executionEnabled === true
+        ? "READY"
+        : "WAITING";
+    const entryReadinessValues = [
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        selectionReadiness,
+        mmReadiness,
+        governanceReadiness,
+        entryExecutionReadiness,
+        leverageReadiness,
+    ];
+    const entryReadiness = botRunning === true
+        ? deriveReviewReadiness(entryReadinessValues)
+        : "WAITING";
+    const entryReady = entryReadiness === "READY";
+    const automationReadinessValues = [
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        selectionReadiness,
+        mmReadiness,
+        governanceReadiness,
+        leverageReadiness,
+    ];
+    const automationReadiness = deriveReviewReadiness(
+        automationReadinessValues,
+    );
+    const automationReady = automationReadiness === "READY";
+
+    const normalizedMode = String(tradingMode || "").trim().toUpperCase();
+    const normalizedMmBlockReasons = Array.isArray(mmBlockReasons)
+        ? mmBlockReasons.map((reason) => String(reason).trim().toUpperCase())
+        : [];
+    const stoppedPaperRuntimeMetricsOnly = (
+        botRunning !== true
+        && normalizedMode === "PAPER"
+        && dryRun === true
+        && realOrderAllowed !== true
+        && executionEntryAllowed === false
+        && mmRecoveryRequired !== true
+        && normalizedMmBlockReasons.length === 1
+        && normalizedMmBlockReasons[0] === "TRADING_RUNTIME_METRICS_UNAVAILABLE"
+    );
+    const startMmReadiness = (
+        savedMmReadiness === "READY"
+        && (mmReadiness === "READY" || stoppedPaperRuntimeMetricsOnly)
+    ) ? "READY" : "BLOCKED";
+    const paperStartReadinessValues = [
+        emergencyReadiness,
+        positionState,
+        orderAuthority,
+        selectionReadiness,
+        startMmReadiness,
+        executionReadiness,
+        leverageReadiness,
+    ];
+    const legacyReadinessValues = [
         emergencyReadiness,
         positionState,
         orderAuthority,
@@ -187,11 +272,30 @@ export const deriveOperationReadiness = ({
         executionReadiness,
         leverageReadiness,
     ];
-    const reviewReadiness = deriveReviewReadiness(readinessValues);
+    const paperPreStart = (
+        botRunning !== true
+        && normalizedMode === "PAPER"
+        && dryRun === true
+        && realOrderAllowed !== true
+    );
+    const startReadinessValues = paperPreStart
+        ? paperStartReadinessValues
+        : legacyReadinessValues;
+    const startReadiness = deriveReviewReadiness(startReadinessValues);
+    const startReady = startReadiness === "READY";
 
     return {
-        reviewReadiness,
-        readinessValues,
+        reviewReadiness: startReadiness,
+        readinessValues: startReadinessValues,
+        startReadiness,
+        startReadinessValues,
+        startReady,
+        entryReadiness,
+        entryReadinessValues,
+        entryReady,
+        automationReadiness,
+        automationReadinessValues,
+        automationReady,
         selectionRuntime,
         selectedRuntimeSymbol,
         selectionReadiness,
@@ -203,6 +307,10 @@ export const deriveOperationReadiness = ({
         mmEntryReadiness,
         mmReadiness,
         mmReadinessSource,
+        savedMmReadiness,
+        startMmReadiness,
+        stoppedPaperRuntimeMetricsOnly,
+        entryExecutionReadiness,
         leverageReadiness,
     };
 };
