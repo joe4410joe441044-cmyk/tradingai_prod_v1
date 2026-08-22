@@ -66,6 +66,9 @@ react_dashboard/deploy/deploy_log.txt
 react_dashboard/deploy/%LOG%
 deploy/*.log
 
+# Frontend build output
+frontend/dist/
+
 # =========================
 # Cache / temp
 # =========================
