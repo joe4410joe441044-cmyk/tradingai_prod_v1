@@ -252,21 +252,75 @@ export default function TradingDecisionCard({ decision }) {
         position: { status: snapshot.stages?.execution?.positionState },
     };
 
+    // Collect all known stages and any additional unknown stages from backend
+    const allStageKeys = new Set([...STAGES.map(([key]) => key), ...Object.keys(snapshot.stages || {}).filter(key => !STAGES.some(([knownKey]) => knownKey === key))]);
+    const displayStages = [...STAGES, ...Array.from(allStageKeys).filter(key => !STAGES.some(([knownKey]) => knownKey === key)).map(key => [key, key.toUpperCase()])];
+
     return (
         <section className="trading-decision-card" aria-labelledby="trading-decision-title">
             <header className="trading-decision-header">
                 <div>
                     <h2 id="trading-decision-title">{label("TRADING DECISION", "売買判断")}</h2>
-                    <span>{label("Live Decision & Entry Readiness", "現在の判断・エントリー準備")}</span>
                 </div>
-                <span className="trading-decision-update">{label("LIVE DECISION & ENTRY READINESS", "現在の判断・エントリー準備")}</span>
             </header>
 
             {snapshot.stale === true && <div className="trading-decision-alert" role="status">{label("STALE DECISION DATA", "判断データが古くなっています")}</div>}
 
-            <div className="trading-decision-overview">
-                <section className="trading-decision-settings" aria-label={label("USER SETTINGS", "現在設定")}>
-                    <h3>{label("USER SETTINGS", "現在設定")}</h3>
+            {/* PRIMARY DECISION - Most visible */}
+            <div className="trading-decision-primary">
+                <div className="trading-decision-final">
+                    <span>{label("FINAL DECISION", "最終判断")}</span>
+                    <strong className={`decision-tone decision-tone--${toneFor(finalDecision)}`}>{finalDecision}</strong>
+                </div>
+                
+                {/* Entry Readiness and Current State */}
+                <div className="trading-decision-status-row">
+                    <div>
+                        <span>{label("ENTRY READINESS", "エントリー準備")}</span>
+                        <strong>{display(snapshot.entryReadiness)}</strong>
+                    </div>
+                    <div>
+                        <span>{label("CURRENT STATE", "現在状態")}</span>
+                        <strong>{display(snapshot.currentState)}</strong>
+                    </div>
+                </div>
+
+                {/* Blocking Information */}
+                {snapshot.blockingStage || snapshot.blockingReason ? (
+                    <div className="trading-decision-block-info">
+                        <div>
+                            <span>{label("BLOCKING STAGE", "停止工程")}</span>
+                            <strong>{display(snapshot.blockingStage, "NONE")}</strong>
+                        </div>
+                        <div>
+                            <span>{label("BLOCKING REASON", "停止理由")}</span>
+                            <strong>{display(snapshot.blockingReason, "NONE")}</strong>
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+
+            {/* Decision Pipeline */}
+            <section className="trading-decision-pipeline" aria-labelledby="decision-pipeline-title">
+                <h3 id="decision-pipeline-title">{label("DECISION PIPELINE", "判断フロー")}</h3>
+                <ol className="trading-decision-stages">
+                    {displayStages.map(([key, stageLabel], index) => {
+                        const currentBlock = stageMatchesBlock(key, snapshot.blockingStage);
+                        return (
+                            <li className={`trading-decision-stage${currentBlock ? " is-current-block" : ""}`} key={key} aria-current={currentBlock ? "step" : undefined}>
+                                <div className="trading-decision-stage-heading"><span>{index + 1}</span><strong>{stageLabel}</strong>{currentBlock && <em>{label("STOPPED HERE", "現在停止")}</em>}</div>
+                                <StageValue stage={stages[key]} />
+                                {index < displayStages.length - 1 && <span className={`trading-decision-connector${currentBlock ? " is-stopped" : ""}`} aria-hidden="true">━━▶</span>}
+                            </li>
+                        );
+                    })}
+                </ol>
+            </section>
+
+            {/* Runtime Meta - Compact grid */}
+            <section className="trading-decision-runtime-meta" aria-labelledby="runtime-meta-title">
+                <h3 id="runtime-meta-title">{label("RUNTIME META", "ランタイム情報")}</h3>
+                <div className="runtime-meta-grid">
                     <div><span>{label("MODE", "モード")}</span><strong>{display(snapshot.mode)}</strong></div>
                     <div><span>{label("EXCHANGE", "取引所")}</span><strong>{display(snapshot.exchange)}</strong></div>
                     <div><span>{label("REAL ORDER ALLOWED", "実注文許可")}</span><strong>{yesNo(snapshot.realOrderAllowed)}</strong></div>
@@ -275,44 +329,15 @@ export default function TradingDecisionCard({ decision }) {
                     <div><span>{label("AUTO TRADE", "自動売買")}</span><strong>{operationalStatus(snapshot.autoTrade ?? snapshot.autoTradeEnabled, "ENABLED", "DISABLED")}</strong></div>
                     <div><span>{label("TRADING AI", "売買AI")}</span><strong>{display(snapshot.tradingAiMode, "OFF")}</strong></div>
                     <div><span>{label("AI IMPLEMENTATION", "AI実装")}</span><strong>{display(snapshot.tradingAiStatus, "NOT_INSTALLED")}</strong></div>
-                </section>
-
-                <div className="trading-decision-summary">
-                    <div className="trading-decision-final"><span>{label("FINAL DECISION", "最終判断")}</span><strong className={`decision-tone decision-tone--${toneFor(finalDecision)}`}>{finalDecision}</strong></div>
-                    <div><span>{label("CURRENT STATE", "現在状態")}</span><strong>{display(snapshot.currentState)}</strong></div>
-                    <div className="trading-decision-block"><span>{label("BLOCKING STAGE", "停止工程")}</span><strong>{display(snapshot.blockingStage, "NONE")}</strong><small>{snapshot.blockingStage ? label("STOPPED HERE", "現在停止") : label("CLEAR", "停止なし")}</small></div>
-                    <div className="trading-decision-reason"><span>{label("BLOCKING REASON", "停止理由")}</span><strong>{display(snapshot.blockingReason, "NONE")}</strong><small>{label("ENTRY CONDITIONS", "エントリー条件")}: {snapshot.entryReadinessAvailable ? "AVAILABLE" : "NOT EXPOSED"}</small></div>
+                    <div><span>{label("MARKET STALE", "市場データ遅延")}</span><strong>{yesNo(snapshot.stale)}</strong></div>
+                    <div><span>{label("LAST CYCLE", "最終サイクル")}</span><strong>{timestampLabel(snapshot.timestamp)}</strong></div>
+                    <div><span>{label("CYCLE ID", "サイクルID")}</span><strong>{display(snapshot.cycleId, "NOT AVAILABLE")}</strong></div>
+                    <div><span>{label("STATE SINCE", "状態継続時間")}</span><strong>{durationLabel(snapshot.stateSince)}</strong></div>
+                    <div><span>{label("PENDING ORDER", "保留注文")}</span><strong>{snapshot.stages?.execution?.orderState == null ? "NOT AVAILABLE" : snapshot.stages.execution.orderState === "NONE" ? "NO" : "YES"}</strong></div>
                 </div>
-
-                <CurrentBlockContext snapshot={snapshot} />
-            </div>
-
-            <EntryReadiness readiness={snapshot.entryReadiness} />
-
-            <section className="trading-decision-pipeline" aria-labelledby="decision-pipeline-title">
-                <h3 id="decision-pipeline-title">{label("DECISION PIPELINE", "判断フロー")}</h3>
-                <ol className="trading-decision-stages">
-                    {STAGES.map(([key, stageLabel], index) => {
-                        const currentBlock = stageMatchesBlock(key, snapshot.blockingStage);
-                        return (
-                            <li className={`trading-decision-stage${currentBlock ? " is-current-block" : ""}`} key={key} aria-current={currentBlock ? "step" : undefined}>
-                                <div className="trading-decision-stage-heading"><span>{index + 1}</span><strong>{stageLabel}</strong>{currentBlock && <em>{label("STOPPED HERE", "現在停止")}</em>}</div>
-                                <StageValue stage={stages[key]} />
-                                {index < STAGES.length - 1 && <span className={`trading-decision-connector${currentBlock ? " is-stopped" : ""}`} aria-hidden="true">━━▶</span>}
-                            </li>
-                        );
-                    })}
-                </ol>
             </section>
 
-            <footer className="trading-decision-footer">
-                <span><b>{label("STATE SINCE", "状態継続時間")}</b>{durationLabel(snapshot.stateSince)}</span>
-                <span><b>{label("LAST CYCLE", "最終サイクル")}</b>{timestampLabel(snapshot.timestamp)}</span>
-                <span><b>{label("CYCLE ID", "サイクルID")}</b>{display(snapshot.cycleId, "NOT AVAILABLE")}</span>
-                <span><b>{label("MARKET STALE", "市場データ遅延")}</b>{yesNo(snapshot.stale)}</span>
-                <span><b>{label("PENDING ORDER", "保留注文")}</b>{snapshot.stages?.execution?.orderState == null ? "NOT AVAILABLE" : snapshot.stages.execution.orderState === "NONE" ? "NO" : "YES"}</span>
-            </footer>
-
+            {/* Decision Details - Collapsible */}
             <details className="trading-decision-disclosure">
                 <summary>{label("Decision Details", "判断詳細")}</summary>
                 <div className="trading-decision-details">

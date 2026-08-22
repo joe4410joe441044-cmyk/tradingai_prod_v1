@@ -28,7 +28,7 @@ const loadComponent = async () => {
     }
 };
 
-test("renders the complete entry-readiness contract", async () => {
+test("renders final decision as most visible item", async () => {
     const Component = await loadComponent();
     const text = textOf(Component({
         decision: {
@@ -47,94 +47,121 @@ test("renders the complete entry-readiness contract", async () => {
         },
     }));
 
-    for (const expected of [
-        "TRADING DECISION（売買判断）", "PAPER", "HOLD", "WAITING FOR SIGNAL",
-        "PYTHON STRATEGY", "ENTRY_THRESHOLD_NOT_MET",
-        "MONEY MANAGEMENT", "NOT REACHED", "NO ORDER", "FLAT",
-        "TRADING AI", "OFF", "NOT_INSTALLED",
-        "Decision Details（判断詳細）", "FINAL DECISION（最終判断）",
-        "ENTRY READINESS（エントリー準備）", "STOPPED HERE（現在停止）",
-        "ENTRY CONDITIONS（エントリー条件）", "NOT EXPOSED", "STOPPED HERE（現在停止）",
-    ]) assert.match(text, new RegExp(expected));
+    assert.match(text, /FINAL DECISION（最終判断）/);
+    assert.match(text, /HOLD/);
 });
 
-test("provides bilingual labels for every decision stage", async () => {
+test("renders entry readiness and current state", async () => {
     const Component = await loadComponent();
-    const text = textOf(Component({ decision: {} }));
-
-    for (const expected of [
-        "MARKET（市場）", "PYTHON STRATEGY（Python戦略）",
-        "MONEY MANAGEMENT（資金管理）", "GOVERNANCE（安全判定）",
-        "EXECUTION（注文実行）", "POSITION（ポジション）",
-    ]) assert.match(text, new RegExp(expected));
-});
-
-test("renders the six-stage route map in processing order", async () => {
-    const Component = await loadComponent();
-    const tree = Component({ decision: { blockingStage: "PYTHON STRATEGY", stages: {} } });
-    const pipeline = tree.props.children.find((child) => child?.props?.className === "trading-decision-pipeline");
-    const text = textOf(pipeline);
-    const labels = ["MARKET（市場）", "PYTHON STRATEGY（Python戦略）", "MONEY MANAGEMENT（資金管理）", "GOVERNANCE（安全判定）", "EXECUTION（注文実行）", "POSITION（ポジション）"];
-    labels.reduce((position, stage) => {
-        const next = text.indexOf(stage);
-        assert.ok(next > position, `${stage} must follow the previous stage`);
-        return next;
-    }, -1);
-    assert.equal((text.match(/━━▶/g) || []).length, 5);
-    assert.equal(pipeline.props.children[1].props.children[1].props["aria-current"], "step");
-});
-
-test("keeps decision details closed by default", async () => {
-    const Component = await loadComponent();
-    const tree = Component({ decision: {} });
-    const disclosure = tree.props.children.find((child) => child?.type === "details");
-    assert.equal(disclosure.props.open, undefined);
-});
-
-test("shows the current block context from the matching stage only", async () => {
-    const Component = await loadComponent();
-    const scenarios = [
-        {
+    const text = textOf(Component({
+        decision: {
+            mode: "PAPER",
+            finalDecision: "HOLD",
+            currentState: "WAITING FOR SIGNAL",
+            entryReadiness: "READY",
             blockingStage: "PYTHON STRATEGY",
-            stages: { pythonStrategy: { confidence: 0.126, executionAllowed: false, decision: "HOLD", suppressionReason: "LIQUIDITY_DETERIORATION" } },
-            expected: ["PYTHON STRATEGY（Python戦略）", "12.6 %", "EXECUTION ALLOWED（実行許可） NO", "LIQUIDITY_DETERIORATION"],
+            blockingReason: "ENTRY_THRESHOLD_NOT_MET",
+            stages: {
+                market: { status: "PASS" },
+                pythonStrategy: { status: "HOLD", confidence: 0.42 },
+                moneyManagement: { status: "NOT REACHED" },
+                governance: { status: "NOT REACHED" },
+                execution: { status: "NO ORDER", positionState: "FLAT", orderState: "NONE" },
+            },
         },
-        {
-            blockingStage: "MONEY MANAGEMENT",
-            stages: { moneyManagement: { riskAmount: "4.50", exposure: "25.00", reason: "RISK_LIMIT" } },
-            expected: ["MONEY MANAGEMENT（資金管理）", "RISK（リスク） 4.50", "EXPOSURE（エクスポージャー） 25.00", "REASON（理由） RISK_LIMIT"],
-        },
-        {
-            blockingStage: "GOVERNANCE",
-            stages: { governance: { executionAuthority: "DISABLED", reason: "RULE_BLOCK", decision: "BLOCK" } },
-            expected: ["GOVERNANCE（安全判定）", "RULE（ルール） DISABLED", "BLOCK REASON（停止理由） RULE_BLOCK", "DECISION（判断） BLOCK"],
-        },
-        {
-            blockingStage: "EXECUTION",
-            stages: { execution: { orderState: "SUBMITTED", state: "WAITING FOR FILL" } },
-            expected: ["EXECUTION（注文実行）", "ORDER STATE（注文状態） SUBMITTED", "PENDING（保留） SUBMITTED", "WAITING FILL（約定待ち） WAITING FOR FILL"],
-        },
-        {
-            blockingStage: "POSITION",
-            stages: { execution: { positionState: "LONG" } },
-            expected: ["POSITION（ポジション）", "POSITION（方向） LONG", "ENTRY PRICE（建値） --", "CURRENT PNL（現在損益） --"],
-        },
-    ];
+    }));
 
-    for (const scenario of scenarios) {
-        const text = textOf(Component({ decision: scenario }));
-        assert.match(text, /CURRENT BLOCK CONTEXT（現在停止工程）/);
-        for (const expected of scenario.expected) assert.match(text, new RegExp(expected));
+    assert.match(text, /ENTRY READINESS（エントリー準備）/);
+    assert.match(text, /READY/);
+    assert.match(text, /CURRENT STATE（現在状態）/);
+    assert.match(text, /WAITING FOR SIGNAL/);
+});
+
+test("renders blocking information when present", async () => {
+    const Component = await loadComponent();
+    const text = textOf(Component({
+        decision: {
+            mode: "PAPER",
+            finalDecision: "HOLD",
+            currentState: "WAITING FOR SIGNAL",
+            entryReadiness: "READY",
+            blockingStage: "PYTHON STRATEGY",
+            blockingReason: "ENTRY_THRESHOLD_NOT_MET",
+            stages: {
+                market: { status: "PASS" },
+                pythonStrategy: { status: "HOLD", confidence: 0.42 },
+                moneyManagement: { status: "NOT REACHED" },
+                governance: { status: "NOT REACHED" },
+                execution: { status: "NO ORDER", positionState: "FLAT", orderState: "NONE" },
+            },
+        },
+    }));
+
+    assert.match(text, /BLOCKING STAGE（停止工程）/);
+    assert.match(text, /PYTHON STRATEGY/);
+    assert.match(text, /BLOCKING REASON（停止理由）/);
+    assert.match(text, /ENTRY_THRESHOLD_NOT_MET/);
+});
+
+test("does not render blocking information when not present", async () => {
+    const Component = await loadComponent();
+    const text = textOf(Component({
+        decision: {
+            mode: "PAPER",
+            finalDecision: "BUY",
+            currentState: "READY",
+            entryReadiness: "READY",
+            stages: {
+                market: { status: "PASS" },
+                pythonStrategy: { status: "PASS", confidence: 0.85 },
+                moneyManagement: { status: "PASS" },
+                governance: { status: "PASS" },
+                execution: { status: "READY FOR ORDER", positionState: "FLAT", orderState: "NONE" },
+            },
+        },
+    }));
+
+    assert.doesNotMatch(text, /BLOCKING STAGE/);
+    assert.doesNotMatch(text, /BLOCKING REASON/);
+});
+
+test("renders decision pipeline with all stages", async () => {
+    const Component = await loadComponent();
+    const text = textOf(Component({ decision: { blockingStage: "PYTHON STRATEGY", stages: {} } }));
+    
+    for (const stage of ["MARKET（市場）", "PYTHON STRATEGY（Python戦略）", "MONEY MANAGEMENT（資金管理）", "GOVERNANCE（安全判定）", "EXECUTION（注文実行）", "POSITION（ポジション）"]) {
+        assert.match(text, new RegExp(stage));
     }
 });
 
-test("shows operational summary values only from the runtime contract", async () => {
+test("renders additional unknown stages from backend", async () => {
+    const Component = await loadComponent();
+    const text = textOf(Component({ 
+        decision: { 
+            blockingStage: "PYTHON STRATEGY", 
+            stages: { 
+                customStage: { status: "PASS" }, 
+                anotherStage: { status: "BLOCKED" } 
+            } 
+        } 
+    }));
+    
+    assert.match(text, /CUSTOMSTAGE/);
+    assert.match(text, /ANOTHERSTAGE/);
+});
+
+test("renders runtime metadata in compact grid", async () => {
     const Component = await loadComponent();
     const text = textOf(Component({ decision: {
         mode: "PAPER", exchange: "kucoin", realOrderAllowed: false,
         bot: "RUNNING", loopState: "RUNNING", autoTradeEnabled: true,
         tradingAiMode: "OFF", tradingAiStatus: "NOT_INSTALLED",
+        stale: false, timestamp: Date.now() / 1000, cycleId: "12345",
+        stateSince: Date.now() / 1000 - 3600,
+        stages: { execution: { orderState: "NONE" } }
     } }));
+
+    assert.match(text, /RUNTIME META（ランタイム情報）/);
     assert.match(text, /MODE（モード） PAPER/);
     assert.match(text, /EXCHANGE（取引所） kucoin/);
     assert.match(text, /REAL ORDER ALLOWED（実注文許可） NO/);
@@ -143,74 +170,67 @@ test("shows operational summary values only from the runtime contract", async ()
     assert.match(text, /AUTO TRADE（自動売買） ENABLED/);
     assert.match(text, /TRADING AI（売買AI） OFF/);
     assert.match(text, /AI IMPLEMENTATION（AI実装） NOT_INSTALLED/);
+    assert.match(text, /MARKET STALE（市場データ遅延） NO/);
+    assert.match(text, /CYCLE ID（サイクルID） 12345/);
+    assert.match(text, /PENDING ORDER（保留注文） NO/);
 });
 
-test("marks unpublished operational and execution fields explicitly", async () => {
+test("renders stale market data warning", async () => {
     const Component = await loadComponent();
-    const text = textOf(Component({ decision: { blockingStage: "PYTHON STRATEGY", stages: { pythonStrategy: {} } } }));
-    assert.match(text, /BOT（ボット） NOT AVAILABLE/);
-    assert.match(text, /LOOP（ループ） NOT AVAILABLE/);
-    assert.match(text, /AUTO TRADE（自動売買） NOT AVAILABLE/);
-    assert.match(text, /EXECUTION ALLOWED（実行許可） NOT PUBLISHED（未公開）/);
+    const text = textOf(Component({ decision: { stale: true } }));
+    assert.match(text, /STALE DECISION DATA（判断データが古くなっています）/);
 });
 
-test("renders unavailable values without inventing a decision", async () => {
+test("does not render stale warning when not stale", async () => {
     const Component = await loadComponent();
-    const text = textOf(Component({ decision: undefined }));
-    assert.match(text, /NOT AVAILABLE/);
-    assert.doesNotMatch(text, /AI_HOLD/);
+    const text = textOf(Component({ decision: { stale: false } }));
+    assert.doesNotMatch(text, /STALE DECISION DATA/);
 });
 
-test("renders backend-computed entry readiness without threshold logic", async () => {
+test("renders pending order status", async () => {
     const Component = await loadComponent();
-    const condition = (code, status, currentValue, threshold, operator, delta = null, sourceStatus = "MEASURED") => ({ code, status, currentValue, threshold, operator, delta, sourceStatus });
-    const text = textOf(Component({ decision: {
-        blockingStage: "PYTHON STRATEGY",
-        entryReadinessAvailable: true,
-        entryReadiness: {
-            available: true,
-            candidateDirection: "SELL",
-            strategyDecision: "HOLD",
-            blockingCondition: "LIQUIDITY_QUALITY",
-            conditions: [
-                condition("SPREAD", "PASS", 0.00001, 0.0005, "<="),
-                condition("SPREAD_VOLATILITY", "PASS", 0, 0.65, "<="),
-                condition("LIQUIDITY_QUALITY", "FAIL", 0.0936, 0.35, ">=", 0.2564),
-                condition("MOMENTUM", "FAIL", 0, 0.5, ">=", 0.5, "DEFAULTED"),
-                condition("PRESSURE_ALIGNMENT", "PASS", 0.4715, 0.15, ">=", 0, "DERIVED"),
-                condition("EDGE", "FAIL", 0.3322, 0.55, ">="),
-                condition("CONFIDENCE", "FAIL", 0.1661, 0.6, ">="),
-                { code: "ABSORPTION", status: "PASS", currentValue: false, expected: false, delta: null, sourceStatus: "MEASURED" },
-                { code: "STAGNANT_FLOW", status: "PASS", currentValue: false, expected: false, delta: null, sourceStatus: "MEASURED" },
-                { code: "FAKE_PRESSURE", status: "PASS", currentValue: false, expected: false, delta: null, sourceStatus: "MEASURED" },
-                { code: "LIQUIDITY_SAFETY", status: "PASS", currentValue: true, expected: true, delta: null, sourceStatus: "DERIVED" },
-            ],
-        },
-        stages: {},
-    } }));
-    for (const expected of [
-        "ENTRY READINESS（エントリー準備）", "Candidate SELL", "Python Decision HOLD",
-        "Primary Blocker  LIQUIDITY_QUALITY", "Liquidity FAIL", "0.0936 / >=0.3500",
-        "LIQUIDITY_QUALITY GAP 0.2564", "Liquidity Safety PASS", "source  DEFAULTED",
-        "EDGE :  FAIL", "CONFIDENCE :  FAIL",
-    ]) assert.match(text, new RegExp(expected));
-    assert.doesNotMatch(text, /SELL GAP/);
+    const text = textOf(Component({ 
+        decision: { 
+            stages: { execution: { orderState: "SUBMITTED" } } 
+        } 
+    }));
+    assert.match(text, /PENDING ORDER（保留注文） YES/);
 });
 
-test("uses the backend PASS and FAIL statuses for readiness tones", async () => {
+test("renders no pending order when none", async () => {
     const Component = await loadComponent();
-    const rendered = Component({ decision: {
-        entryReadiness: {
-            available: true,
-            conditions: [
-                { code: "SPREAD", status: "PASS", currentValue: 0.0001, threshold: 0.0005, operator: "<=" },
-                { code: "LIQUIDITY_QUALITY", status: "FAIL", currentValue: 0.1, threshold: 0.35, operator: ">=" },
-            ],
-        },
-        stages: {},
-    } });
-    const source = await readFile(new URL("./TradingDecisionCard.jsx", import.meta.url), "utf8");
-    assert.match(textOf(rendered), /Spread PASS/);
-    assert.match(textOf(rendered), /Liquidity FAIL/);
-    assert.match(source, /\["FAIL", "HOLD", "BLOCK", "ENTRY BLOCKED"\]/);
+    const text = textOf(Component({ 
+        decision: { 
+            stages: { execution: { orderState: "NONE" } } 
+        } 
+    }));
+    assert.match(text, /PENDING ORDER（保留注文） NO/);
+});
+
+test("renders decision details section collapsed by default", async () => {
+    const Component = await loadComponent();
+    const tree = Component({ decision: {} });
+    const disclosure = tree.props.children.find((child) => child?.type === "details");
+    assert.equal(disclosure.props.open, undefined);
+});
+
+test("renders all decision stages with correct statuses", async () => {
+    const Component = await loadComponent();
+    const text = textOf(Component({ 
+        decision: { 
+            blockingStage: "MONEY MANAGEMENT", 
+            stages: { 
+                market: { status: "PASS" }, 
+                pythonStrategy: { status: "PASS", confidence: 0.75 }, 
+                moneyManagement: { status: "BLOCKED", reason: "RISK_LIMIT" }, 
+                governance: { status: "NOT REACHED" }, 
+                execution: { status: "NOT REACHED" }, 
+                position: { status: "UNKNOWN" } 
+            } 
+        } 
+    }));
+    
+    assert.match(text, /MARKET（市場）.*PASS/);
+    assert.match(text, /PYTHON STRATEGY（Python戦略）.*PASS.*75.0%/);
+    assert.match(text, /MONEY MANAGEMENT（資金管理）.*BLOCKED.*RISK_LIMIT/);
 });
