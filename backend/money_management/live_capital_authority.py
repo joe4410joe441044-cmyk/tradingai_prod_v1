@@ -3,7 +3,10 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from .capital_eligibility import build_capital_eligibility_contract
+from .capital_eligibility import (
+    build_capital_eligibility_contract,
+    resolve_compounding_capital_basis,
+)
 from .models import MoneyManagementConfig
 from .position_risk import calculate_risk_budget
 
@@ -53,8 +56,12 @@ def build_live_capital_eligibility(
     )
     current_risk = Decimal("0") if position_state == "FLAT" else None
     reserved_risk = Decimal("0") if pending_state == "NONE" else None
+    available_capital = getattr(snapshot, "available_capital", None)
+    capital_basis = resolve_compounding_capital_basis(
+        config, available_capital
+    )
     risk = calculate_risk_budget(
-        getattr(snapshot, "available_capital", None),
+        capital_basis,
         config.risk_per_trade_pct,
         current_risk,
         reserved_risk,
@@ -74,7 +81,9 @@ def build_live_capital_eligibility(
     )
     return build_capital_eligibility_contract(
         equity=getattr(snapshot, "equity", None),
-        available_capital=getattr(snapshot, "available_capital", None),
+        available_capital=available_capital,
+        capital_basis=capital_basis,
+        compounding_enabled=config.compounding_enabled,
         risk_budget=risk.risk_budget_remaining,
         max_position_notional=config.maximum_position_notional,
         total_exposure_percent=config.total_exposure_pct,

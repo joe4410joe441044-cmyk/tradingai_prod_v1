@@ -44,6 +44,7 @@ class CapitalEligibilityContract:
     execution_entry_allowed: bool
     capital_source: str = "UNSPECIFIED"
     input_authority: str = "UNSPECIFIED"
+    capital_basis: Optional[Decimal] = None
 
     def to_dict(self):
         return {
@@ -52,6 +53,7 @@ class CapitalEligibilityContract:
             "inputAuthority": self.input_authority,
             "equity": _value(self.equity),
             "availableCapital": _value(self.available_capital),
+            "capitalBasis": _value(self.capital_basis),
             "mmMode": self.mm_mode,
             "mmRegime": self.mm_regime,
             "riskBudget": _value(self.risk_budget),
@@ -78,8 +80,11 @@ def build_capital_eligibility_contract(
     total_exposure_percent, open_exposure, position_count, pending_order_count,
     mm_regime, policy_version, evaluated_at, authority_fresh=True,
     execution_entry_allowed=True, capital_source="UNSPECIFIED",
-    input_authority="UNSPECIFIED",
+    input_authority="UNSPECIFIED", compounding_enabled=False,
+    capital_basis=None,
 ):
+    if type(compounding_enabled) is not bool:
+        raise TypeError("compounding_enabled must be bool")
     max_total = (
         equity * total_exposure_percent / Decimal("100")
         if equity is not None and total_exposure_percent is not None else None
@@ -105,11 +110,28 @@ def build_capital_eligibility_contract(
         "MONEY_MANAGEMENT", equity, available_capital, "MANUAL", mm_regime,
         risk_budget, max_position_notional, total_exposure_percent,
         max_total, remaining, theoretical,
-        EXECUTABLE_MAX_CONCURRENT_POSITIONS, capacity, "UNAVAILABLE", False,
+        EXECUTABLE_MAX_CONCURRENT_POSITIONS, capacity, "UNAVAILABLE",
+        compounding_enabled,
         policy_version, evaluated_at, bool(authority_fresh),
         bool(execution_entry_allowed and authority_fresh),
-        capital_source, input_authority,
+        capital_source, input_authority, capital_basis,
     )
+
+
+def resolve_compounding_capital_basis(config, current_capital):
+    """Apply the existing simulation rule to authoritative runtime capital."""
+    from .models import MoneyManagementConfig
+    if not isinstance(config, MoneyManagementConfig):
+        return None
+    if config.compounding_enabled:
+        if (
+            not isinstance(current_capital, Decimal)
+            or not current_capital.is_finite()
+            or current_capital <= 0
+        ):
+            return None
+        return current_capital
+    return config.initial_reference_equity
 
 
 @dataclass(frozen=True)
@@ -170,7 +192,7 @@ def evaluate_market_capital_eligibility(
     if any(value is None for value in required_metadata):
         reasons.append("MARKET_METADATA_INCOMPLETE")
     required_capital = (
-        capital.available_capital, capital.risk_budget,
+        capital.available_capital, capital.capital_basis, capital.risk_budget,
         capital.max_position_notional, capital.remaining_exposure,
         capital.remaining_position_capacity,
     )
@@ -194,7 +216,7 @@ def evaluate_market_capital_eligibility(
         stop_loss_percent=stop_loss_percent,
         effective_cost_percent=effective_cost_percent,
         risk_percent=risk_percent,
-        risk_base_capital=capital.available_capital,
+        risk_base_capital=capital.capital_basis,
         maximum_position_notional=capital.max_position_notional,
         total_exposure_remaining=capital.remaining_exposure,
         available_capital=capital.available_capital,

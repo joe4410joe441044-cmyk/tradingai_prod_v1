@@ -32,7 +32,9 @@ def test_flat_none_uses_existing_mm_policy_and_primitives():
     assert contract.capital_authority == "MONEY_MANAGEMENT"
     assert contract.capital_source == "REAL_LIVE_ACCOUNT"
     assert contract.input_authority == "REAL_LIVE_ACCOUNT"
-    assert contract.risk_budget == Decimal("4")
+    assert contract.compounding_enabled is False
+    assert contract.capital_basis == Decimal("1000")
+    assert contract.risk_budget == Decimal("5.00")
     assert contract.max_position_notional == Decimal("100")
     assert contract.total_exposure_percent == Decimal("20")
     assert contract.max_total_exposure == Decimal("200")

@@ -14,6 +14,7 @@ export function validConfiguration(overrides = {}) {
     maximumPositionNotional: "100.00",
     singleSymbolExposurePercent: "10.00",
     maximumLeverage: "5",
+    compoundingEnabled: false,
     revision: 7,
     source: "DEFAULT",
     updatedAt: "2026-07-26T12:00:00Z",

@@ -57,6 +57,7 @@ from .position_risk import (
 from .capital_eligibility import (
     CapitalEligibilityContract,
     build_capital_eligibility_contract,
+    resolve_compounding_capital_basis,
 )
 from .simulation import (
     MAX_SIMULATION_TRADES,
@@ -220,6 +221,7 @@ class MoneyManagementConfigurationResponse:
     maximum_position_notional: Optional[Decimal]
     single_symbol_exposure_percent: Optional[Decimal]
     maximum_leverage: Optional[Decimal]
+    compounding_enabled: bool
     revision: int
     source: str
     updated_at: datetime
@@ -250,6 +252,7 @@ class MoneyManagementConfigurationResponse:
                 self.single_symbol_exposure_percent
             ),
             "maximumLeverage": _serialize(self.maximum_leverage),
+            "compoundingEnabled": self.compounding_enabled,
             "revision": self.revision,
             "source": self.source,
             "updatedAt": _serialize(self.updated_at),
@@ -373,6 +376,7 @@ _BASE_CONFIG_FIELDS = {
     "riskPerTradePercent": "risk_per_trade_pct",
     "maximumPositionNotional": "maximum_position_notional",
     "singleSymbolExposurePercent": "single_symbol_exposure_pct",
+    "compoundingEnabled": "compounding_enabled",
 }
 _REQUEST_FIELDS = frozenset((
     *_CONFIG_FIELDS,
@@ -575,6 +579,9 @@ class MoneyManagementHttpBoundary:
             base_config.maximum_leverage
             if base_config is not None
             else None,
+            base_config.compounding_enabled
+            if base_config is not None
+            else False,
             revision,
             source,
             updated_at,
@@ -685,15 +692,17 @@ class MoneyManagementHttpBoundary:
                 "Risk percent exceeds active configuration.",
             )
         capital = metrics.available_balance
+        capital_basis = resolve_compounding_capital_basis(config, capital)
         exposure = metrics.open_exposure
         risk_budget = calculate_risk_budget(
-            capital,
+            capital_basis,
             config.risk_per_trade_pct,
             Decimal("0") if metrics.position_count == 0 else None,
             Decimal("0") if metrics.pending_order_count == 0 else None,
         )
         if (
             capital is None
+            or capital_basis is None
             or exposure is None
             or risk_budget.risk_budget_remaining is None
         ):
@@ -720,7 +729,7 @@ class MoneyManagementHttpBoundary:
             stop_loss_percent=stop_loss,
             effective_cost_percent=effective_cost,
             risk_percent=risk_percent,
-            risk_base_capital=capital,
+            risk_base_capital=capital_basis,
             maximum_position_notional=config.maximum_position_notional,
             total_exposure_remaining=max(
                 total_limit - exposure, Decimal("0")
@@ -1187,10 +1196,14 @@ class MoneyManagementHttpBoundary:
             diagnostics.append("EXPOSURE_METRICS_INCOMPLETE")
         if metrics_response.open_position_state == "UNKNOWN":
             diagnostics.append("POSITION_STATE_UNAVAILABLE")
-        risk_budget = calculate_risk_budget(
+        capital_basis = resolve_compounding_capital_basis(
+            base_config,
             metrics.available_balance
             if isinstance(metrics, LossRuntimeMetrics)
             else None,
+        )
+        risk_budget = calculate_risk_budget(
+            capital_basis,
             base_config.risk_per_trade_pct
             if base_config is not None
             else None,
@@ -1222,6 +1235,11 @@ class MoneyManagementHttpBoundary:
             equity=metrics.equity if isinstance(metrics, LossRuntimeMetrics) else None,
             available_capital=(
                 metrics.available_balance if isinstance(metrics, LossRuntimeMetrics) else None
+            ),
+            capital_basis=capital_basis,
+            compounding_enabled=(
+                base_config.compounding_enabled
+                if base_config is not None else False
             ),
             risk_budget=risk_budget.risk_budget_remaining,
             max_position_notional=(
@@ -1362,6 +1380,11 @@ class MoneyManagementHttpBoundary:
         try:
             for external, internal in _BASE_CONFIG_FIELDS.items():
                 if external in payload:
+                    if external == "compoundingEnabled":
+                        if type(payload[external]) is not bool:
+                            raise ValueError("compoundingEnabled invalid")
+                        base_update[internal] = payload[external]
+                        continue
                     parser = (
                         _strict_positive_decimal
                         if external == "maximumPositionNotional"

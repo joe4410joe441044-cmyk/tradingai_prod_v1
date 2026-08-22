@@ -450,6 +450,7 @@ export default function BotControl({
     const lifecycleState = mmStatus?.lifecycleState;
     const capitalAuthorityStatus = mmStatus?.capitalAuthorityStatus;
     const availableCapital = mmStatus?.capitalEligibility?.availableCapital;
+    const capitalBasis = mmStatus?.capitalEligibility?.capitalBasis;
     const riskBudget = mmStatus?.capitalEligibility?.riskBudget;
     const executionEntryAllowed = mmStatus?.executionEntryAllowed;
     const recommendedAction = mmStatus?.recommendedAction;
@@ -1243,6 +1244,7 @@ export default function BotControl({
                 handleAutoTradeChange={handleAutoTradeChange}
                 mmDraft={mmDraft}
                 mmConfiguration={mmConfiguration}
+                capitalBasis={capitalBasis}
                 leverageAuthority={config?.leverageAuthority}
                 mmUpdating={mmUpdating}
                 mmLoading={mmLoading}

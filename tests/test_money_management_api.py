@@ -328,7 +328,7 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         })
 
         self.assertTrue(payload["calculationAllowed"])
-        self.assertEqual(payload["riskAmount"], "4.50")
+        self.assertEqual(payload["riskAmount"], "5.00")
         self.assertEqual(payload["finalPositionNotional"], "100")
         self.assertEqual(payload["positionQuantity"], "200")
         self.assertEqual(payload["appliedLimits"], [
@@ -781,6 +781,44 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         self.assertEqual(rendered["riskPerTradePercent"], "0.40")
         self.assertEqual(rendered["maximumPositionNotional"], "80")
         self.assertEqual(rendered["singleSymbolExposurePercent"], "8")
+
+    def test_compounding_update_uses_same_saved_provider_and_status(self):
+        boundary, app, _, _, _ = ready_boundary(
+            runtime_metrics=metrics(
+                available_balance=Decimal("1200"),
+                pending_order_count=0,
+            )
+        )
+        provider = app.state.money_management.base_config_provider
+        before = boundary.get_status().capital_eligibility
+        self.assertFalse(before.compounding_enabled)
+        self.assertEqual(before.capital_basis, Decimal("1000"))
+
+        result = boundary.update_configuration({
+            "compoundingEnabled": True,
+            "expectedRevision": 1,
+        })
+
+        self.assertIs(app.state.money_management.base_config_provider, provider)
+        self.assertTrue(provider.get_config().compounding_enabled)
+        self.assertTrue(result.configuration.compounding_enabled)
+        self.assertEqual(result.status.capital_eligibility.capital_basis, Decimal("1200"))
+        self.assertEqual(result.status.capital_eligibility.risk_budget, Decimal("6.00"))
+
+    def test_malformed_compounding_update_is_rejected_without_mutation(self):
+        boundary, app, _, _, _ = ready_boundary()
+        before = app.state.money_management.base_config_provider.get_config()
+        for value in (None, 0, 1, "true", "false"):
+            with self.subTest(value=value):
+                with self.assertRaises(MoneyManagementApiBoundaryException):
+                    boundary.update_configuration({
+                        "compoundingEnabled": value,
+                        "expectedRevision": 1,
+                    })
+                self.assertIs(
+                    app.state.money_management.base_config_provider.get_config(),
+                    before,
+                )
 
     def test_maximum_leverage_projection_comes_from_active_config(self):
         boundary, app, _, _, _ = ready_boundary()

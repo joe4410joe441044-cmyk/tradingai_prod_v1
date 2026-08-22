@@ -126,6 +126,7 @@ export default function OperationPreparation({
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
     availableCapital = undefined,
+    capitalBasis = undefined,
     riskBudget = undefined,
     executionEntryAllowed,
     recommendedAction,
@@ -298,12 +299,22 @@ export default function OperationPreparation({
     const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
     const mmExposureValue = mmDraft ? Number(mmDraft.totalExposurePercent) : undefined;
     const mmDrawdownValue = mmDraft ? Number(mmDraft.maximumDrawdownPercent) : undefined;
+    const mmCompoundingValue = mmDraft?.compoundingEnabled === true;
+    const savedCompounding = typeof mmConfiguration?.compoundingEnabled === "boolean"
+        ? mmConfiguration.compoundingEnabled
+        : null;
+    const compoundingPolicy = savedCompounding === null
+        ? "UNAVAILABLE"
+        : savedCompounding
+            ? "ON — CURRENT AVAILABLE CAPITAL"
+            : "OFF — INITIAL REFERENCE CAPITAL";
     const mmControlsDisabled = controlsDisabled || !mmAvailable || mmUpdating;
 
     const MM_CONNECTED_FIELDS = [
         "riskPerTradePercent",
         "totalExposurePercent",
         "maximumDrawdownPercent",
+        "compoundingEnabled",
     ];
     const mmDirty = mmAvailable
         && Boolean(mmConfiguration)
@@ -412,8 +423,9 @@ return (
                     />
                     <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
                     <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                    <span className="operation-prep-label">COMPOUNDING {sourceBadge("NOT CONNECTED")}</span>
-                    <ToggleControl disabled={controlsDisabled} label="Compounding" onChange={(value) => changeSetting("compounding", value)} value={settings.compounding} />
+                    <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
+                    <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
+                    <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
                     <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
                     <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
                     <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
