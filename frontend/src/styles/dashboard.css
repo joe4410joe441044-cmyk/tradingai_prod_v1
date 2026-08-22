@@ -2703,8 +2703,9 @@ replace the legacy scaled three-column layout.
     position: relative;
     min-height: 34px;
     display: flex;
-    flex-direction: column;
-    justify-content: center;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
     gap: 2px;
     padding: 6px 8px 7px;
     border-bottom: 1px solid rgba(36, 49, 73, 0.75);

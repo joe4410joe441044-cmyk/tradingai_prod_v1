@@ -3,7 +3,9 @@ import {
     useEffect,
     useMemo,
     useState,
+    useRef,
 } from "react";
+import ReactDOM from "react-dom";
 
 import { API } from "../api";
 import usePolling from "../hooks/usePolling";
@@ -21,6 +23,7 @@ import {
 import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
+import EmergencyControls from "../components/operation/EmergencyControls";
 
 
 const fetchBotStatus = async () => {
@@ -87,6 +90,7 @@ const normalizeTimestamp = (value) => {
 
 
 const Dashboard = () => {
+    const emergencyContainerRef = useRef(null);
 
 const { data: botStatusSnapshot } = usePolling(
     fetchBotStatus,
@@ -99,13 +103,22 @@ const [executionEnabled, setExecutionEnabled] = useState(false);
 const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
 const [manualBotStatusSnapshot, setManualBotStatusSnapshot] = useState(null);
 
-const refreshBotStatus = useCallback(async () => {
-    const snapshot = await fetchBotStatus();
+    const onRenderEmergency = useCallback((emergencyProps) => {
+        if (emergencyContainerRef.current) {
+            ReactDOM.render(
+                <EmergencyControls {...emergencyProps} />,
+                emergencyContainerRef.current
+            );
+        }
+    }, []);
 
-    setManualBotStatusSnapshot(snapshot);
+    const refreshBotStatus = useCallback(async () => {
+        const snapshot = await fetchBotStatus();
 
-    return snapshot.data;
-}, []);
+        setManualBotStatusSnapshot(snapshot);
+
+        return snapshot.data;
+    }, []);
 
 const governance = telemetryState.governance;
 const runtime = telemetryState.runtime;
@@ -317,11 +330,13 @@ useEffect(() => {
             <div className="operations-top-card left-column panel-card">
 
                 <div className="operations-top-card-header">
-
                     <div className="left-card-title section-number-title">
                         OPERATION
                     </div>
-
+                    <div 
+                        className="operations-top-emergency-container"
+                        ref={emergencyContainerRef}
+                    />
                 </div>
 
                 <div className="operations-top-body">
@@ -329,6 +344,7 @@ useEffect(() => {
                     <div className="operations-top-section operations-bot-control">
 
                         <BotControl
+                            onRenderEmergency={onRenderEmergency}
 
                             config={{
                                 ...tradeSettings,

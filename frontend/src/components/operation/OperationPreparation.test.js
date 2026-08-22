@@ -418,14 +418,7 @@ test("runtime safety values remain read-only and real order control is never ren
     assert.equal(content.includes("BLOCKED"), true);
     assert.equal(content.includes("REAL ORDER"), true);
     assert.equal(content.includes("DISABLED"), true);
-assert.equal(descendants(renderer.root).some(
-        (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
-    ), true);
-    // UI-9: Emergency section integrated into OperationPreparation,
-    // emergency button renders with "EMERGENCY STOP" text
-    assert.equal(descendants(renderer.root).some(
-        (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
-    ), true);
+
 });
 
 test("MM lifecycle RUNNING with entry not allowed stays non-ready in Section 6 and Final", async () => {

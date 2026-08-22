@@ -1199,6 +1199,30 @@ export default function BotControl({
        UI
     ======================================================= */
 
+    if (onRenderEmergency) {
+        onRenderEmergency({
+            emergencyState: emergencyStateCode,
+            emergencyPath,
+            emergencyError,
+            unlockError,
+            lastResultMessage,
+            emergencyLocked: emergencyIsLocked,
+            emergencyConfirmOpen,
+            emergencyPending,
+            unlockPending,
+            unlockAllowed,
+            emergencyButtonDisabled,
+            emergencyLockValue,
+            emergencyLockClass,
+            openEmergencyConfirm,
+            cancelEmergencyConfirm,
+            confirmEmergency,
+            handleReturnToNormal,
+            lockedFacts,
+            actionWarnings,
+        });
+    }
+
     return (
 
         <div className="terminal-panel operation-console">

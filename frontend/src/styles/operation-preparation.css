@@ -9,24 +9,24 @@
 
 /* 顶部紧急操作栏 */
 .operation-top-emergency {
-    width: 100%;
+    width: auto;
 }
 
 .operation-emergency-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
 }
 
 .operation-emergency-section {
-    width: 100%;
+    width: auto;
     min-width: 0;
     padding: 10px;
     border: 1px solid rgba(255, 80, 80, .3);
     border-radius: 4px;
     background: rgba(30, 8, 8, .56);
+    flex-shrink: 0;
 }
 
 /* 主网格布局 */
