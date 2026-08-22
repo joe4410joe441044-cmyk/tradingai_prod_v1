@@ -10,6 +10,7 @@ from .loss_runtime_store_models import LossLimitRuntimeSnapshot
 _PRIORITY = (
     SaveTrigger.RUNTIME_SHUTDOWN,
     SaveTrigger.LOCKED,
+    SaveTrigger.ACCOUNTING_REBASE,
     SaveTrigger.PERIOD_ROLLOVER,
     SaveTrigger.STATE_TRANSITION,
     SaveTrigger.INITIAL_STATE_CREATED,
@@ -23,6 +24,7 @@ _MANDATORY = frozenset(
         SaveTrigger.STATE_TRANSITION,
         SaveTrigger.LOCKED,
         SaveTrigger.PERIOD_ROLLOVER,
+        SaveTrigger.ACCOUNTING_REBASE,
         SaveTrigger.RUNTIME_SHUTDOWN,
     )
 )

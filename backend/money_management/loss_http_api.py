@@ -44,6 +44,17 @@ from .loss_runtime_metrics_models import (
     LossRuntimeMetricsReadStatus,
 )
 from .loss_runtime_store_models import LossLimitRuntimeSnapshot
+from .loss_accounting_rebase import (
+    AccountingRebaseAuthorization,
+    AccountingRebaseStatus,
+    build_accounting_rebase_update,
+)
+from .loss_persistence_models import (
+    AccountingRebaseAuthoritySource,
+    AccountingRebaseAuthorizationState,
+    AccountingRebaseReason,
+)
+from .enums import TradingMode
 from .loss_runtime_update_dispatcher import (
     LossRuntimeDispatchResult,
     LossRuntimeDispatchStatus,
@@ -1738,6 +1749,57 @@ class MoneyManagementHttpBoundary:
         finally:
             with self._lock:
                 self._recovery_in_progress = False
+
+    def rebase_accounting(self, payload):
+        """Execute an explicitly authorized PAPER accounting rebase."""
+        now = self._now()
+        if not isinstance(payload, Mapping):
+            self._error(422, "ACCOUNTING_REBASE_INVALID", "Accounting rebase request must be a JSON object.")
+        allowed = {"rebaseId", "accountScope", "runtimeInstanceId", "authoritySource", "reason", "authorizationState"}
+        if set(payload) != allowed:
+            self._error(422, "ACCOUNTING_REBASE_INVALID", "Explicit accounting rebase authorization is incomplete.")
+        try:
+            authorization = AccountingRebaseAuthorization(
+                payload["rebaseId"], payload["accountScope"], payload["runtimeInstanceId"],
+                AccountingRebaseAuthoritySource(payload["authoritySource"]),
+                AccountingRebaseReason(payload["reason"]),
+                AccountingRebaseAuthorizationState(payload["authorizationState"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            self._error(422, "ACCOUNTING_REBASE_INVALID", "Explicit accounting rebase authorization is invalid.")
+        dispatcher = self._dispatcher
+        registration = self._base_registration
+        lifecycle = registration.lifecycle_adapter if registration is not None else None
+        metrics_result = dispatcher.get_last_metrics_result() if dispatcher is not None else None
+        metrics = metrics_result.metrics if isinstance(metrics_result, LossRuntimeMetricsReadResult) else None
+        snapshot = lifecycle.get_snapshot() if lifecycle is not None else None
+        base_config = self._base_config_provider.get_config() if self._base_config_provider is not None else None
+        mode = base_config.mode if base_config is not None else TradingMode.LIVE
+        result = build_accounting_rebase_update(
+            authorization, metrics, snapshot, now,
+            self._maximum_metrics_age, mode,
+        )
+        if result.status is AccountingRebaseStatus.REJECTED:
+            return {"accepted": False, "persisted": False, "status": "REBASE_REJECTED", "safeReasons": list(result.safe_reasons), "revision": snapshot.revision if snapshot else None, "sequence": snapshot.sequence if snapshot else None}
+        if result.status is AccountingRebaseStatus.IDEMPOTENT:
+            return {"accepted": True, "persisted": True, "status": "IDEMPOTENT", "rebase": result.record.to_dict(), "revision": snapshot.revision, "sequence": snapshot.sequence}
+        hook_registration = self._hook_registration()
+        if hook_registration is not None:
+            # Admission remains UNKNOWN until the mandatory checkpoint and a
+            # subsequent real dispatcher evaluation both succeed.
+            hook_registration.hook.invalidate_evaluation()
+        lifecycle_result = lifecycle.apply_update(result.update)
+        coordination = lifecycle_result.coordination_result
+        persisted = bool(coordination is not None and coordination.checkpoint_succeeded and not coordination.durability_pending)
+        if not persisted:
+            return {"accepted": False, "persisted": False, "status": "REBASE_PERSISTENCE_FAILED", "safeReasons": ["accounting rebase persistence failed"], "revision": None, "sequence": None}
+        dispatch, _ = self._reevaluate(f"accounting-rebase-{authorization.rebase_id}", now)
+        return {
+            "accepted": True, "persisted": True, "status": "REBASE_ACCEPTED",
+            "rebase": result.record.to_dict(), "dispatchStatus": dispatch.status.value,
+            "revision": dispatch.runtime_revision, "sequence": dispatch.runtime_sequence,
+            "newEntryAllowed": dispatch.new_entry_allowed,
+        }
 
 
 def register_money_management_http_boundary(

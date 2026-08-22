@@ -105,6 +105,26 @@ def _aggregate(metrics, period_type, sequence):
     )
 
 
+def _apply_rebase_pnl_baseline(previous, aggregate, code):
+    for record in reversed(previous.accounting_rebases):
+        if code not in record.affected_periods:
+            continue
+        index = record.affected_periods.index(code)
+        if record.new_period_ids[index] != aggregate.period.period_key:
+            continue
+        pnl = aggregate.net_realized_pnl - record.observed_period_pnl[index]
+        return MoneyManagementPeriodAggregate(
+            aggregate.schema_version, aggregate.period, aggregate.currency,
+            aggregate.event_count, pnl, aggregate.fees,
+            aggregate.funding, pnl, max(Decimal("0"), pnl),
+            max(Decimal("0"), -pnl), aggregate.winning_event_count,
+            aggregate.losing_event_count, aggregate.first_event_at,
+            aggregate.last_event_at, aggregate.last_sequence,
+            aggregate.processed_event_ids, aggregate.updated_at,
+        )
+    return aggregate
+
+
 def _period_state(code, aggregate, starting_equity, cash_flow_amount, captured_at):
     pnl = aggregate.net_realized_pnl
     loss = max(Decimal("0"), -pnl)
@@ -233,6 +253,9 @@ class LossRuntimeEvaluationBridge:
                     LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
                     "period rollover requires authoritative starting equity",
                 )
+            daily = _apply_rebase_pnl_baseline(previous, daily, PeriodCode.DAILY)
+            weekly = _apply_rebase_pnl_baseline(previous, weekly, PeriodCode.WEEKLY)
+            monthly = _apply_rebase_pnl_baseline(previous, monthly, PeriodCode.MONTHLY)
             if metrics.peak_equity <= 0:
                 return _failure(
                     LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
@@ -301,6 +324,7 @@ class LossRuntimeEvaluationBridge:
                 reason,
                 metrics.captured_at,
                 freshness=FreshnessStatus.VALID,
+                accounting_rebases=previous.accounting_rebases,
             )
             governance = _governance(reason)
             recovery = LossLimitRecoveryRequirement(

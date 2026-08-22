@@ -191,6 +191,21 @@ def recover_money_management(request: Request):
         )
 
 
+@router.post("/recovery/accounting-rebase")
+async def rebase_money_management_accounting(request: Request):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(503, "MONEY_MANAGEMENT_UNAVAILABLE", "Money Management accounting recovery is unavailable.", True)
+    try:
+        payload = await request.json()
+    except Exception:
+        return _safe_error(400, "ACCOUNTING_REBASE_INVALID", "Request body must contain valid JSON.")
+    try:
+        return boundary.rebase_accounting(payload)
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(503, "INTERNAL_STATE_UNAVAILABLE", "Money Management accounting rebase failed.", True)
 @router.post("/position-size/preview")
 async def preview_money_management_position_size(request: Request):
     boundary = _boundary(request)

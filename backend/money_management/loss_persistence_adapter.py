@@ -61,15 +61,19 @@ def _dec(v):
     if not isinstance(v,str): raise ValueError("invalid decimal")
     return Decimal(v)
 def _period(d):
-    return PersistedLossPeriodState(PeriodCode(d["period_code"]),d["period_id"],_dt(d["period_start"]),_dt(d["period_end"]),_dec(d["starting_equity"]),_dec(d["net_realized_pnl"]),_dec(d["net_loss"]),_dec(d["loss_percent"]),_dec(d["cash_flow_amount"]),_dt(d["last_updated_at"]))
+    return PersistedLossPeriodState(PeriodCode(d["period_code"]),d["period_id"],_dt(d["period_start"]),_dt(d["period_end"]),_dec(d["starting_equity"]),_dec(d["net_realized_pnl"]),_dec(d["net_loss"]),_dec(d["loss_percent"]),_dec(d["cash_flow_amount"]),_dt(d["last_updated_at"]),LossBaselineType(d.get("baseline_type",LossBaselineType.PERIOD_BOUNDARY_BASELINE.value)),_dt(d["baseline_observed_at"]) if d.get("baseline_observed_at") else None)
+def _rebase(d):
+    expected={"rebase_id","observed_at","authoritative_equity","authority_source","account_scope","runtime_instance_id","affected_periods","previous_period_ids","new_period_ids","observed_period_pnl","reason","continuity_status","authorization_state","audit_marker"}
+    if set(d)!=expected: raise ValueError("rebase payload shape invalid")
+    return PersistedAccountingRebaseRecord(d["rebase_id"],_dt(d["observed_at"]),_dec(d["authoritative_equity"]),AccountingRebaseAuthoritySource(d["authority_source"]),d["account_scope"],d["runtime_instance_id"],tuple(PeriodCode(x) for x in d["affected_periods"]),tuple(d["previous_period_ids"]),tuple(d["new_period_ids"]),tuple(_dec(x) for x in d["observed_period_pnl"]),AccountingRebaseReason(d["reason"]),AccountingContinuityStatus(d["continuity_status"]),AccountingRebaseAuthorizationState(d["authorization_state"]),AccountingRebaseAuditMarker(d["audit_marker"]))
 def _reason(d):
     metrics=tuple(LossMetric(ReasonPeriodCode(x["period"]),_dec(x["net_loss"]),_dec(x["loss_percent"])) for x in d["metrics"])
     return LossReasonContract(d["schema_version"],_dt(d["evaluated_at"]),RiskState(d["decision_state"]),RecommendedAction(d["recommended_action"]),ReasonCode(d["primary_reason"]),tuple(WarningReason(x) for x in d["warning_reasons"]),tuple(HoldReason(x) for x in d["hold_reasons"]),tuple(BlockReason(x) for x in d["block_reasons"]),tuple(DiagnosticReason(x) for x in d["diagnostic_reasons"]),tuple(ReasonPeriodCode(x) for x in d["triggered_periods"]),metrics,bool(d["fail_closed"]))
 def _state(d):
     expected={"schema_version","config_schema_version","account_scope","valuation_currency","daily_state","weekly_state","monthly_state","drawdown_state","cash_flow_state","last_decision","captured_at","freshness"}
-    if set(d)!=expected: raise ValueError("payload shape invalid")
+    if set(d) not in (expected, expected|{"accounting_rebases"}): raise ValueError("payload shape invalid")
     dd=d["drawdown_state"]; cf=d["cash_flow_state"]
-    return PersistedLossState(d["schema_version"],d["account_scope"],d["valuation_currency"],_period(d["daily_state"]),_period(d["weekly_state"]),_period(d["monthly_state"]),PersistedDrawdownState(_dec(dd["high_water_mark"]),_dec(dd["current_equity"]),_dec(dd["drawdown_amount"]),_dec(dd["drawdown_percent"]),_dt(dd["last_updated_at"])),PersistedCashFlowState(bool(cf["has_unresolved_cash_flow"]),tuple(CashFlowType(x) for x in cf["cash_flow_types"]),_dec(cf["net_cash_flow_amount"]),_dt(cf["last_cash_flow_at"]) if cf["last_cash_flow_at"] else None),_reason(d["last_decision"]),_dt(d["captured_at"]),d["config_schema_version"],FreshnessStatus(d["freshness"]))
+    return PersistedLossState(d["schema_version"],d["account_scope"],d["valuation_currency"],_period(d["daily_state"]),_period(d["weekly_state"]),_period(d["monthly_state"]),PersistedDrawdownState(_dec(dd["high_water_mark"]),_dec(dd["current_equity"]),_dec(dd["drawdown_amount"]),_dec(dd["drawdown_percent"]),_dt(dd["last_updated_at"])),PersistedCashFlowState(bool(cf["has_unresolved_cash_flow"]),tuple(CashFlowType(x) for x in cf["cash_flow_types"]),_dec(cf["net_cash_flow_amount"]),_dt(cf["last_cash_flow_at"]) if cf["last_cash_flow_at"] else None),_reason(d["last_decision"]),_dt(d["captured_at"]),d["config_schema_version"],FreshnessStatus(d["freshness"]),tuple(_rebase(x) for x in d.get("accounting_rebases",())))
 
 def _strict_pairs(pairs):
     def hook(obj):
