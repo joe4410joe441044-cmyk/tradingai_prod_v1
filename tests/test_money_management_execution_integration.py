@@ -85,16 +85,27 @@ NOW = datetime(2026, 7, 26, 12, tzinfo=timezone.utc)
 
 class UnusedSource(LossRuntimeMetricsSource):
     def read_metrics(self, request):
-        raise AssertionError("runtime source must not be read by entry gate")
+        raise AssertionError("mocked runtime hook must not read its source")
 
 
-def attach_runtime_health(app, status=LossRuntimeDispatchStatus.APPLIED):
+def attach_runtime_health(
+    app,
+    status=LossRuntimeDispatchStatus.APPLIED,
+    source=None,
+    timestamp_source=None,
+):
+    real_source = source is not None
+    source = source or UnusedSource()
     hook = MoneyManagementRuntimeHook(
         app,
-        LossRuntimeUpdateDispatcher(UnusedSource()),
-        timestamp_source=lambda: NOW,
+        LossRuntimeUpdateDispatcher(source),
+        timestamp_source=timestamp_source or (
+            lambda: NOW + timedelta(seconds=1)
+        ),
     )
     hook._last_dispatch_status = status
+    if not real_source:
+        hook.refresh_authority = Mock(return_value=True)
     app.state.money_management_runtime_hook = (
         MoneyManagementRuntimeHookRegistration(
             hook,
@@ -104,7 +115,7 @@ def attach_runtime_health(app, status=LossRuntimeDispatchStatus.APPLIED):
             NOW,
         )
     )
-    return hook
+    return hook, source
 
 
 def gate(app, **kwargs):
@@ -370,6 +381,7 @@ class ApplicationEntryGateTests(unittest.TestCase):
             LossRuntimeUpdateDispatcher(source),
             timestamp_source=lambda: NOW + timedelta(seconds=2),
         )
+        hook._last_dispatch_status = LossRuntimeDispatchStatus.APPLIED
         app.state.money_management_runtime_hook = (
             MoneyManagementRuntimeHookRegistration(
                 hook,
@@ -398,6 +410,199 @@ class ApplicationEntryGateTests(unittest.TestCase):
         )
         self.assertIsNone(result.revision)
         self.assertIsNone(result.sequence)
+
+    def test_candidate_refresh_replaces_stale_start_authority(self):
+        app = runtime_application()
+        clock = [NOW + timedelta(seconds=1)]
+        source = RuntimeMetricsSource(
+            [
+                runtime_metrics("start", at=clock[0]),
+                runtime_metrics(
+                    "candidate", at=NOW + timedelta(minutes=3)
+                ),
+            ]
+        )
+        hook = MoneyManagementRuntimeHook(
+            app,
+            LossRuntimeUpdateDispatcher(source),
+            timestamp_source=lambda: clock[0],
+        )
+        app.state.money_management_runtime_hook = (
+            MoneyManagementRuntimeHookRegistration(
+                hook,
+                SimpleNamespace(
+                    set_money_management_runtime_hook=lambda callback: True
+                ),
+                NOW,
+            )
+        )
+
+        self.assertTrue(hook.refresh_authority())
+        start_revision = (
+            app.state.money_management.lifecycle_adapter.get_snapshot().revision
+        )
+        self.assertEqual(source.calls, 1)
+
+        clock[0] = NOW + timedelta(minutes=3)
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: clock[0],
+            projection_dispatcher=LossGovernanceProjectionDispatcher(
+                timestamp_source=lambda: clock[0]
+            ),
+        ).evaluate(intent())
+
+        self.assertEqual(source.calls, 2)
+        self.assertIs(
+            hook.last_dispatch_status,
+            LossRuntimeDispatchStatus.APPLIED,
+        )
+        self.assertTrue(result.allowed)
+        self.assertGreater(result.revision, start_revision)
+        self.assertEqual(
+            app.state.money_management_governance_projection.generated_at,
+            clock[0],
+        )
+
+    def test_fresh_existing_authority_is_refreshed_for_each_candidate(self):
+        app = runtime_application()
+        clock = [NOW + timedelta(seconds=1)]
+        source = RuntimeMetricsSource(
+            [
+                runtime_metrics("start", at=clock[0]),
+                runtime_metrics(
+                    "candidate", at=NOW + timedelta(seconds=2)
+                ),
+            ]
+        )
+        hook = MoneyManagementRuntimeHook(
+            app,
+            LossRuntimeUpdateDispatcher(source),
+            timestamp_source=lambda: clock[0],
+        )
+        app.state.money_management_runtime_hook = (
+            MoneyManagementRuntimeHookRegistration(
+                hook,
+                SimpleNamespace(
+                    set_money_management_runtime_hook=lambda callback: True
+                ),
+                NOW,
+            )
+        )
+        self.assertTrue(hook.refresh_authority())
+        clock[0] = NOW + timedelta(seconds=2)
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: clock[0],
+            projection_dispatcher=LossGovernanceProjectionDispatcher(
+                timestamp_source=lambda: clock[0]
+            ),
+        ).evaluate(intent())
+
+        self.assertEqual(source.calls, 2)
+        self.assertTrue(result.allowed)
+
+    def test_previous_allow_never_survives_failed_candidate_refresh(self):
+        for status in (
+            LossRuntimeDispatchStatus.FAILED,
+            LossRuntimeDispatchStatus.REJECTED,
+            LossRuntimeDispatchStatus.UNAVAILABLE,
+            LossRuntimeDispatchStatus.STALE,
+            LossRuntimeDispatchStatus.CONFLICT,
+            LossRuntimeDispatchStatus.RECOVERY_REQUIRED,
+        ):
+            with self.subTest(status=status):
+                app, _ = application()
+                hook, _ = attach_runtime_health(app)
+
+                def fail_refresh(status=status):
+                    hook._last_dispatch_status = status
+                    return False
+
+                hook.refresh_authority.side_effect = fail_refresh
+                result = MoneyManagementExecutionEntryGate(
+                    app,
+                    timestamp_source=lambda: NOW + timedelta(seconds=1),
+                ).evaluate(intent())
+
+                hook.refresh_authority.assert_called_once_with()
+                self.assertFalse(result.allowed)
+                self.assertIs(
+                    result.decision,
+                    LossExecutionEntryDecision.UNKNOWN,
+                )
+                self.assertIsNone(result.revision)
+                self.assertIsNone(result.sequence)
+
+    def test_previous_block_is_replaced_by_current_normal_refresh(self):
+        locked = reason(
+            RiskState.LOCKED,
+            RecommendedAction.BLOCK_EXECUTION,
+            ReasonCode.DAILY_LOSS_BLOCK,
+            (BlockReason.DAILY_LOSS_BLOCK,),
+        )
+        lifecycle = Lifecycle(
+            snapshot=runtime_snapshot(
+                GovernanceProjection.BLOCK_EXECUTION,
+                last_reason=locked,
+            )
+        )
+        app, _ = application(lifecycle)
+        attach_runtime_health(app)
+        previous = LossGovernanceProjectionDispatcher(
+            timestamp_source=lambda: NOW
+        ).dispatch(app).public_snapshot
+        self.assertIs(
+            previous.projection.entry_permission,
+            LossEntryPermission.BLOCK,
+        )
+        lifecycle.snapshot = runtime_snapshot(GovernanceProjection.CONTINUE)
+        hook, _ = attach_runtime_health(app)
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: NOW + timedelta(seconds=1),
+            projection_dispatcher=LossGovernanceProjectionDispatcher(
+                timestamp_source=lambda: NOW + timedelta(seconds=1)
+            ),
+        ).evaluate(intent())
+
+        hook.refresh_authority.assert_called_once_with()
+        self.assertIs(
+            hook.last_dispatch_status,
+            LossRuntimeDispatchStatus.APPLIED,
+        )
+        self.assertTrue(result.allowed)
+        self.assertIs(result.decision, LossExecutionEntryDecision.ALLOW)
+
+    def test_candidate_refresh_invalid_timestamp_fails_closed(self):
+        app = runtime_application()
+        source = RuntimeMetricsSource([runtime_metrics()])
+        hook = MoneyManagementRuntimeHook(
+            app,
+            LossRuntimeUpdateDispatcher(source),
+            timestamp_source=lambda: "invalid",
+        )
+        hook._last_dispatch_status = LossRuntimeDispatchStatus.APPLIED
+        app.state.money_management_runtime_hook = (
+            MoneyManagementRuntimeHookRegistration(
+                hook,
+                SimpleNamespace(
+                    set_money_management_runtime_hook=lambda callback: True
+                ),
+                NOW,
+            )
+        )
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: NOW + timedelta(seconds=1),
+        ).evaluate(intent())
+
+        self.assertEqual(source.calls, 0)
+        self.assertFalse(result.allowed)
+        self.assertIs(result.decision, LossExecutionEntryDecision.UNKNOWN)
 
     def test_allow_buy_and_sell_with_revision_sequence(self):
         app, _ = application()
