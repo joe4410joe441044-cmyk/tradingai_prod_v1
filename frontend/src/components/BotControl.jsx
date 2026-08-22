@@ -804,7 +804,6 @@ export default function BotControl({
         mmConfigurationError: Boolean(mmConfigurationError),
     });
     const { startReady, automationReady } = startReadiness;
->>>>>>> f11c330 (fix(operation): reconcile dashboard runtime authority)
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)

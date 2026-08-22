@@ -279,7 +279,6 @@ export default function OperationPreparation({
     } = deriveOperationReadiness({
         botRunning,
         tradingMode: settings.tradingMode,
-<<<<<<< HEAD
         dryRun: config.dryRun ?? config.dry_run ?? (
             settings.tradingMode === "PAPER"
         ),

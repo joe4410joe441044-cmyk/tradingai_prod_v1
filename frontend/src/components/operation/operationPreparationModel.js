@@ -114,21 +114,6 @@ export const deriveMmReadiness = ({
     return Object.freeze({ state: "UNKNOWN", label: "UNKNOWN" });
 };
 
-export const savedMmConfigurationReadiness = (configuration) => {
-    if (!configuration || typeof configuration !== "object") return "BLOCKED";
-
-    const requiredPositiveFields = [
-        "riskPerTradePercent",
-        "totalExposurePercent",
-        "maximumDrawdownPercent",
-        "maximumLeverage",
-    ];
-    return requiredPositiveFields.every((field) => {
-        const value = Number(configuration[field]);
-        return Number.isFinite(value) && value > 0;
-    }) ? "READY" : "BLOCKED";
-};
-
 const POSITIVE_READINESS = new Set(["READY", "SAFE", "FLAT"]);
 const BLOCKING_READINESS = new Set([
     "BLOCKED",
