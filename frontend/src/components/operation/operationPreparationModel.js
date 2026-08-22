@@ -5,7 +5,7 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],
     maxExposure: [10, 20, 30, 40, 50],
     maxDrawdown: [5, 7, 10],
-    requestedLeverage: [1, 2, 3, 4, 5],
+    requestedLeverage: [1, 2, 3, 4, 5, 10],
 });
 
 const supportedValue = (values, candidate, fallback) => (
@@ -31,7 +31,7 @@ export const createOperationPreparationSettings = (config = {}) => ({
     compounding: false,
     requestedLeverage: supportedValue(
         OPERATION_PREPARATION_OPTIONS.requestedLeverage,
-        Number(config.leverage),
+        Number(config.requestedLeverage),
         3,
     ),
     loopOnStart: Boolean(config.loopOnStart),

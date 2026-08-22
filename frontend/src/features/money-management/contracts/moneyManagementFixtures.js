@@ -13,6 +13,7 @@ export function validConfiguration(overrides = {}) {
     riskPerTradePercent: "0.50",
     maximumPositionNotional: "100.00",
     singleSymbolExposurePercent: "10.00",
+    maximumLeverage: "5",
     revision: 7,
     source: "DEFAULT",
     updatedAt: "2026-07-26T12:00:00Z",

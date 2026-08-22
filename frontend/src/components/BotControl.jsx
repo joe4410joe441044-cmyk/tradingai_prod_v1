@@ -1243,6 +1243,7 @@ export default function BotControl({
                 handleAutoTradeChange={handleAutoTradeChange}
                 mmDraft={mmDraft}
                 mmConfiguration={mmConfiguration}
+                leverageAuthority={config?.leverageAuthority}
                 mmUpdating={mmUpdating}
                 mmLoading={mmLoading}
                 mmConfigurationError={mmConfigurationError}

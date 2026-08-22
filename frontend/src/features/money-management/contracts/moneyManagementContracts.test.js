@@ -177,8 +177,18 @@ test("configuration normalization and payload retain string decimals", () => {
   assert.equal(payload.dailyWarningPercent, "1.00");
   assert.equal(payload.maximumDrawdownPercent, "5.00");
   assert.equal(payload.totalExposurePercent, "20.00");
+  assert.equal(configuration.maximumLeverage, "5");
   assert.equal(typeof payload.dailyWarningPercent, "string");
   assert.equal(payload.expectedRevision, 7);
+});
+
+test("maximum leverage normalization follows the active Backend value", () => {
+  assert.equal(
+    normalizeMoneyManagementConfiguration(
+      validConfiguration({ maximumLeverage: "3.5" }),
+    ).maximumLeverage,
+    "3.5",
+  );
 });
 
 test("configuration validation matches Backend strict threshold contract", () => {

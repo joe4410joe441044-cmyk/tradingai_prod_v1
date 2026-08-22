@@ -346,6 +346,9 @@ export function normalizeMoneyManagementConfiguration(raw) {
       value.singleSymbolExposurePercent,
       "configuration.singleSymbolExposurePercent",
     ),
+    maximumLeverage: value.maximumLeverage == null
+      ? null
+      : decimal(value.maximumLeverage, "configuration.maximumLeverage"),
     revision: positiveInteger(
       value.revision,
       "configuration.revision",

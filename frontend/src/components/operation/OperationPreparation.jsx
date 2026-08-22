@@ -11,6 +11,10 @@ import {
 const percentage = (value) => `${Number(value).toFixed(2)}%`;
 const wholePercentage = (value) => `${value}%`;
 const leverage = (value) => `${value}x`;
+const authoritativeLeverage = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? `${parsed}x` : "UNAVAILABLE";
+};
 
 const sourceLabel = (source) => ({
     "UI PREVIEW": "PREVIEW",
@@ -128,6 +132,7 @@ export default function OperationPreparation({
     riskState,
     mmDraft = null,
     mmConfiguration = null,
+    leverageAuthority = null,
     mmUpdating = false,
     mmLoading = false,
     mmConfigurationError = null,
@@ -278,6 +283,15 @@ export default function OperationPreparation({
         riskState,
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
+    const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);
+    const effectiveLeverage = authoritativeLeverage(
+        leverageAuthority?.effectiveLeverage,
+    );
+    const leverageReason = String(leverageAuthority?.reason || "").trim();
+    const effectiveLeverageDisplay = effectiveLeverage === "UNAVAILABLE"
+        && leverageReason === "MAXIMUM_LEVERAGE"
+        ? "— · MAXIMUM_LEVERAGE"
+        : effectiveLeverage;
     const controlsDisabled = botRunning === true;
 
     const mmAvailable = Boolean(mmDraft);
@@ -420,7 +434,8 @@ return (
             <div className="operation-lane-right">
                  <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
                     <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source="OPERATOR" value={leverage(settings.requestedLeverage)} />
+                    <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
+                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
                     <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
                     <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
                 </Section>

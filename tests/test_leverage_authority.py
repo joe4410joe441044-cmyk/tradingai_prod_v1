@@ -1,4 +1,4 @@
-"""TR-OP-CONNECT-8: Authoritative Leverage Boundary (backend).
+"""TR-OP-CONNECT-7: Authoritative Leverage Boundary (backend).
 
 Covers:
 
@@ -55,6 +55,7 @@ def _mm_config(maximum_leverage=D("5")):
 def _bare_manager(**attrs):
     manager = BotManager.__new__(BotManager)
     manager.production_ams_mm_config_provider = None
+    manager.money_management_config_provider = None
     for name, value in attrs.items():
         setattr(manager, name, value)
     return manager
@@ -118,6 +119,39 @@ def test_authority_unavailable_never_uses_requested_as_authority():
     result = resolve_effective_leverage(D("3"), None)
     assert result.allowed is False
     assert result.effective_leverage is None
+
+
+def test_status_projection_uses_the_same_allowed_resolution():
+    manager = _bare_manager()
+    manager._last_requested_leverage = 3
+    manager._last_leverage_authority = resolve_effective_leverage(D("3"), D("5"))
+    assert manager._leverage_authority_projection() == {
+        "requestedLeverage": 3,
+        "maximumLeverage": 5.0,
+        "effectiveLeverage": 3.0,
+        "allowed": True,
+        "reason": "NONE",
+    }
+
+
+def test_status_projection_keeps_blocked_effective_unavailable():
+    manager = _bare_manager()
+    manager._last_requested_leverage = 10
+    manager._last_leverage_authority = resolve_effective_leverage(D("10"), D("5"))
+    projection = manager._leverage_authority_projection()
+    assert projection["requestedLeverage"] == 10
+    assert projection["maximumLeverage"] == 5.0
+    assert projection["effectiveLeverage"] is None
+    assert projection["allowed"] is False
+    assert projection["reason"] == "MAXIMUM_LEVERAGE"
+
+
+def test_status_projection_is_unavailable_before_any_start_resolution():
+    manager = _bare_manager()
+    projection = manager._leverage_authority_projection()
+    assert projection["maximumLeverage"] is None
+    assert projection["effectiveLeverage"] is None
+    assert projection["allowed"] is None
 
 
 # =========================
@@ -239,7 +273,7 @@ def test_execution_preserves_valid_fractional_effective_leverage():
 
 def test_bot_manager_resolve_leverage_authority_reads_active_mm_config():
     manager = _bare_manager(
-        production_ams_mm_config_provider=lambda: _mm_config(D("5")),
+        money_management_config_provider=lambda: _mm_config(D("5")),
     )
     result = manager._resolve_leverage_authority({"leverage": 4.0})
     assert result.allowed is True
@@ -256,7 +290,7 @@ def test_bot_manager_resolve_leverage_authority_fails_closed_without_provider():
 
 def test_start_rejects_over_limit_leverage_at_start_boundary():
     manager = _bare_manager(
-        production_ams_mm_config_provider=lambda: _mm_config(D("5")),
+        money_management_config_provider=lambda: _mm_config(D("5")),
     )
     result = manager.start({"leverage": 10, "mode": "paper"})
     assert result["status"] == "error"
@@ -275,10 +309,21 @@ def test_start_fails_closed_when_mm_authority_unavailable():
 
 def test_start_transports_effective_leverage_to_execution_engine():
     from backend.routers import positions as positions_router
+    from backend.runtime import runtime_registry
 
     previous_positions_engine = positions_router.engine
+    execution_runtime = (
+        getattr(runtime_registry.trading_runtime, "execution_runtime", None)
+        if runtime_registry.trading_runtime is not None
+        else None
+    )
+    previous_runtime_engine = (
+        getattr(execution_runtime, "engine", None)
+        if execution_runtime is not None
+        else None
+    )
     manager = BotManager()
-    manager.configure_production_ams_read_model(
+    manager.configure_money_management_config_provider(
         lambda: _mm_config(D("5")),
     )
     ws = Mock()
@@ -310,3 +355,5 @@ def test_start_transports_effective_leverage_to_execution_engine():
         assert manager.config["maximum_leverage"] == 5.0
     finally:
         positions_router.set_engine(previous_positions_engine)
+        if execution_runtime is not None:
+            execution_runtime.set_engine(previous_runtime_engine)

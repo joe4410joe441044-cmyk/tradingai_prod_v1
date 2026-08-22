@@ -219,6 +219,7 @@ class MoneyManagementConfigurationResponse:
     risk_per_trade_percent: Optional[Decimal]
     maximum_position_notional: Optional[Decimal]
     single_symbol_exposure_percent: Optional[Decimal]
+    maximum_leverage: Optional[Decimal]
     revision: int
     source: str
     updated_at: datetime
@@ -248,6 +249,7 @@ class MoneyManagementConfigurationResponse:
             "singleSymbolExposurePercent": _serialize(
                 self.single_symbol_exposure_percent
             ),
+            "maximumLeverage": _serialize(self.maximum_leverage),
             "revision": self.revision,
             "source": self.source,
             "updatedAt": _serialize(self.updated_at),
@@ -568,6 +570,9 @@ class MoneyManagementHttpBoundary:
             if base_config is not None
             else None,
             base_config.single_symbol_exposure_pct
+            if base_config is not None
+            else None,
+            base_config.maximum_leverage
             if base_config is not None
             else None,
             revision,

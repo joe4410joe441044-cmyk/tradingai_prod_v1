@@ -30,6 +30,9 @@ from backend.execution.kucoin_trade import (
     ForceIPv4Adapter,
     KucoinTradeClient,
 )
+from backend.money_management.loss_application_registration import (
+    build_default_money_management_config,
+)
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.runtime.governance_runtime import (
     EMERGENCY_ACTION_REQUIRED,
@@ -1361,6 +1364,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     @staticmethod
     def _configure_durable_snapshot_path(bot, path):
+        bot.configure_production_ams_read_model(
+            build_default_money_management_config
+        )
+        bot.configure_money_management_config_provider(
+            build_default_money_management_config
+        )
         tempdir = getattr(bot, "_test_durable_snapshot_dir", None)
         if hasattr(tempdir, "cleanup"):
             tempdir.cleanup()
@@ -1370,6 +1379,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def _restart_stopped_paper_bot(self, path):
         bot = BotManager()
+        bot.configure_production_ams_read_model(
+            build_default_money_management_config
+        )
+        bot.configure_money_management_config_provider(
+            build_default_money_management_config
+        )
         bot.stopped_paper_durable_snapshot_path = path
         bot.engine = None
         bot._running = False
@@ -9893,6 +9908,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def _bootstrap_bot(self):
         bot = BotManager()
+        bot.configure_production_ams_read_model(
+            build_default_money_management_config
+        )
+        bot.configure_money_management_config_provider(
+            build_default_money_management_config
+        )
         bot.stopped_paper_durable_snapshot_path = (
             self._temporary_durable_snapshot_path()
         )
@@ -10072,7 +10093,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 return_value=ws,
             ):
                 started = bot.start(self._bootstrap_start_config())
-                self.assertEqual(started["status"], "started")
+                self.assertEqual(started["status"], "started", started)
                 self.assertIsNotNone(bot.engine)
                 stopped = bot.stop()
 

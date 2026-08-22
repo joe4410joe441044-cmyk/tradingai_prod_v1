@@ -508,8 +508,12 @@ async def startup_event():
     add_log("🧠 Production Execution Cognition Runtime Active")
     startup_money_management_application(app, logger=logger)
     start_money_management_cash_flow_runtime(app, logger=logger)
+    saved_mm_config_provider = lambda: get_money_management_config(app)
+    get_bot_manager().configure_money_management_config_provider(
+        saved_mm_config_provider
+    )
     get_bot_manager().configure_production_ams_read_model(
-        lambda: get_money_management_config(app)
+        saved_mm_config_provider
     )
     from backend.auto_market_selection.paper_production import (
         attach_production_paper_auto_selection,

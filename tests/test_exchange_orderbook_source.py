@@ -162,7 +162,7 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
 
     def test_bot_manager_start_passes_position_risk_config_to_engine(self):
         manager = BotManager()
-        manager.configure_production_ams_read_model(
+        manager.configure_money_management_config_provider(
             lambda: MoneyManagementConfig(
                 MoneyManagementProfile.CAPITAL_PROTECTION_STANDARD,
                 TradingMode.PAPER,
