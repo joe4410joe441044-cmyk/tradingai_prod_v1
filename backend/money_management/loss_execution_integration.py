@@ -533,6 +533,18 @@ def _ensure_valid_runtime_hook(app):
         )
     ):
         return hook_registration
+    if isinstance(hook_registration, MoneyManagementRuntimeHookRegistration):
+        refresh = getattr(hook_registration.hook, "refresh_authority", None)
+        try:
+            recovered = callable(refresh) and refresh() is True
+        except Exception:
+            recovered = False
+        if recovered and hook_registration.hook.last_dispatch_status in (
+            LossRuntimeDispatchStatus.APPLIED,
+            LossRuntimeDispatchStatus.IDEMPOTENT,
+        ):
+            return hook_registration
+        return None
     return register_money_management_runtime_hook(
         app,
         getattr(app, "bot_manager", None),

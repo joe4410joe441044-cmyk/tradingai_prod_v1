@@ -60,6 +60,11 @@ from tests.test_money_management_loss_governance_projection_dispatcher import (
     reason,
     runtime_snapshot,
 )
+from tests.test_money_management_loss_runtime_update_dispatcher import (
+    Source as RuntimeMetricsSource,
+    app_with as runtime_application,
+    metrics as runtime_metrics,
+)
 from backend.money_management.loss_runtime_integration_models import (
     GovernanceProjection,
 )
@@ -254,6 +259,76 @@ class OperationClassificationTests(unittest.TestCase):
 
 
 class ApplicationEntryGateTests(unittest.TestCase):
+    def test_existing_non_authoritative_hook_recovers_by_real_dispatch(self):
+        app = runtime_application()
+        source = RuntimeMetricsSource([runtime_metrics()])
+        hook = MoneyManagementRuntimeHook(
+            app,
+            LossRuntimeUpdateDispatcher(source),
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+        )
+        bot = SimpleNamespace(
+            set_money_management_runtime_hook=lambda callback: True
+        )
+        registration = MoneyManagementRuntimeHookRegistration(hook, bot, NOW)
+        app.state.money_management_runtime_hook = registration
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+            projection_dispatcher=LossGovernanceProjectionDispatcher(
+                timestamp_source=lambda: NOW + timedelta(seconds=2)
+            ),
+        ).evaluate(intent())
+
+        self.assertIs(app.state.money_management_runtime_hook, registration)
+        self.assertEqual(source.calls, 1)
+        self.assertIs(
+            hook.last_dispatch_status,
+            LossRuntimeDispatchStatus.APPLIED,
+        )
+        self.assertTrue(result.allowed)
+        self.assertIs(result.decision, LossExecutionEntryDecision.ALLOW)
+        self.assertIsNotNone(result.revision)
+        self.assertIsNotNone(result.sequence)
+
+    def test_runtime_hook_recovery_failure_remains_unknown(self):
+        app = runtime_application()
+        source = RuntimeMetricsSource([RuntimeError("unavailable")])
+        hook = MoneyManagementRuntimeHook(
+            app,
+            LossRuntimeUpdateDispatcher(source),
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+        )
+        app.state.money_management_runtime_hook = (
+            MoneyManagementRuntimeHookRegistration(
+                hook,
+                SimpleNamespace(
+                    set_money_management_runtime_hook=lambda callback: True
+                ),
+                NOW,
+            )
+        )
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+        ).evaluate(intent())
+
+        self.assertEqual(source.calls, 1)
+        self.assertIs(
+            hook.last_dispatch_status,
+            LossRuntimeDispatchStatus.FAILED,
+        )
+        self.assertFalse(result.allowed)
+        self.assertIs(result.decision, LossExecutionEntryDecision.UNKNOWN)
+        self.assertIs(
+            result.reason,
+            LossExecutionAdmissionReason.MONEY_MANAGEMENT_UNKNOWN,
+        )
+        self.assertIsNone(result.revision)
+        self.assertIsNone(result.sequence)
+
     def test_allow_buy_and_sell_with_revision_sequence(self):
         app, _ = application()
         entry_gate = gate(app)

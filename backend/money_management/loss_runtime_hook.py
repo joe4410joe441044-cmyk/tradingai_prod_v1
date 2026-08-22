@@ -183,6 +183,62 @@ class MoneyManagementRuntimeHook:
             self._active = False
             return already_stopped
 
+    def refresh_authority(self):
+        """Refresh entry authority from the current authoritative metrics."""
+
+        with self._lock:
+            registration = getattr(
+                getattr(self._app, "state", None), "money_management", None
+            )
+            if (
+                not self._active
+                or not isinstance(
+                    registration, MoneyManagementApplicationRegistration
+                )
+                or registration.composition_status
+                is not CompositionReadinessStatus.READY
+                or registration.safe_status.lifecycle_state
+                is not ApplicationLifecycleState.RUNNING
+                or not registration.safe_status.runtime_available
+            ):
+                self._last_dispatch_status = None
+                return False
+            try:
+                now = self._timestamp_source()
+                if (
+                    not isinstance(now, datetime)
+                    or now.tzinfo is None
+                    or now.utcoffset() is None
+                ):
+                    self._last_dispatch_status = None
+                    return False
+                request = LossRuntimeMetricsReadRequest(
+                    "bot-manager",
+                    now.astimezone(timezone.utc),
+                    self._maximum_age,
+                )
+                result = dispatch_money_management_runtime_update(
+                    self._app,
+                    self._dispatcher,
+                    request,
+                    LossRuntimeEventType.BALANCE_UPDATE,
+                )
+            except Exception:
+                self._last_dispatch_status = None
+                _safe_log(self._logger, "warning", "Authority Refresh Failed")
+                return False
+            if not isinstance(result, LossRuntimeDispatchResult):
+                self._last_dispatch_status = None
+                return False
+            self._last_dispatch_status = result.status
+            authoritative = result.status in (
+                LossRuntimeDispatchStatus.APPLIED,
+                LossRuntimeDispatchStatus.IDEMPOTENT,
+            )
+            if not authoritative:
+                _safe_log(self._logger, "warning", "Authority Refresh Rejected")
+            return authoritative
+
     def handle(self, event_type, event_key):
         try:
             event_type = LossRuntimeEventType(event_type)
