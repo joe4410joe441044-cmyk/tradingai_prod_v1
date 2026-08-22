@@ -8,6 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from Bot.engine.execution_engine import ExecutionEngine
+from backend.bot_manager.bot_manager import BotManager
+from backend.money_management.loss_authoritative_runtime_metrics import (
+    AuthoritativeLossRuntimeMetricsState,
+)
 from backend.money_management.enums import RiskState
 from backend.money_management.loss_execution_guard import (
     LossExecutionEntryGuardDispatcher,
@@ -46,6 +50,7 @@ from backend.money_management.loss_reason_models import (
 from backend.money_management.loss_runtime_hook import (
     MoneyManagementRuntimeHook,
     MoneyManagementRuntimeHookRegistration,
+    register_money_management_runtime_hook,
 )
 from backend.money_management.loss_runtime_metrics_source import (
     LossRuntimeMetricsSource,
@@ -67,6 +72,10 @@ from tests.test_money_management_loss_runtime_update_dispatcher import (
 )
 from backend.money_management.loss_runtime_integration_models import (
     GovernanceProjection,
+    StateSource,
+)
+from tests.test_money_management_loss_authoritative_runtime_metrics import (
+    persisted,
 )
 
 
@@ -259,6 +268,67 @@ class OperationClassificationTests(unittest.TestCase):
 
 
 class ApplicationEntryGateTests(unittest.TestCase):
+    def test_production_bot_persisted_restore_first_paper_admission_recovers(self):
+        bot = BotManager()
+        bot.money_management_runtime_metrics = (
+            AuthoritativeLossRuntimeMetricsState(bot.runtime_instance_id)
+        )
+        restored = bot.money_management_runtime_metrics.restore(
+            persisted(), StateSource.PERSISTED_STATE, NOW
+        )
+        self.assertIsNone(restored.trade_count_daily)
+        self.assertIsNone(restored.trade_count_weekly)
+        self.assertIsNone(restored.trade_count_monthly)
+
+        bot.session_id = 1
+        bot.money_management_runtime_metrics.begin_paper_session(1, NOW)
+        bot.engine = SimpleNamespace(
+            mode="paper", latest_price=D("100"), peak_equity=D("1000")
+        )
+        bot.lifecycle_state = "RUNNING"
+        bot.pending_order = False
+        bot._capture_account_snapshot = lambda: {
+            "balance": D("1000"),
+            "equity": D("1000"),
+            "availableBalance": D("1000"),
+            "realizedPnl": D("0"),
+            "unrealizedPnl": D("0"),
+            "position": None,
+        }
+        with patch("backend.bot_manager.bot_manager.datetime") as clock:
+            clock.now.return_value = NOW + timedelta(seconds=1)
+            observed = bot._observe_money_management_runtime_metrics(
+                {"realizedPnl": D("0")}, None, "paper-baseline"
+            )
+        self.assertTrue(observed.is_complete)
+        self.assertEqual(observed.session_trade_count, 0)
+        self.assertIsNone(observed.trade_count_daily)
+
+        app = runtime_application()
+        registration = register_money_management_runtime_hook(
+            app,
+            lambda: bot,
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+        )
+        self.assertIsNotNone(registration)
+        self.assertIsNone(registration.hook.last_dispatch_status)
+
+        result = MoneyManagementExecutionEntryGate(
+            app,
+            timestamp_source=lambda: NOW + timedelta(seconds=2),
+            projection_dispatcher=LossGovernanceProjectionDispatcher(
+                timestamp_source=lambda: NOW + timedelta(seconds=2)
+            ),
+        ).evaluate(intent())
+
+        self.assertIs(
+            registration.hook.last_dispatch_status,
+            LossRuntimeDispatchStatus.APPLIED,
+        )
+        self.assertTrue(result.allowed)
+        self.assertIsNotNone(result.revision)
+        self.assertIsNotNone(result.sequence)
+
     def test_existing_non_authoritative_hook_recovers_by_real_dispatch(self):
         app = runtime_application()
         source = RuntimeMetricsSource([runtime_metrics()])

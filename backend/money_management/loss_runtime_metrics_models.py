@@ -107,6 +107,9 @@ class LossRuntimeMetrics:
     position_side: Optional[str] = None
     current_risk_amount: Optional[Decimal] = None
     reserved_risk_amount: Optional[Decimal] = None
+    session_trade_count: Optional[int] = None
+    trade_count_authority_scope: Optional[str] = None
+    trade_count_authority_session_id: Optional[int] = None
 
     def __post_init__(self):
         object.__setattr__(
@@ -158,6 +161,8 @@ class LossRuntimeMetrics:
             "trade_count_monthly",
             "session_id",
             "metrics_revision",
+            "session_trade_count",
+            "trade_count_authority_session_id",
         ):
             _count(name, getattr(self, name), optional=True)
         object.__setattr__(
@@ -182,6 +187,16 @@ class LossRuntimeMetrics:
         object.__setattr__(
             self, "data_quality", LossRuntimeDataQuality(self.data_quality)
         )
+        if self.trade_count_authority_scope not in (None, "RUNTIME_SESSION"):
+            raise ValueError("trade_count_authority_scope invalid")
+        session_authoritative = (
+            self.trade_count_authority_scope == "RUNTIME_SESSION"
+        )
+        if session_authoritative != (
+            self.session_trade_count is not None
+            and self.trade_count_authority_session_id is not None
+        ):
+            raise ValueError("session trade count authority incomplete")
 
     def to_dict(self):
         return {

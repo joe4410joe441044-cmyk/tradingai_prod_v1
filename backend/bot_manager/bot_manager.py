@@ -2752,6 +2752,12 @@ class BotManager:
                 self.session_id
             )
 
+            if requested_mode == "paper":
+                self.money_management_runtime_metrics.begin_paper_session(
+                    current_session,
+                    datetime.now(timezone.utc),
+                )
+
             add_log(
                 f"🆕 SESSION: "
                 f"{current_session}"

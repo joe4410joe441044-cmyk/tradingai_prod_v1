@@ -27,9 +27,6 @@ _REQUIRED_FIELDS = (
     "openExposure",
     "positionCount",
     "tradeCount",
-    "tradeCountDaily",
-    "tradeCountWeekly",
-    "tradeCountMonthly",
     "runtimeInstanceId",
     "sessionId",
     "metricsRevision",
@@ -90,7 +87,23 @@ def _normalize(raw):
             LossRuntimeMetricsReadStatus.INCONSISTENT,
             "runtime metrics invalid",
         )
+    session_trade_count_authoritative = (
+        raw.get("tradeCountAuthorityScope") == "RUNTIME_SESSION"
+        and raw.get("sessionTradeCount") is not None
+        and raw.get("tradeCountAuthoritySessionId") == raw.get("sessionId")
+        and raw.get("tradeCount") == raw.get("sessionTradeCount")
+    )
+    period_trade_counts_complete = all(
+        raw.get(name) is not None
+        for name in (
+            "tradeCountDaily",
+            "tradeCountWeekly",
+            "tradeCountMonthly",
+        )
+    )
     missing = tuple(name for name in _REQUIRED_FIELDS if raw.get(name) is None)
+    if not session_trade_count_authoritative and not period_trade_counts_complete:
+        missing += ("tradeCountAuthority",)
     quality = (
         LossRuntimeDataQuality.PARTIAL
         if missing
@@ -130,6 +143,11 @@ def _normalize(raw):
         reserved_risk_amount=_decimal(
             raw, "reservedRiskAmount", nonnegative=True
         ),
+        session_trade_count=_count(raw, "sessionTradeCount"),
+        trade_count_authority_scope=raw.get("tradeCountAuthorityScope"),
+        trade_count_authority_session_id=_count(
+            raw, "tradeCountAuthoritySessionId"
+        ),
     )
     if missing:
         return metrics, LossRuntimeMetricsReadStatus.PARTIAL, "required runtime metrics missing"
@@ -145,7 +163,13 @@ def _inconsistency(metrics):
         return "runtime metrics inconsistent"
     if metrics.position_count == 0 and metrics.open_exposure != 0:
         return "runtime metrics inconsistent"
-    if (
+    if metrics.trade_count_authority_scope == "RUNTIME_SESSION":
+        if (
+            metrics.trade_count != metrics.session_trade_count
+            or metrics.trade_count_authority_session_id != metrics.session_id
+        ):
+            return "runtime metrics inconsistent"
+    elif (
         metrics.trade_count != metrics.trade_count_daily
         or metrics.trade_count_daily > metrics.trade_count_weekly
         or metrics.trade_count_daily > metrics.trade_count_monthly

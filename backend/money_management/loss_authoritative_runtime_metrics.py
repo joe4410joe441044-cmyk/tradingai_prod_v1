@@ -98,6 +98,9 @@ class AuthoritativeLossRuntimeMetrics:
     observation_valid: bool
     position_side: Optional[str] = None
     current_risk_amount: Optional[Decimal] = None
+    session_trade_count: Optional[int] = None
+    trade_count_authority_scope: Optional[str] = None
+    trade_count_authority_session_id: Optional[int] = None
 
     def __post_init__(self):
         for name in (
@@ -131,6 +134,8 @@ class AuthoritativeLossRuntimeMetrics:
             "trade_count_daily",
             "trade_count_weekly",
             "trade_count_monthly",
+            "session_trade_count",
+            "trade_count_authority_session_id",
         ):
             _count(name, getattr(self, name), optional=True)
         object.__setattr__(self, "as_of", _utc("as_of", self.as_of))
@@ -145,6 +150,16 @@ class AuthoritativeLossRuntimeMetrics:
             raise TypeError("availability flags must be bool")
         if self.position_side not in (None, "LONG", "SHORT", "OPEN"):
             raise ValueError("position_side invalid")
+        if self.trade_count_authority_scope not in (None, "RUNTIME_SESSION"):
+            raise ValueError("trade_count_authority_scope invalid")
+        session_authoritative = (
+            self.trade_count_authority_scope == "RUNTIME_SESSION"
+        )
+        if session_authoritative != (
+            self.session_trade_count is not None
+            and self.trade_count_authority_session_id is not None
+        ):
+            raise ValueError("session trade count authority incomplete")
 
     def to_dict(self):
         return {
@@ -168,18 +183,33 @@ class AuthoritativeLossRuntimeMetrics:
             self.monthly_realized_pnl,
             self.open_exposure,
             self.position_count,
-            self.trade_count_daily,
-            self.trade_count_weekly,
-            self.trade_count_monthly,
+        )
+        trade_count_complete = bool(
+            self.session_trade_count is not None
+            and self.trade_count_authority_scope == "RUNTIME_SESSION"
+            and self.trade_count_authority_session_id == self.session_id
+        ) or all(
+            value is not None
+            for value in (
+                self.trade_count_daily,
+                self.trade_count_weekly,
+                self.trade_count_monthly,
+            )
         )
         return (
             self.available
             and self.observation_valid
             and all(value is not None for value in required)
+            and trade_count_complete
         )
 
     def to_runtime_mapping(self, pending_order_count=None):
         _count("pending_order_count", pending_order_count, optional=True)
+        session_authoritative = bool(
+            self.session_trade_count is not None
+            and self.trade_count_authority_scope == "RUNTIME_SESSION"
+            and self.trade_count_authority_session_id == self.session_id
+        )
         return {
             "capturedAt": self.as_of,
             "sourceRevision": (
@@ -199,11 +229,21 @@ class AuthoritativeLossRuntimeMetrics:
             "drawdownAmount": self.current_drawdown_amount,
             "openExposure": self.open_exposure,
             "positionCount": self.position_count,
-            # Existing MM-4I contract consumes the daily close-execution count.
-            "tradeCount": self.trade_count_daily,
+            # Entry evaluation consumes the explicitly scoped runtime count.
+            # Persisted period counts remain separate and may remain unknown.
+            "tradeCount": (
+                self.session_trade_count
+                if session_authoritative
+                else self.trade_count_daily
+            ),
             "tradeCountDaily": self.trade_count_daily,
             "tradeCountWeekly": self.trade_count_weekly,
             "tradeCountMonthly": self.trade_count_monthly,
+            "sessionTradeCount": self.session_trade_count,
+            "tradeCountAuthorityScope": self.trade_count_authority_scope,
+            "tradeCountAuthoritySessionId": (
+                self.trade_count_authority_session_id
+            ),
             "pendingOrderCount": pending_order_count,
             "positionSide": self.position_side,
             "currentRiskAmount": self.current_risk_amount,
@@ -257,7 +297,29 @@ class AuthoritativeLossRuntimeMetricsState:
         self._position_count = None
         self._position_side = None
         self._current_risk_amount = None
+        self._session_trade_count = None
+        self._trade_count_authority_scope = None
+        self._trade_count_authority_session_id = None
         self._seen_close_events = set()
+
+    def begin_paper_session(self, session_id, as_of):
+        """Establish a zero-count baseline owned by one new PAPER session."""
+
+        _count("session_id", session_id)
+        at = _utc("as_of", as_of)
+        with self._lock:
+            if (
+                self._trade_count_authority_scope == "RUNTIME_SESSION"
+                and self._trade_count_authority_session_id == session_id
+            ):
+                return self._snapshot_locked()
+            self._session_id = session_id
+            self._session_trade_count = 0
+            self._trade_count_authority_scope = "RUNTIME_SESSION"
+            self._trade_count_authority_session_id = session_id
+            self._as_of = at
+            self._revision += 1
+            return self._snapshot_locked()
 
     @staticmethod
     def _period_keys(at):
@@ -437,6 +499,11 @@ class AuthoritativeLossRuntimeMetricsState:
         if not isinstance(source_state, str) or not source_state:
             raise ValueError("source_state invalid")
         with self._lock:
+            if (
+                self._trade_count_authority_scope == "RUNTIME_SESSION"
+                and self._trade_count_authority_session_id != session_id
+            ):
+                raise ValueError("runtime session authority mismatch")
             self._initialized = True
             self._observed = True
             self._roll_periods_locked(at)
@@ -486,6 +553,8 @@ class AuthoritativeLossRuntimeMetricsState:
                     raise ValueError("close_event_id invalid")
                 if close_event_id not in self._seen_close_events:
                     self._seen_close_events.add(close_event_id)
+                    if self._session_trade_count is not None:
+                        self._session_trade_count += 1
                     before = _runtime_decimal(realized_pnl_before)
                     if realized_pnl_before is not None and before is None:
                         self._observation_valid = False
@@ -564,6 +633,9 @@ class AuthoritativeLossRuntimeMetricsState:
             self._observation_valid,
             self._position_side,
             self._current_risk_amount,
+            self._session_trade_count,
+            self._trade_count_authority_scope,
+            self._trade_count_authority_session_id,
         )
 
     def snapshot(self):

@@ -143,6 +143,36 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.PARTIAL)
         self.assertIsNone(result.metrics.trade_count_weekly)
 
+    def test_session_authority_allows_unknown_historical_period_counts(self):
+        result = BotManagerLossRuntimeMetricsSource(
+            Reader(raw(
+                tradeCountDaily=None,
+                tradeCountWeekly=None,
+                tradeCountMonthly=None,
+                sessionTradeCount=0,
+                tradeCountAuthorityScope="RUNTIME_SESSION",
+                tradeCountAuthoritySessionId=1,
+            ))
+        ).read_metrics(request())
+
+        self.assertEqual(result.status, LossRuntimeMetricsReadStatus.AVAILABLE)
+        self.assertEqual(result.metrics.trade_count, 0)
+        self.assertIsNone(result.metrics.trade_count_daily)
+
+    def test_session_count_without_matching_authority_remains_partial(self):
+        result = BotManagerLossRuntimeMetricsSource(
+            Reader(raw(
+                tradeCountDaily=None,
+                tradeCountWeekly=None,
+                tradeCountMonthly=None,
+                sessionTradeCount=0,
+                tradeCountAuthorityScope="RUNTIME_SESSION",
+                tradeCountAuthoritySessionId=2,
+            ))
+        ).read_metrics(request())
+
+        self.assertEqual(result.status, LossRuntimeMetricsReadStatus.PARTIAL)
+
     def test_relational_inconsistency_is_reported(self):
         cases = (
             {"availableBalance": 1001},

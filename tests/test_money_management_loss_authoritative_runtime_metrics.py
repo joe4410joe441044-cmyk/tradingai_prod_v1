@@ -293,6 +293,47 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         )
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.PARTIAL)
 
+    def test_paper_session_baseline_preserves_unknown_period_counts(self):
+        state = self.new_state(source=StateSource.PERSISTED_STATE)
+
+        baseline = state.begin_paper_session(7, NOW + timedelta(seconds=1))
+        observed = observe(
+            state,
+            at=NOW + timedelta(seconds=2),
+            session_id=7,
+        )
+
+        self.assertIsNone(baseline.trade_count_daily)
+        self.assertIsNone(baseline.trade_count_weekly)
+        self.assertIsNone(baseline.trade_count_monthly)
+        self.assertEqual(observed.session_trade_count, 0)
+        self.assertEqual(
+            observed.trade_count_authority_scope, "RUNTIME_SESSION"
+        )
+        self.assertEqual(observed.trade_count_authority_session_id, 7)
+        self.assertTrue(observed.is_complete)
+        mapping = observed.to_runtime_mapping(0)
+        self.assertEqual(mapping["tradeCount"], 0)
+        self.assertIsNone(mapping["tradeCountDaily"])
+
+    def test_paper_session_close_updates_only_session_count_when_history_unknown(self):
+        state = self.new_state(source=StateSource.PERSISTED_STATE)
+        state.begin_paper_session(7, NOW)
+
+        closed = observe(
+            state,
+            at=NOW + timedelta(seconds=1),
+            session_id=7,
+            realized_pnl=D("5"),
+            realized_pnl_before=D("0"),
+            close_event_id="session-close-1",
+        )
+
+        self.assertEqual(closed.session_trade_count, 1)
+        self.assertIsNone(closed.trade_count_daily)
+        self.assertIsNone(closed.trade_count_weekly)
+        self.assertIsNone(closed.trade_count_monthly)
+
     def test_callback_reregistration_does_not_reset_runtime_peak_or_counts(self):
         state = self.new_state()
         observe(
