@@ -176,8 +176,15 @@ class AccountingRebaseTests(unittest.TestCase):
             revision=2, sequence=2, updated_at=REQUESTED,
         )
         later_at = OBSERVED + timedelta(seconds=20)
-        later = production_metrics(at=later_at)
-        dispatcher = LossRuntimeUpdateDispatcher(Source([later]))
+        cached = production_metrics()
+        later = production_metrics(at=later_at, source_revision="account:9")
+        dispatcher = LossRuntimeUpdateDispatcher(Source([cached, later]))
+        stale = dispatcher.dispatch(
+            app_with(lifecycle),
+            LossRuntimeMetricsReadRequest("paper-runtime", REQUESTED, timedelta(minutes=1)),
+            LossRuntimeEventType.BALANCE_UPDATE,
+        )
+        self.assertEqual(stale.status, LossRuntimeDispatchStatus.STALE)
         result = dispatcher.dispatch(
             app_with(lifecycle),
             LossRuntimeMetricsReadRequest("paper-runtime", later_at, timedelta(minutes=1)),
@@ -186,6 +193,17 @@ class AccountingRebaseTests(unittest.TestCase):
         self.assertIn(result.status, (LossRuntimeDispatchStatus.APPLIED, LossRuntimeDispatchStatus.IDEMPOTENT))
         self.assertIsNotNone(result.runtime_revision)
         self.assertIsNotNone(result.runtime_sequence)
+
+    def test_existing_rebase_id_is_idempotent_and_creates_no_second_record(self):
+        built = self.build()
+        rebased_snapshot = replace(
+            production_snapshot(), state=built.update.next_state,
+            revision=2, sequence=2, updated_at=REQUESTED,
+        )
+        duplicate = self.build(snap=rebased_snapshot)
+        self.assertEqual(duplicate.status, AccountingRebaseStatus.IDEMPOTENT)
+        self.assertIsNone(duplicate.update)
+        self.assertEqual(len(rebased_snapshot.state.accounting_rebases), 1)
 
 
 if __name__ == "__main__":

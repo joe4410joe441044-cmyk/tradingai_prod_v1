@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 
 from .loss_runtime_metrics_models import (
     LossRuntimeDataQuality,
@@ -193,13 +194,18 @@ def _inconsistency(metrics):
 class BotManagerLossRuntimeMetricsSource(LossRuntimeMetricsSource):
     """Consumes only BotManager's public, scalar-only read snapshot."""
 
-    def __init__(self, bot_manager):
+    def __init__(self, bot_manager, timestamp_source=None):
         reader = getattr(
             bot_manager, "get_runtime_metrics_snapshot", None
         )
         if not callable(reader):
             raise TypeError("bot runtime metrics reader required")
         self._reader = reader
+        self._timestamp_source = timestamp_source or (
+            lambda: datetime.now(timezone.utc)
+        )
+        if not callable(self._timestamp_source):
+            raise TypeError("timestamp source required")
 
     def read_metrics(self, request):
         if not isinstance(request, LossRuntimeMetricsReadRequest):
@@ -209,12 +215,20 @@ class BotManagerLossRuntimeMetricsSource(LossRuntimeMetricsSource):
             )
         try:
             raw = self._reader()
+            read_completed_at = self._timestamp_source()
+            if (
+                not isinstance(read_completed_at, datetime)
+                or read_completed_at.tzinfo is None
+                or read_completed_at.utcoffset() is None
+            ):
+                raise TypeError("metrics read timestamp invalid")
+            read_completed_at = read_completed_at.astimezone(timezone.utc)
             metrics, status, reason = _normalize(raw)
             if status is LossRuntimeMetricsReadStatus.UNAVAILABLE:
                 return _failed(status, reason)
             if status is LossRuntimeMetricsReadStatus.INCONSISTENT:
                 return _failed(status, reason)
-            if metrics.captured_at > request.requested_at:
+            if metrics.captured_at > read_completed_at:
                 return LossRuntimeMetricsReadResult(
                     LossRuntimeMetricsReadStatus.INCONSISTENT,
                     LossRuntimeMetrics(
@@ -225,7 +239,7 @@ class BotManagerLossRuntimeMetricsSource(LossRuntimeMetricsSource):
                     ),
                     ("runtime metrics timestamp inconsistent",),
                 )
-            if request.requested_at - metrics.captured_at > request.maximum_age:
+            if read_completed_at - metrics.captured_at > request.maximum_age:
                 return LossRuntimeMetricsReadResult(
                     LossRuntimeMetricsReadStatus.STALE,
                     LossRuntimeMetrics(

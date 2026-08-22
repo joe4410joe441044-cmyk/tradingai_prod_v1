@@ -218,7 +218,9 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         self.assertTrue(snapshot.is_complete)
         self.assertEqual(snapshot.daily_realized_pnl, D("0"))
         self.assertEqual(snapshot.open_exposure, D("0"))
-        result = BotManagerLossRuntimeMetricsSource(Reader(snapshot)).read_metrics(
+        result = BotManagerLossRuntimeMetricsSource(
+            Reader(snapshot), timestamp_source=lambda: NOW + timedelta(seconds=1)
+        ).read_metrics(
             LossRuntimeMetricsReadRequest(
                 "bot-manager", NOW + timedelta(seconds=1), timedelta(minutes=1)
             )
@@ -286,7 +288,9 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         self.assertFalse(snapshot.is_complete)
         self.assertIsNone(snapshot.trade_count_daily)
         self.assertEqual(snapshot.daily_realized_pnl, D("0"))
-        result = BotManagerLossRuntimeMetricsSource(Reader(snapshot)).read_metrics(
+        result = BotManagerLossRuntimeMetricsSource(
+            Reader(snapshot), timestamp_source=lambda: NOW + timedelta(seconds=1)
+        ).read_metrics(
             LossRuntimeMetricsReadRequest(
                 "bot-manager", NOW + timedelta(seconds=1), timedelta(minutes=1)
             )
@@ -546,7 +550,9 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         self.assertIsNone(snapshot.trade_count_daily)
         self.assertTrue(snapshot.available)
         self.assertFalse(snapshot.observation_valid)
-        result = BotManagerLossRuntimeMetricsSource(Reader(snapshot)).read_metrics(
+        result = BotManagerLossRuntimeMetricsSource(
+            Reader(snapshot), timestamp_source=lambda: NOW + timedelta(seconds=1)
+        ).read_metrics(
             LossRuntimeMetricsReadRequest(
                 "bot-manager", NOW + timedelta(seconds=1), timedelta(minutes=1)
             )

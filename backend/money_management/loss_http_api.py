@@ -1511,6 +1511,30 @@ class MoneyManagementHttpBoundary:
         )
         return result, projected
 
+    def _refresh_runtime_authority(self, now):
+        """Read a new provider observation; never reuse cached pre-checkpoint metrics."""
+        dispatcher = self._dispatcher
+        hook_registration = self._hook_registration()
+        if dispatcher is None or hook_registration is None:
+            return None
+        request = LossRuntimeMetricsReadRequest(
+            "money-management-http-refresh",
+            now,
+            self._maximum_metrics_age,
+        )
+        result = dispatcher.dispatch(
+            self._app,
+            request,
+            LossRuntimeEventType.BALANCE_UPDATE,
+        )
+        if isinstance(result, LossRuntimeDispatchResult):
+            hook_registration.hook.record_evaluation_result(result)
+        projected = dispatch_money_management_governance_projection(
+            self._app,
+            self._projection_dispatcher,
+        )
+        return result, projected
+
     def update_configuration(self, payload):
         (
             expected,
@@ -1754,11 +1778,7 @@ class MoneyManagementHttpBoundary:
                     previous.sequence,
                 )
             hook_registration.hook.invalidate_evaluation()
-            source_revision = str(metrics.source_revision).replace(":", "-")
-            reevaluation = self._reevaluate(
-                f"recovery-{revision}-{source_revision}",
-                now,
-            )
+            reevaluation = self._refresh_runtime_authority(now)
             current = self.get_status()
             succeeded = bool(
                 reevaluation is not None
@@ -1845,12 +1865,15 @@ class MoneyManagementHttpBoundary:
         persisted = bool(coordination is not None and coordination.checkpoint_succeeded and not coordination.durability_pending)
         if not persisted:
             return {"accepted": False, "persisted": False, "status": "REBASE_PERSISTENCE_FAILED", "safeReasons": ["accounting rebase persistence failed"], "revision": None, "sequence": None}
-        dispatch, _ = self._reevaluate(f"accounting-rebase-{authorization.rebase_id}", now)
+        refresh = self._refresh_runtime_authority(now)
+        dispatch = refresh[0] if refresh is not None else None
         return {
             "accepted": True, "persisted": True, "status": "REBASE_ACCEPTED",
-            "rebase": result.record.to_dict(), "dispatchStatus": dispatch.status.value,
-            "revision": dispatch.runtime_revision, "sequence": dispatch.runtime_sequence,
-            "newEntryAllowed": dispatch.new_entry_allowed,
+            "rebase": result.record.to_dict(),
+            "dispatchStatus": dispatch.status.value if dispatch is not None else "UNAVAILABLE",
+            "revision": dispatch.runtime_revision if dispatch is not None else None,
+            "sequence": dispatch.runtime_sequence if dispatch is not None else None,
+            "newEntryAllowed": dispatch.new_entry_allowed if dispatch is not None else False,
         }
 
 

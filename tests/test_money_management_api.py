@@ -944,16 +944,19 @@ class MoneyManagementRecoveryApiTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
 
-    def test_missing_projection_recovers_using_cached_metrics_only(self):
+    def test_missing_projection_recovers_from_fresh_provider_observation(self):
         boundary, _, dispatcher, lifecycle, _ = ready_boundary(publish=False)
         source_calls = dispatcher._metrics_source.calls
+        dispatcher._metrics_source.values.append(
+            metrics(revision="9", at=NOW + timedelta(seconds=2))
+        )
         before = lifecycle.snapshot.sequence
         result = boundary.recover()
         self.assertTrue(result.accepted)
         self.assertTrue(result.recovered)
         self.assertTrue(result.execution_entry_allowed)
         self.assertEqual(lifecycle.snapshot.sequence, before + 1)
-        self.assertEqual(dispatcher._metrics_source.calls, source_calls)
+        self.assertEqual(dispatcher._metrics_source.calls, source_calls + 1)
 
     def test_partial_metrics_do_not_recover_or_mutate_runtime(self):
         partial = metrics(data_quality=LossRuntimeDataQuality.PARTIAL)
@@ -1015,14 +1018,14 @@ class MoneyManagementRecoveryApiTests(unittest.TestCase):
         boundary, _, _, _, _ = ready_boundary(publish=False)
         entered = threading.Event()
         release = threading.Event()
-        original = boundary._reevaluate
+        original = boundary._refresh_runtime_authority
 
         def delayed(*args):
             entered.set()
             release.wait(timeout=2)
             return original(*args)
 
-        boundary._reevaluate = delayed
+        boundary._refresh_runtime_authority = delayed
         results = []
         first = threading.Thread(
             target=lambda: results.append(boundary.recover())

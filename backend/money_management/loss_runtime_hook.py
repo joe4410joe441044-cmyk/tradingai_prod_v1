@@ -549,7 +549,10 @@ def register_money_management_runtime_hook(
                 runtime_snapshot.state_source,
                 runtime_snapshot.updated_at,
             )
-        source = BotManagerLossRuntimeMetricsSource(bot_manager)
+        source = BotManagerLossRuntimeMetricsSource(
+            bot_manager,
+            timestamp_source=timestamp_source,
+        )
         dispatcher = LossRuntimeUpdateDispatcher(source)
         hook = MoneyManagementRuntimeHook(
             app,

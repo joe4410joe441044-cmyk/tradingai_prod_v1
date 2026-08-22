@@ -71,10 +71,16 @@ def request(at=NOW + timedelta(seconds=1), age=timedelta(minutes=1)):
     return LossRuntimeMetricsReadRequest("bot-manager", at, age)
 
 
+def source(reader, completed_at=NOW + timedelta(seconds=1)):
+    return BotManagerLossRuntimeMetricsSource(
+        reader, timestamp_source=lambda: completed_at
+    )
+
+
 class RuntimeMetricsSourceTests(unittest.TestCase):
     def test_complete_metrics_are_strictly_normalized_without_raw_objects(self):
         reader = Reader(raw())
-        result = BotManagerLossRuntimeMetricsSource(reader).read_metrics(request())
+        result = source(reader).read_metrics(request())
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.AVAILABLE)
         self.assertEqual(result.metrics.equity, Decimal("1000"))
         self.assertEqual(result.metrics.realized_pnl, Decimal("0"))
@@ -85,14 +91,14 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
             result.metrics.equity = Decimal("1")
 
     def test_zero_is_not_treated_as_unknown(self):
-        result = BotManagerLossRuntimeMetricsSource(Reader(raw())).read_metrics(
+        result = source(Reader(raw())).read_metrics(
             request()
         )
         self.assertEqual(result.metrics.open_exposure, Decimal("0"))
         self.assertEqual(result.metrics.trade_count, 0)
 
     def test_missing_required_metric_is_partial_and_fail_closed(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(raw(equity=None, drawdown=None))
         ).read_metrics(request())
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.PARTIAL)
@@ -100,7 +106,7 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
         self.assertIsNone(result.metrics.equity)
 
     def test_unavailable_snapshot_has_no_metrics(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(raw(available=False))
         ).read_metrics(request())
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.UNAVAILABLE)
@@ -109,7 +115,7 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
     def test_invalid_numeric_types_are_rejected(self):
         for value in ("1000", True, float("nan"), float("inf")):
             with self.subTest(value=value):
-                result = BotManagerLossRuntimeMetricsSource(
+                result = source(
                     Reader(raw(equity=value))
                 ).read_metrics(request())
                 self.assertEqual(
@@ -129,7 +135,7 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
         )
         for values in cases:
             with self.subTest(values=values):
-                result = BotManagerLossRuntimeMetricsSource(
+                result = source(
                     Reader(raw(**values))
                 ).read_metrics(request())
                 self.assertEqual(
@@ -137,14 +143,14 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
                 )
 
     def test_missing_period_trade_count_is_partial_not_zero(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(raw(tradeCountWeekly=None))
         ).read_metrics(request())
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.PARTIAL)
         self.assertIsNone(result.metrics.trade_count_weekly)
 
     def test_session_authority_allows_unknown_historical_period_counts(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(raw(
                 tradeCountDaily=None,
                 tradeCountWeekly=None,
@@ -160,7 +166,7 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
         self.assertIsNone(result.metrics.trade_count_daily)
 
     def test_session_count_without_matching_authority_remains_partial(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(raw(
                 tradeCountDaily=None,
                 tradeCountWeekly=None,
@@ -183,7 +189,7 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
         )
         for values in cases:
             with self.subTest(values=values):
-                result = BotManagerLossRuntimeMetricsSource(
+                result = source(
                     Reader(raw(**values))
                 ).read_metrics(request())
                 self.assertEqual(
@@ -191,17 +197,28 @@ class RuntimeMetricsSourceTests(unittest.TestCase):
                 )
 
     def test_stale_and_future_snapshots_are_distinct(self):
-        stale = BotManagerLossRuntimeMetricsSource(Reader(raw())).read_metrics(
+        stale = source(
+            Reader(raw()), completed_at=NOW + timedelta(minutes=2)
+        ).read_metrics(
             request(at=NOW + timedelta(minutes=2), age=timedelta(seconds=30))
         )
-        future = BotManagerLossRuntimeMetricsSource(
+        future = source(
             Reader(raw(capturedAt=NOW + timedelta(seconds=2)))
         ).read_metrics(request())
         self.assertEqual(stale.status, LossRuntimeMetricsReadStatus.STALE)
         self.assertEqual(future.status, LossRuntimeMetricsReadStatus.INCONSISTENT)
 
+    def test_observation_created_during_read_is_not_artificial_future(self):
+        captured = NOW + timedelta(seconds=1, microseconds=500000)
+        result = source(
+            Reader(raw(capturedAt=captured)),
+            completed_at=NOW + timedelta(seconds=2),
+        ).read_metrics(request(at=NOW + timedelta(seconds=1)))
+        self.assertEqual(result.status, LossRuntimeMetricsReadStatus.AVAILABLE)
+        self.assertEqual(result.metrics.captured_at, captured)
+
     def test_reader_exception_is_sanitized(self):
-        result = BotManagerLossRuntimeMetricsSource(
+        result = source(
             Reader(error=RuntimeError("secret /tmp/private"))
         ).read_metrics(request())
         self.assertEqual(result.status, LossRuntimeMetricsReadStatus.FAILED)
