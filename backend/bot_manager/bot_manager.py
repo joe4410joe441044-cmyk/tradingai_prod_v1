@@ -2071,6 +2071,28 @@ class BotManager:
             raise TypeError("Money Management config provider required")
         self.production_ams_mm_config_provider = mm_config_provider
 
+    def _resolve_leverage_authority(self, config):
+        """Resolve requested leverage against the active MM maximum (fail-closed).
+
+        The MM authority is read-only and shared by Paper and Live.  If the
+        active Money Management configuration is unavailable, the resolution
+        fails closed and START must not use the raw requested leverage.
+        """
+        provider = self.production_ams_mm_config_provider
+        mm_config = provider() if callable(provider) else None
+        maximum_leverage = (
+            getattr(mm_config, "maximum_leverage", None)
+            if mm_config is not None
+            else None
+        )
+        from backend.money_management.leverage_authority import (
+            resolve_effective_leverage,
+        )
+        return resolve_effective_leverage(
+            config.get("leverage"),
+            maximum_leverage,
+        )
+
     def get_official_mm_capital_authority(self, *, force=False):
         """Return the MM-owned monitoring contract shared with AMS."""
         observation = self.refresh_production_ams_read_model(force=force)
@@ -2574,6 +2596,26 @@ class BotManager:
     def start(self, config):
 
         try:
+            leverage_authority = self._resolve_leverage_authority(config)
+        except Exception:
+            return {
+                "status": "error",
+                "reason": "MONEY_MANAGEMENT_AUTHORITY_UNAVAILABLE",
+                "success": False,
+                "completed": False,
+                "stateUnknown": True,
+            }
+        if not leverage_authority.allowed:
+            return {
+                "status": "error",
+                "reason": leverage_authority.block_reason.value,
+                "success": False,
+                "completed": False,
+                "stateUnknown": True,
+            }
+        self._start_leverage_authority = leverage_authority
+
+        try:
             requested_mode = str(
                 config.get("mode", "")
             ).strip().lower()
@@ -2780,6 +2822,28 @@ class BotManager:
             )
 
             self.config = dict(config)
+
+            # Leverage is resolved by Money Management authority at the START
+            # boundary; Execution consumes the validated effective leverage,
+            # never the raw requested value as its own authority.
+            start_leverage_authority = getattr(
+                self,
+                "_start_leverage_authority",
+                None,
+            )
+            if (
+                start_leverage_authority is not None
+                and start_leverage_authority.allowed
+            ):
+                self.config["leverage"] = float(
+                    start_leverage_authority.effective_leverage
+                )
+                self.config["effective_leverage"] = float(
+                    start_leverage_authority.effective_leverage
+                )
+                self.config["maximum_leverage"] = float(
+                    start_leverage_authority.maximum_leverage
+                )
 
             self.config["exchange"] = self.exchange_name
             self.config["symbol"] = active_symbol
