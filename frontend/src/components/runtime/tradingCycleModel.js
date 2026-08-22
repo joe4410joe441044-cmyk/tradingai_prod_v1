@@ -111,18 +111,37 @@ const createTradingCycleModel = (decision) => {
     const snapshot = decision || {};
     const stages = snapshot.stages || {};
     
-    const currentStageIndex = determineCurrentStage(decision);
+    // Priority: Use backend-projected values if available
+    let currentStageIndex = snapshot.currentStageIndex;
+    let currentActivity = snapshot.currentActivity;
+    let selectedSymbol = snapshot.selectedSymbol || getSelectedSymbol(decision);
+    let nextStage = null;
+
+    // Fallback to frontend logic if backend values not available
+    if (currentStageIndex === null || currentStageIndex === undefined) {
+        currentStageIndex = determineCurrentStage(decision);
+    }
+
+    if (!currentActivity) {
+        const fallbackStage = STAGES.find(s => s.index === currentStageIndex);
+        currentActivity = getCurrentActivity(decision, fallbackStage?.key);
+    }
+
+    // Determine stage statuses
     const blockedStageIndex = snapshot.blockingStage ? currentStageIndex : -1;
-    
     const stageStatuses = STAGES.map(stage => ({
         ...stage,
         status: determineStageStatus(stage.index, currentStageIndex, blockedStageIndex),
     }));
 
     const currentStage = stageStatuses.find(s => s.index === currentStageIndex);
-    const nextStage = stageStatuses.find(s => s.index === currentStageIndex + 1);
-    const selectedSymbol = getSelectedSymbol(decision);
-    const currentActivity = getCurrentActivity(decision, currentStage?.key);
+    
+    // Get next stage from backend or calculate
+    if (snapshot.nextStage) {
+        nextStage = STAGES.find(s => s.label === snapshot.nextStage);
+    } else if (currentStageIndex !== null && currentStageIndex < STAGES.length - 1) {
+        nextStage = stageStatuses.find(s => s.index === currentStageIndex + 1);
+    }
 
     return {
         stages: stageStatuses,

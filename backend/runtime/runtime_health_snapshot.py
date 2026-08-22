@@ -203,6 +203,25 @@ def build_trading_decision_snapshot(
     HOLD as the final decision when the Python strategy blocked entry first.
     """
 
+    # Define UI trading cycle stages (15 stages as per TR-DASH-DECISION-B9)
+    UI_STAGES = [
+        {"key": "parameter", "label": "PARAMETER CONTEXT", "index": 0},
+        {"key": "marketSelection", "label": "MARKET SELECTION", "index": 1},
+        {"key": "marketData", "label": "MARKET DATA", "index": 2},
+        {"key": "featureBuilder", "label": "FEATURE BUILDER", "index": 3},
+        {"key": "microEdgeStrategy", "label": "MICRO EDGE STRATEGY", "index": 4},
+        {"key": "aiDecision", "label": "AI DECISION / REVIEW", "index": 5},
+        {"key": "moneyManagement", "label": "MONEY MANAGEMENT", "index": 6},
+        {"key": "governance", "label": "GOVERNANCE", "index": 7},
+        {"key": "execution", "label": "EXECUTION", "index": 8},
+        {"key": "position", "label": "POSITION", "index": 9},
+        {"key": "exitMonitoring", "label": "EXIT MONITORING", "index": 10},
+        {"key": "settlement", "label": "SETTLEMENT", "index": 11},
+        {"key": "positionClosed", "label": "POSITION CLOSED", "index": 12},
+        {"key": "performanceRecord", "label": "PERFORMANCE RECORD", "index": 13},
+        {"key": "readyForNext", "label": "READY FOR NEXT TRADE", "index": 14},
+    ]
+
     result = runtime_result if running and isinstance(runtime_result, dict) else {}
     strategy = _strategy_state(result)
     strategy_reached = bool(result.get("strategyRuntimeReached"))
@@ -279,6 +298,65 @@ def build_trading_decision_snapshot(
     elif governance_reached and not governance_allowed:
         blocking_stage, blocking_reason = "GOVERNANCE", governance_reason or "GOVERNANCE_BLOCKED"
 
+    # Project currentStage, currentStageIndex, currentActivity, nextStage
+    current_stage = None
+    current_stage_index = None
+    current_activity = None
+    next_stage = None
+
+    if not running:
+        current_activity = "BOT_STOPPED"
+    else:
+        # Determine current stage based on runtime facts with precedence
+        if position_active:
+            current_stage = "POSITION"
+            current_stage_index = 9
+            current_activity = "MONITORING_POSITION"
+        elif pending_order:
+            current_stage = "EXECUTION"
+            current_stage_index = 8
+            current_activity = "WAITING_FOR_FILL"
+        elif blocking_stage == "GOVERNANCE":
+            current_stage = "GOVERNANCE"
+            current_stage_index = 7
+            current_activity = governance_reason or "CHECKING_SAFETY"
+        elif blocking_stage == "MONEY MANAGEMENT":
+            current_stage = "MONEY MANAGEMENT"
+            current_stage_index = 6
+            current_activity = money_reason or "CALCULATING_RISK"
+        elif blocking_stage == "PYTHON STRATEGY":
+            current_stage = "MICRO EDGE STRATEGY"
+            current_stage_index = 4
+            current_activity = strategy_reason or "EVALUATING_STRATEGY"
+        elif blocking_stage == "MARKET":
+            current_stage = "MARKET DATA"
+            current_stage_index = 2
+            current_activity = "STALE_DATA" if stale else "WAITING_FOR_DATA"
+        elif strategy_reached and strategy_allowed and money_allowed and governance_allowed:
+            current_stage = "EXECUTION"
+            current_stage_index = 8
+            current_activity = "READY_TO_EXECUTE"
+        elif strategy_reached:
+            current_stage = "MICRO EDGE STRATEGY"
+            current_stage_index = 4
+            current_activity = "EVALUATING_STRATEGY"
+        elif market_ready:
+            current_stage = "MARKET DATA"
+            current_stage_index = 2
+            current_activity = "VERIFYING_DATA"
+        else:
+            current_stage = "MARKET SELECTION"
+            current_stage_index = 1
+            current_activity = "SCANNING_MARKET"
+
+        # Determine next stage
+        if current_stage_index is not None and current_stage_index < len(UI_STAGES) - 1:
+            next_stage = UI_STAGES[current_stage_index + 1]["label"]
+
+    # Map to UI stage labels and ensure consistency
+    if current_stage is None:
+        current_activity = current_activity or "UNKNOWN"
+
     if position_active:
         current_state = "POSITION OPEN"
     elif execution_status == "WAITING FOR FILL":
@@ -335,6 +413,13 @@ def build_trading_decision_snapshot(
         "currentState": current_state,
         "blockingStage": blocking_stage,
         "blockingReason": blocking_reason,
+        # New fields for trading cycle status projection (TR-DASH-DECISION-B9)
+        "currentStage": current_stage,
+        "currentStageIndex": current_stage_index,
+        "currentActivity": current_activity,
+        "nextStage": next_stage,
+        "selectedSymbol": symbol,
+        "cycleProgressUpdatedAt": timestamp,
         "stages": {
             "market": {"reached": bool(market_ready), "status": "PASS" if market_ready else "NOT READY", "reason": None if market_ready else "MARKET_DATA_MISSING_OR_STALE"},
             "pythonStrategy": {"evaluated": strategy_reached, "reached": strategy_reached, "status": strategy_decision, "decision": strategy_decision, "confidence": strategy.get("confidence", result.get("strategyConfidence")), "executionAllowed": strategy.get("executionAllowed"), "reason": strategy_reason, "suppressionReason": strategy.get("suppressionReason"), "evaluatedAt": timestamp if strategy_reached else None},
