@@ -269,6 +269,7 @@ export default function OperationPreparation({
         mmEntryReadiness,
         mmReadiness,
         mmReadinessSource,
+        leverageReadiness,
     } = deriveOperationReadiness({
         selectionMode: settings.selectionMode,
         autoMarketState: config.autoMarketState,
@@ -282,6 +283,8 @@ export default function OperationPreparation({
         executionEntryAllowed,
         recommendedAction,
         riskState,
+        requestedLeverage: settings.requestedLeverage,
+        maximumLeverage: mmConfiguration?.maximumLeverage,
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);
@@ -644,6 +647,7 @@ return (
                             <DerivedRow label="Money Management（資金管理）" source={mmReadinessSource} status value={mmReadiness} />
                             <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
                             <DerivedRow label="Execution（執行）" source="RUNTIME" status value={executionReadiness} />
+                            <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
                         </div>
                     </Section>
                 </div>

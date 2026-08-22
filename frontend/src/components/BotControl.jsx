@@ -772,7 +772,9 @@ export default function BotControl({
                 : "unknown"
     );
 
-    const effectiveSelectionMode = createOperationPreparationSettings(config).selectionMode;
+    const operationSettings = createOperationPreparationSettings(config);
+    const effectiveSelectionMode = operationSettings.selectionMode;
+    const canonicalRequestedLeverage = operationSettings.requestedLeverage;
     const startReadiness = deriveOperationReadiness({
         selectionMode: effectiveSelectionMode,
         autoMarketState: config?.autoMarketState,
@@ -786,6 +788,8 @@ export default function BotControl({
         executionEntryAllowed,
         recommendedAction,
         riskState,
+        requestedLeverage: canonicalRequestedLeverage,
+        maximumLeverage: mmConfiguration?.maximumLeverage,
     });
     const startReady = startReadiness.reviewReadiness === "READY";
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
@@ -832,7 +836,7 @@ export default function BotControl({
                     position_size: config?.positionSize ?? 0,
                     max_drawdown_pct: config?.maxDd ?? 5,
                     sl_percent: config?.sl ?? 1,
-                    leverage: config?.leverage ?? 5,
+                    leverage: canonicalRequestedLeverage,
                     timeframe: config?.timeframe || "1m",
                     tp_percent: config?.tp ?? 2,
                     trailing_stop: config?.trailing === true,
@@ -1243,6 +1247,7 @@ export default function BotControl({
                 handleAutoTradeChange={handleAutoTradeChange}
                 mmDraft={mmDraft}
                 mmConfiguration={mmConfiguration}
+                leverageAuthority={config?.leverageAuthority}
                 mmUpdating={mmUpdating}
                 mmLoading={mmLoading}
                 mmConfigurationError={mmConfigurationError}

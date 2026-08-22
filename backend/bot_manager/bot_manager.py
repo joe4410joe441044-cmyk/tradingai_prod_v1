@@ -168,6 +168,7 @@ class BotManager:
         self.selection_mode = "MANUAL"
         self.auto_market_selection_observation = None
         self.production_ams_mm_config_provider = None
+        self.money_management_config_provider = None
         self.production_ams_observation_ttl = 30
         self.production_ams_last_observed_at = 0.0
         self.production_ams_observation_lock = threading.Lock()
@@ -2071,6 +2072,12 @@ class BotManager:
             raise TypeError("Money Management config provider required")
         self.production_ams_mm_config_provider = mm_config_provider
 
+    def configure_money_management_config_provider(self, config_provider):
+        """Attach the generic saved Money Management configuration authority."""
+        if not callable(config_provider):
+            raise TypeError("Money Management config provider required")
+        self.money_management_config_provider = config_provider
+
     def _resolve_leverage_authority(self, config):
         """Resolve requested leverage against the active MM maximum (fail-closed).
 
@@ -2078,7 +2085,7 @@ class BotManager:
         active Money Management configuration is unavailable, the resolution
         fails closed and START must not use the raw requested leverage.
         """
-        provider = self.production_ams_mm_config_provider
+        provider = self.money_management_config_provider
         mm_config = provider() if callable(provider) else None
         maximum_leverage = (
             getattr(mm_config, "maximum_leverage", None)
@@ -2605,6 +2612,8 @@ class BotManager:
                 "completed": False,
                 "stateUnknown": True,
             }
+        self._last_requested_leverage = config.get("leverage")
+        self._last_leverage_authority = leverage_authority
         if not leverage_authority.allowed:
             return {
                 "status": "error",
@@ -9781,11 +9790,39 @@ class BotManager:
                     else "STALE"
                 )
             ),
+
+            "leverageAuthority": self._leverage_authority_projection(),
         }
 
         status_payload.update(account_status_fields)
 
         return status_payload
+
+    def _leverage_authority_projection(self):
+        """Project the last START resolution without re-resolving authority."""
+        authority = getattr(self, "_last_leverage_authority", None)
+        if authority is None:
+            return {
+                "requestedLeverage": None,
+                "maximumLeverage": None,
+                "effectiveLeverage": None,
+                "allowed": None,
+                "reason": "LEVERAGE_AUTHORITY_UNAVAILABLE",
+            }
+        return {
+            "requestedLeverage": getattr(self, "_last_requested_leverage", None),
+            "maximumLeverage": (
+                float(authority.maximum_leverage)
+                if authority.maximum_leverage is not None else None
+            ),
+            "effectiveLeverage": (
+                float(authority.effective_leverage)
+                if authority.allowed and authority.effective_leverage is not None
+                else None
+            ),
+            "allowed": authority.allowed,
+            "reason": authority.block_reason.value,
+        }
 
     # =========================
     # STATUS

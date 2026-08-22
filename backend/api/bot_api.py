@@ -302,6 +302,8 @@ class StatusResponse(BaseModel):
 
     autoMarketSelection: dict = Field(default_factory=dict)
 
+    leverageAuthority: dict = Field(default_factory=dict)
+
     exchange: Optional[str] = None
 
     orderbookSource: Optional[str] = None

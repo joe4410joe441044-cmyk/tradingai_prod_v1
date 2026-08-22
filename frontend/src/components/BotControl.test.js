@@ -575,6 +575,7 @@ const setMmConfiguration = (
         riskPerTradePercent: "0.50",
         totalExposurePercent: "20.00",
         maximumDrawdownPercent: "5.00",
+        maximumLeverage: "5",
         ...overrides,
     };
 };
@@ -1042,7 +1043,9 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         assert.equal(pending.props.disabled, true);
         pending.props.onClick();
         assert.equal(mock.requests.length, 1);
-        assert.equal(JSON.parse(mock.requests[0].options.body).mode, "paper");
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.mode, "paper");
+        assert.equal(payload.leverage, 3);
         response.resolve(jsonResponse({ body: { success: true, status: "started" } }));
         await first;
     } finally { clearMmConfiguration(); mock.restore(); }
@@ -1067,6 +1070,39 @@ test("START payload uses the single effective selectionMode source", async () =>
         await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
         assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
     } finally { clearMmConfiguration(); mock.restore(); }
+});
+
+test("START blocks over-limit leverage without clamping the payload", async () => {
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    setMmConfiguration({ maximumLeverage: "5" });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { leverage: 10 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally { clearMmConfiguration(); mock.restore(); }
+});
+
+test("unsaved MM draft maximum cannot authorize START", async () => {
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    setMmConfiguration({ maximumLeverage: "5" });
+    globalThis.__MM_DRAFT__ = { maximumLeverage: "10" };
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { leverage: 10 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        clearMmDraft();
+        mock.restore();
+    }
 });
 
 test("START payload risk_percent uses saved MM configuration, ignoring legacy config and MM draft", async () => {
@@ -1163,6 +1199,7 @@ test("START payload risk_percent uses saved MM risk over legacy config risk_perc
 });
 
 test("START fails closed when saved MM risk is unavailable", async () => {
+    setMmConfiguration({ riskPerTradePercent: undefined });
     const mock = installFetchMock(() => {
         throw new Error("No request expected");
     });
@@ -1172,6 +1209,7 @@ test("START fails closed when saved MM risk is unavailable", async () => {
         assert.equal(mock.requests.length, 0);
         assert.equal(textIncludes(renderer.root, "risk-per-trade is unavailable"), true);
     } finally {
+        clearMmConfiguration();
         mock.restore();
     }
 });
@@ -1306,6 +1344,7 @@ test("running BOT Runtime Auto Trade reaches the existing Governance handler", a
 
 test("START BOT is enabled when MM, Emergency, and remaining readiness are READY", async () => {
     setMmStatus({ executionEntryAllowed: true });
+    setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
         const start = findButton(renderer.root, "START BOT");
@@ -1313,6 +1352,7 @@ test("START BOT is enabled when MM, Emergency, and remaining readiness are READY
         assert.equal(start.props.disabled, false);
     } finally {
         clearMmStatus();
+        clearMmConfiguration();
     }
 });
 
@@ -1709,4 +1749,6 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
     assert.doesNotMatch(source, /deriveMmReadiness|deriveReviewReadiness/);
     assert.match(source, /deriveOperationReadiness/);
     assert.match(source, /startReady/);
+    assert.match(source, /leverage: canonicalRequestedLeverage/);
+    assert.doesNotMatch(source, /leverage: config\?\.leverage|leverage: .*\?\? 5/);
 });

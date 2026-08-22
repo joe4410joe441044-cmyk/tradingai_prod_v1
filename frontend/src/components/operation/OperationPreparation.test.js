@@ -22,7 +22,7 @@ const modelSource =
 '    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],' + "\n" +
 '    maxExposure: [10, 20, 30, 40, 50],' + "\n" +
 '    maxDrawdown: [5, 7, 10],' + "\n" +
-'    requestedLeverage: [1, 2, 3, 4, 5],' + "\n" +
+'    requestedLeverage: [1, 2, 3, 4, 5, 10],' + "\n" +
 ' });' + "\n" +
 "\n" +
 'const supportedValue = (values, candidate, fallback) => (' + "\n" +
@@ -45,7 +45,11 @@ const modelSource =
 '        "XRPUSDTM",' + "\n" +
 '    ),' + "\n" +
 '    compounding: false,' + "\n" +
-'    requestedLeverage: 3,' + "\n" +
+'    requestedLeverage: supportedValue(' + "\n" +
+'        OPERATION_PREPARATION_OPTIONS.requestedLeverage,' + "\n" +
+'        Number(config.leverage),' + "\n" +
+'        3,' + "\n" +
+'    ),' + "\n" +
 '    loopOnStart: false,' + "\n" +
 '    autoTradeOnStart: false,' + "\n" +
 ' });' + "\n" +
@@ -59,7 +63,7 @@ const modelSource =
 '    riskPerTrade: Number.isFinite(Number(riskPerTradePercent))' + "\n" +
 '        ? `${Number(riskPerTradePercent).toFixed(2)}%`' + "\n" +
 '        : "UNAVAILABLE",' + "\n" +
-'    requestedLeverage: "3x",' + "\n" +
+'    requestedLeverage: `${settings.requestedLeverage}x`,' + "\n" +
 '    loop: settings.loopOnStart ? "ON" : "OFF",' + "\n" +
 '    autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",' + "\n" +
 ' });' + "\n" +
@@ -264,6 +268,7 @@ const mmConfig = (overrides = {}) => ({
     riskPerTradePercent: "0.50",
     totalExposurePercent: "20.00",
     maximumDrawdownPercent: "5.00",
+    maximumLeverage: "5",
     ...overrides,
 });
 
@@ -518,7 +523,7 @@ test("preparation model keeps UI-review defaults separate from legacy execution 
     assert.equal(settings.riskPerTrade, undefined);
     assert.equal(settings.maxExposure, undefined);
     assert.equal(settings.maxDrawdown, undefined);
-    assert.equal(settings.requestedLeverage, 3);
+    assert.equal(settings.requestedLeverage, 5);
     assert.equal(settings.loopOnStart, false);
     assert.equal(settings.autoTradeOnStart, false);
     assert.equal(operationPreparationSummary(settings).symbol, "AUTO SELECT");
@@ -654,4 +659,71 @@ test("MM conflict and dirty states are reported instead of a fake saved state", 
     });
     assert.equal(normalizedText(findTestId(conflictRenderer.root, "mm-save-state")), "CONFLICT");
     assert.equal(findButton(conflictRenderer.root, "Save MM").props.disabled, true);
+});
+
+test("requested, MM maximum, and Backend effective leverage remain distinct", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", leverage: 3 },
+        mmConfiguration: mmConfig({ maximumLeverage: "5" }),
+        leverageAuthority: {
+            requestedLeverage: 3,
+            maximumLeverage: 5,
+            effectiveLeverage: 3,
+            allowed: true,
+            reason: "NONE",
+        },
+    });
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(findSelect(renderer.root, "operation-prep-leverage").props.value, 3);
+    assert.equal(content.includes("MM Leverage Limit（MMレバレッジ上限） 5x"), true);
+    assert.equal(content.includes("Effective Leverage（有効レバレッジ） 3x"), true);
+});
+
+test("equal requested and maximum displays Backend effective leverage", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", leverage: 5 },
+        mmConfiguration: mmConfig({ maximumLeverage: "5" }),
+        leverageAuthority: { effectiveLeverage: 5, allowed: true, reason: "NONE" },
+    });
+    assert.equal(findSelect(renderer.root, "operation-prep-leverage").props.value, 5);
+    assert.equal(
+        normalizedText(descendants(renderer.root)).includes(
+            "Effective Leverage（有効レバレッジ） 5x",
+        ),
+        true,
+    );
+});
+
+test("over-limit Backend BLOCK never appears as a clamped effective value", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", leverage: 10 },
+        mmConfiguration: mmConfig({ maximumLeverage: "5" }),
+        leverageAuthority: {
+            requestedLeverage: 10,
+            maximumLeverage: 5,
+            effectiveLeverage: null,
+            allowed: false,
+            reason: "MAXIMUM_LEVERAGE",
+        },
+    });
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(findSelect(renderer.root, "operation-prep-leverage").props.value, 10);
+    assert.equal(content.includes("— · MAXIMUM_LEVERAGE"), true);
+    assert.equal(content.includes("Effective Leverage（有効レバレッジ） 5x"), false);
+});
+
+test("missing authority never falls back from requested to effective", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", leverage: 3 },
+        mmConfiguration: null,
+        leverageAuthority: null,
+    });
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(findSelect(renderer.root, "operation-prep-leverage").props.value, 3);
+    assert.equal(content.includes("MM Leverage Limit（MMレバレッジ上限） UNAVAILABLE"), true);
+    assert.equal(content.includes("Effective Leverage（有効レバレッジ） UNAVAILABLE"), true);
 });

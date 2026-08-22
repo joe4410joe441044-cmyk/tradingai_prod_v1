@@ -782,6 +782,18 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
         self.assertEqual(rendered["maximumPositionNotional"], "80")
         self.assertEqual(rendered["singleSymbolExposurePercent"], "8")
 
+    def test_maximum_leverage_projection_comes_from_active_config(self):
+        boundary, app, _, _, _ = ready_boundary()
+        provider = app.state.money_management.base_config_provider
+        provider.replace_config(replace(
+            provider.get_config(),
+            maximum_leverage=Decimal("3.5"),
+        ))
+
+        rendered = boundary.get_configuration().to_dict()
+
+        self.assertEqual(rendered["maximumLeverage"], "3.5")
+
     def test_invalid_update_never_partially_applies(self):
         boundary, _, _, _, _ = ready_boundary()
         before = boundary.get_configuration()

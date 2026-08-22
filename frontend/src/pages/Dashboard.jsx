@@ -331,6 +331,7 @@ useEffect(() => {
                                 realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,
                                 realOrderAuthorityKnown: typeof botStatus?.realOrderAllowed === "boolean"
                                     || typeof botStatus?.real_order_allowed === "boolean",
+                                leverageAuthority: botStatus?.leverageAuthority ?? null,
                             }}
 
                             executionEnabled={

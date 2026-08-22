@@ -5,7 +5,7 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],
     maxExposure: [10, 20, 30, 40, 50],
     maxDrawdown: [5, 7, 10],
-    requestedLeverage: [1, 2, 3, 4, 5],
+    requestedLeverage: [1, 2, 3, 4, 5, 7, 10],
 });
 
 const supportedValue = (values, candidate, fallback) => (
@@ -29,11 +29,9 @@ export const createOperationPreparationSettings = (config = {}) => ({
         "XRPUSDTM",
     ),
     compounding: false,
-    requestedLeverage: supportedValue(
-        OPERATION_PREPARATION_OPTIONS.requestedLeverage,
-        Number(config.leverage),
-        3,
-    ),
+    requestedLeverage: config.leverage == null || config.leverage === ""
+        ? 3
+        : Number(config.leverage),
     loopOnStart: Boolean(config.loopOnStart),
     autoTradeOnStart: Boolean(config.autoTradeOnStart),
 });
@@ -134,6 +132,8 @@ export const deriveOperationReadiness = ({
     executionEntryAllowed,
     recommendedAction,
     riskState,
+    requestedLeverage,
+    maximumLeverage,
 } = {}) => {
     const selectionRuntime = normalizeReadiness(
         autoMarketState,
@@ -168,6 +168,15 @@ export const deriveOperationReadiness = ({
     const mmReadinessSource = (
         executionEntryAllowed === true || executionEntryAllowed === false
     ) ? "RUNTIME" : "NOT CONNECTED";
+    const requestedLeverageValue = Number(requestedLeverage);
+    const maximumLeverageValue = Number(maximumLeverage);
+    const leverageReadiness = (
+        Number.isFinite(requestedLeverageValue)
+        && requestedLeverageValue > 0
+        && Number.isFinite(maximumLeverageValue)
+        && maximumLeverageValue > 0
+        && requestedLeverageValue <= maximumLeverageValue
+    ) ? "READY" : "BLOCKED";
     const readinessValues = [
         emergencyReadiness,
         positionState,
@@ -176,6 +185,7 @@ export const deriveOperationReadiness = ({
         mmReadiness,
         governanceReadiness,
         executionReadiness,
+        leverageReadiness,
     ];
     const reviewReadiness = deriveReviewReadiness(readinessValues);
 
@@ -193,5 +203,6 @@ export const deriveOperationReadiness = ({
         mmEntryReadiness,
         mmReadiness,
         mmReadinessSource,
+        leverageReadiness,
     };
 };
