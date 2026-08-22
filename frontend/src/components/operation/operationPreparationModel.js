@@ -79,6 +79,21 @@ export const pendingOrderReadiness = (pendingOrder) => {
     return "UNKNOWN";
 };
 
+export const savedMmConfigurationReadiness = (configuration) => {
+    if (!configuration || typeof configuration !== "object") return "BLOCKED";
+
+    const requiredPositiveFields = [
+        "riskPerTradePercent",
+        "totalExposurePercent",
+        "maximumDrawdownPercent",
+        "maximumLeverage",
+    ];
+    return requiredPositiveFields.every((field) => {
+        const value = Number(configuration[field]);
+        return Number.isFinite(value) && value > 0;
+    }) ? "READY" : "BLOCKED";
+};
+
 export const deriveMmReadiness = ({
     executionEntryAllowed,
     recommendedAction,

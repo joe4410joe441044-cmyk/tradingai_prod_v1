@@ -258,9 +258,10 @@ export default function OperationPreparation({
     const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
 
-    const {
+     const {
         reviewReadiness,
         startReadiness,
+        entryReady,
         entryReadiness,
         selectionRuntime,
         selectedRuntimeSymbol,
@@ -278,6 +279,7 @@ export default function OperationPreparation({
     } = deriveOperationReadiness({
         botRunning,
         tradingMode: settings.tradingMode,
+<<<<<<< HEAD
         dryRun: config.dryRun ?? config.dry_run ?? (
             settings.tradingMode === "PAPER"
         ),
