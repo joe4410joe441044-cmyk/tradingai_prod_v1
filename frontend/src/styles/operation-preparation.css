@@ -7,26 +7,94 @@
     justify-content: flex-start;
 }
 
-/* 顶部紧急操作栏 */
-.operation-top-emergency {
-    width: 100%;
-}
-
-.operation-emergency-header {
+/* 顶部标题栏 */
+.operation-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    flex-wrap: wrap;
+    padding: 8px 0;
+    border-bottom: 1px solid #2d405e;
+    margin-bottom: 8px;
 }
 
-.operation-emergency-section {
+.operation-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #66e3ff;
+}
+
+/* 紧急操作控件 */
+.operation-emergency-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.operation-emergency-controls .emergency-stop-button {
+    width: auto;
+    min-width: 140px;
+    height: 36px;
+    font-size: 11px;
+    padding: 0 12px;
+}
+
+.operation-emergency-controls .operation-emergency-lock {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #243149;
+    border-radius: 8px;
+    background: #0b101a;
+    color: #9badc6;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.operation-emergency-controls .operation-emergency-lock strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--operation-font-mono);
+    font-size: 11px;
+    line-height: 1.1;
+    letter-spacing: 0;
+}
+
+.operation-emergency-controls .operation-emergency-lock strong::before {
+    color: currentColor;
+    content: "●";
+    font-size: 9px;
+    line-height: 1;
+}
+
+.operation-emergency-controls .operation-emergency-lock strong.locked {
+    color: #ff7272;
+}
+
+.operation-emergency-controls .operation-emergency-lock strong.unlocked {
+    color: #a8b5c9;
+}
+
+.operation-emergency-controls .operation-emergency-lock strong.unknown {
+    color: #e8b45f;
+}
+
+/* 紧急状态详细信息 */
+.operation-emergency-details {
     width: 100%;
     min-width: 0;
     padding: 10px;
     border: 1px solid rgba(255, 80, 80, .3);
     border-radius: 4px;
     background: rgba(30, 8, 8, .56);
+    margin-bottom: 8px;
 }
 
 /* 主网格布局 */

@@ -367,90 +367,87 @@ export default function OperationPreparation({
 
 return (
         <div className="operation-preparation" data-testid="operation-preparation">
-            {/* 顶部紧急操作栏 */}
-            <div className="operation-top-emergency">
-                <section className="operation-emergency-section">
-                    <div className="operation-emergency-header">
-                        <div className="operation-section-title">
-                            EMERGENCY（緊急操作）
-                        </div>
-                        
-                        <button
-                            className="emergency-stop-button operation-emergency-button"
-                            disabled={resolvedEmergencyButtonDisabled}
-                            onClick={openEmergencyConfirm}
-                            aria-busy={emergencyPending ? "true" : "false"}
-                            type="button"
-                        >
-                            {emergencyPending
-                                ? "EMERGENCY IN PROGRESS..."
-                                : "EMERGENCY STOP"
-                            }
-                        </button>
-
-                        <div className="operation-emergency-lock">
-                            <span className="operation-state-label">
-                                LOCK
-                            </span>
-                            <strong className={resolvedEmergencyLockClass}>
-                                ● {resolvedEmergencyLockValue}
-                            </strong>
-                        </div>
+            {/* 顶部标题和紧急操作栏 */}
+            <div className="operation-header">
+                <div className="operation-title">OPERATION</div>
+                <div className="operation-emergency-controls">
+                    <button
+                        className="emergency-stop-button operation-emergency-button"
+                        disabled={resolvedEmergencyButtonDisabled}
+                        onClick={openEmergencyConfirm}
+                        aria-busy={emergencyPending ? "true" : "false"}
+                        type="button"
+                    >
+                        {emergencyPending
+                            ? "EMERGENCY IN PROGRESS..."
+                            : "EMERGENCY STOP"
+                        }
+                    </button>
+                    <div className="operation-emergency-lock">
+                        <span className="operation-state-label">
+                            LOCK
+                        </span>
+                        <strong className={resolvedEmergencyLockClass}>
+                            ● {resolvedEmergencyLockValue}
+                        </strong>
                     </div>
+                </div>
+            </div>
 
-                    {emergencyStateCode !== "READY" && (
-                        <div
-                            className={
-                                "operation-emergency-status "
-                                + `operation-emergency-status--${emergencyStateDetails.tone}`
-                            }
-                        >
-                            <span className="operation-emergency-status__eyebrow">
-                                EMERGENCY STATUS
+            {/* 紧急状态详细信息（仅在非READY状态显示） */}
+            {emergencyStateCode !== "READY" && (
+                <div className="operation-emergency-details">
+                    <div
+                        className={
+                            "operation-emergency-status "
+                            + `operation-emergency-status--${emergencyStateDetails.tone}`
+                        }
+                    >
+                        <span className="operation-emergency-status__eyebrow">
+                            EMERGENCY STATUS
+                        </span>
+
+                        <strong className="operation-emergency-status__state">
+                            {emergencyStateDetails.label}
+                        </strong>
+
+                        <span className="operation-emergency-status__message">
+                            {emergencyStateDetails.text}
+                        </span>
+
+                        {emergencyStateCode === "PROCESSING" && (
+                            <span className="operation-emergency-status__pending">
+                                PROCESSING
                             </span>
+                        )}
 
-                            <strong className="operation-emergency-status__state">
-                                {emergencyStateDetails.label}
-                            </strong>
+                        {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
+                            <div className="operation-emergency-facts">
+                                {lockedFacts.map((fact) => (
+                                    <span key={fact}>
+                                        {fact}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
 
+                        {emergencyStateCode === "ACTION_REQUIRED"
+                            && actionWarnings.length > 0 && (
+                            <div className="operation-emergency-warnings">
+                                {actionWarnings.map((warning) => (
+                                    <span key={warning}>
+                                        {warning}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {lastResultMessage && (
                             <span className="operation-emergency-status__message">
-                                {emergencyStateDetails.text}
+                                {lastResultMessage}
                             </span>
-
-                            {emergencyStateCode === "PROCESSING" && (
-                                <span className="operation-emergency-status__pending">
-                                    PROCESSING
-                                </span>
-                            )}
-
-                            {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
-                                <div className="operation-emergency-facts">
-                                    {lockedFacts.map((fact) => (
-                                        <span key={fact}>
-                                            {fact}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-
-                            {emergencyStateCode === "ACTION_REQUIRED"
-                                && actionWarnings.length > 0 && (
-                                <div className="operation-emergency-warnings">
-                                    {actionWarnings.map((warning) => (
-                                        <span key={warning}>
-                                            {warning}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-
-                            {lastResultMessage && (
-                                <span className="operation-emergency-status__message">
-                                    {lastResultMessage}
-                                </span>
-                            )}
-                        </div>
-                    )}
+                        )}
+                    </div>
 
                     {emergencyConfirmOpen && (
                         <div
@@ -532,8 +529,8 @@ return (
                             {unlockError}
                         </div>
                     )}
-                </section>
-            </div>
+                </div>
+            )}
 
             {/* 三列布局 */}
             <div className="operation-main-grid">
