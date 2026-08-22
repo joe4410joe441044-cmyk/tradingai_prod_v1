@@ -256,8 +256,12 @@ export default function OperationPreparation({
     const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
 
-    const {
+     const {
         reviewReadiness,
+        startReady,
+        startReadiness,
+        entryReady,
+        entryReadiness,
         selectionRuntime,
         selectedRuntimeSymbol,
         selectionReadiness,
@@ -270,6 +274,9 @@ export default function OperationPreparation({
         mmReadiness,
         mmReadinessSource,
     } = deriveOperationReadiness({
+        botRunning,
+        tradingMode: settings.tradingMode,
+        dryRun: settings.tradingMode === "PAPER",
         selectionMode: settings.selectionMode,
         autoMarketState: config.autoMarketState,
         displaySymbol: config.displaySymbol,
@@ -282,6 +289,12 @@ export default function OperationPreparation({
         executionEntryAllowed,
         recommendedAction,
         riskState,
+        requestedLeverage: settings.requestedLeverage,
+        maximumLeverage: mmConfiguration?.maximumLeverage,
+        mmConfiguration,
+        mmBlockReasons: [],
+        mmRecoveryRequired: false,
+        mmConfigurationError: Boolean(mmConfigurationError),
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);

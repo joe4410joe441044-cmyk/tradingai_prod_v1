@@ -773,22 +773,31 @@ export default function BotControl({
                 : "unknown"
     );
 
-    const effectiveSelectionMode = createOperationPreparationSettings(config).selectionMode;
-    const startReadiness = deriveOperationReadiness({
-        selectionMode: effectiveSelectionMode,
-        autoMarketState: config?.autoMarketState,
-        displaySymbol: config?.displaySymbol,
-        emergencyState: emergencyStateCode,
-        position,
-        pendingOrder,
-        governanceStatus: runtimeHealth?.governance?.status,
-        realOrderAllowed: config?.realOrderAllowed === true,
-        executionEnabled,
-        executionEntryAllowed,
-        recommendedAction,
-        riskState,
-    });
-    const startReady = startReadiness.reviewReadiness === "READY";
+     const effectiveSelectionMode = createOperationPreparationSettings(config).selectionMode;
+     const startReadiness = deriveOperationReadiness({
+         botRunning,
+         tradingMode: config?.mode,
+         dryRun: String(config?.mode || "PAPER").toUpperCase() !== "LIVE",
+         selectionMode: effectiveSelectionMode,
+         autoMarketState: config?.autoMarketState,
+         displaySymbol: config?.displaySymbol,
+         emergencyState: emergencyStateCode,
+         position,
+         pendingOrder,
+         governanceStatus: runtimeHealth?.governance?.status,
+         realOrderAllowed: config?.realOrderAllowed === true,
+         executionEnabled,
+         executionEntryAllowed,
+         recommendedAction,
+         riskState,
+         requestedLeverage: config?.leverage,
+         maximumLeverage: mmConfiguration?.maximumLeverage,
+         mmConfiguration,
+         mmBlockReasons: mmStatus?.blockReasons || [],
+         mmRecoveryRequired: mmStatus?.recoveryRequired || false,
+         mmConfigurationError: Boolean(mmConfigurationError),
+     });
+     const startReady = startReadiness.startReady;
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)
@@ -1199,7 +1208,7 @@ export default function BotControl({
        UI
     ======================================================= */
 
-    if (onRenderEmergency) {
+    if (typeof onRenderEmergency === 'function') {
         onRenderEmergency({
             emergencyState: emergencyStateCode,
             emergencyPath,
