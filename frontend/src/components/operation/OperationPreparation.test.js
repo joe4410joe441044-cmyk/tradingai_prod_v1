@@ -261,6 +261,7 @@ const mmDraft = (overrides = {}) => ({
     riskPerTradePercent: "0.50",
     maximumPositionNotional: "100.00",
     singleSymbolExposurePercent: "10.00",
+    compoundingEnabled: false,
     ...overrides,
 });
 
@@ -269,6 +270,7 @@ const mmConfig = (overrides = {}) => ({
     totalExposurePercent: "20.00",
     maximumDrawdownPercent: "5.00",
     maximumLeverage: "5",
+    compoundingEnabled: false,
     ...overrides,
 });
 
@@ -595,16 +597,18 @@ test("MM Save and Reset route to the shared save/reset handlers", async () => {
     assert.equal(reset, 1);
 });
 
-test("Compounding stays non-authoritative and never writes to MM", async () => {
+test("Compounding shows saved policy and edits only the MM draft", async () => {
     const draftChanges = [];
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "AUTO" },
         mmDraft: mmDraft(),
         mmConfiguration: mmConfig(),
+        capitalBasis: "1000",
         onMmDraftChange: (patch) => draftChanges.push(patch),
     });
-    assert.equal(normalizedText(descendants(renderer.root)).includes("NOT CONNECTED"), true);
+    assert.equal(normalizedText(descendants(renderer.root)).includes("OFF — INITIAL REFERENCE CAPITAL"), true);
+    assert.equal(normalizedText(descendants(renderer.root)).includes("CAPITAL BASIS 1000"), true);
     const compoundingGroup = descendants(renderer.root).find(
         (node) => node.props?.["aria-label"] === "Compounding",
     );
@@ -613,7 +617,20 @@ test("Compounding stays non-authoritative and never writes to MM", async () => {
     );
     onButton.props.onClick();
     renderer.render();
-    assert.equal(draftChanges.length, 0);
+    assert.deepEqual(draftChanges, [{ compoundingEnabled: true }]);
+});
+
+test("saved ON policy remains distinct from an unsaved OFF draft", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER" },
+        mmDraft: mmDraft({ compoundingEnabled: false }),
+        mmConfiguration: mmConfig({ compoundingEnabled: true }),
+        capitalBasis: "1200",
+    });
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("ON — CURRENT AVAILABLE CAPITAL"), true);
+    assert.equal(content.includes("UNSAVED CHANGES"), true);
 });
 
 test("MM controls are disabled and honest when configuration is unavailable", async () => {

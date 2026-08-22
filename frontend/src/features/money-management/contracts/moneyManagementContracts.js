@@ -349,6 +349,10 @@ export function normalizeMoneyManagementConfiguration(raw) {
     maximumLeverage: value.maximumLeverage == null
       ? null
       : decimal(value.maximumLeverage, "configuration.maximumLeverage"),
+    compoundingEnabled: bool(
+      value.compoundingEnabled,
+      "configuration.compoundingEnabled",
+    ),
     revision: positiveInteger(
       value.revision,
       "configuration.revision",
@@ -587,6 +591,7 @@ export function configurationDraftFromAuthoritative(configuration) {
     riskPerTradePercent: configuration.riskPerTradePercent,
     maximumPositionNotional: configuration.maximumPositionNotional,
     singleSymbolExposurePercent: configuration.singleSymbolExposurePercent,
+    compoundingEnabled: configuration.compoundingEnabled,
   });
 }
 
@@ -616,6 +621,9 @@ export function validateMoneyManagementConfigurationDraft(
   }
   if (typeof draft.enabled !== "boolean") {
     errors.enabled = "INVALID_BOOLEAN";
+  }
+  if (typeof draft.compoundingEnabled !== "boolean") {
+    errors.compoundingEnabled = "INVALID_BOOLEAN";
   }
   for (const field of PERCENTAGE_FIELDS) {
     if (!isBackendPercentage(draft[field])) {
@@ -712,6 +720,7 @@ export function buildMoneyManagementConfigurationPayload(
     riskPerTradePercent: draft.riskPerTradePercent,
     maximumPositionNotional: draft.maximumPositionNotional,
     singleSymbolExposurePercent: draft.singleSymbolExposurePercent,
+    compoundingEnabled: draft.compoundingEnabled,
     expectedRevision,
   });
 }

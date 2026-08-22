@@ -178,8 +178,18 @@ test("configuration normalization and payload retain string decimals", () => {
   assert.equal(payload.maximumDrawdownPercent, "5.00");
   assert.equal(payload.totalExposurePercent, "20.00");
   assert.equal(configuration.maximumLeverage, "5");
+  assert.equal(configuration.compoundingEnabled, false);
+  assert.equal(payload.compoundingEnabled, false);
   assert.equal(typeof payload.dailyWarningPercent, "string");
   assert.equal(payload.expectedRevision, 7);
+});
+
+test("compounding requires a strict saved boolean", () => {
+  for (const value of [null, 0, 1, "true", "false"]) {
+    assert.throws(() => normalizeMoneyManagementConfiguration(
+      validConfiguration({ compoundingEnabled: value }),
+    ));
+  }
 });
 
 test("maximum leverage normalization follows the active Backend value", () => {

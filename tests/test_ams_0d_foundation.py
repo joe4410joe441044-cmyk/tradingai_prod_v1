@@ -66,6 +66,7 @@ def client_for(payload):
 def capital(**changes):
     values = dict(
         equity=Decimal("1000"), available_capital=Decimal("900"),
+        capital_basis=Decimal("900"),
         risk_budget=Decimal("4.5"), max_position_notional=Decimal("100"),
         total_exposure_percent=Decimal("20"), open_exposure=Decimal("0"),
         position_count=0, pending_order_count=0, mm_regime="NORMAL",

@@ -9,6 +9,7 @@ import {
 const configuration = Object.freeze({
   available: true,
   enabled: true,
+  compoundingEnabled: false,
   dailyWarningPercent: "1.0000",
   dailyBlockPercent: "2.0000",
   weeklyWarningPercent: "3.0000",
@@ -27,6 +28,7 @@ const configuration = Object.freeze({
 
 const draft = Object.freeze({
   enabled: true,
+  compoundingEnabled: false,
   dailyWarningPercent: "1.0000",
   dailyBlockPercent: "2.0000",
   weeklyWarningPercent: "3.0000",
@@ -61,6 +63,7 @@ test("configuration fields exactly match the backend editable contract", () => {
     MONEY_MANAGEMENT_CONFIGURATION_FIELDS.map(({ key }) => key),
     [
       "enabled",
+      "compoundingEnabled",
       "dailyWarningPercent",
       "dailyBlockPercent",
       "weeklyWarningPercent",

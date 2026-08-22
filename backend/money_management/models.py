@@ -48,9 +48,11 @@ class MoneyManagementConfig:
     extended_cooldown_hours: Decimal=Decimal("12")
     recovery_25_multiplier: Decimal=Decimal("0.25")
     recovery_50_multiplier: Decimal=Decimal("0.50")
+    compounding_enabled: bool=False
     def __post_init__(self):
         object.__setattr__(self,"profile",_enum(MoneyManagementProfile,self.profile)); object.__setattr__(self,"mode",_enum(TradingMode,self.mode))
         if type(self.multi_bot_enabled) is not bool: raise TypeError("multi_bot_enabled must be bool")
+        if type(self.compounding_enabled) is not bool: raise TypeError("compounding_enabled must be bool")
         for n in ("initial_reference_equity","maximum_position_notional"): _dec(n,getattr(self,n),positive=True)
         for n in ("risk_per_trade_pct","maximum_drawdown_pct","total_exposure_pct","single_symbol_exposure_pct","daily_loss_warning_pct","daily_loss_block_pct","weekly_loss_warning_pct","weekly_loss_block_pct","monthly_loss_warning_pct","monthly_loss_block_pct","profit_lock_start_pct"): _pct(n,getattr(self,n),positive=True)
         _dec("maximum_leverage",self.maximum_leverage,positive=True)

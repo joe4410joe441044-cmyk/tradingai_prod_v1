@@ -13,6 +13,11 @@ export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
     type: "boolean",
   }),
   Object.freeze({
+    key: "compoundingEnabled",
+    label: "Compounding",
+    type: "boolean",
+  }),
+  Object.freeze({
     key: "dailyWarningPercent",
     label: "Daily Warning",
     type: "decimal",
