@@ -16,6 +16,10 @@ from backend.market.exchanges.kucoin_market_ws import (
     OrderBookWS as KuCoinFuturesOrderBookWS,
     normalize_futures_symbol,
 )
+from backend.money_management.enums import (
+    MoneyManagementProfile,
+    TradingMode,
+)
 from backend.money_management.loss_execution_guard_models import (
     LossExecutionEntryDecision,
     LossExecutionOperation,
@@ -25,6 +29,7 @@ from backend.money_management.loss_execution_integration import (
     LossExecutionAdmissionResult,
     LossExecutionIntent,
 )
+from backend.money_management.models import MoneyManagementConfig
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.runtime.ExecutionRuntime import ExecutionRuntime
 from backend.runtime.governance_runtime import governance_state
@@ -157,6 +162,15 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
 
     def test_bot_manager_start_passes_position_risk_config_to_engine(self):
         manager = BotManager()
+        manager.configure_production_ams_read_model(
+            lambda: MoneyManagementConfig(
+                MoneyManagementProfile.CAPITAL_PROTECTION_STANDARD,
+                TradingMode.PAPER,
+                Decimal("1000"), Decimal(".50"), Decimal("100"),
+                Decimal("5"), Decimal("20"), Decimal("10"),
+                Decimal("5"), False,
+            )
+        )
         ws = Mock()
         ws.connected = False
         ws.start = Mock()
@@ -180,7 +194,7 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         ) as create_market_ws:
             result = manager.start(config)
 
-        self.assertEqual(result["status"], "started")
+        self.assertEqual(result["status"], "started", result)
         self.assertEqual(result["activeSymbol"], "XRPUSDT")
         self.assertEqual(result["symbol"], result["activeSymbol"])
         self.assertEqual(result["selectionMode"], "MANUAL")
@@ -817,8 +831,9 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
 
         fallback_preview = fallback.get_result()["preview"]
         self.assertEqual(fallback_preview["sizing_mode"], "risk_percent")
-        self.assertEqual(fallback_preview["position_size"], 50)
-        self.assertEqual(fallback_preview["qty"], 25)
+        self.assertEqual(fallback_preview["position_size"], 10)
+        self.assertEqual(fallback_preview["qty"], 5)
+        self.assertEqual(fallback_preview["required_margin"], 2)
 
     def test_tp_sl_prices_and_paper_close_are_direction_aware(self):
         long_engine, long_price = self._paper_engine(price=2.0)

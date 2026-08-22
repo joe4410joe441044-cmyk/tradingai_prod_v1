@@ -743,7 +743,7 @@ class ExecutionEngine:
                 ) or 0
             )
 
-            self.config["leverage"] = int(
+            self.config["leverage"] = float(
                 float(
                     safe_config.get(
                         "leverage",
@@ -2404,9 +2404,9 @@ class ExecutionEngine:
 
             else:
 
-                base_position_size = (
-                    risk * self.config["leverage"]
-                )
+                # Leverage is margin-only.  It must not amplify the risk
+                # budget into a larger position notional or quantity.
+                base_position_size = risk
 
                 sizing_mode = "risk_percent"
 
