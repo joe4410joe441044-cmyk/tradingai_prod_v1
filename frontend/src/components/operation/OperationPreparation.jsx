@@ -367,110 +367,277 @@ export default function OperationPreparation({
 
 return (
         <div className="operation-preparation" data-testid="operation-preparation">
-            <div className="operation-lane-left">
-                <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
-                    <span className="operation-prep-label">Mode（モード）</span>
-                    <SegmentedControl
-                        disabled={controlsDisabled}
-                        label="Trading mode"
-                        onChange={(value) => changeSetting("tradingMode", value)}
-                        options={OPERATION_PREPARATION_OPTIONS.tradingModes}
-                        value={settings.tradingMode}
-                    />
-                    {settings.tradingMode === "LIVE" && (
-                        <p className="operation-prep-warning">LIVE request selected. Existing backend and Governance guards remain authoritative.</p>
-                    )}
-                </Section>
-
-                <Section number="2" testId="market-selection-section" title="MARKET SELECTION（市場選択）">
-                    <span className="operation-prep-label">SELECTION MODE</span>
-                    <SegmentedControl
-                        disabled={controlsDisabled}
-                        label="Market selection mode"
-                        onChange={(value) => changeSetting("selectionMode", value)}
-                        options={OPERATION_PREPARATION_OPTIONS.selectionModes}
-                        value={settings.selectionMode}
-                    />
-                    {settings.selectionMode === "MANUAL" ? (
-                        <SelectField
-                            disabled={controlsDisabled}
-                            id="operation-prep-symbol"
-                            label="SYMBOL"
-                            onChange={(value) => changeSetting("manualSymbol", value)}
-                            options={OPERATION_PREPARATION_OPTIONS.symbols}
-                            value={settings.manualSymbol}
-                        />
-                    ) : (
-                        <div className="operation-prep-derived-list">
-                            <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
-                            <DerivedRow label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
+            {/* 顶部紧急操作栏 */}
+            <div className="operation-top-emergency">
+                <section className="operation-emergency-section">
+                    <div className="operation-emergency-header">
+                        <div className="operation-section-title">
+                            EMERGENCY（緊急操作）
                         </div>
-                    )}
-                    <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
-                </Section>
-            </div>
+                        
+                        <button
+                            className="emergency-stop-button operation-emergency-button"
+                            disabled={resolvedEmergencyButtonDisabled}
+                            onClick={openEmergencyConfirm}
+                            aria-busy={emergencyPending ? "true" : "false"}
+                            type="button"
+                        >
+                            {emergencyPending
+                                ? "EMERGENCY IN PROGRESS..."
+                                : "EMERGENCY STOP"
+                            }
+                        </button>
 
-            <div className="operation-lane-center">
-                <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
-                    <SelectField
-                        disabled={mmControlsDisabled}
-                        format={percentage}
-                        id="operation-prep-risk"
-                        label="RISK / Trade（1取引リスク）"
-                        onChange={(value) => onMmDraftChange({ riskPerTradePercent: String(value) })}
-                        options={mmRiskOptions}
-                        value={mmAvailable ? mmRiskValue : ""}
-                    />
-                    <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                    <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                    <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
-                    <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
-                    <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
-                    <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
-                    <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
-                    <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
-                    <div className="operation-prep-mm-save" data-testid="mm-save-controls">
-                        <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
-                        <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
-                        <button disabled={mmSaveDisabled} onClick={onMmSave} type="button">Save MM</button>
+                        <div className="operation-emergency-lock">
+                            <span className="operation-state-label">
+                                LOCK
+                            </span>
+                            <strong className={resolvedEmergencyLockClass}>
+                                ● {resolvedEmergencyLockValue}
+                            </strong>
+                        </div>
                     </div>
-                    {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
-                    {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
-                    {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
-                    <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
-                    <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
-                    <a className="operation-prep-link" href="/money-management">Money Management →</a>
-                </Section>
-            </div>
 
-            <div className="operation-lane-right">
-                 <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
-                    <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                    <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
-                    <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
-                    <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
-                    <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
-                </Section>
+                    {emergencyStateCode !== "READY" && (
+                        <div
+                            className={
+                                "operation-emergency-status "
+                                + `operation-emergency-status--${emergencyStateDetails.tone}`
+                            }
+                        >
+                            <span className="operation-emergency-status__eyebrow">
+                                EMERGENCY STATUS
+                            </span>
 
-                <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
-                    <span className="operation-prep-label">LOOP ON START</span>
-                    <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
-                    <span className="operation-prep-label">AUTO TRADE ON START</span>
-                    <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
-                    {botRunning && (
-                        <div className="operation-prep-runtime-controls">
-                            <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
-                            <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
-                            <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
-                            <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
+                            <strong className="operation-emergency-status__state">
+                                {emergencyStateDetails.label}
+                            </strong>
+
+                            <span className="operation-emergency-status__message">
+                                {emergencyStateDetails.text}
+                            </span>
+
+                            {emergencyStateCode === "PROCESSING" && (
+                                <span className="operation-emergency-status__pending">
+                                    PROCESSING
+                                </span>
+                            )}
+
+                            {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
+                                <div className="operation-emergency-facts">
+                                    {lockedFacts.map((fact) => (
+                                        <span key={fact}>
+                                            {fact}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            {emergencyStateCode === "ACTION_REQUIRED"
+                                && actionWarnings.length > 0 && (
+                                <div className="operation-emergency-warnings">
+                                    {actionWarnings.map((warning) => (
+                                        <span key={warning}>
+                                            {warning}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            {lastResultMessage && (
+                                <span className="operation-emergency-status__message">
+                                    {lastResultMessage}
+                                </span>
+                            )}
                         </div>
                     )}
-                    <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
-                </Section>
+
+                    {emergencyConfirmOpen && (
+                        <div
+                            className="operation-emergency-confirm"
+                            role="dialog"
+                            aria-modal="false"
+                            aria-label="Confirm emergency stop"
+                        >
+                            <div className="operation-emergency-confirm__title">
+                                EMERGENCY STOP
+                            </div>
+
+                            <div className="operation-emergency-confirm__body">
+                                This action will activate Emergency Lock, disable Auto Trade,
+                                cancel eligible open orders, and flatten eligible positions.
+                            </div>
+
+                            <div className="operation-emergency-confirm__actions">
+                                <button
+                                    className="operation-emergency-confirm__cancel"
+                                    disabled={emergencyPending}
+                                    onClick={cancelEmergencyConfirm}
+                                    type="button"
+                                >
+                                    CANCEL
+                                </button>
+
+                                <button
+                                    className="operation-emergency-confirm__confirm"
+                                    disabled={emergencyPending}
+                                    onClick={confirmEmergency}
+                                    type="button"
+                                >
+                                    CONFIRM EMERGENCY
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {emergencyStateCode === "LOCKED" && (
+                        <div className="operation-emergency-note">
+                            Emergency Lock is active.（Emergency Lockが有効です）
+                        </div>
+                    )}
+
+                    {emergencyStateCode !== "READY" && (
+                        <button
+                            className="operation-emergency-unlock"
+                            disabled={unlockPending || !resolvedUnlockAllowed}
+                            onClick={handleReturnToNormal}
+                            type="button"
+                        >
+                            {unlockPending ? "復帰中..." : "通常に戻す"}
+                        </button>
+                    )}
+
+                    {emergencyStateCode !== "READY" && (
+                        <div className="operation-emergency-detail">
+                            Execution path: {String(emergencyPath).toUpperCase()}
+                        </div>
+                    )}
+
+                    {emergencyError && (
+                        <div
+                            className="operation-emergency-error"
+                            data-testid="emergency-error"
+                            role="alert"
+                        >
+                            {emergencyError}
+                        </div>
+                    )}
+
+                    {unlockError && (
+                        <div
+                            className="operation-emergency-error"
+                            data-testid="emergency-unlock-error"
+                            role="alert"
+                        >
+                            {unlockError}
+                        </div>
+                    )}
+                </section>
             </div>
 
-            <div className="operation-bottom-row">
-                <div className="operation-bottom-col">
+            {/* 三列布局 */}
+            <div className="operation-main-grid">
+                {/* 左列 */}
+                <div className="operation-column-left">
+                    <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
+                        <span className="operation-prep-label">Mode（モード）</span>
+                        <SegmentedControl
+                            disabled={controlsDisabled}
+                            label="Trading mode"
+                            onChange={(value) => changeSetting("tradingMode", value)}
+                            options={OPERATION_PREPARATION_OPTIONS.tradingModes}
+                            value={settings.tradingMode}
+                        />
+                        {settings.tradingMode === "LIVE" && (
+                            <p className="operation-prep-warning">LIVE request selected. Existing backend and Governance guards remain authoritative.</p>
+                        )}
+                    </Section>
+
+                    <Section number="2" testId="market-selection-section" title="MARKET SELECTION（市場選択）">
+                        <span className="operation-prep-label">SELECTION MODE</span>
+                        <SegmentedControl
+                            disabled={controlsDisabled}
+                            label="Market selection mode"
+                            onChange={(value) => changeSetting("selectionMode", value)}
+                            options={OPERATION_PREPARATION_OPTIONS.selectionModes}
+                            value={settings.selectionMode}
+                        />
+                        {settings.selectionMode === "MANUAL" ? (
+                            <SelectField
+                                disabled={controlsDisabled}
+                                id="operation-prep-symbol"
+                                label="SYMBOL"
+                                onChange={(value) => changeSetting("manualSymbol", value)}
+                                options={OPERATION_PREPARATION_OPTIONS.symbols}
+                                value={settings.manualSymbol}
+                            />
+                        ) : (
+                            <div className="operation-prep-derived-list">
+                                <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
+                                <DerivedRow label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
+                            </div>
+                        )}
+                        <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
+                    </Section>
+
+                    <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
+                        <SelectField
+                            disabled={mmControlsDisabled}
+                            format={percentage}
+                            id="operation-prep-risk"
+                            label="RISK / Trade（1取引リスク）"
+                            onChange={(value) => onMmDraftChange({ riskPerTradePercent: String(value) })}
+                            options={mmRiskOptions}
+                            value={mmAvailable ? mmRiskValue : ""}
+                        />
+                        <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
+                        <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                        <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
+                        <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
+                        <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
+                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
+                        <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                        <div className="operation-prep-mm-save" data-testid="mm-save-controls">
+                            <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
+                            <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
+                            <button disabled={mmSaveDisabled} onClick={onMmSave} type="button">Save MM</button>
+                        </div>
+                        {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
+                        {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
+                        {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
+                        <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
+                        <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
+                        <a className="operation-prep-link" href="/money-management">Money Management →</a>
+                    </Section>
+                </div>
+
+                {/* 中列 */}
+                <div className="operation-column-center">
+                    <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
+                        <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
+                        <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
+                        <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
+                        <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
+                        <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
+                    </Section>
+
+                    <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
+                        <span className="operation-prep-label">LOOP ON START</span>
+                        <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
+                        <span className="operation-prep-label">AUTO TRADE ON START</span>
+                        <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
+                        {botRunning && (
+                            <div className="operation-prep-runtime-controls">
+                                <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
+                                <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
+                                <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
+                                <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
+                            </div>
+                        )}
+                        <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                    </Section>
+
                     <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS（安全性 / 開始準備）">
                         <div className="operation-prep-derived-list operation-prep-derived-list--safety">
                             <DerivedRow label="Emergency（緊急停止）" source="RUNTIME" status value={emergencyReadiness} />
@@ -484,7 +651,8 @@ return (
                     </Section>
                 </div>
 
-                <div className="operation-bottom-col">
+                {/* 右列 */}
+                <div className="operation-column-right">
                     <section className="operation-prep-final" data-testid="operation-preparation-summary">
                         <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
                         <div className="operation-prep-summary">
@@ -506,174 +674,6 @@ return (
                             <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
                         )}
                         {children}
-                    </section>
-                </div>
-
-                <div className="operation-bottom-col">
-                    <section className="operation-emergency-section">
-                        <div className="operation-section-title">
-                            EMERGENCY（緊急操作）
-                        </div>
-
-                        {emergencyStateCode !== "READY" && (
-                            <div
-                                className={
-                                    "operation-emergency-status "
-                                    + `operation-emergency-status--${emergencyStateDetails.tone}`
-                                }
-                            >
-                                <span className="operation-emergency-status__eyebrow">
-                                    EMERGENCY STATUS
-                                </span>
-
-                                <strong className="operation-emergency-status__state">
-                                    {emergencyStateDetails.label}
-                                </strong>
-
-                                <span className="operation-emergency-status__message">
-                                    {emergencyStateDetails.text}
-                                </span>
-
-                                {emergencyStateCode === "PROCESSING" && (
-                                    <span className="operation-emergency-status__pending">
-                                        PROCESSING
-                                    </span>
-                                )}
-
-                                {emergencyStateCode === "LOCKED" && lockedFacts.length > 0 && (
-                                    <div className="operation-emergency-facts">
-                                        {lockedFacts.map((fact) => (
-                                            <span key={fact}>
-                                                {fact}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {emergencyStateCode === "ACTION_REQUIRED"
-                                    && actionWarnings.length > 0 && (
-                                    <div className="operation-emergency-warnings">
-                                        {actionWarnings.map((warning) => (
-                                            <span key={warning}>
-                                                {warning}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {lastResultMessage && (
-                                    <span className="operation-emergency-status__message">
-                                        {lastResultMessage}
-                                    </span>
-                                )}
-                            </div>
-                        )}
-
-                        <button
-                            className="emergency-stop-button operation-emergency-button"
-                            disabled={resolvedEmergencyButtonDisabled}
-                            onClick={openEmergencyConfirm}
-                            aria-busy={emergencyPending ? "true" : "false"}
-                            type="button"
-                        >
-
-                            {emergencyPending
-                                ? "EMERGENCY IN PROGRESS...（処理中）"
-                                : "EMERGENCY STOP（緊急停止）"
-                            }
-
-                        </button>
-
-                        {emergencyConfirmOpen && (
-                            <div
-                                className="operation-emergency-confirm"
-                                role="dialog"
-                                aria-modal="false"
-                                aria-label="Confirm emergency stop"
-                            >
-                                <div className="operation-emergency-confirm__title">
-                                    EMERGENCY STOP
-                                </div>
-
-                                <div className="operation-emergency-confirm__body">
-                                    This action will activate Emergency Lock, disable Auto Trade,
-                                    cancel eligible open orders, and flatten eligible positions.
-                                </div>
-
-                                <div className="operation-emergency-confirm__actions">
-                                    <button
-                                        className="operation-emergency-confirm__cancel"
-                                        disabled={emergencyPending}
-                                        onClick={cancelEmergencyConfirm}
-                                        type="button"
-                                    >
-                                        CANCEL
-                                    </button>
-
-                                    <button
-                                        className="operation-emergency-confirm__confirm"
-                                        disabled={emergencyPending}
-                                        onClick={confirmEmergency}
-                                        type="button"
-                                    >
-                                        CONFIRM EMERGENCY
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {emergencyStateCode === "LOCKED" && (
-                            <div className="operation-emergency-note">
-                                Emergency Lock is active.（Emergency Lockが有効です）
-                            </div>
-                        )}
-
-                        {emergencyStateCode !== "READY" && (
-                            <button
-                                className="operation-emergency-unlock"
-                                disabled={unlockPending || !resolvedUnlockAllowed}
-                                onClick={handleReturnToNormal}
-                                type="button"
-                            >
-                                {unlockPending ? "復帰中..." : "通常に戻す"}
-                            </button>
-                        )}
-
-                        <div className="operation-emergency-lock">
-                            <span className="operation-state-label">
-                                EMERGENCY LOCK（緊急ロック）
-                            </span>
-
-                            <strong className={resolvedEmergencyLockClass}>
-                                {resolvedEmergencyLockValue}
-                            </strong>
-                        </div>
-
-                        {emergencyStateCode !== "READY" && (
-                            <div className="operation-emergency-detail">
-                                Execution path: {String(emergencyPath).toUpperCase()}
-                            </div>
-                        )}
-
-                        {emergencyError && (
-                            <div
-                                className="operation-emergency-error"
-                                data-testid="emergency-error"
-                                role="alert"
-                            >
-                                {emergencyError}
-                            </div>
-                        )}
-
-                        {unlockError && (
-                            <div
-                                className="operation-emergency-error"
-                                data-testid="emergency-unlock-error"
-                                role="alert"
-                            >
-                                {unlockError}
-                            </div>
-                        )}
                     </section>
                 </div>
             </div>
