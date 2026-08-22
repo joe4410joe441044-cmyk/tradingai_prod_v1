@@ -135,6 +135,31 @@ class LossGovernanceProjectionDispatcher:
             True,
         )
 
+    def invalidate_runtime_authority(
+        self, app, dispatch_status, reasons, revision=None, sequence=None
+    ):
+        """Publish the latest failed runtime evaluation as non-executable."""
+        from .loss_runtime_update_dispatcher import LossRuntimeDispatchStatus
+
+        status = LossRuntimeDispatchStatus(dispatch_status)
+        safe_reasons = tuple(str(item) for item in reasons)
+        if status is LossRuntimeDispatchStatus.RECOVERY_REQUIRED:
+            generated_at = self._fallback_timestamp(app, revision, sequence)
+            return self._publish(
+                app,
+                _recovery_projection(generated_at),
+                revision,
+                sequence,
+                safe_reasons or ("loss runtime recovery required",),
+                True,
+            )
+        return self._fail_closed(
+            app,
+            safe_reasons[0] if safe_reasons else "runtime authority unavailable",
+            revision,
+            sequence,
+        )
+
     def dispatch(self, app):
         with self._lock:
             try:
@@ -174,6 +199,32 @@ class LossGovernanceProjectionDispatcher:
                     return self._fail_closed(app, "lifecycle status invalid")
                 revision = lifecycle_status.revision
                 sequence = lifecycle_status.sequence
+                hook_registration = getattr(
+                    state, "money_management_runtime_hook", None
+                )
+                hook = getattr(hook_registration, "hook", None)
+                latest_dispatch_status = getattr(
+                    hook, "last_dispatch_status", None
+                )
+                if latest_dispatch_status is not None:
+                    from .loss_runtime_update_dispatcher import (
+                        LossRuntimeDispatchStatus,
+                    )
+
+                    latest_dispatch_status = LossRuntimeDispatchStatus(
+                        latest_dispatch_status
+                    )
+                    if latest_dispatch_status not in (
+                        LossRuntimeDispatchStatus.APPLIED,
+                        LossRuntimeDispatchStatus.IDEMPOTENT,
+                    ):
+                        return self.invalidate_runtime_authority(
+                            app,
+                            latest_dispatch_status,
+                            getattr(hook, "last_dispatch_safe_reasons", ()),
+                            revision,
+                            sequence,
+                        )
                 if (
                     lifecycle_status.lifecycle_state
                     is ApplicationLifecycleState.RECOVERY_REQUIRED

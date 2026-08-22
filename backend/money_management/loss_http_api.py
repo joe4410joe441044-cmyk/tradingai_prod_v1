@@ -1009,6 +1009,23 @@ class MoneyManagementHttpBoundary:
                 LossRuntimeDispatchStatus.IDEMPOTENT,
             )
         )
+        hook_authority_failed = bool(
+            hook_registration is not None
+            and hook_registration.hook.last_dispatch_status
+            in (
+                LossRuntimeDispatchStatus.RECOVERY_REQUIRED,
+                LossRuntimeDispatchStatus.REJECTED,
+                LossRuntimeDispatchStatus.UNAVAILABLE,
+                LossRuntimeDispatchStatus.FAILED,
+                LossRuntimeDispatchStatus.STALE,
+                LossRuntimeDispatchStatus.CONFLICT,
+            )
+        )
+        hook_failure_reasons = (
+            hook_registration.hook.last_dispatch_safe_reasons
+            if hook_authority_failed
+            else ()
+        )
         lifecycle_status = None
         runtime_snapshot = None
         if (
@@ -1126,6 +1143,7 @@ class MoneyManagementHttpBoundary:
             enabled
             and registration_ready
             and lifecycle_running
+            and hook_healthy
             and live_equity_matches_mm_state
             and cash_flow_ready
             and live_projection_valid
@@ -1149,8 +1167,14 @@ class MoneyManagementHttpBoundary:
             safe_reason = "MONEY_MANAGEMENT_NOT_REGISTERED"
         elif not lifecycle_running:
             safe_reason = "MONEY_MANAGEMENT_UNAVAILABLE"
-        elif not hook_healthy and not live_capital_complete:
-            safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
+        elif hook_authority_failed:
+            safe_reason = (
+                hook_failure_reasons[0]
+                if hook_failure_reasons
+                else "AUTHORITATIVE_EVALUATION_FAILED"
+            )
+        elif not hook_healthy:
+            safe_reason = "AUTHORITATIVE_EVALUATION_NOT_ESTABLISHED"
         elif not metrics_fresh and not live_capital_complete:
             safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
         elif live_capital_complete and not cash_flow_ready:
@@ -1452,7 +1476,7 @@ class MoneyManagementHttpBoundary:
             token,
         )
         if isinstance(result, LossRuntimeDispatchResult):
-            hook_registration.hook.record_evaluation_status(result.status)
+            hook_registration.hook.record_evaluation_result(result)
         projected = dispatch_money_management_governance_projection(
             self._app,
             self._projection_dispatcher,

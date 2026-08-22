@@ -12,6 +12,9 @@ from .loss_application_models import (
 )
 from .loss_application_registration import MoneyManagementApplicationRegistration
 from .loss_runtime_event_models import LossRuntimeEventType
+from .loss_governance_projection_dispatcher import (
+    LossGovernanceProjectionDispatcher,
+)
 from .loss_runtime_metrics_models import LossRuntimeMetricsReadRequest
 from .loss_runtime_metrics_source import BotManagerLossRuntimeMetricsSource
 from .loss_runtime_update_dispatcher import (
@@ -132,6 +135,7 @@ class MoneyManagementRuntimeHook:
         self._active = True
         self._last_event_key = None
         self._last_dispatch_status = None
+        self._last_dispatch_safe_reasons = ()
         self._timeline_recorder = None
         self._timeline_configuration_version_source = None
         self._lock = RLock()
@@ -147,18 +151,72 @@ class MoneyManagementRuntimeHook:
             return self._last_dispatch_status
 
     @property
+    def last_dispatch_safe_reasons(self):
+        with self._lock:
+            return self._last_dispatch_safe_reasons
+
+    @property
     def dispatcher(self):
         return self._dispatcher
 
     def invalidate_evaluation(self):
         with self._lock:
             self._last_dispatch_status = None
+            self._last_dispatch_safe_reasons = ()
 
     def record_evaluation_status(self, status):
         if not isinstance(status, LossRuntimeDispatchStatus):
             raise TypeError("runtime dispatch status required")
         with self._lock:
             self._last_dispatch_status = status
+            self._last_dispatch_safe_reasons = ()
+
+    def record_evaluation_result(self, result):
+        if not isinstance(result, LossRuntimeDispatchResult):
+            raise TypeError("runtime dispatch result required")
+        with self._lock:
+            self._record_dispatch_result(result)
+
+    def _record_dispatch_result(self, result):
+        self._last_dispatch_status = result.status
+        self._last_dispatch_safe_reasons = tuple(result.safe_reasons)
+        if result.status not in (
+            LossRuntimeDispatchStatus.APPLIED,
+            LossRuntimeDispatchStatus.IDEMPOTENT,
+        ):
+            LossGovernanceProjectionDispatcher(
+                timestamp_source=self._timestamp_source
+            ).invalidate_runtime_authority(
+                self._app,
+                result.status,
+                result.safe_reasons,
+                result.runtime_revision,
+                result.runtime_sequence,
+            )
+
+    def _record_dispatch_failure(self, reason):
+        registration = getattr(
+            getattr(self._app, "state", None), "money_management", None
+        )
+        snapshot = None
+        if isinstance(registration, MoneyManagementApplicationRegistration):
+            reader = getattr(registration.lifecycle_adapter, "get_snapshot", None)
+            try:
+                snapshot = reader() if callable(reader) else None
+            except Exception:
+                snapshot = None
+        result = LossRuntimeDispatchResult(
+            LossRuntimeDispatchStatus.FAILED,
+            None,
+            None,
+            getattr(snapshot, "revision", None),
+            getattr(snapshot, "sequence", None),
+            False,
+            (reason,),
+            False,
+            False,
+        )
+        self._record_dispatch_result(result)
 
     def attach_timeline_recorder(
         self, recorder, configuration_version_source=None
@@ -224,13 +282,13 @@ class MoneyManagementRuntimeHook:
                     LossRuntimeEventType.BALANCE_UPDATE,
                 )
             except Exception:
-                self._last_dispatch_status = None
+                self._record_dispatch_failure("authority refresh failed")
                 _safe_log(self._logger, "warning", "Authority Refresh Failed")
                 return False
             if not isinstance(result, LossRuntimeDispatchResult):
-                self._last_dispatch_status = None
+                self._record_dispatch_failure("authority refresh result invalid")
                 return False
-            self._last_dispatch_status = result.status
+            self._record_dispatch_result(result)
             authoritative = result.status in (
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,
@@ -336,7 +394,7 @@ class MoneyManagementRuntimeHook:
                 )
             except Exception:
                 _safe_log(self._logger, "warning", "Dispatch Failed")
-                self._last_dispatch_status = None
+                self._record_dispatch_failure("runtime hook dispatch failed")
                 return MoneyManagementRuntimeHookResult(
                     MoneyManagementRuntimeHookStatus.FAILED,
                     event_type,
@@ -346,7 +404,7 @@ class MoneyManagementRuntimeHook:
                 )
             if not isinstance(result, LossRuntimeDispatchResult):
                 _safe_log(self._logger, "warning", "Dispatch Result Invalid")
-                self._last_dispatch_status = None
+                self._record_dispatch_failure("runtime hook dispatch result invalid")
                 return MoneyManagementRuntimeHookResult(
                     MoneyManagementRuntimeHookStatus.FAILED,
                     event_type,
@@ -354,7 +412,7 @@ class MoneyManagementRuntimeHook:
                     None,
                     ("runtime hook dispatch result invalid",),
                 )
-            self._last_dispatch_status = result.status
+            self._record_dispatch_result(result)
             if result.status in (
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,
