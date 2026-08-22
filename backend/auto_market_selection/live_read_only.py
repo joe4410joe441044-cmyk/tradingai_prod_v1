@@ -139,6 +139,7 @@ class LiveReadOnlyValidation:
                 item, capital, stop_loss_percent=self.stop_loss_percent,
                 effective_cost_percent=self.effective_cost_percent,
                 risk_percent=self.risk_percent,
+                evaluated_at=now,
             ) for item in contracts
         }
         scanner = self.scanner.scan(ScannerInput(

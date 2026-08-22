@@ -11,6 +11,7 @@ from .position_risk import PositionSizingInput, calculate_position_size
 
 
 EXECUTABLE_MAX_CONCURRENT_POSITIONS = 1
+METADATA_FUTURE_SKEW_TOLERANCE_SECONDS = 1
 
 
 def _value(value):
@@ -147,17 +148,25 @@ class PerMarketEligibilityResult:
 
 def evaluate_market_capital_eligibility(
     metadata, capital, *, stop_loss_percent, effective_cost_percent,
-    risk_percent, maximum_metadata_age_seconds=900,
+    risk_percent, evaluated_at, maximum_metadata_age_seconds=900,
 ):
     if not isinstance(metadata, FuturesContractMetadata):
         raise TypeError("FuturesContractMetadata required")
     if not isinstance(capital, CapitalEligibilityContract):
         raise TypeError("CapitalEligibilityContract required")
+    if (
+        not isinstance(evaluated_at, datetime)
+        or evaluated_at.tzinfo is None
+        or evaluated_at.utcoffset() is None
+    ):
+        raise TypeError("evaluated_at must be timezone-aware")
+    evaluated_at = evaluated_at.astimezone(timezone.utc)
     reasons = []
-    metadata_age = capital.evaluated_at - metadata.metadata_evaluated_at
+    metadata_age = evaluated_at - metadata.metadata_evaluated_at
     if (
         maximum_metadata_age_seconds <= 0
-        or metadata_age.total_seconds() < 0
+        or metadata_age.total_seconds()
+        < -METADATA_FUTURE_SKEW_TOLERANCE_SECONDS
         or metadata_age.total_seconds() > maximum_metadata_age_seconds
     ):
         reasons.append("MARKET_METADATA_STALE")

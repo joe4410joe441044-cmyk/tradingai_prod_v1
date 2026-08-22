@@ -95,6 +95,7 @@ def test_per_market_preview_reuses_existing_mm_position_sizing():
         stop_loss_percent=Decimal("1"),
         effective_cost_percent=Decimal("0.1"),
         risk_percent=Decimal("0.5"),
+        evaluated_at=capital.evaluated_at,
     )
     assert result.calculation_allowed
     assert result.position_feasible

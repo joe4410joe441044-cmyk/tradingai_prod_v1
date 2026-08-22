@@ -170,6 +170,7 @@ def test_stale_or_locked_mm_authority_is_not_market_eligible():
         result = evaluate_market_capital_eligibility(
             metadata, authority, stop_loss_percent=Decimal("1"),
             effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
+            evaluated_at=NOW,
         )
         assert not result.eligible
         assert reason in result.reason_codes
@@ -180,6 +181,7 @@ def test_market_eligibility_reuses_sizing_and_never_creates_order():
     result = evaluate_market_capital_eligibility(
         metadata, capital(), stop_loss_percent=Decimal("1"),
         effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
+        evaluated_at=NOW,
     )
     payload = result.to_dict()
     assert result.calculation_allowed
@@ -194,20 +196,51 @@ def test_incomplete_market_metadata_is_ineligible_not_fabricated():
     result = evaluate_market_capital_eligibility(
         metadata, capital(), stop_loss_percent=Decimal("1"),
         effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
+        evaluated_at=NOW,
     )
     assert not result.eligible
     assert "MARKET_METADATA_INCOMPLETE" in result.reason_codes
 
 
+@pytest.mark.parametrize("metadata_at", [
+    NOW - timedelta(minutes=5),
+    NOW + timedelta(minutes=5),
+])
+def test_metadata_freshness_is_independent_of_capital_ordering(metadata_at):
+    metadata = client_for({"code": "200000", "data": [contract_payload()]}).get_active_contracts(evaluated_at=metadata_at)[0]
+    result = evaluate_market_capital_eligibility(
+        metadata, capital(evaluated_at=NOW),
+        stop_loss_percent=Decimal("1"), effective_cost_percent=Decimal("0.2"),
+        risk_percent=Decimal("0.5"),
+        evaluated_at=NOW + timedelta(minutes=5),
+    )
+    assert "MARKET_METADATA_STALE" not in result.reason_codes
+
+
 def test_stale_metadata_is_not_fresh_eligibility_authority():
     metadata = client_for({"code": "200000", "data": [contract_payload()]}).get_active_contracts(evaluated_at=NOW)[0]
     result = evaluate_market_capital_eligibility(
-        metadata, capital(evaluated_at=NOW + timedelta(minutes=16)),
+        metadata, capital(evaluated_at=NOW + timedelta(minutes=20)),
         stop_loss_percent=Decimal("1"), effective_cost_percent=Decimal("0.2"),
         risk_percent=Decimal("0.5"),
+        evaluated_at=NOW + timedelta(minutes=16),
     )
     assert not result.eligible
     assert "MARKET_METADATA_STALE" in result.reason_codes
+
+
+def test_materially_future_metadata_fails_closed_but_small_skew_is_allowed():
+    for offset, expected_stale in (
+        (timedelta(milliseconds=500), False),
+        (timedelta(seconds=2), True),
+    ):
+        metadata = client_for({"code": "200000", "data": [contract_payload()]}).get_active_contracts(evaluated_at=NOW + offset)[0]
+        result = evaluate_market_capital_eligibility(
+            metadata, capital(), stop_loss_percent=Decimal("1"),
+            effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
+            evaluated_at=NOW,
+        )
+        assert ("MARKET_METADATA_STALE" in result.reason_codes) is expected_stale
 
 
 def test_mm_status_preserves_legacy_exposure_field_and_adds_explicit_units():

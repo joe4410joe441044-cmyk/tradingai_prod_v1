@@ -241,6 +241,21 @@ def attach_production_paper_auto_selection(bot_manager):
     """Attach the production PAPER AUTO lifecycle to the bot manager."""
 
     public_client = KucoinFuturesPublicClient()
+
+    def eligibility_provider(universe, capital):
+        evaluated_at = datetime.now(timezone.utc)
+        return {
+            contract.canonical_symbol: evaluate_market_capital_eligibility(
+                contract,
+                capital,
+                stop_loss_percent=Decimal("1.0"),
+                effective_cost_percent=Decimal("0.1"),
+                risk_percent=Decimal("0.5"),
+                evaluated_at=evaluated_at,
+            )
+            for contract in universe.contracts
+        }
+
     auto_runtime = AutoMarketSelectionRuntime(
         bot_manager,
         universe_provider=lambda: MarketUniverseSnapshot(
@@ -254,16 +269,7 @@ def attach_production_paper_auto_selection(bot_manager):
             "FRESH",
         ),
         capital_provider=bot_manager.get_official_mm_capital_authority,
-        eligibility_provider=lambda universe, capital: {
-            contract.canonical_symbol: evaluate_market_capital_eligibility(
-                contract,
-                capital,
-                stop_loss_percent=Decimal("1.0"),
-                effective_cost_percent=Decimal("0.1"),
-                risk_percent=Decimal("0.5"),
-            )
-            for contract in universe.contracts
-        },
+        eligibility_provider=eligibility_provider,
         position_provider=lambda: bot_manager.state.position_state,
         pending_order_provider=bot_manager.get_authoritative_pending_order_state,
         emergency_provider=lambda: (
