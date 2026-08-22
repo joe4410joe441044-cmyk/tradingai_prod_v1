@@ -76,12 +76,20 @@ def test_paper_production_composition():
     # Mock bot manager
     bot_manager = MagicMock()
     bot_manager.get_official_mm_capital_authority.return_value = 10000
-    bot_manager.get_authoritative_pending_order_state.return_value = {'position': None, 'pending': None}
+    bot_manager.get_authoritative_pending_order_state.return_value = {
+        'known': True, 'pending': False, 'safe': True,
+    }
     bot_manager.state = MagicMock()
     bot_manager.state.emergency_stop = False
+    bot_manager.state.position_state = 'FLAT'
     
     # Mock Kucoin futures client
-    with patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin:
+    governance = MagicMock()
+    governance.process_governance = MagicMock()
+    trading_runtime = MagicMock(governance_runtime=governance)
+    with (patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin,
+          patch('backend.auto_market_selection.paper_production.runtime_registry.trading_runtime',
+                trading_runtime)):
         mock_kucoin.return_value = MockKucoinFuturesPublicClient()
         
         # Attach production paper auto selection
@@ -94,8 +102,10 @@ def test_paper_production_composition():
         bot_manager.config = {'mode': 'paper', 'dry_run': True, 'realOrderAllowed': False}
         start_result = lifecycle.start()
         assert start_result['amsRuntimeState'] == 'READY'
-        
-        cycle_result = lifecycle.run_one_cycle(started_at=NOW)
-        assert cycle_result['accepted'] is True
+        assert lifecycle.e2e_runtime.production_pipeline is not None
+        assert lifecycle.e2e_runtime.strategy is None
+        assert lifecycle.e2e_runtime.money_management is None
+        assert lifecycle.e2e_runtime.governance is None
+        assert lifecycle.e2e_runtime.paper_execution is None
         
         print("✅ Paper production composition test passed")

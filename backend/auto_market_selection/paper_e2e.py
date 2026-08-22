@@ -74,10 +74,15 @@ class PaperAutoSelectionE2E:
 
     def __init__(self, bot_manager, auto_runtime, *, initial_state_provider,
                  market_intelligence, strategy, ai_review, money_management,
-                 governance, paper_execution, clock=None):
+                 governance, paper_execution, clock=None,
+                 production_pipeline=None):
         boundaries = (
-            initial_state_provider, market_intelligence, strategy, ai_review,
-            money_management, governance, paper_execution,
+            (initial_state_provider, production_pipeline)
+            if production_pipeline is not None
+            else (
+                initial_state_provider, market_intelligence, strategy,
+                ai_review, money_management, governance, paper_execution,
+            )
         )
         if any(not callable(item) for item in boundaries):
             raise TypeError("Paper E2E authority boundaries required")
@@ -94,6 +99,7 @@ class PaperAutoSelectionE2E:
         self.money_management = money_management
         self.governance = governance
         self.paper_execution = paper_execution
+        self.production_pipeline = production_pipeline
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def run(self, *, started_at=None):
@@ -143,6 +149,10 @@ class PaperAutoSelectionE2E:
                                 reasons=("ACTIVE_SYMBOL_CONTEXT_INVALID",), **common)
         context_payload = context.to_dict()
         try:
+            if self.production_pipeline is not None:
+                return self._run_production_pipeline(
+                    started, common, context_payload,
+                )
             market = self.market_intelligence(context_payload)
             if not self._stage_matches(market, context_payload):
                 raise ValueError("MARKET_INTELLIGENCE_CONTEXT_MISMATCH")
@@ -204,6 +214,70 @@ class PaperAutoSelectionE2E:
         except Exception:
             return self._result(started, status=PaperAutoSelectionE2EStatus.FAILED,
                                 reasons=("PAPER_E2E_STAGE_FAILED",), **common)
+
+    def _run_production_pipeline(self, started, common, context):
+        """Project the authoritative mainline without replaying its stages."""
+
+        result = self.production_pipeline(context)
+        if not self._stage_matches(result, context):
+            raise ValueError("PRODUCTION_PIPELINE_CONTEXT_MISMATCH")
+
+        strategy = self._decision(result.get("strategy"))
+        ai = "NOT_REQUIRED"
+        mm = self._decision(result.get("moneyManagement"))
+        governance = self._decision(result.get("governance"))
+        reason = result.get("reason")
+
+        if result.get("valid") is not True:
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.FAILED,
+                strategy=strategy, ai=ai, mm=mm, governance=governance,
+                reasons=(str(reason or "PRODUCTION_PIPELINE_FAILED"),),
+                **common,
+            )
+        if strategy == "HOLD":
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.COMPLETED_HOLD,
+                strategy=strategy, ai=ai,
+                reasons=(str(reason or "STRATEGY_HOLD"),), **common,
+            )
+        if result.get("moneyManagementReached") is not True:
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.COMPLETED_BLOCKED,
+                strategy=strategy, ai=ai, reasons=(
+                    str(reason or "MONEY_MANAGEMENT_NOT_REACHED"),
+                ), **common,
+            )
+        if result.get("moneyManagementAllowed") is not True:
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.COMPLETED_BLOCKED,
+                strategy=strategy, ai=ai, mm=mm,
+                reasons=(str(reason or "MONEY_MANAGEMENT_BLOCKED"),),
+                **common,
+            )
+        if result.get("governanceReached") is not True:
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.COMPLETED_BLOCKED,
+                strategy=strategy, ai=ai, mm=mm, reasons=(
+                    str(reason or "GOVERNANCE_NOT_REACHED"),
+                ), **common,
+            )
+        if result.get("governanceAllowed") is not True:
+            return self._result(
+                started, status=PaperAutoSelectionE2EStatus.COMPLETED_BLOCKED,
+                strategy=strategy, ai=ai, mm=mm, governance=governance,
+                reasons=(str(reason or "GOVERNANCE_BLOCKED"),), **common,
+            )
+        return self._result(
+            started,
+            status=(
+                PaperAutoSelectionE2EStatus.COMPLETED_SWITCHED
+                if common["auto"].status is AutoSelectionCycleStatus.COMPLETED
+                else PaperAutoSelectionE2EStatus.COMPLETED_NO_SWITCH
+            ),
+            strategy=strategy, ai=ai, mm=mm, governance=governance,
+            order=result.get("paperOrderCreated") is True, **common,
+        )
 
     def _safety_reason(self):
         config = getattr(self.manager, "config", None)
