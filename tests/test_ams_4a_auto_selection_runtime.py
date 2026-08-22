@@ -228,6 +228,31 @@ def test_precommit_and_postcommit_failures_preserve_safe_switch_semantics():
     assert post_runtime.events[-1] == "old_cleanup"
 
 
+def test_snapshot_warmup_timeout_is_retryable_and_next_cycle_can_commit():
+    service, manager, switch_runtime, _ = runtime(switch_failure="not_ready")
+
+    first = service.run_cycle(started_at=NOW)
+    assert first.status is AutoSelectionCycleStatus.SWITCH_BLOCKED
+    assert first.reason_codes == ("NEW_SNAPSHOT_NOT_READY",)
+    assert manager.activeSymbol == "ETHUSDT"
+    assert service.get_status()["status"] == "SWITCH_BLOCKED"
+
+    switch_runtime.fail = None
+    second = service.run_cycle(started_at=NOW)
+    assert second.status is AutoSelectionCycleStatus.COMPLETED
+    assert manager.activeSymbol == "BTCUSDT"
+
+
+def test_repeated_snapshot_warmup_timeouts_do_not_corrupt_runtime():
+    service, manager, switch_runtime, _ = runtime(switch_failure="not_ready")
+    for _ in range(3):
+        result = service.run_cycle(started_at=NOW)
+        assert result.status is AutoSelectionCycleStatus.SWITCH_BLOCKED
+        assert result.reason_codes == ("NEW_SNAPSHOT_NOT_READY",)
+        assert manager.activeSymbol == "ETHUSDT"
+        assert switch_runtime.old_feed_active is True
+
+
 def test_concurrent_cycle_is_rejected_without_overwriting_last_status():
     service, manager, _, calls = runtime()
     service._cycle_lock.acquire()

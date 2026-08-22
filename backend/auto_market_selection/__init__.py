@@ -29,7 +29,8 @@ from .selection_proposal import (
     snapshot_active_symbol_authority,
 )
 from .safe_switch import (
-    InitialSymbolCommit, SafeSymbolSwitch, SwitchReason, SwitchResult, SwitchState,
+    InitialSymbolCommit, SafeSymbolSwitch, SnapshotNotReady, SwitchReason,
+    SwitchResult, SwitchState,
 )
 from .bot_manager_switch_runtime import (
     BotManagerSwitchRuntime, InitialBotManagerCommitRuntime, PreparedFeed,
@@ -121,6 +122,7 @@ __all__ = [
     "SwitchReason",
     "SwitchResult",
     "SwitchState",
+    "SnapshotNotReady",
     "BotManagerSwitchRuntime",
     "InitialBotManagerCommitRuntime",
     "PreparedFeed",

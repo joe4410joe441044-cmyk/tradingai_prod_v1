@@ -17,6 +17,7 @@ READY = {"dependenciesAvailable": True, "mmAvailable": True, "emergencySafe": Tr
 
 class ResultStatus(str, Enum):
     COMPLETED = "COMPLETED_SWITCHED"
+    BLOCKED = "COMPLETED_BLOCKED"
     FAILED = "FAILED"
 
 
@@ -152,6 +153,24 @@ def test_failure_is_visible_and_no_automatic_retry_occurs():
     assert response["runtime"]["reasonCodes"] == ["GOVERNANCE_CONTEXT_MISMATCH"]
     assert len(e2e.calls) == 1 and manager.activeSymbol == "ETHUSDT"
     assert service.run_one_cycle()["accepted"] is False
+
+
+def test_retryable_snapshot_warmup_keeps_lifecycle_ready_for_next_cycle():
+    retryable = Result(ResultStatus.BLOCKED, ("NEW_SNAPSHOT_NOT_READY",))
+    service, manager, e2e = lifecycle(result=retryable)
+    service.start()
+
+    first = service.run_one_cycle(started_at=NOW)
+    assert first["runtime"]["amsRuntimeState"] == "READY"
+    assert first["runtime"]["enabled"] is True
+    assert first["reasonCodes"] == ["NEW_SNAPSHOT_NOT_READY"]
+    assert manager.activeSymbol == "ETHUSDT"
+
+    e2e.result = Result()
+    second = service.run_one_cycle(started_at=NOW)
+    assert second["accepted"] is True
+    assert second["runtime"]["amsRuntimeState"] == "READY"
+    assert len(e2e.calls) == 2
 
 
 def test_stop_idle_changes_only_auto_reselection_state():

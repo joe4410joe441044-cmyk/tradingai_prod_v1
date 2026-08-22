@@ -14,7 +14,7 @@ from .bot_manager_switch_runtime import (
 )
 from .candidate_ranking import CandidateRankingEngine
 from .market_scanner import MarketScanner, ScannerInput, ScannerStatus
-from .safe_switch import InitialSymbolCommit, SafeSymbolSwitch
+from .safe_switch import InitialSymbolCommit, SafeSymbolSwitch, SwitchState
 from .selection_audit import build_selection_audit_event
 from .selection_proposal import build_selection_proposal, snapshot_active_symbol_authority
 
@@ -237,8 +237,13 @@ class AutoMarketSelectionRuntime:
             and final_active == proposal.proposed_symbol
             and getattr(self.manager, "active_runtime_id", None)
         )
-        status = (AutoSelectionCycleStatus.COMPLETED if synchronized
-                  else AutoSelectionCycleStatus.FAILED)
+        status = (
+            AutoSelectionCycleStatus.COMPLETED
+            if synchronized
+            else AutoSelectionCycleStatus.SWITCH_BLOCKED
+            if switch_result.state is SwitchState.NOT_READY
+            else AutoSelectionCycleStatus.FAILED
+        )
         reasons = tuple(reason.value for reason in switch_result.reason_codes)
         if switch_result.success and not synchronized:
             reasons = ("MARKET_INTELLIGENCE_SYNCHRONIZATION_UNCONFIRMED",)

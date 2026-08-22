@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from copy import deepcopy
 import threading
 
+from .safe_switch import SnapshotNotReady
+
 @dataclass
 class PreparedFeed:
     feed: object
@@ -14,6 +16,7 @@ class PreparedFeed:
     symbol: str
     exchange_symbol: str
     snapshot: object = None
+    snapshot_timed_out: bool = False
 
 
 class BotManagerSwitchRuntime:
@@ -109,11 +112,15 @@ class BotManagerSwitchRuntime:
         )
         handle.feed = feed
         feed.start()
-        ready.wait(self.snapshot_timeout_seconds)
+        handle.snapshot_timed_out = not ready.wait(
+            self.snapshot_timeout_seconds
+        )
         return handle
 
     def read_new_snapshot(self, handle):
         data = handle.snapshot
+        if data is None and handle.snapshot_timed_out:
+            return SnapshotNotReady()
         if not isinstance(data, dict):
             return None
         debug = data.get("orderbook_sync_debug") or {}

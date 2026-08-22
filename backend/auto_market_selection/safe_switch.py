@@ -24,6 +24,7 @@ class SwitchState(str, Enum):
     COMMITTING = "COMMITTING"
     CLEANUP = "CLEANUP"
     COMPLETED = "COMPLETED"
+    NOT_READY = "NOT_READY"
     FAILED = "FAILED"
 
 
@@ -40,6 +41,7 @@ class SwitchReason(str, Enum):
     EMERGENCY_UNSAFE = "EMERGENCY_UNSAFE"
     ENTRY_PAUSE_FAILED = "ENTRY_PAUSE_FAILED"
     NEW_FEED_SUBSCRIBE_FAILED = "NEW_FEED_SUBSCRIBE_FAILED"
+    NEW_SNAPSHOT_NOT_READY = "NEW_SNAPSHOT_NOT_READY"
     NEW_SNAPSHOT_INVALID = "NEW_SNAPSHOT_INVALID"
     NEW_SNAPSHOT_STALE = "NEW_SNAPSHOT_STALE"
     SYMBOL_MISMATCH = "SYMBOL_MISMATCH"
@@ -108,6 +110,13 @@ class SwitchResult:
 
     def to_json(self):
         return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class SnapshotNotReady:
+    """Typed evidence that a feed exists but has not published a snapshot."""
+
+    reason: str = "FIRST_SNAPSHOT_TIMEOUT"
 
 
 class SafeSymbolSwitch:
@@ -305,6 +314,8 @@ class SafeSymbolSwitch:
         return None
 
     def _snapshot_reason(self, proposal, snapshot, now):
+        if isinstance(snapshot, SnapshotNotReady):
+            return SwitchReason.NEW_SNAPSHOT_NOT_READY
         if not isinstance(snapshot, dict):
             return SwitchReason.NEW_SNAPSHOT_INVALID
         if (snapshot.get("symbol") != proposal.proposed_symbol
@@ -341,7 +352,17 @@ class SafeSymbolSwitch:
                 committed_at=None, success=False, entry_paused=False,
                 validated=False, committed=False, detached=False, resumed=False,
                 reasons=()):
-        self.state = SwitchState.COMPLETED if success else SwitchState.FAILED
+        retryable = (
+            not success
+            and tuple(reasons) == (SwitchReason.NEW_SNAPSHOT_NOT_READY,)
+        )
+        self.state = (
+            SwitchState.COMPLETED
+            if success
+            else SwitchState.NOT_READY
+            if retryable
+            else SwitchState.FAILED
+        )
         result = SwitchResult(
             transaction_id, getattr(proposal, "selection_proposal_id", ""),
             getattr(proposal, "scanner_cycle_id", ""),

@@ -4,7 +4,7 @@ import pytest
 
 from backend.auto_market_selection import (
     BotManagerSwitchRuntime, CandidateRankingEngine, MarketScanner,
-    PreparedFeed, SafeSymbolSwitch, SwitchReason,
+    PreparedFeed, SafeSymbolSwitch, SnapshotNotReady, SwitchReason, SwitchState,
     build_selection_audit_event, build_selection_proposal,
 )
 from tests.test_ams_1a_market_scanner import scanner_input
@@ -66,6 +66,8 @@ class Runtime:
                     "timestamp": NOW, "sequence": 12, "sequenceValid": True,
                     "bids": {99.0: 2.0}, "asks": {101.0: 3.0}}
         if self.fail == "invalid": snapshot["bids"] = {}
+        if self.fail == "crossed": snapshot["bids"] = {102.0: 2.0}
+        if self.fail == "not_ready": return SnapshotNotReady()
         if self.fail == "stale": snapshot["timestamp"] = NOW - timedelta(seconds=6)
         if self.fail == "symbol": snapshot["symbol"] = "SOLUSDT"
         if self.fail == "sequence": snapshot["sequenceValid"] = False
@@ -148,6 +150,7 @@ def test_stale_and_ineligible_proposals_do_not_start_transaction():
 
 @pytest.mark.parametrize("failure,reason", [
     ("invalid", SwitchReason.NEW_SNAPSHOT_INVALID),
+    ("crossed", SwitchReason.NEW_SNAPSHOT_INVALID),
     ("stale", SwitchReason.NEW_SNAPSHOT_STALE),
     ("symbol", SwitchReason.SYMBOL_MISMATCH),
     ("sequence", SwitchReason.SEQUENCE_INVALID),
@@ -159,6 +162,39 @@ def test_snapshot_barrier_failure_keeps_old_authority_and_cleans_new(failure, re
     assert runtime.active == "ETHUSDT" and runtime.old_feed_active
     assert "commit" not in runtime.events
     assert runtime.events[-2:] == ["new_cleanup", "resume"]
+
+
+def test_first_snapshot_timeout_is_retryable_and_preserves_old_authority():
+    runtime = Runtime(); runtime.fail = "not_ready"
+    runtime, result = execute(runtime)
+    assert not result.success
+    assert result.state is SwitchState.NOT_READY
+    assert result.reason_codes == (SwitchReason.NEW_SNAPSHOT_NOT_READY,)
+    assert runtime.active == "ETHUSDT" and runtime.old_feed_active
+    assert "commit" not in runtime.events
+    assert runtime.events[-2:] == ["new_cleanup", "resume"]
+
+
+def test_bot_manager_adapter_returns_typed_timeout_without_fabricating_snapshot(
+        monkeypatch):
+    class Feed:
+        def start(self): pass
+    class Manager:
+        exchange_name = "kucoin"
+        ws = None
+        active_runtime_id = "old"
+    monkeypatch.setattr(
+        "backend.market.exchange_factory.ExchangeFactory.create_market_ws",
+        lambda **kwargs: Feed(),
+    )
+    adapter = BotManagerSwitchRuntime(
+        Manager(), position_provider=lambda: "FLAT", mm_provider=lambda: None,
+        emergency_provider=lambda: True, snapshot_timeout_seconds=0,
+    )
+    handle = adapter.prepare_new_feed("BTCUSDT", "XBTUSDTM", "tx")
+    snapshot = adapter.read_new_snapshot(handle)
+    assert handle.snapshot is None and handle.snapshot_timed_out is True
+    assert isinstance(snapshot, SnapshotNotReady)
 
 
 def test_cleanup_failure_after_commit_stays_paused_and_never_rolls_back():
