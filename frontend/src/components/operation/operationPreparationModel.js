@@ -172,7 +172,7 @@ export const deriveOperationReadiness = ({
         : null;
     const selectionReadiness = selectionMode === "MANUAL"
         ? "READY"
-        : selectedRuntimeSymbol
+        : selectionRuntime === "READY" && selectedRuntimeSymbol
             ? "READY"
             : selectionRuntime === "READY" ? "WAITING" : selectionRuntime;
     const emergencyReadiness = normalizeReadiness(emergencyState, ["READY"]);
