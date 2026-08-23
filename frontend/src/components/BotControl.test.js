@@ -535,6 +535,9 @@ const defaultProps = (
             symbol: "XRPUSDT",
             exchange: "kucoin",
             mode: "paper",
+            realOrderAllowed: false,
+            allowLive: false,
+            tradeMode: "paper",
         },
         executionEnabled: false,
         botRunning: false,
@@ -544,6 +547,7 @@ const defaultProps = (
         emergencyState: emergency.state,
         emergency,
         pendingOrder: false,
+        realOrderAllowed: false,
         onStatusRefresh: async () => undefined,
         setExecutionEnabledState: () => undefined,
         ...overrides,
@@ -575,6 +579,7 @@ const setMmConfiguration = (
         riskPerTradePercent: "0.50",
         totalExposurePercent: "20.00",
         maximumDrawdownPercent: "5.00",
+        maximumLeverage: "5",
         ...overrides,
     };
 };
@@ -589,19 +594,31 @@ const clearMmDraft = () => {
 
 const readyStartProps = (
     overrides = {}
-) => ({
-    config: {
-        symbol: "XRPUSDTM",
-        exchange: "kucoin",
-        mode: "paper",
-        selectionMode: "MANUAL",
-        ...overrides.config,
-    },
-    position: "FLAT",
-    pendingOrder: false,
-    runtimeHealth: { governance: { status: "READY" } },
-    ...overrides,
-});
+) => {
+    const {
+        config: configOverrides = {},
+        ...restOverrides
+    } = overrides;
+
+    return {
+        config: {
+            symbol: "XRPUSDTM",
+            exchange: "kucoin",
+            mode: "paper",
+            selectionMode: "MANUAL",
+            leverage: 5,
+            realOrderAllowed: false,
+            allowLive: false,
+            tradeMode: "paper",
+            ...configOverrides,
+        },
+        position: "FLAT",
+        pendingOrder: false,
+        runtimeHealth: { governance: { status: "READY" } },
+        realOrderAllowed: false,
+        ...restOverrides,
+    };
+};
 
 const renderBotControl = async (
     props = {}
@@ -1168,9 +1185,11 @@ test("START fails closed when saved MM risk is unavailable", async () => {
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+        await clickAndRender(renderer, start);
         assert.equal(mock.requests.length, 0);
-        assert.equal(textIncludes(renderer.root, "risk-per-trade is unavailable"), true);
     } finally {
         mock.restore();
     }
@@ -1306,6 +1325,7 @@ test("running BOT Runtime Auto Trade reaches the existing Governance handler", a
 
 test("START BOT is enabled when MM, Emergency, and remaining readiness are READY", async () => {
     setMmStatus({ executionEntryAllowed: true });
+    setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
         const start = findButton(renderer.root, "START BOT");
@@ -1313,6 +1333,7 @@ test("START BOT is enabled when MM, Emergency, and remaining readiness are READY
         assert.equal(start.props.disabled, false);
     } finally {
         clearMmStatus();
+        clearMmConfiguration();
     }
 });
 
@@ -1709,4 +1730,61 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
     assert.doesNotMatch(source, /deriveMmReadiness|deriveReviewReadiness/);
     assert.match(source, /deriveOperationReadiness/);
     assert.match(source, /startReady/);
+});
+
+test("DASH4A: LIVE selected but authority denied disables START BOT", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: false,
+                tradeMode: "paper",
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+    } finally {
+        clearMmConfiguration();
+    }
+});
+
+test("DASH4A: LIVE selected but authority unknown fails closed", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: undefined,
+                tradeMode: undefined,
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+    } finally {
+        clearMmConfiguration();
+    }
+});
+
+test("DASH4A: LIVE explicitly authorized enables START BOT", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: true,
+                tradeMode: "live",
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, false);
+    } finally {
+        clearMmConfiguration();
+    }
 });

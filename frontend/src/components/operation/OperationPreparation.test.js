@@ -737,3 +737,143 @@ test("missing authority never falls back from requested to effective", async () 
     assert.equal(content.includes("MM Leverage Limit（MMレバレッジ上限） UNAVAILABLE"), true);
     assert.equal(content.includes("Effective Leverage（有効レバレッジ） UNAVAILABLE"), true);
 });
+
+// =========================
+// TR-OP-A-DASH-4A: LIVE start authority model contract
+// =========================
+
+const readinessInput = (overrides = {}) => ({
+    botRunning: false,
+    tradingMode: "PAPER",
+    dryRun: true,
+    selectionMode: "MANUAL",
+    emergencyState: "READY",
+    position: "FLAT",
+    pendingOrder: false,
+    governanceStatus: "READY",
+    realOrderAllowed: false,
+    executionEnabled: false,
+    executionEntryAllowed: true,
+    recommendedAction: "CONTINUE",
+    riskState: "NORMAL",
+    requestedLeverage: 5,
+    maximumLeverage: 5,
+    mmConfiguration: {
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20.00",
+        maximumDrawdownPercent: "5.00",
+        maximumLeverage: "5",
+    },
+    mmBlockReasons: [],
+    mmRecoveryRequired: false,
+    mmConfigurationError: false,
+    allowLive: false,
+    tradeMode: "paper",
+    ...overrides,
+});
+
+test("DASH4A: PAPER safe Start is preserved without entry permission", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "PAPER",
+        executionEntryAllowed: true,
+        mmBlockReasons: [],
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.startReadiness, "READY");
+    assert.equal(result.liveAuthorityReadiness, "NOT_RELEVANT");
+    assert.equal(result.entryReady, false);
+});
+
+test("DASH4A: A-R6 split allows PAPER start with runtime MM metrics unavailable", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "PAPER",
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.stoppedPaperRuntimeMetricsOnly, true);
+    assert.equal(result.entryReady, false);
+});
+
+test("DASH4A: LIVE selected but authority denied is BLOCKED", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: false,
+        tradeMode: "paper",
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.startReadiness, "BLOCKED");
+    assert.equal(result.liveAuthorityReadiness, "BLOCKED");
+});
+
+test("DASH4A: LIVE selected but trade mode not live is BLOCKED", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: true,
+        tradeMode: "paper",
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.liveAuthorityReadiness, "BLOCKED");
+});
+
+test("DASH4A: LIVE selected but authority unknown fails closed", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: undefined,
+        tradeMode: undefined,
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.startReadiness, "BLOCKED");
+    assert.equal(result.liveAuthorityReadiness, "BLOCKED");
+});
+
+test("DASH4A: LIVE explicitly authorized is READY for start but not entry", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: true,
+        tradeMode: "live",
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.startReadiness, "READY");
+    assert.equal(result.liveAuthorityReadiness, "READY");
+    assert.equal(result.entryReady, false);
+});
+
+test("DASH4A: invalid mode fails closed", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        tradingMode: "SIMULATION",
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.startReadiness, "BLOCKED");
+});
+
+test("DASH4A: A-R1 requested leverage above MM max blocks, never clamps", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        requestedLeverage: 10,
+        maximumLeverage: 5,
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.leverageReadiness, "BLOCKED");
+});
+
+test("DASH4A: A-R1 requested leverage at MM max is allowed", async () => {
+    const { deriveOperationReadiness } = await import("./operationPreparationModel.js");
+    const result = deriveOperationReadiness(readinessInput({
+        requestedLeverage: 5,
+        maximumLeverage: 5,
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.leverageReadiness, "READY");
+});
