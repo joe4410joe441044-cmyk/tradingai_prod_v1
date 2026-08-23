@@ -6406,6 +6406,8 @@ class BotManager:
             if (
                 effective_source
                 not in self._stopped_paper_base_snapshot_sources()
+                and effective_source
+                != self._stopped_paper_recovered_snapshot_source()
             ):
                 return {
                     "valid": False,
