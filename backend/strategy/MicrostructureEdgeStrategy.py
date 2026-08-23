@@ -26,7 +26,10 @@
 #
 # ============================================================
 
-from datetime import datetime
+from datetime import datetime, timezone
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
 
 from backend.utils.log_buffer import runtime_debug
 from backend.strategy.normalized_parameters import parameter_value
@@ -48,6 +51,32 @@ class MicrostructureEdgeStrategy:
         self.MIN_LIQUIDITY_SCORE = 0.40
 
         self.MIN_MOMENTUM_SCORE = 0.50
+
+        # --------------------------------------------------------
+        # Microstructure Edge Exit holding-time contract.
+        #
+        # - MIN_HOLD_MS : minimum time a position must be held before a
+        #                 "soft" microstructure exit (reversal / momentum
+        #                 decay) may fire.  Safety exits (liquidity / spread)
+        #                 and the ExecutionEngine SL/TP authority are never
+        #                 gated by this floor.
+        # - TARGET_HOLD_MS : design target for capturing the short-lived edge.
+        # - MAX_HOLD_MS : hard bound.  Reaching it grants a formal MAX_HOLD
+        #                 exit so a position is never held indefinitely.
+        # --------------------------------------------------------
+        self.MIN_HOLD_MS = 500
+        self.TARGET_HOLD_MS = 2000
+        self.MAX_HOLD_MS = 3000
+
+        # Maximum acceptable age of a fresh feature snapshot used for a
+        # profitable, deterministic exit decision.
+        self.FEATURE_FRESHNESS_MAX_MS = 1000
+
+        # Single source for the "deterioration" thresholds used by the exit
+        # evaluator (stricter than the entry gates).
+        self.EXIT_LIQUIDITY_QUALITY_MIN = 0.30
+        self.EXIT_SPREAD_QUALITY_MIN = 0.30
+        self.EXIT_MOMENTUM_MIN = 0.40
 
     @staticmethod
     def _uses_normalized_feature_contract(microstructure_state):
@@ -1058,6 +1087,402 @@ class MicrostructureEdgeStrategy:
             "blockingCondition": blocker_by_reason.get(suppression["suppressionReason"]),
             "suppressionReason": suppression["suppressionReason"],
         }
+
+    # ============================================================
+    # EXIT REASONS
+    # ============================================================
+
+    class ExitReason(str, Enum):
+        STOP_LOSS = "STOP_LOSS"
+        TAKE_PROFIT = "TAKE_PROFIT"
+        MAX_HOLD = "MAX_HOLD"
+        MICROSTRUCTURE_REVERSAL = "MICROSTRUCTURE_REVERSAL"
+        MOMENTUM_DECAY = "MOMENTUM_DECAY"
+        LIQUIDITY_DETERIORATION = "LIQUIDITY_DETERIORATION"
+        SPREAD_DIVERGENCE = "SPREAD_DIVERGENCE"
+
+    # ============================================================
+    # EXIT DECISION CONTRACT
+    # ============================================================
+
+    @dataclass(frozen=True)
+    class ExitDecision:
+        symbol: str
+        position_side: str
+        entry_price: float
+        current_price: float
+        opened_at: float
+        evaluated_at: float
+        holding_duration_ms: float
+        decision: str  # "HOLD" or "EXIT"
+        reason: Optional[str]
+        feature_timestamp: float
+        feature_fresh: bool
+        trace_id: Optional[str]
+
+        def to_dict(self):
+            return {
+                "symbol": self.symbol,
+                "positionSide": self.position_side,
+                "entryPrice": self.entry_price,
+                "currentPrice": self.current_price,
+                "openedAt": self.opened_at,
+                "evaluatedAt": self.evaluated_at,
+                "holdingDurationMs": self.holding_duration_ms,
+                "decision": self.decision,
+                "reason": self.reason,
+                "featureTimestamp": self.feature_timestamp,
+                "featureFresh": self.feature_fresh,
+                "traceId": self.trace_id,
+            }
+
+    # ============================================================
+    # EXIT EVALUATION
+    # ============================================================
+
+    @staticmethod
+    def _parse_feature_timestamp(value):
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = datetime.fromisoformat(
+                    text.replace("Z", "+00:00")
+                )
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        return None
+
+    @staticmethod
+    def _position_field(position_info, key, default):
+        try:
+            value = position_info.get(key)
+        except AttributeError:
+            return default
+        return default if value is None else value
+
+    def evaluate_exit(
+        self,
+        microstructure_state,
+        position_info,
+    ):
+        """
+        Evaluate whether an OPEN position should be exited.
+
+        This is a deterministic, side-aware, symbol-matched evaluator.  It
+        never fabricates a profitable exit from stale / unknown / mismatched
+        features: invalid inputs produce HOLD with an explicit reason.
+
+        position_info fields:
+            symbol, positionSide ("BUY"/"SELL"), entryPrice, currentPrice,
+            openedAt (epoch seconds), optional traceId, optional evaluatedAt.
+        """
+
+        if not isinstance(microstructure_state, dict):
+            return self._invalid_exit_decision(
+                self._position_field(position_info, "symbol", "UNKNOWN"),
+                self._position_field(position_info, "positionSide", "UNKNOWN"),
+                self._position_field(position_info, "entryPrice", 0.0),
+                self._position_field(position_info, "currentPrice", 0.0),
+                self._position_field(position_info, "openedAt", 0.0),
+                "INVALID_FEATURE_STATE",
+            )
+
+        position_info = dict(position_info or {})
+
+        required_fields = [
+            "symbol", "positionSide", "entryPrice", "currentPrice", "openedAt",
+        ]
+        for field in required_fields:
+            if position_info.get(field) is None:
+                return self._invalid_exit_decision(
+                    position_info.get("symbol", "UNKNOWN"),
+                    position_info.get("positionSide", "UNKNOWN"),
+                    position_info.get("entryPrice", 0.0),
+                    position_info.get("currentPrice", 0.0),
+                    position_info.get("openedAt", 0.0),
+                    "INVALID_POSITION_INFO",
+                )
+
+        symbol = str(position_info["symbol"]).strip().upper()
+        position_side = str(position_info["positionSide"]).strip().upper()
+        position_side = {
+            "LONG": "BUY",
+            "SHORT": "SELL",
+        }.get(position_side, position_side)
+        entry_price = float(position_info["entryPrice"])
+        current_price = float(position_info["currentPrice"])
+        opened_at = float(position_info["openedAt"])
+        trace_id = position_info.get("traceId")
+
+        evaluated_at = float(
+            position_info.get("evaluatedAt")
+            if position_info.get("evaluatedAt") is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        holding_duration_ms = (evaluated_at - opened_at) * 1000
+
+        # --------------------------------------------------------
+        # Symbol identity
+        # --------------------------------------------------------
+        state_symbol = str(
+            microstructure_state.get("symbol") or ""
+        ).strip().upper()
+        if state_symbol and state_symbol != symbol:
+            return self._invalid_exit_decision(
+                symbol, position_side, entry_price, current_price,
+                opened_at, "SYMBOL_MISMATCH", evaluated_at,
+            )
+
+        # --------------------------------------------------------
+        # Feature freshness
+        # --------------------------------------------------------
+        feature_timestamp = self._parse_feature_timestamp(
+            microstructure_state.get("timestamp")
+        )
+        if feature_timestamp is None:
+            feature_timestamp = evaluated_at
+        feature_age_ms = (evaluated_at - feature_timestamp) * 1000
+        feature_fresh = feature_age_ms < self.FEATURE_FRESHNESS_MAX_MS
+
+        if not feature_fresh:
+            return self._invalid_exit_decision(
+                symbol, position_side, entry_price, current_price,
+                opened_at, "STALE_FEATURES", evaluated_at,
+            )
+
+        # --------------------------------------------------------
+        # Deterministic exit evaluation
+        # --------------------------------------------------------
+        exit_reason = self._evaluate_exit_conditions(
+            microstructure_state, position_side, holding_duration_ms,
+        )
+        if isinstance(exit_reason, self.ExitReason):
+            exit_reason = exit_reason.value
+
+        return self.ExitDecision(
+            symbol=symbol,
+            position_side=position_side,
+            entry_price=entry_price,
+            current_price=current_price,
+            opened_at=opened_at,
+            evaluated_at=evaluated_at,
+            holding_duration_ms=holding_duration_ms,
+            decision="EXIT" if exit_reason else "HOLD",
+            reason=exit_reason,
+            feature_timestamp=feature_timestamp,
+            feature_fresh=feature_fresh,
+            trace_id=trace_id,
+        )
+
+    def _invalid_exit_decision(
+        self,
+        symbol,
+        position_side,
+        entry_price,
+        current_price,
+        opened_at,
+        reason,
+        evaluated_at=None,
+    ):
+        """Fail-closed HOLD for invalid / unsafe feature evidence."""
+        evaluated_at = (
+            evaluated_at
+            if evaluated_at is not None
+            else datetime.now(timezone.utc).timestamp()
+        )
+        return self.ExitDecision(
+            symbol=symbol,
+            position_side=position_side,
+            entry_price=entry_price,
+            current_price=current_price,
+            opened_at=opened_at,
+            evaluated_at=evaluated_at,
+            holding_duration_ms=0,
+            decision="HOLD",
+            reason=reason,
+            feature_timestamp=evaluated_at,
+            feature_fresh=False,
+            trace_id=None,
+        )
+
+    def _evaluate_exit_conditions(
+        self,
+        microstructure_state,
+        position_side,
+        holding_duration_ms,
+    ):
+        """
+        Deterministic exit priority (highest first).  Generic SL/TP remain
+        the ExecutionEngine's authority and are intentionally not duplicated
+        here:
+
+        1. Microstructure reversal     (side-aware, immediate)
+        2. Liquidity deterioration     (unsafe / weak liquidity)
+        3. Spread deterioration        (unsafe / divergent spread)
+        4. Momentum decay              (side-aware, gated by MIN_HOLD_MS)
+        5. Max hold                    (hard holding-time bound)
+        6. HOLD
+        """
+
+        normalized_contract = self._uses_normalized_feature_contract(
+            microstructure_state
+        )
+
+        reversal_reason = self._evaluate_microstructure_reversal(
+            microstructure_state, position_side, normalized_contract,
+        )
+        if reversal_reason:
+            return reversal_reason
+
+        liquidity_reason = self._evaluate_liquidity_deterioration(
+            microstructure_state, normalized_contract,
+        )
+        if liquidity_reason:
+            return liquidity_reason
+
+        spread_reason = self._evaluate_spread_deterioration(
+            microstructure_state, normalized_contract,
+        )
+        if spread_reason:
+            return spread_reason
+
+        if holding_duration_ms >= self.MIN_HOLD_MS:
+            momentum_reason = self._evaluate_momentum_decay(
+                microstructure_state, position_side, normalized_contract,
+            )
+            if momentum_reason:
+                return momentum_reason
+
+        if holding_duration_ms >= self.MAX_HOLD_MS:
+            return self.ExitReason.MAX_HOLD
+
+        return None
+
+    def _evaluate_microstructure_reversal(
+        self,
+        microstructure_state,
+        position_side,
+        normalized_contract,
+    ):
+        """Side-aware directional reversal evidence."""
+
+        if normalized_contract:
+            momentum_direction = str(
+                microstructure_state.get("momentumDirection", "FLAT")
+            ).upper()
+        else:
+            direction = self.evaluate_momentum_continuation(
+                microstructure_state
+            )["direction"]
+            momentum_direction = {
+                "LONG": "UP",
+                "SHORT": "DOWN",
+            }.get(direction, "FLAT")
+
+        if position_side == "BUY" and momentum_direction == "DOWN":
+            return self.ExitReason.MICROSTRUCTURE_REVERSAL
+        if position_side == "SELL" and momentum_direction == "UP":
+            return self.ExitReason.MICROSTRUCTURE_REVERSAL
+
+        return None
+
+    def _evaluate_liquidity_deterioration(
+        self,
+        microstructure_state,
+        normalized_contract,
+    ):
+        """Unsafe liquidity (formal authority) or weak liquidity quality."""
+
+        liquidity_result = self.evaluate_liquidity_safety(
+            microstructure_state
+        )
+        if not liquidity_result.get("liquiditySafe", False):
+            return self.ExitReason.LIQUIDITY_DETERIORATION
+
+        liquidity_quality = float(
+            microstructure_state.get(
+                "normalizedLiquidityQuality"
+                if normalized_contract
+                else "liquidityQuality",
+                self.EXIT_LIQUIDITY_QUALITY_MIN,
+            )
+        )
+        if liquidity_quality < self.EXIT_LIQUIDITY_QUALITY_MIN:
+            return self.ExitReason.LIQUIDITY_DETERIORATION
+
+        return None
+
+    def _evaluate_spread_deterioration(
+        self,
+        microstructure_state,
+        normalized_contract,
+    ):
+        """Unsafe spread (formal authority) or divergent spread quality."""
+
+        spread_result = self.evaluate_spread_safety(
+            microstructure_state
+        )
+        if not spread_result.get("spreadSafe", True):
+            return self.ExitReason.SPREAD_DIVERGENCE
+
+        spread_quality = float(
+            microstructure_state.get(
+                "normalizedSpreadQuality"
+                if normalized_contract
+                else "spreadQuality",
+                self.EXIT_SPREAD_QUALITY_MIN,
+            )
+        )
+        if spread_quality < self.EXIT_SPREAD_QUALITY_MIN:
+            return self.ExitReason.SPREAD_DIVERGENCE
+
+        return None
+
+    def _evaluate_momentum_decay(
+        self,
+        microstructure_state,
+        position_side,
+        normalized_contract,
+    ):
+        """Side-aware loss of the formal momentum evidence present at entry."""
+
+        momentum_score = float(
+            microstructure_state.get(
+                "normalizedMomentum"
+                if normalized_contract
+                else "momentumPersistence",
+                0.0,
+            )
+        )
+
+        if normalized_contract:
+            momentum_direction = str(
+                microstructure_state.get("momentumDirection", "FLAT")
+            ).upper()
+            if position_side == "BUY" and momentum_direction != "UP":
+                return self.ExitReason.MOMENTUM_DECAY
+            if position_side == "SELL" and momentum_direction != "DOWN":
+                return self.ExitReason.MOMENTUM_DECAY
+        else:
+            momentum_result = self.evaluate_momentum_continuation(
+                microstructure_state
+            )
+            if not momentum_result.get("momentumValid", False):
+                return self.ExitReason.MOMENTUM_DECAY
+
+        if momentum_score < self.EXIT_MOMENTUM_MIN:
+            return self.ExitReason.MOMENTUM_DECAY
+
+        return None
 
     # ============================================================
     # MAIN STRATEGY PIPELINE

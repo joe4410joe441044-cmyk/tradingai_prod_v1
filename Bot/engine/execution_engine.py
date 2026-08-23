@@ -103,6 +103,9 @@ class ExecutionEngine:
         self.last_signal_time = 0
         self.last_signal_id = None
 
+        # strategy-specific exit authority (MicrostructureEdgeStrategy exit)
+        self.exit_evaluator = None
+
         # execution lifecycle
         self.last_execution_time = 0
 
@@ -967,7 +970,59 @@ class ExecutionEngine:
     # PRICE EVENT
     # =====================================
 
-    def on_price(self, symbol, price):
+    def set_exit_evaluator(self, evaluator):
+        """Bind the strategy-specific exit evaluator used by on_price().
+
+        The evaluator receives (microstructure_state, position_info) and
+        returns an ExitDecision (or dict) with a "decision" of "EXIT"/"HOLD".
+        Generic SL/TP close authority is not replaced by this evaluator.
+        """
+
+        if evaluator is not None and not callable(evaluator):
+            return False
+        self.exit_evaluator = evaluator
+        return True
+
+    def _evaluate_strategy_exit(self, price, microstructure_state):
+        """Evaluate a strategy-specific exit for the OPEN position.
+
+        Returns an exit reason string when a close is authorized, otherwise
+        None.  Only OPEN positions are evaluated, so FLAT / pending-entry /
+        closing states never produce an exit request.
+        """
+
+        if self.exit_evaluator is None:
+            return None
+        if not isinstance(self.actual_position, dict):
+            return None
+        if self.actual_position.get("state") != "OPEN":
+            return None
+        if not isinstance(microstructure_state, dict):
+            return None
+
+        position_info = {
+            "symbol": self.symbol or self.actual_position.get("symbol"),
+            "positionSide": self.actual_position.get("side"),
+            "entryPrice": self.actual_position.get("entry_price"),
+            "currentPrice": price,
+            "openedAt": self.actual_position.get("entry_time"),
+            "traceId": self.actual_position.get("trace_id"),
+        }
+        if position_info["symbol"] is None:
+            return None
+
+        decision = self.exit_evaluator(microstructure_state, position_info)
+        if isinstance(decision, dict):
+            if decision.get("decision") == "EXIT":
+                reason = decision.get("reason") or "MICROSTRUCTURE_EXIT"
+                return getattr(reason, "value", reason)
+            return None
+        if getattr(decision, "decision", None) == "EXIT":
+            reason = getattr(decision, "reason", None) or "MICROSTRUCTURE_EXIT"
+            return getattr(reason, "value", reason)
+        return None
+
+    def on_price(self, symbol, price, microstructure_state=None):
 
         try:
             if getattr(self, "_on_price_running", False):
@@ -1096,6 +1151,22 @@ class ExecutionEngine:
                     add_log("🟢 TP HIT")
 
                     self.close_position(price, "TP")
+
+                    return
+
+                # Strategy-specific microstructure exit.  Runs only after the
+                # generic SL/TP authority has declined to close, so a single
+                # close mutation is guaranteed per price cycle.
+                strategy_exit_reason = self._evaluate_strategy_exit(
+                    price, microstructure_state
+                )
+                if strategy_exit_reason:
+
+                    add_log(
+                        f"🧠 MICROSTRUCTURE EXIT ({strategy_exit_reason})"
+                    )
+
+                    self.close_position(price, str(strategy_exit_reason))
 
                     return
 

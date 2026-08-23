@@ -2971,6 +2971,19 @@ class BotManager:
                         self.engine
                     )
 
+                strategy_engine = getattr(
+                    runtime_registry.trading_runtime,
+                    "strategy_engine",
+                    None,
+                )
+                evaluate_exit = getattr(
+                    strategy_engine,
+                    "evaluate_exit",
+                    None,
+                )
+                if callable(evaluate_exit):
+                    self.engine.set_exit_evaluator(evaluate_exit)
+
             from backend.routers.positions import (
                 set_engine
             )
@@ -3259,6 +3272,8 @@ class BotManager:
                             )
                         )
 
+                        self.latest_microstructure_state = micro_state
+
                         if (self.loop_state == "RUNNING"
                                 and runtime_registry.trading_runtime
                                 and not self._symbol_switch_entry_paused):
@@ -3314,7 +3329,12 @@ class BotManager:
 
                         self.engine.on_price(
                             self.symbol,
-                            price
+                            price,
+                            microstructure_state=getattr(
+                                self,
+                                "latest_microstructure_state",
+                                None,
+                            ),
                         )
 
                         money_management_after = (
