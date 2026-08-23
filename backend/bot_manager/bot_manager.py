@@ -2618,7 +2618,11 @@ class BotManager:
         self.ob_manager.current_price = snapshot.get("price", 0)
         self.last_price = snapshot.get("price", 0)
         self.market_ready = True
-        self.last_update_time = snapshot.get("market_timestamp", time.time())
+        # 修复：snapshot中的timestamp是datetime对象，需要转换为timestamp
+        if isinstance(snapshot.get("timestamp"), datetime):
+            self.last_update_time = snapshot.get("timestamp").timestamp()
+        else:
+            self.last_update_time = snapshot.get("market_timestamp", time.time())
         self._store_market_snapshot(snapshot)
         return True
 
