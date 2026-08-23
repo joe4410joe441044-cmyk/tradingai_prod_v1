@@ -16,12 +16,48 @@ const authoritativeLeverage = (value) => {
     return Number.isFinite(parsed) && parsed > 0 ? `${parsed}x` : "UNAVAILABLE";
 };
 
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+const formatCurrency = (value) => {
+    if (value === null || value === undefined) {
+        return "UNAVAILABLE";
+    }
+    const strValue = String(value).trim();
+    const decimalPattern = /^-?\d+(?:\.\d+)?$/;
+    if (!decimalPattern.test(strValue)) {
+        return "UNAVAILABLE";
+    }
+    
+    const parts = strValue.split('.');
+    const integerPart = parts[0];
+    const fractionPart = parts[1] || "00";
+    
+    if (!/^-?\d+$/.test(integerPart) || fractionPart.length > 10) {
+        return "UNAVAILABLE";
+    }
+    
+    const parsed = Number(strValue);
+    if (!Number.isFinite(parsed)) {
+        return "UNAVAILABLE";
+    }
+    
+    return currencyFormatter.format(parsed);
+};
+
 const sourceLabel = (source) => ({
     "UI PREVIEW": "PREVIEW",
     "UI FALLBACK": "PREVIEW",
     "UI REVIEW": "UI",
     OPERATOR: "UI",
     DERIVED: "UI",
+    "NOT CONNECTED": "NOT CONNECTED",
+    "MM CONFIG": "MM CONFIG",
+    "RUNTIME": "RUNTIME",
 }[source] || source);
 
 const sourceBadge = (source) => (
@@ -608,13 +644,14 @@ return (
                             value={mmAvailable ? mmRiskValue : ""}
                         />
                         <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                        <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                        <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "NOT CONNECTED"} value={formatCurrency(availableCapital)} />
                         <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
                         <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
-                        <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                        <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={formatCurrency(capitalBasis)} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
-                        <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                        <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "NOT CONNECTED"} value={formatCurrency(riskBudget)} />
+                        <DerivedRow label="EXECUTION AUTHORITY" source={executionEntryAllowed !== undefined ? "RUNTIME" : "NOT CONNECTED"} value={executionEntryAllowed === true ? "ALLOWED" : executionEntryAllowed === false ? "BLOCKED" : "UNKNOWN"} />
                         <div className="operation-prep-mm-save" data-testid="mm-save-controls">
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
                             <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
@@ -636,7 +673,7 @@ return (
                         <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
                         <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
                         <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
-                        <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
+                        <DerivedRow label="REAL ORDER" source={config.realOrderAuthorityKnown ? "RUNTIME" : "NOT CONNECTED"} status value={realOrderAllowed ? "ALLOWED" : "BLOCKED"} />
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
