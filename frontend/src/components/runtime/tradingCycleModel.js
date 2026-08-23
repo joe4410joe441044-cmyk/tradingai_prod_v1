@@ -117,53 +117,44 @@ const createTradingCycleModel = (decision) => {
     let selectedSymbol = snapshot.selectedSymbol || getSelectedSymbol(decision);
     let nextStage = null;
 
-    // Handle STOPPED state specially
-    if (currentStageIndex === null) {
-        // No current stage when stopped
+    // Handle BOT_STOPPED case specially
+    if (currentActivity === 'BOT_STOPPED' || currentStageIndex === null) {
+        currentStageIndex = null;
+        nextStage = null;
+    } else {
+        // Fallback to frontend logic if backend values not available
+        if (currentStageIndex === null || currentStageIndex === undefined) {
+            currentStageIndex = determineCurrentStage(decision);
+        }
+
+        if (!currentActivity) {
+            const fallbackStage = STAGES.find(s => s.index === currentStageIndex);
+            currentActivity = getCurrentActivity(decision, fallbackStage?.key);
+        }
+
+        // Determine stage statuses
+        const blockedStageIndex = snapshot.blockingStage ? currentStageIndex : -1;
         const stageStatuses = STAGES.map(stage => ({
             ...stage,
-            status: STATUS.NOT_REACHED,
+            status: determineStageStatus(stage.index, currentStageIndex, blockedStageIndex),
         }));
+
+        const currentStage = stageStatuses.find(s => s.index === currentStageIndex);
         
-        return {
-            stages: stageStatuses,
-            currentStage: null,
-            currentStageIndex: null,
-            currentActivity: currentActivity || 'BOT_STOPPED',
-            nextStage: null,
-            selectedSymbol,
-        };
-    }
-
-    // Fallback to frontend logic if backend values not available
-    if (currentStageIndex === undefined) {
-        currentStageIndex = determineCurrentStage(decision);
-    }
-
-    if (!currentActivity) {
-        const fallbackStage = STAGES.find(s => s.index === currentStageIndex);
-        currentActivity = getCurrentActivity(decision, fallbackStage?.key);
-    }
-
-    // Determine stage statuses
-    const blockedStageIndex = snapshot.blockingStage ? currentStageIndex : -1;
-    const stageStatuses = STAGES.map(stage => ({
-        ...stage,
-        status: determineStageStatus(stage.index, currentStageIndex, blockedStageIndex),
-    }));
-
-    const currentStage = stageStatuses.find(s => s.index === currentStageIndex);
-    
-    // Get next stage from backend or calculate
-    if (snapshot.nextStage) {
-        nextStage = STAGES.find(s => s.label === snapshot.nextStage);
-    } else if (currentStageIndex !== null && currentStageIndex < STAGES.length - 1) {
-        nextStage = stageStatuses.find(s => s.index === currentStageIndex + 1);
+        // Get next stage from backend or calculate
+        if (snapshot.nextStage) {
+            nextStage = STAGES.find(s => s.label === snapshot.nextStage);
+        } else if (currentStageIndex !== null && currentStageIndex < STAGES.length - 1) {
+            nextStage = stageStatuses.find(s => s.index === currentStageIndex + 1);
+        }
     }
 
     return {
-        stages: stageStatuses,
-        currentStage,
+        stages: STAGES.map(stage => ({
+            ...stage,
+            status: currentStageIndex === null ? STATUS.NOT_REACHED : determineStageStatus(stage.index, currentStageIndex, snapshot.blockingStage ? currentStageIndex : -1),
+        })),
+        currentStage: currentStageIndex === null ? null : STAGES.find(s => s.index === currentStageIndex),
         currentStageIndex,
         currentActivity,
         nextStage,

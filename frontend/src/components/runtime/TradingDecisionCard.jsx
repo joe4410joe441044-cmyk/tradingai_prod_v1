@@ -30,7 +30,7 @@ const toneFor = (status) => {
 const TradingCycleFlow = ({ stages }) => {
     // 布局分为三行：顶部行(0-4), 中间行(5-9), 底部行(10-14)
     const topRow = stages.slice(0, 5);
-    const middleRow = stages.slice(5, 10).reverse(); // 中间行反转以便箭头指向正确
+    const middleRow = stages.slice(5, 10); // 保持正确的顺序
     const bottomRow = stages.slice(10, 15);
 
     return (
@@ -61,7 +61,7 @@ const TradingCycleFlow = ({ stages }) => {
                             <div className="trading-cycle-stage-status">{stage.status}</div>
                         </div>
                         {index < middleRow.length - 1 && (
-                            <div className="trading-cycle-connector" aria-hidden="true">←</div>
+                            <div className="trading-cycle-connector" aria-hidden="true">→</div>
                         )}
                     </div>
                 ))}
@@ -94,7 +94,7 @@ const CurrentActivityPanel = ({ model }) => {
             <div className="current-activity-grid">
                 <div>
                     <span>{label("CURRENT STAGE", "現在の工程")}</span>
-                    <strong>{model.currentStage?.label || 'UNKNOWN'}</strong>
+                    <strong>{model.currentStage?.label || ''}</strong>
                 </div>
                 <div>
                     <span>{label("CURRENT ACTION", "現在のアクション")}</span>
@@ -106,7 +106,7 @@ const CurrentActivityPanel = ({ model }) => {
                 </div>
                 <div>
                     <span>{label("NEXT STAGE", "次の工程")}</span>
-                    <strong>{model.nextStage?.label || 'COMPLETED'}</strong>
+                    <strong>{model.nextStage?.label || ''}</strong>
                 </div>
             </div>
         </section>

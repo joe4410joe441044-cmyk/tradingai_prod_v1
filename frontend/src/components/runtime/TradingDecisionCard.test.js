@@ -1,4 +1,4 @@
-import TradingDecisionCard from './TradingDecisionCard';
+import TradingDecisionCard from './TradingDecisionCard.jsx';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
