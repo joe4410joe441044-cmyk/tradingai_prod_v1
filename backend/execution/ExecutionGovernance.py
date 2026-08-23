@@ -160,7 +160,10 @@ class ExecutionGovernance:
     # EXECUTION PACING
     # ========================================================
 
-    def evaluate_execution_pacing(self):
+    def evaluate_execution_pacing(self, current_exposure=0.0):
+        # Reset consecutive executions when in FLAT position (current_exposure == 0)
+        if current_exposure == 0.0:
+            self.reset_consecutive_executions()
 
         pacing_risk = (
             self.consecutive_executions
@@ -311,7 +314,7 @@ class ExecutionGovernance:
         # ----------------------------------------------------
 
         pacing_result = (
-            self.evaluate_execution_pacing()
+            self.evaluate_execution_pacing(current_exposure)
         )
 
         if pacing_result["pacingSuppressed"]:
