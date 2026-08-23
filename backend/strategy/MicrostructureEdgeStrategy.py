@@ -78,6 +78,70 @@ class MicrostructureEdgeStrategy:
         self.EXIT_SPREAD_QUALITY_MIN = 0.30
         self.EXIT_MOMENTUM_MIN = 0.40
 
+        # --------------------------------------------------------
+        # Early exit confirmation configuration
+        # --------------------------------------------------------
+        # Minimum consecutive observations required to confirm an early exit
+        # before MIN_HOLD_MS to prevent noise/flicker.
+        self.EARLY_EXIT_CONFIRMATION_COUNT = 2
+        # Tracks confirmation state per symbol and position (symbol -> state)
+        # State structure: {
+        #     "liquidity_deterioration": {
+        #         "count": 0,
+        #         "last_observed": None
+        #     },
+        #     "spread_divergence": {
+        #         "count": 0,
+        #         "last_observed": None
+        #     }
+        # }
+        self._confirmation_state = {}
+
+    def _get_confirmation_state(self, symbol):
+        """Get or initialize confirmation state for a specific symbol."""
+        if symbol not in self._confirmation_state:
+            self._confirmation_state[symbol] = {
+                "liquidity_deterioration": {
+                    "count": 0,
+                    "last_observed": None
+                },
+                "spread_divergence": {
+                    "count": 0,
+                    "last_observed": None
+                }
+            }
+        return self._confirmation_state[symbol]
+
+    def _reset_confirmation_state(self, symbol):
+        """Reset confirmation state for a specific symbol (e.g., on position close)."""
+        if symbol in self._confirmation_state:
+            del self._confirmation_state[symbol]
+
+    def _update_confirmation_state(self, symbol, reason, condition_met):
+        """Update confirmation state for a specific symbol and reason."""
+        state = self._get_confirmation_state(symbol)
+        
+        # Convert reason to string if it's an Enum member
+        if hasattr(reason, 'value'):
+            reason_str = reason.value.lower()
+        else:
+            reason_str = str(reason).lower()
+        
+        if condition_met:
+            # Increment count if condition is met
+            state[reason_str]["count"] += 1
+        else:
+            # Reset count if condition is not met
+            state[reason_str]["count"] = 0
+        
+        state[reason_str]["last_observed"] = datetime.now(timezone.utc).timestamp()
+
+        return state[reason_str]["count"]
+
+    def _is_early_exit_confirmed(self, symbol, reason, count):
+        """Check if an early exit reason has been confirmed."""
+        return count >= self.EARLY_EXIT_CONFIRMATION_COUNT
+
     @staticmethod
     def _uses_normalized_feature_contract(microstructure_state):
         return parameter_value(
@@ -1263,7 +1327,7 @@ class MicrostructureEdgeStrategy:
         # Deterministic exit evaluation
         # --------------------------------------------------------
         exit_reason = self._evaluate_exit_conditions(
-            microstructure_state, position_side, holding_duration_ms,
+            microstructure_state, position_side, holding_duration_ms, symbol,
         )
         if isinstance(exit_reason, self.ExitReason):
             exit_reason = exit_reason.value
@@ -1319,6 +1383,7 @@ class MicrostructureEdgeStrategy:
         microstructure_state,
         position_side,
         holding_duration_ms,
+        symbol,
     ):
         """
         Deterministic exit priority (highest first).  Generic SL/TP remain
@@ -1343,17 +1408,43 @@ class MicrostructureEdgeStrategy:
         if reversal_reason:
             return reversal_reason
 
-        liquidity_reason = self._evaluate_liquidity_deterioration(
-            microstructure_state, normalized_contract,
-        )
-        if liquidity_reason:
-            return liquidity_reason
+        # Evaluate liquidity condition
+        liquidity_condition_met = bool(self._evaluate_liquidity_deterioration(microstructure_state, normalized_contract))
+        liquidity_reason = None
+        if liquidity_condition_met:
+            if holding_duration_ms < self.MIN_HOLD_MS:
+                # Early exit: need confirmation
+                count = self._update_confirmation_state(
+                    symbol, self.ExitReason.LIQUIDITY_DETERIORATION, condition_met=True
+                )
+                if self._is_early_exit_confirmed(symbol, self.ExitReason.LIQUIDITY_DETERIORATION, count):
+                    liquidity_reason = self.ExitReason.LIQUIDITY_DETERIORATION
+            else:
+                # Post-min hold: no confirmation needed
+                liquidity_reason = self.ExitReason.LIQUIDITY_DETERIORATION
 
-        spread_reason = self._evaluate_spread_deterioration(
-            microstructure_state, normalized_contract,
-        )
-        if spread_reason:
-            return spread_reason
+        # Evaluate spread condition
+        spread_condition_met = bool(self._evaluate_spread_deterioration(microstructure_state, normalized_contract))
+        spread_reason = None
+        if spread_condition_met and not liquidity_reason:
+            if holding_duration_ms < self.MIN_HOLD_MS:
+                # Early exit: need confirmation
+                count = self._update_confirmation_state(
+                    symbol, self.ExitReason.SPREAD_DIVERGENCE, condition_met=True
+                )
+                if self._is_early_exit_confirmed(symbol, self.ExitReason.SPREAD_DIVERGENCE, count):
+                    spread_reason = self.ExitReason.SPREAD_DIVERGENCE
+            else:
+                # Post-min hold: no confirmation needed
+                spread_reason = self.ExitReason.SPREAD_DIVERGENCE
+
+        # If conditions are cleared, reset confirmation counts
+        if not liquidity_condition_met:
+            state = self._get_confirmation_state(symbol)
+            state["liquidity_deterioration"]["count"] = 0
+        if not spread_condition_met:
+            state = self._get_confirmation_state(symbol)
+            state["spread_divergence"]["count"] = 0
 
         if holding_duration_ms >= self.MIN_HOLD_MS:
             momentum_reason = self._evaluate_momentum_decay(
@@ -1365,7 +1456,10 @@ class MicrostructureEdgeStrategy:
         if holding_duration_ms >= self.MAX_HOLD_MS:
             return self.ExitReason.MAX_HOLD
 
-        return None
+
+
+        # Return the confirmed early exit reason or None
+        return liquidity_reason or spread_reason
 
     def _evaluate_microstructure_reversal(
         self,
