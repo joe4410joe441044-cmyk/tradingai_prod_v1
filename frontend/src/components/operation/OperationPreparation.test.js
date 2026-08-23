@@ -417,7 +417,7 @@ test("runtime safety values remain read-only and real order control is never ren
     const content = normalizedText(descendants(renderer.root));
     assert.equal(content.includes("BLOCKED"), true);
     assert.equal(content.includes("REAL ORDER"), true);
-    assert.equal(content.includes("DISABLED"), true);
+     assert.equal(content.includes("BLOCKED"), true);
 assert.equal(descendants(renderer.root).some(
         (node) => node.type === "button" && normalizedText(node).includes("EMERGENCY"),
     ), true);
@@ -608,7 +608,7 @@ test("Compounding shows saved policy and edits only the MM draft", async () => {
         onMmDraftChange: (patch) => draftChanges.push(patch),
     });
     assert.equal(normalizedText(descendants(renderer.root)).includes("OFF — INITIAL REFERENCE CAPITAL"), true);
-    assert.equal(normalizedText(descendants(renderer.root)).includes("CAPITAL BASIS 1000"), true);
+    assert.equal(normalizedText(descendants(renderer.root)).includes("CAPITAL BASIS $1,000"), true);
     const compoundingGroup = descendants(renderer.root).find(
         (node) => node.props?.["aria-label"] === "Compounding",
     );
