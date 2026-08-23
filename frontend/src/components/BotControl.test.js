@@ -1823,7 +1823,7 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
     assert.doesNotMatch(source, /deriveMmReadiness|deriveReviewReadiness/);
     assert.match(source, /deriveOperationReadiness/);
     assert.match(source, /startReady/);
-    assert.match(source, /leverage: canonicalRequestedLeverage/);
+    assert.match(source, /leverage: startSettings\.requestedLeverage/);
     assert.doesNotMatch(source, /leverage: config\?\.leverage|leverage: .*\?\? 5/);
 });
 
