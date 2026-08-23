@@ -802,7 +802,7 @@ export default function BotControl({
         mmRecoveryRequired: mmStatus?.recoveryRequired || false,
         mmConfigurationError: Boolean(mmConfigurationError),
     });
-    const startReady = startReadiness.startReady;
+    const { startReady, automationReady } = startReadiness;
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)
@@ -867,7 +867,7 @@ export default function BotControl({
 
             if (!botRunning) {
                 // 使用已经计算过的 startSettings，而不是重新创建
-                if (startSettings.loopOnStart) {
+                if (startSettings.loopOnStart && automationReady) {
                     try {
                         await startLoop();
                     } catch (error) {
@@ -876,7 +876,7 @@ export default function BotControl({
                     }
                 }
 
-                if (startSettings.autoTradeOnStart) {
+                if (startSettings.autoTradeOnStart && automationReady) {
                     try {
                         const executionResult = await setExecutionEnabled(true);
 
