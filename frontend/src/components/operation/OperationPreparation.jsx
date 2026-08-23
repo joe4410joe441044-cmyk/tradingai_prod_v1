@@ -34,19 +34,30 @@ const formatCurrency = (value) => {
     }
     
     const parts = strValue.split('.');
-    const integerPart = parts[0];
+    let integerPart = parts[0];
     const fractionPart = parts[1] || "00";
     
     if (!/^-?\d+$/.test(integerPart) || fractionPart.length > 10) {
         return "UNAVAILABLE";
     }
     
-    const parsed = Number(strValue);
-    if (!Number.isFinite(parsed)) {
-        return "UNAVAILABLE";
+    // 处理负数符号
+    const isNegative = integerPart.startsWith("-");
+    if (isNegative) {
+        integerPart = integerPart.slice(1);
     }
     
-    return currencyFormatter.format(parsed);
+    // 格式化整数部分（每3位添加逗号）
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    
+    // 确保小数部分有至少2位，保留原始精度
+    const formattedFraction = fractionPart.padEnd(2, "0");
+    
+    // 构建格式化后的字符串
+    const formattedNumber = `${formattedInteger}.${formattedFraction}`;
+    
+    // 添加货币符号和负号
+    return `${isNegative ? "-" : ""}$${formattedNumber}`;
 };
 
 const sourceLabel = (source) => ({
