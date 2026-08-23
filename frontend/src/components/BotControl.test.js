@@ -535,6 +535,9 @@ const defaultProps = (
             symbol: "XRPUSDT",
             exchange: "kucoin",
             mode: "paper",
+            realOrderAllowed: false,
+            allowLive: false,
+            tradeMode: "paper",
         },
         executionEnabled: false,
         botRunning: false,
@@ -544,6 +547,7 @@ const defaultProps = (
         emergencyState: emergency.state,
         emergency,
         pendingOrder: false,
+        realOrderAllowed: false,
         onStatusRefresh: async () => undefined,
         setExecutionEnabledState: () => undefined,
         ...overrides,
@@ -590,19 +594,31 @@ const clearMmDraft = () => {
 
 const readyStartProps = (
     overrides = {}
-) => ({
-    config: {
-        symbol: "XRPUSDTM",
-        exchange: "kucoin",
-        mode: "paper",
-        selectionMode: "MANUAL",
-        ...overrides.config,
-    },
-    position: "FLAT",
-    pendingOrder: false,
-    runtimeHealth: { governance: { status: "READY" } },
-    ...overrides,
-});
+) => {
+    const {
+        config: configOverrides = {},
+        ...restOverrides
+    } = overrides;
+
+    return {
+        config: {
+            symbol: "XRPUSDTM",
+            exchange: "kucoin",
+            mode: "paper",
+            selectionMode: "MANUAL",
+            leverage: 5,
+            realOrderAllowed: false,
+            allowLive: false,
+            tradeMode: "paper",
+            ...configOverrides,
+        },
+        position: "FLAT",
+        pendingOrder: false,
+        runtimeHealth: { governance: { status: "READY" } },
+        realOrderAllowed: false,
+        ...restOverrides,
+    };
+};
 
 const renderBotControl = async (
     props = {}
@@ -1045,7 +1061,7 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
         assert.equal(mock.requests.length, 1);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.mode, "paper");
-        assert.equal(payload.leverage, 3);
+        assert.equal(payload.leverage, 5);
         response.resolve(jsonResponse({ body: { success: true, status: "started" } }));
         await first;
     } finally { clearMmConfiguration(); mock.restore(); }
@@ -1206,7 +1222,9 @@ test("START fails closed when saved MM risk is unavailable", async () => {
     try {
         const renderer = await renderBotControl(readyStartProps());
         const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
         assert.equal(start.props.disabled, true);
+        await clickAndRender(renderer, start);
         assert.equal(mock.requests.length, 0);
     } finally {
         clearMmConfiguration();
@@ -1797,4 +1815,61 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
     assert.match(source, /startReady/);
     assert.match(source, /leverage: canonicalRequestedLeverage/);
     assert.doesNotMatch(source, /leverage: config\?\.leverage|leverage: .*\?\? 5/);
+});
+
+test("DASH4A: LIVE selected but authority denied disables START BOT", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: false,
+                tradeMode: "paper",
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+    } finally {
+        clearMmConfiguration();
+    }
+});
+
+test("DASH4A: LIVE selected but authority unknown fails closed", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: undefined,
+                tradeMode: undefined,
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+    } finally {
+        clearMmConfiguration();
+    }
+});
+
+test("DASH4A: LIVE explicitly authorized enables START BOT", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: true,
+                tradeMode: "live",
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, false);
+    } finally {
+        clearMmConfiguration();
+    }
 });

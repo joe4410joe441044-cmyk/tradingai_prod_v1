@@ -300,6 +300,8 @@ export default function OperationPreparation({
         mmBlockReasons,
         mmRecoveryRequired,
         mmConfigurationError: Boolean(mmConfigurationError),
+        allowLive: config.allowLive,
+        tradeMode: config.tradeMode,
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);

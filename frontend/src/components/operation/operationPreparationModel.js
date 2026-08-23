@@ -156,6 +156,8 @@ export const deriveOperationReadiness = ({
     mmBlockReasons = [],
     mmRecoveryRequired = false,
     mmConfigurationError = false,
+    allowLive,
+    tradeMode,
 } = {}) => {
     const selectionRuntime = normalizeReadiness(
         autoMarketState,
@@ -253,6 +255,24 @@ export const deriveOperationReadiness = ({
         savedMmReadiness === "READY"
         && (mmReadiness === "READY" || stoppedPaperRuntimeMetricsOnly)
     ) ? "READY" : "BLOCKED";
+
+    // LIVE pre-start authority: the authoritative gate is the global
+    // ALLOW_LIVE + TRADE_MODE permission, never the runtime real-order
+    // state. Unknown/missing authority fails closed.
+    const liveAuthorityReadiness = (() => {
+        if (normalizedMode !== "LIVE") {
+            return "NOT_RELEVANT";
+        }
+        if (allowLive !== true) {
+            return "BLOCKED";
+        }
+        if (String(tradeMode ?? "").trim().toLowerCase() !== "live") {
+            return "BLOCKED";
+        }
+        return "READY";
+    })();
+
+    // Calculate readiness values for all modes
     const paperStartReadinessValues = [
         emergencyReadiness,
         positionState,
@@ -278,11 +298,23 @@ export const deriveOperationReadiness = ({
         && dryRun === true
         && realOrderAllowed !== true
     );
-    const startReadinessValues = paperPreStart
+    let startReadinessValues = paperPreStart
         ? paperStartReadinessValues
         : legacyReadinessValues;
-    const startReadiness = deriveReviewReadiness(startReadinessValues);
-    const startReady = startReadiness === "READY";
+    if (normalizedMode === "LIVE") {
+        startReadinessValues = [
+            ...startReadinessValues,
+            liveAuthorityReadiness,
+        ];
+    }
+    if (normalizedMode !== "PAPER" && normalizedMode !== "LIVE") {
+        startReadinessValues = [
+            ...startReadinessValues,
+            "BLOCKED",
+        ];
+    }
+    let startReadiness = deriveReviewReadiness(startReadinessValues);
+    let startReady = startReadiness === "READY";
 
     return {
         reviewReadiness: startReadiness,
@@ -290,6 +322,7 @@ export const deriveOperationReadiness = ({
         startReadiness,
         startReadinessValues,
         startReady,
+        liveAuthorityReadiness,
         entryReadiness,
         entryReadinessValues,
         entryReady,

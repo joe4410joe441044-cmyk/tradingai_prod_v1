@@ -792,6 +792,8 @@ export default function BotControl({
         pendingOrder,
         governanceStatus: runtimeHealth?.governance?.status,
         realOrderAllowed: config?.realOrderAllowed === true,
+        allowLive: config?.allowLive,
+        tradeMode: config?.tradeMode,
         executionEnabled,
         executionEntryAllowed,
         recommendedAction,

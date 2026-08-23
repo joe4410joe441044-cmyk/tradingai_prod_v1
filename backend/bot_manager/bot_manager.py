@@ -2630,6 +2630,15 @@ class BotManager:
             ).strip().lower()
             requested_dry_run = config.get("dry_run", True)
 
+            if requested_mode not in ("paper", "live"):
+                return {
+                    "status": "error",
+                    "reason": "INVALID_MODE",
+                    "success": False,
+                    "completed": False,
+                    "stateUnknown": False,
+                }
+
             if requested_mode == "paper":
                 pending_authority = (
                     self.get_authoritative_pending_order_state()
@@ -2718,6 +2727,35 @@ class BotManager:
                         "stateUnknown": (
                             pending_authority.get("known") is not True
                         ),
+                    }
+            elif requested_mode == "live":
+                # LIVE pre-start authority: the global ALLOW_LIVE + TRADE_MODE
+                # permission is the authoritative pre-start gate. dry_run must
+                # be off for LIVE. No silent LIVE -> PAPER / dryRun conversion.
+                # Rejection happens before any start side effect.
+                if requested_dry_run is not False:
+                    return {
+                        "status": "error",
+                        "reason": "LIVE_DRY_RUN_REQUIRED",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": False,
+                    }
+                if backend_config.ALLOW_LIVE is not True:
+                    return {
+                        "status": "error",
+                        "reason": "LIVE_NOT_ENABLED",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": False,
+                    }
+                if backend_config.TRADE_MODE != "live":
+                    return {
+                        "status": "error",
+                        "reason": "TRADE_MODE_NOT_LIVE",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": False,
                     }
 
         except Exception as e:
