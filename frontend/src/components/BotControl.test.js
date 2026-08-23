@@ -1079,7 +1079,11 @@ test("START payload uses the single effective selectionMode source", async () =>
         assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "MANUAL");
 
         const autoRenderer = await renderBotControl(readyStartProps({
-            config: { selectionMode: "AUTO", displaySymbol: "BTCUSDTM" },
+            config: { 
+                selectionMode: "AUTO", 
+                displaySymbol: "BTCUSDTM",
+                autoMarketState: "READY"  // 确保自动选择状态为READY
+            },
         }));
         await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
         assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
@@ -1685,7 +1689,13 @@ test("Sequencing: START succeeds, then Loop, then Auto Trade in deterministic or
     setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps({
-            config: { selectionMode: "AUTO", displaySymbol: "BTCUSDTM", loopOnStart: true, autoTradeOnStart: true },
+            config: { 
+                selectionMode: "AUTO", 
+                displaySymbol: "BTCUSDTM", 
+                loopOnStart: true, 
+                autoTradeOnStart: true,
+                autoMarketState: "READY"  // 确保自动选择状态为READY
+            },
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         assert.equal(mock.requests.length, 3);

@@ -773,11 +773,12 @@ export default function BotControl({
                 : "unknown"
     );
 
-     const effectiveSelectionMode = createOperationPreparationSettings(config).selectionMode;
+     const startSettings = createOperationPreparationSettings(config);
+     const effectiveSelectionMode = startSettings.selectionMode;
      const startReadiness = deriveOperationReadiness({
          botRunning,
-         tradingMode: config?.mode,
-         dryRun: String(config?.mode || "PAPER").toUpperCase() !== "LIVE",
+         tradingMode: startSettings.tradingMode,
+         dryRun: startSettings.tradingMode === "PAPER",
          selectionMode: effectiveSelectionMode,
          autoMarketState: config?.autoMarketState,
          displaySymbol: config?.displaySymbol,
@@ -792,7 +793,7 @@ export default function BotControl({
          executionEntryAllowed,
          recommendedAction,
          riskState,
-         requestedLeverage: config?.leverage,
+         requestedLeverage: startSettings.requestedLeverage,
          maximumLeverage: mmConfiguration?.maximumLeverage,
          mmConfiguration,
          mmBlockReasons: mmStatus?.blockReasons || [],
@@ -838,18 +839,18 @@ export default function BotControl({
                 headers: botRunning ? undefined : { "Content-Type": "application/json" },
                 body: botRunning ? undefined : JSON.stringify({
                     symbol: config?.symbol,
-                    selection_mode: effectiveSelectionMode,
+                    selection_mode: startSettings.selectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
                     risk_percent: startRiskPercent,
                     position_size: config?.positionSize ?? 0,
                     max_drawdown_pct: config?.maxDd ?? 5,
                     sl_percent: config?.sl ?? 1,
-                    leverage: config?.leverage ?? 5,
+                    leverage: startSettings.requestedLeverage,
                     timeframe: config?.timeframe || "1m",
                     tp_percent: config?.tp ?? 2,
                     trailing_stop: config?.trailing === true,
-                    dry_run: String(config?.mode || "PAPER").toUpperCase() !== "LIVE",
-                    mode: String(config?.mode || "PAPER").toLowerCase(),
+                    dry_run: startSettings.tradingMode === "PAPER",
+                    mode: startSettings.tradingMode.toLowerCase(),
                 }),
             });
             const result = await response.json().catch(() => null);
@@ -863,9 +864,8 @@ export default function BotControl({
             }
 
             if (!botRunning) {
-                const startIntent = createOperationPreparationSettings(config);
-
-                if (startIntent.loopOnStart) {
+                // 使用已经计算过的 startSettings，而不是重新创建
+                if (startSettings.loopOnStart) {
                     try {
                         await startLoop();
                     } catch (error) {
@@ -874,7 +874,7 @@ export default function BotControl({
                     }
                 }
 
-                if (startIntent.autoTradeOnStart) {
+                if (startSettings.autoTradeOnStart) {
                     try {
                         const executionResult = await setExecutionEnabled(true);
 
