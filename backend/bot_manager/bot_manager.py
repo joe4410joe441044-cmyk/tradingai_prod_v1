@@ -1031,8 +1031,28 @@ class BotManager:
             if available and position is None
             else [deepcopy(position)]
             if available
-            else None
+            else []  # If not available, use paper account store's position (which is FLAT)
         )
+
+        # If snapshot is not available, use paper account store's state
+        if not available:
+            paper_state = self.paper_account_state
+            return {
+                "balance": float(paper_state["balance"]) if paper_state.get("balance") else None,
+                "equity": float(paper_state["equity"]) if paper_state.get("equity") else None,
+                "availableBalance": float(paper_state["availableBalance"]) if paper_state.get("availableBalance") else None,
+                "position": None,
+                "positions": [],
+                "realizedPnl": float(paper_state["realizedPnl"]) if paper_state.get("realizedPnl") else None,
+                "unrealizedPnl": float(paper_state["unrealizedPnl"]) if paper_state.get("unrealizedPnl") else None,
+                "totalPnl": float(paper_state["totalPnl"]) if paper_state.get("totalPnl") else None,
+                "source": paper_state.get("source", "PAPER_SIMULATION"),
+                "capital": float(paper_state.get("capital", 1000)),
+                "positionState": paper_state.get("positionState", "FLAT"),
+                "lastUpdate": paper_state.get("updatedAt"),
+                "available": True,  # Paper account store is always available
+                "reason": snapshot.get("reason"),
+            }
 
         return {
             "balance": snapshot.get("balance") if available else None,
@@ -1060,7 +1080,9 @@ class BotManager:
                 "PAPER_SIMULATION",
             ),
             "capital": float(self.paper_account_state.get("capital", 1000)),
-            "positionState": "FLAT" if available and not positions else "OPEN",
+            "positionState": (
+                "FLAT" if (available and not positions) else ("OPEN" if available else "FLAT")
+            ),
             "lastUpdate": snapshot.get("last_update") if available else None,
             "available": available,
             "reason": snapshot.get("reason"),
@@ -2529,7 +2551,7 @@ class BotManager:
         requested = str(requested or "MANUAL").strip().upper()
         if requested not in ("MANUAL", "AUTO"):
             requested = "MANUAL"
-        self.selection_mode = "MANUAL"
+        self.selection_mode = requested
         if requested == "AUTO":
             self.start_auto_market_selection_runtime()
         else:
@@ -3055,6 +3077,11 @@ class BotManager:
             # Operator selection (MANUAL/AUTO) hands off to runtime authority.
             # AUTO reuses the existing PAPER AUTO lifecycle; MANUAL stays on
             # the operator symbol and never starts AUTO selection.
+            runtime_debug(
+                "DEBUG: selection_mode in config is %s (type %s)", 
+                config.get("selection_mode"), 
+                type(config.get("selection_mode"))
+            )
             self._handoff_selection_mode(
                 config.get("selection_mode", "MANUAL")
             )
@@ -7117,7 +7144,7 @@ class BotManager:
             "snapshot_refresh_state": None,
             "snapshot_operation_state": None,
             "mode_resolution": None,
-            "position_state": None,
+            "position_state": "FLAT",
             "pending_order_state": None,
             "open_order_state": None,
             "open_order_count": None,
@@ -7479,7 +7506,7 @@ class BotManager:
             "safe": True,
             "reason": "BOOTSTRAP_STOPPED_PAPER_CONFIRMED",
             "source": "bootstrap_stopped_paper",
-            "position_state": "flat",
+            "position_state": "FLAT",
             "pending_order_state": "flat",
             "open_order_state": "flat",
             "open_order_count": 0,

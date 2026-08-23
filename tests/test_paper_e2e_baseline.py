@@ -82,6 +82,27 @@ def test_paper_production_composition():
     bot_manager.state = MagicMock()
     bot_manager.state.emergency_stop = False
     bot_manager.state.position_state = 'FLAT'
+    # Mock paper account runtime
+    bot_manager._build_paper_account_runtime.return_value = {
+        'positionState': 'FLAT',
+        'positions': [],
+        'available': True,
+        'capital': 1000
+    }
+    # Mock paper account state
+    bot_manager.paper_account_state = {
+        'positionState': 'FLAT',
+        'capital': 1000,
+        'balance': '1000.00',
+        'equity': '1000.00',
+        'availableBalance': '1000.00',
+        'realizedPnl': '0.00',
+        'unrealizedPnl': '0.00',
+        'totalPnl': '0.00',
+        'position': None,
+        'positions': [],
+        'pendingOrder': False
+    }
     
     # Mock Kucoin futures client
     governance = MagicMock()
