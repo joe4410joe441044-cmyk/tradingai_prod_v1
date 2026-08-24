@@ -35,9 +35,9 @@ const formatCurrency = (value) => {
     
     const parts = strValue.split('.');
     let integerPart = parts[0];
-    const fractionPart = parts[1] || "00";
+    const fractionPart = parts[1];
     
-    if (!/^-?\d+$/.test(integerPart) || fractionPart.length > 10) {
+    if (!/^-?\d+$/.test(integerPart) || (fractionPart && fractionPart.length > 10)) {
         return "UNAVAILABLE";
     }
     
@@ -50,11 +50,14 @@ const formatCurrency = (value) => {
     // 格式化整数部分（每3位添加逗号）
     const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     
-    // 确保小数部分有至少2位，保留原始精度
-    const formattedFraction = fractionPart.padEnd(2, "0");
-    
-    // 构建格式化后的字符串
-    const formattedNumber = `${formattedInteger}.${formattedFraction}`;
+    // 构建格式化后的字符串，保留原始小数精度
+    let formattedNumber;
+    if (fractionPart !== undefined) {
+        formattedNumber = `${formattedInteger}.${fractionPart}`;
+    } else {
+        // 如果没有小数部分，不添加小数点
+        formattedNumber = formattedInteger;
+    }
     
     // 添加货币符号和负号
     return `${isNegative ? "-" : ""}$${formattedNumber}`;

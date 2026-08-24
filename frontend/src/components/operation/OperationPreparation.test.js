@@ -608,7 +608,7 @@ test("Compounding shows saved policy and edits only the MM draft", async () => {
         onMmDraftChange: (patch) => draftChanges.push(patch),
     });
     assert.equal(normalizedText(descendants(renderer.root)).includes("OFF — INITIAL REFERENCE CAPITAL"), true);
-    assert.equal(normalizedText(descendants(renderer.root)).includes("CAPITAL BASIS $1,000.00"), true);
+    assert.equal(normalizedText(descendants(renderer.root)).includes("CAPITAL BASIS $1,000"), true);
     const compoundingGroup = descendants(renderer.root).find(
         (node) => node.props?.["aria-label"] === "Compounding",
     );
