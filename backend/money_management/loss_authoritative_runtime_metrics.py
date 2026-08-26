@@ -302,6 +302,10 @@ class AuthoritativeLossRuntimeMetricsState:
         self._trade_count_authority_session_id = None
         self._seen_close_events = set()
 
+    @property
+    def runtime_instance_id(self):
+        return self._runtime_instance_id
+
     def begin_paper_session(self, session_id, as_of):
         """Establish a zero-count baseline owned by one new PAPER session."""
 
@@ -329,7 +333,7 @@ class AuthoritativeLossRuntimeMetricsState:
             period_for(at, PeriodType.MONTHLY).period_key,
         )
 
-    def restore(self, state, state_source, as_of):
+    def restore(self, state, state_source, as_of, *, preserve_periods=False):
         if not isinstance(state, PersistedLossState):
             raise TypeError("persisted loss state required")
         source = StateSource(state_source)
@@ -361,12 +365,20 @@ class AuthoritativeLossRuntimeMetricsState:
             self._trade_count_daily = 0 if counts_known else None
             self._trade_count_weekly = 0 if counts_known else None
             self._trade_count_monthly = 0 if counts_known else None
-            self._roll_periods_locked(at)
+            if not preserve_periods:
+                self._roll_periods_locked(at)
             self._as_of = at
             self._source_state = f"RESTORED_{source.value}"
             self._initialized = True
             self._revision += 1
             return self._snapshot_locked()
+
+    def restored_periods_match(self, as_of):
+        at = _utc("as_of", as_of)
+        with self._lock:
+            return self._period_keys(at) == (
+                self._daily_key, self._weekly_key, self._monthly_key
+            )
 
     def _roll_periods_locked(self, at):
         daily_key, weekly_key, monthly_key = self._period_keys(at)
@@ -596,6 +608,77 @@ class AuthoritativeLossRuntimeMetricsState:
             self._revision += 1
             return self._snapshot_locked()
 
+    def observe_stopped_paper_maintenance(
+        self,
+        *,
+        as_of,
+        session_id,
+        balance,
+        equity,
+        available_balance,
+        realized_pnl,
+        unrealized_pnl,
+        position,
+        mark_price,
+    ):
+        """Observe a stopped PAPER account without rolling restored periods."""
+
+        at = _utc("as_of", as_of)
+        _count("session_id", session_id)
+        with self._lock:
+            if not self._initialized:
+                raise ValueError("persisted loss state not restored")
+            normalized_balance = _runtime_decimal(balance, nonnegative=True)
+            normalized_equity = _runtime_decimal(equity, nonnegative=True)
+            normalized_available = _runtime_decimal(
+                available_balance, nonnegative=True
+            )
+            normalized_realized = _runtime_decimal(realized_pnl)
+            normalized_unrealized = _runtime_decimal(unrealized_pnl)
+            self._observation_valid = all(
+                value is not None
+                for value in (
+                    normalized_balance,
+                    normalized_equity,
+                    normalized_available,
+                    normalized_realized,
+                    normalized_unrealized,
+                )
+            )
+            self._balance = normalized_balance
+            self._equity = normalized_equity
+            self._available_balance = normalized_available
+            self._realized_pnl = normalized_realized
+            self._unrealized_pnl = normalized_unrealized
+            (
+                self._open_exposure,
+                self._position_count,
+                self._position_side,
+                self._current_risk_amount,
+            ) = self._position_metrics(position, mark_price)
+            self._observation_valid = bool(
+                self._observation_valid
+                and self._open_exposure is not None
+                and self._position_count is not None
+            )
+            candidates = tuple(
+                value
+                for value in (self._peak_equity, self._equity)
+                if value is not None
+            )
+            self._peak_equity = max(candidates) if candidates else None
+            self._session_id = session_id
+            # A new, stopped process proves that its own runtime session has
+            # executed no closes. Persisted period counts remain untouched.
+            self._session_trade_count = 0
+            self._trade_count_authority_scope = "RUNTIME_SESSION"
+            self._trade_count_authority_session_id = session_id
+            self._as_of = at
+            self._source_state = "STOPPED_PAPER_MAINTENANCE"
+            self._observed = True
+            self._revision += 1
+            return self._snapshot_locked()
+
     def _snapshot_locked(self):
         drawdown_amount = None
         drawdown_pct = None
@@ -629,7 +712,9 @@ class AuthoritativeLossRuntimeMetricsState:
             self._session_id,
             self._revision,
             self._source_state,
-            self._source_state == "RUNNING" and self._observed,
+            self._source_state in {
+                "RUNNING", "STOPPED_PAPER_MAINTENANCE"
+            } and self._observed,
             self._observation_valid,
             self._position_side,
             self._current_risk_amount,

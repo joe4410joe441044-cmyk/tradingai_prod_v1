@@ -292,6 +292,7 @@ class BotManager:
                 self.runtime_instance_id
             )
         )
+        self.money_management_maintenance_pending_order_count = None
         self.stopped_paper_durable_snapshot_path = (
             self._default_stopped_paper_durable_snapshot_path()
         )
@@ -3982,11 +3983,70 @@ class BotManager:
 
         """Restore the existing MM checkpoint through its read-only boundary."""
 
-        return self.money_management_runtime_metrics.restore(
+        maintenance_candidate = bool(
+            self.engine is None
+            and self.lifecycle_state == "STOPPED"
+            and governance_state.get("execution_enabled") is False
+        )
+        restored = self.money_management_runtime_metrics.restore(
             persisted_state,
             state_source,
             as_of,
+            preserve_periods=maintenance_candidate,
         )
+        if not (
+            maintenance_candidate
+            and self.runtime_instance_id
+            == self.money_management_runtime_metrics.runtime_instance_id
+            and self.money_management_runtime_metrics.restored_periods_match(
+                as_of
+            )
+        ):
+            return restored
+        mode = self._stopped_paper_mode_resolution(
+            self.paper_account_runtime_snapshot
+        )
+        if mode.get("mode") != "paper":
+            return restored
+        try:
+            now = datetime.now(timezone.utc)
+            observation = self.paper_account_store.observe(
+                self.paper_account_state,
+                account_scope=persisted_state.account_scope,
+                observed_at=now,
+                maximum_age=self.account_stale_after,
+            )
+            position = (
+                list(observation.positions)
+                if observation.positions
+                else observation.position
+            )
+            mark_price = None
+            if isinstance(observation.position, dict):
+                mark_price = observation.position.get(
+                    "mark_price", observation.position.get("markPrice")
+                )
+            metrics = (
+                self.money_management_runtime_metrics
+                .observe_stopped_paper_maintenance(
+                    as_of=observation.observed_at,
+                    session_id=self.session_id,
+                    balance=observation.balance,
+                    equity=observation.equity,
+                    available_balance=observation.available_balance,
+                    realized_pnl=observation.realized_pnl,
+                    unrealized_pnl=observation.unrealized_pnl,
+                    position=position,
+                    mark_price=mark_price,
+                )
+            )
+            self.money_management_maintenance_pending_order_count = (
+                1 if observation.pending_order else 0
+            )
+            return metrics
+        except (TypeError, ValueError, TimeoutError, ArithmeticError):
+            self.money_management_maintenance_pending_order_count = None
+            return restored
 
     def _notify_money_management_runtime_event(
         self,
@@ -4062,6 +4122,13 @@ class BotManager:
                 else None
             )
             metrics = self.money_management_runtime_metrics.snapshot()
+            if (
+                getattr(metrics, "source_state", None)
+                == "STOPPED_PAPER_MAINTENANCE"
+            ):
+                pending_order_count = (
+                    self.money_management_maintenance_pending_order_count
+                )
             return MappingProxyType(
                 metrics.to_runtime_mapping(pending_order_count)
             )
