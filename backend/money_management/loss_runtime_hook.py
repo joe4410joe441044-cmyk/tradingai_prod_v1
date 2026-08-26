@@ -573,6 +573,21 @@ def register_money_management_runtime_hook(
             hook.stop()
             return None
         setattr(state, APPLICATION_STATE_ATTRIBUTE, hook_registration)
+        current_metrics = getattr(
+            bot_manager, "get_runtime_metrics_snapshot", lambda: {}
+        )()
+        if (
+            current_metrics.get("sourceState")
+            == "STOPPED_PAPER_MAINTENANCE"
+        ):
+            hook.handle(
+                LossRuntimeEventType.BALANCE_UPDATE,
+                (
+                    "stopped-paper-maintenance:"
+                    f"{current_metrics.get('runtimeInstanceId')}:"
+                    f"{current_metrics.get('metricsRevision')}"
+                ),
+            )
         _safe_log(
             logger,
             "info",
