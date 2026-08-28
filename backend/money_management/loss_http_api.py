@@ -179,6 +179,7 @@ class MoneyManagementMetricsResponse:
     recommended_position_notional: Optional[Decimal]
     recommended_position_quantity: Optional[Decimal]
     generated_at: Optional[datetime]
+    runtime_instance_id: Optional[str] = None
 
     def to_dict(self):
         return {
@@ -213,6 +214,7 @@ class MoneyManagementMetricsResponse:
                 self.recommended_position_quantity
             ),
             "metricsGeneratedAt": _serialize(self.generated_at),
+            "runtimeInstanceId": self.runtime_instance_id,
         }
 
 
@@ -296,6 +298,10 @@ class MoneyManagementStatusResponse:
     cash_flow_authority: object
     capital_authority_status: str = "UNAVAILABLE"
     runtime_trading_metrics_status: str = "UNAVAILABLE"
+    trading_mode: str = "UNKNOWN"
+    metrics_source: Optional[str] = None
+    account_scope: Optional[str] = None
+    freshness: str = "UNAVAILABLE"
 
     def to_dict(self):
         return {
@@ -315,6 +321,10 @@ class MoneyManagementStatusResponse:
             "recoveryRequired": self.recovery_required,
             "capitalAuthorityStatus": self.capital_authority_status,
             "runtimeTradingMetricsStatus": self.runtime_trading_metrics_status,
+            "tradingMode": self.trading_mode,
+            "metricsSource": self.metrics_source,
+            "accountScope": self.account_scope,
+            "freshness": self.freshness,
             "safeReason": self.safe_reason,
             "generatedAt": _serialize(self.generated_at),
             "revision": self.revision,
@@ -992,6 +1002,7 @@ class MoneyManagementHttpBoundary:
             None,
             None,
             metrics.captured_at if metrics else None,
+            metrics.runtime_instance_id if metrics else None,
         )
 
     def get_status(self):
@@ -1297,6 +1308,18 @@ class MoneyManagementHttpBoundary:
             evaluated_at=generated_at,
             authority_fresh=bool(metrics_fresh and projection_fresh and revisions_match),
             execution_entry_allowed=execution_allowed,
+            capital_source=(
+                "PAPER_ACCOUNT"
+                if isinstance(metrics, LossRuntimeMetrics)
+                and metrics.source_state == "STOPPED_PAPER_MAINTENANCE"
+                else "UNSPECIFIED"
+            ),
+            input_authority=(
+                "PAPER_ACCOUNT_STORE"
+                if isinstance(metrics, LossRuntimeMetrics)
+                and metrics.source_state == "STOPPED_PAPER_MAINTENANCE"
+                else "UNSPECIFIED"
+            ),
         )
         capital = monitoring_capital or runtime_capital
         capital_authority_available = bool(
@@ -1360,6 +1383,23 @@ class MoneyManagementHttpBoundary:
             metrics_result.status.value
             if isinstance(metrics_result, LossRuntimeMetricsReadResult)
             else LossRuntimeMetricsReadStatus.UNAVAILABLE.value,
+            (
+                "PAPER" if capital.input_authority == "PAPER_ACCOUNT_STORE"
+                else "LIVE" if capital.input_authority == "REAL_LIVE_ACCOUNT"
+                else "UNKNOWN"
+            ),
+            metrics.source_state if isinstance(metrics, LossRuntimeMetrics) else None,
+            (
+                runtime_snapshot.state.account_scope
+                if isinstance(runtime_snapshot, LossLimitRuntimeSnapshot)
+                and runtime_snapshot.state is not None
+                else None
+            ),
+            (
+                metrics.data_quality.value
+                if isinstance(metrics, LossRuntimeMetrics)
+                else "UNAVAILABLE"
+            ),
         )
 
     def _normalize_update(self, payload):

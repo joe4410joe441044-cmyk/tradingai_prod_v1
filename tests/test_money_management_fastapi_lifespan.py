@@ -78,6 +78,7 @@ class FastApiSourceIntegrationTests(unittest.TestCase):
         self.assertIn('@app.on_event("shutdown")', source)
         self.assertIn("startup_money_management_application(app, logger=logger)", source)
         self.assertIn("shutdown_money_management_application(app, logger=logger)", source)
+        self.assertIn("get_money_management_capital_authority()", source)
         self.assertLess(
             source.index("result = bot_manager.shutdown()"),
             source.rindex("shutdown_money_management_application(app, logger=logger)"),

@@ -293,6 +293,7 @@ class BotManager:
             )
         )
         self.money_management_maintenance_pending_order_count = None
+        self.money_management_initial_evaluation = None
         self.stopped_paper_durable_snapshot_path = (
             self._default_stopped_paper_durable_snapshot_path()
         )
@@ -2133,6 +2134,15 @@ class BotManager:
             CapitalEligibilityContract,
         )
         return capital if isinstance(capital, CapitalEligibilityContract) else None
+
+    def get_money_management_capital_authority(self, *, force=False):
+        """Select PAPER or LIVE capital without cross-mode fallback."""
+        mode = self._stopped_paper_mode_resolution(
+            self.paper_account_runtime_snapshot
+        ).get("mode")
+        if mode == "live":
+            return self.get_official_mm_capital_authority(force=force)
+        return None
 
     def _production_ams_safety_state(self):
         state = {
@@ -4007,6 +4017,21 @@ class BotManager:
             as_of,
             preserve_periods=maintenance_candidate,
         )
+        current_periods = self.money_management_runtime_metrics._period_keys(as_of)
+        restored_periods = (
+            persisted_state.daily_state.period_id,
+            persisted_state.weekly_state.period_id,
+            persisted_state.monthly_state.period_id,
+        )
+        if maintenance_candidate and current_periods != restored_periods:
+            self.money_management_initial_evaluation = {
+                "status": "PERIOD_CONTINUITY_REQUIRED",
+                "safeReason": "PERIOD_CONTINUITY_REQUIRED",
+                "currentPeriods": current_periods,
+                "restoredPeriods": restored_periods,
+                "runtimeInstanceId": self.runtime_instance_id,
+            }
+            return restored
         if not (
             maintenance_candidate
             and self.runtime_instance_id
@@ -4020,6 +4045,11 @@ class BotManager:
             self.paper_account_runtime_snapshot
         )
         if mode.get("mode") != "paper":
+            self.money_management_initial_evaluation = {
+                "status": "AUTHORITY_MISMATCH",
+                "safeReason": mode.get("reason") or "AUTHORITY_MISMATCH",
+                "runtimeInstanceId": self.runtime_instance_id,
+            }
             return restored
         try:
             now = datetime.now(timezone.utc)
@@ -4056,9 +4086,30 @@ class BotManager:
             self.money_management_maintenance_pending_order_count = (
                 1 if observation.pending_order else 0
             )
+            evaluation_status = (
+                "AVAILABLE" if observation.freshness == "FRESH"
+                else "PAPER_STORE_STALE"
+            )
+            self.money_management_initial_evaluation = {
+                "status": evaluation_status,
+                "safeReason": (
+                    None if evaluation_status == "AVAILABLE"
+                    else evaluation_status
+                ),
+                "runtimeInstanceId": self.runtime_instance_id,
+            }
             return metrics
-        except (TypeError, ValueError, TimeoutError, ArithmeticError):
+        except (TypeError, ValueError, TimeoutError, ArithmeticError) as exc:
             self.money_management_maintenance_pending_order_count = None
+            status = (
+                "PAPER_STORE_STALE" if "STALE" in str(exc)
+                else "PAPER_STORE_INVALID"
+            )
+            self.money_management_initial_evaluation = {
+                "status": status,
+                "safeReason": status,
+                "runtimeInstanceId": self.runtime_instance_id,
+            }
             return restored
 
     def _notify_money_management_runtime_event(
@@ -4142,9 +4193,17 @@ class BotManager:
                 pending_order_count = (
                     self.money_management_maintenance_pending_order_count
                 )
-            return MappingProxyType(
-                metrics.to_runtime_mapping(pending_order_count)
+            result = metrics.to_runtime_mapping(pending_order_count)
+            evaluation = getattr(
+                self, "money_management_initial_evaluation", None
             )
+            if isinstance(evaluation, dict):
+                result.update(evaluation)
+                if evaluation.get("status") not in (
+                    "AVAILABLE", "PAPER_STORE_STALE"
+                ):
+                    result["available"] = False
+            return MappingProxyType(result)
 
     def _observe_money_management_runtime_metrics(
         self,

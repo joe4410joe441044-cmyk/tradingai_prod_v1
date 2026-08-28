@@ -577,8 +577,11 @@ def register_money_management_runtime_hook(
             bot_manager, "get_runtime_metrics_snapshot", lambda: {}
         )()
         if (
-            current_metrics.get("sourceState")
-            == "STOPPED_PAPER_MAINTENANCE"
+            current_metrics.get("sourceState") == "STOPPED_PAPER_MAINTENANCE"
+            or current_metrics.get("status") in (
+                "PERIOD_CONTINUITY_REQUIRED", "PAPER_STORE_STALE",
+                "PAPER_STORE_INVALID", "AUTHORITY_MISMATCH",
+            )
         ):
             hook.handle(
                 LossRuntimeEventType.BALANCE_UPDATE,

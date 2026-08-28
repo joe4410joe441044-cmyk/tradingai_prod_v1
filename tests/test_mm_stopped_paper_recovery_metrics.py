@@ -238,5 +238,45 @@ class StoppedPaperRecoveryMetricsTests(unittest.TestCase):
                          LossRuntimeDispatchStatus.APPLIED)
 
 
+    def test_period_mismatch_is_typed_and_preserves_identities(self):
+        old = self.now - timedelta(days=40)
+        self.initialize(persisted(old))
+        raw = self.manager.get_runtime_metrics_snapshot()
+        self.assertFalse(raw["available"])
+        self.assertEqual(raw["status"], "PERIOD_CONTINUITY_REQUIRED")
+        self.assertEqual(raw["safeReason"], "PERIOD_CONTINUITY_REQUIRED")
+        self.assertNotEqual(raw["currentPeriods"], raw["restoredPeriods"])
+        self.assertEqual(raw["runtimeInstanceId"], self.manager.runtime_instance_id)
+
+    def test_stale_store_keeps_typed_reason_without_live_fallback(self):
+        self.manager.paper_account_state["updatedAt"] = (
+            self.now - timedelta(seconds=91)
+        ).timestamp()
+        with patch.object(
+            self.manager, "get_official_mm_capital_authority",
+            side_effect=AssertionError("LIVE provider must not be called"),
+        ):
+            self.initialize()
+            self.assertIsNone(
+                self.manager.get_money_management_capital_authority()
+            )
+        raw = self.manager.get_runtime_metrics_snapshot()
+        self.assertEqual(raw["status"], "PAPER_STORE_STALE")
+        self.assertEqual(raw["safeReason"], "PAPER_STORE_STALE")
+
+    def test_live_capital_authority_preserves_existing_provider(self):
+        self.manager.config = {"mode": "live"}
+        governance_state["mode"] = "LIVE"
+        sentinel = object()
+        with patch.object(
+            self.manager, "get_official_mm_capital_authority",
+            return_value=sentinel,
+        ) as live_provider:
+            self.assertIs(
+                self.manager.get_money_management_capital_authority(), sentinel
+            )
+        live_provider.assert_called_once_with(force=False)
+
+
 if __name__ == "__main__":
     unittest.main()

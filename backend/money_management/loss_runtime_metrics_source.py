@@ -81,7 +81,7 @@ def _normalize(raw):
         or source_revision is None
         or source_state is None
     ):
-        return None, LossRuntimeMetricsReadStatus.UNAVAILABLE, "runtime metrics unavailable"
+        return None, LossRuntimeMetricsReadStatus.UNAVAILABLE, str(raw.get("safeReason") or "runtime metrics unavailable")
     if raw.get("observationValid") is not True:
         return (
             None,
