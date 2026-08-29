@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 
 from backend.bot_manager import (
     get_bot_manager
@@ -23,7 +24,7 @@ class StartConfig(BaseModel):
 
     position_size: float = 0.0
 
-    max_drawdown_pct: float = 5.0
+    max_drawdown_pct: Optional[float] = None
 
     sl_percent: float
 
