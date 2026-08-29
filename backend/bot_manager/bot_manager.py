@@ -2123,6 +2123,48 @@ class BotManager:
             maximum_leverage,
         )
 
+    def _resolve_max_drawdown_authority(self, config):
+        """Resolve canonical maximum drawdown from saved MM configuration.
+
+        The saved Money Management configuration is the single authority for
+        maximum drawdown. If unavailable, START must fail closed. If the
+        payload supplies a value that does not match the canonical authority,
+        START must also fail closed — silent override is prohibited.
+        """
+        provider = self.money_management_config_provider
+        mm_config = provider() if callable(provider) else None
+        canonical = (
+            getattr(mm_config, "maximum_drawdown_pct", None)
+            if mm_config is not None
+            else None
+        )
+        if canonical is None:
+            raise ValueError("MONEY_MANAGEMENT_MAX_DRAWDOWN_UNAVAILABLE")
+        try:
+            canonical_float = float(canonical)
+        except (TypeError, ValueError):
+            raise ValueError("MONEY_MANAGEMENT_MAX_DRAWDOWN_INVALID")
+        if not (canonical_float > 0 and math.isfinite(canonical_float)):
+            raise ValueError("MONEY_MANAGEMENT_MAX_DRAWDOWN_INVALID")
+        payload_value = config.get("max_drawdown_pct")
+        if payload_value is not None:
+            try:
+                payload_float = float(payload_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "MAX_DRAWDOWN_PAYLOAD_MISMATCH_CANONICAL"
+                )
+            if not math.isclose(
+                payload_float,
+                canonical_float,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                raise ValueError(
+                    "MAX_DRAWDOWN_PAYLOAD_MISMATCH_CANONICAL"
+                )
+        return canonical_float
+
     def get_official_mm_capital_authority(self, *, force=False):
         """Return the MM-owned monitoring contract shared with AMS."""
         observation = self.refresh_production_ams_read_model(force=force)
@@ -2661,6 +2703,22 @@ class BotManager:
         self._start_leverage_authority = leverage_authority
 
         try:
+            max_drawdown_authority = (
+                self._resolve_max_drawdown_authority(config)
+            )
+        except ValueError as exc:
+            reason = str(exc)
+            if "UNAVAILABLE" in reason or "INVALID" in reason:
+                reason = "MONEY_MANAGEMENT_MAX_DRAWDOWN_UNAVAILABLE"
+            return {
+                "status": "error",
+                "reason": reason,
+                "success": False,
+                "completed": False,
+                "stateUnknown": True,
+            }
+
+        try:
             requested_mode = str(
                 config.get("mode", "")
             ).strip().lower()
@@ -2933,6 +2991,12 @@ class BotManager:
                 self.config["maximum_leverage"] = float(
                     start_leverage_authority.maximum_leverage
                 )
+
+            # Maximum drawdown is resolved from saved MM configuration at
+            # the START boundary; the canonical value replaces any raw
+            # payload value and is the single authority consumed by both
+            # ExecutionEngine and MM loss decision.
+            self.config["max_drawdown_pct"] = max_drawdown_authority
 
             self.config["exchange"] = self.exchange_name
             self.config["symbol"] = active_symbol

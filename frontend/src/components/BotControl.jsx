@@ -808,6 +808,13 @@ export default function BotControl({
         Number.isFinite(startRiskPercent)
         && startRiskPercent > 0
     );
+    const startMaxDrawdownPercent = Number(
+        mmConfiguration?.maximumDrawdownPercent,
+    );
+    const startMaxDrawdownAvailable = (
+        Number.isFinite(startMaxDrawdownPercent)
+        && startMaxDrawdownPercent > 0
+    );
 
     const refreshStatusSafely = async () => {
         if (typeof onStatusRefresh !== "function") {
@@ -828,6 +835,10 @@ export default function BotControl({
             setBotError("START failed: authoritative Money Management risk-per-trade is unavailable.");
             return;
         }
+        if (!botRunning && !startMaxDrawdownAvailable) {
+            setBotError("START failed: authoritative Money Management maximum drawdown is unavailable.");
+            return;
+        }
 
         botPendingRef.current = true;
         setBotPending(true);
@@ -845,7 +856,7 @@ export default function BotControl({
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
                     risk_percent: startRiskPercent,
                     position_size: config?.positionSize ?? 0,
-                    max_drawdown_pct: config?.maxDd ?? 5,
+                    max_drawdown_pct: startMaxDrawdownPercent,
                     sl_percent: config?.sl ?? 1,
                     leverage: startSettings.requestedLeverage,
                     timeframe: config?.timeframe || "1m",

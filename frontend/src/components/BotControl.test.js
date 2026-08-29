@@ -1236,6 +1236,135 @@ test("START fails closed when saved MM risk is unavailable", async () => {
     }
 });
 
+test("START payload max_drawdown_pct uses saved MM maximumDrawdownPercent, ignoring legacy config.maxDd", async () => {
+    setMmConfiguration({ maximumDrawdownPercent: "7.00", riskPerTradePercent: "0.50" });
+    globalThis.__MM_DRAFT__ = {
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20.00",
+        maximumDrawdownPercent: "10.00",
+    };
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", maxDd: 3 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.max_drawdown_pct, 7);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+    }
+});
+
+test("START payload max_drawdown_pct uses saved MM configuration over unsaved draft", async () => {
+    setMmConfiguration({ maximumDrawdownPercent: "5.00", riskPerTradePercent: "0.50" });
+    globalThis.__MM_DRAFT__ = {
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20.00",
+        maximumDrawdownPercent: "15.00",
+    };
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", maxDd: 10 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.max_drawdown_pct, 5);
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+    }
+});
+
+test("START fails closed when saved MM maximumDrawdownPercent is unavailable", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50", maximumDrawdownPercent: undefined });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start);
+        assert.equal(start.props.disabled, true);
+        await clickAndRender(renderer, start);
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("START fails closed when saved MM maximumDrawdownPercent is NaN", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50", maximumDrawdownPercent: "not-a-number" });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        const start = findButton(renderer.root, "START BOT");
+        await clickAndRender(renderer, start);
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("START payload risk_percent, leverage, selection_mode contracts preserved alongside max_drawdown_pct authority", async () => {
+    setMmConfiguration({
+        riskPerTradePercent: "0.50",
+        maximumDrawdownPercent: "7.00",
+        maximumLeverage: "5",
+    });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", maxDd: 3, leverage: 5 },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.5);
+        assert.equal(payload.max_drawdown_pct, 7);
+        assert.equal(payload.leverage, 5);
+        assert.equal(payload.selection_mode, "MANUAL");
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+    }
+});
+
+test("START does not fallback to default 5 when saved MM max drawdown is unavailable", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50", maximumDrawdownPercent: undefined });
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL" },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.equal(start.props.disabled, true);
+        await clickAndRender(renderer, start);
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
 test("running BOT presents STOP BOT and uses existing stop authority", async () => {
     const mock = installFetchMock((url) => {
         assert.equal(url, "/api/bot/stop");
