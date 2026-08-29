@@ -2594,12 +2594,40 @@ class BotManager:
         requested = str(requested or "MANUAL").strip().upper()
         if requested not in ("MANUAL", "AUTO"):
             requested = "MANUAL"
-        self.selection_mode = requested
-        if requested == "AUTO":
-            self.start_auto_market_selection_runtime()
-        else:
+        self.selection_mode = "MANUAL"
+        if requested != "AUTO":
             self.stop_auto_market_selection_runtime()
-        return self.selection_mode
+            return self.selection_mode
+
+        deadline = time.monotonic() + 2.0
+        while True:
+            lifecycle_status = self.start_auto_market_selection_runtime()
+            lifecycle_status = lifecycle_status if isinstance(lifecycle_status, dict) else {}
+            runtime_state = lifecycle_status.get("amsRuntimeState") or lifecycle_status.get("runtimeState")
+            if runtime_state in ("READY", "RUNNING_CYCLE") and lifecycle_status.get("enabled", True) is not False:
+                self.selection_mode = "AUTO"
+                return self.selection_mode
+            reason_codes = lifecycle_status.get("reasonCodes") or []
+            reason = reason_codes[0] if isinstance(reason_codes, (list, tuple)) and reason_codes else "AUTO_RUNTIME_AUTHORITY_UNKNOWN"
+            if reason != "AUTO_RUNTIME_PENDING_UNKNOWN" or time.monotonic() >= deadline:
+                self.stop_auto_market_selection_runtime()
+                raise RuntimeError(reason)
+            time.sleep(0.05)
+
+    def _run_initial_auto_market_selection_cycle(self):
+        """Require the existing PAPER AUTO cycle to accept START authority."""
+        if self.selection_mode != "AUTO":
+            return None
+        result = self.run_auto_market_selection_cycle()
+        runtime = result.get("runtime") if isinstance(result, dict) else None
+        runtime = runtime if isinstance(runtime, dict) else {}
+        runtime_state = runtime.get("amsRuntimeState") or runtime.get("runtimeState")
+        reason_codes = result.get("reasonCodes") or [] if isinstance(result, dict) else []
+        already_running = "AUTO_SELECTION_ALREADY_IN_PROGRESS" in reason_codes
+        if not isinstance(result, dict) or (result.get("accepted") is not True and not already_running) or runtime_state in ("BLOCKED", "FAILED", "STOPPED"):
+            reason = reason_codes[0] if isinstance(reason_codes, (list, tuple)) and reason_codes else "AUTO_RUNTIME_CYCLE_NOT_ACCEPTED"
+            raise RuntimeError(reason)
+        return result
 
     def _pause_new_entries_for_safe_switch(self, transaction_id):
         if not transaction_id or not self.symbol_switch_lock.acquire(blocking=False):
@@ -2856,6 +2884,10 @@ class BotManager:
             return {
                 "status": "error",
                 "reason": str(e),
+                "requestedSelectionMode": str(
+                    config.get("selection_mode", "MANUAL")
+                ).strip().upper(),
+                "selectionMode": self.selection_mode,
                 "success": False,
                 "completed": False,
                 "stateUnknown": True,
@@ -3160,9 +3192,11 @@ class BotManager:
                 config.get("selection_mode"), 
                 type(config.get("selection_mode"))
             )
-            self._handoff_selection_mode(
+            requested_selection_mode = str(
                 config.get("selection_mode", "MANUAL")
-            )
+            ).strip().upper()
+            if requested_selection_mode != "AUTO":
+                self._handoff_selection_mode(requested_selection_mode)
 
             runtime_metrics = (
                 self.state.runtime_metrics
@@ -3692,6 +3726,12 @@ class BotManager:
                 "🟢 ORDERBOOK WS STARTED"
             )
 
+            # AUTO readiness depends on the running engine/feed authority.
+            # Confirm the typed lifecycle state before reporting START success.
+            if requested_selection_mode == "AUTO":
+                self._handoff_selection_mode("AUTO")
+                self._run_initial_auto_market_selection_cycle()
+
             return {
                 "status": "started",
                 "symbol": self.activeSymbol,
@@ -3725,6 +3765,10 @@ class BotManager:
             return {
                 "status": "error",
                 "reason": str(e),
+                "requestedSelectionMode": str(
+                    config.get("selection_mode", "MANUAL")
+                ).strip().upper(),
+                "selectionMode": self.selection_mode,
                 "success": False,
                 "completed": False,
                 "stateUnknown": cleanup_succeeded is not True,
@@ -8887,7 +8931,9 @@ class BotManager:
 
         engine = self.engine
 
-        # Bot shutdown always revokes transient Live AUTO authority first.
+        # Bot shutdown revokes both selection and transient Live AUTO authority.
+        self.stop_auto_market_selection_runtime()
+        self.selection_mode = "MANUAL"
         self.stop_live_auto_control()
 
         self._set_lifecycle_state(

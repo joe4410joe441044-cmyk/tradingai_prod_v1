@@ -96,6 +96,31 @@ class _FakeLifecycle:
         return {"amsRuntimeState": "STOPPED"}
 
 
+def test_stop_revokes_auto_selection_authority():
+    manager = _bare_manager()
+    manager.selection_mode = "AUTO"
+    manager.shutdown_lock = __import__("threading").RLock()
+    manager.stop_live_auto_control = lambda: None
+    manager._set_lifecycle_state = lambda _state: None
+    manager._set_loop_state = lambda _state: None
+    manager.engine = None
+    manager.ws = None
+    manager.state = type("State", (), {"runtime_metrics": {}})()
+    manager._capture_account_snapshot = lambda: None
+    manager.strategy = object()
+    manager.ob_manager = object()
+    manager.active_runtime_id = "runtime"
+    manager._running = True
+    manager.account_snapshot = {}
+    manager.runtime_instance_id = "runtime"
+    manager.config = {"mode": "paper"}
+    manager.paper_account_runtime_snapshot = {}
+    manager._set_lifecycle_state = lambda _state: None
+    manager.stop()
+    assert manager.selection_mode == "MANUAL"
+    assert manager.auto_market_selection_lifecycle.stopped == 1
+
+
 def _bare_manager():
     manager = BotManager.__new__(BotManager)
     manager.selection_mode = "MANUAL"
@@ -128,13 +153,70 @@ def test_fail_closed_lifecycle_leaves_manual():
     class BlockedLifecycle(_FakeLifecycle):
         def start(self):
             self.started += 1
-            # Blocked AUTO never elevates authority; stays MANUAL.
             return {"amsRuntimeState": "BLOCKED", "reasonCodes": ["AUTO_RUNTIME_BLOCKED"]}
 
     manager = BotManager.__new__(BotManager)
     manager.selection_mode = "MANUAL"
     manager.auto_market_selection_lifecycle = BlockedLifecycle(manager)
-    assert manager._handoff_selection_mode("AUTO") == "MANUAL"
+    with pytest.raises(RuntimeError, match="AUTO_RUNTIME_BLOCKED"):
+        manager._handoff_selection_mode("AUTO")
+    assert manager.selection_mode == "MANUAL"
+    assert manager.auto_market_selection_lifecycle.stopped == 1
+
+
+def test_pending_lifecycle_transitions_to_ready_without_manual_downgrade(monkeypatch):
+    class PendingLifecycle(_FakeLifecycle):
+        def start(self):
+            self.started += 1
+            if self.started == 1:
+                return {"amsRuntimeState": "BLOCKED", "reasonCodes": ["AUTO_RUNTIME_PENDING_UNKNOWN"]}
+            return {"amsRuntimeState": "READY", "enabled": True, "reasonCodes": []}
+
+    manager = BotManager.__new__(BotManager)
+    manager.selection_mode = "MANUAL"
+    manager.auto_market_selection_lifecycle = PendingLifecycle(manager)
+    monkeypatch.setattr("backend.bot_manager.bot_manager.time.sleep", lambda _seconds: None)
+    assert manager._handoff_selection_mode("AUTO") == "AUTO"
+    assert manager.auto_market_selection_lifecycle.started == 2
+
+
+def test_pending_lifecycle_timeout_is_typed_and_stays_manual(monkeypatch):
+    class PendingLifecycle(_FakeLifecycle):
+        def start(self):
+            self.started += 1
+            return {"amsRuntimeState": "BLOCKED", "reasonCodes": ["AUTO_RUNTIME_PENDING_UNKNOWN"]}
+
+    manager = BotManager.__new__(BotManager)
+    manager.selection_mode = "MANUAL"
+    manager.auto_market_selection_lifecycle = PendingLifecycle(manager)
+    ticks = iter((10.0, 10.0, 12.0))
+    monkeypatch.setattr("backend.bot_manager.bot_manager.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("backend.bot_manager.bot_manager.time.sleep", lambda _seconds: None)
+    with pytest.raises(RuntimeError, match="AUTO_RUNTIME_PENDING_UNKNOWN"):
+        manager._handoff_selection_mode("AUTO")
+    assert manager.selection_mode == "MANUAL"
+    assert manager.auto_market_selection_lifecycle.stopped == 1
+
+
+def test_initial_auto_cycle_requires_accepted_typed_runtime():
+    manager = _bare_manager()
+    manager.selection_mode = "AUTO"
+    manager.auto_market_selection_lifecycle.run_one_cycle = lambda **_kwargs: {
+        "accepted": True, "reasonCodes": [], "runtime": {"amsRuntimeState": "READY"}
+    }
+    assert manager._run_initial_auto_market_selection_cycle()["accepted"] is True
+
+
+def test_initial_auto_cycle_blocked_preserves_reason_and_mode():
+    manager = _bare_manager()
+    manager.selection_mode = "AUTO"
+    manager.auto_market_selection_lifecycle.run_one_cycle = lambda **_kwargs: {
+        "accepted": False, "reasonCodes": ["AUTO_RUNTIME_MM_UNAVAILABLE"],
+        "runtime": {"amsRuntimeState": "BLOCKED"},
+    }
+    with pytest.raises(RuntimeError, match="AUTO_RUNTIME_MM_UNAVAILABLE"):
+        manager._run_initial_auto_market_selection_cycle()
+    assert manager.selection_mode == "AUTO"
 
 
 # =========================
