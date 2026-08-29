@@ -6,6 +6,8 @@ Covers the runtime hand-off of operator-selected MANUAL/AUTO:
         -> start_bot() -> BotManager.start() -> BotManager.selection_mode
 """
 
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
 
@@ -196,6 +198,45 @@ def test_pending_lifecycle_timeout_is_typed_and_stays_manual(monkeypatch):
         manager._handoff_selection_mode("AUTO")
     assert manager.selection_mode == "MANUAL"
     assert manager.auto_market_selection_lifecycle.stopped == 1
+
+
+def test_running_engine_replaces_retired_stopped_pending_authority():
+    manager = BotManager.__new__(BotManager)
+    manager.pending_order = False
+    manager.engine = SimpleNamespace(pending_order=False)
+    manager.account_snapshot = {
+        "authorityReason": "STOPPED_PAPER_DURABLE_EVIDENCE_REBOUND",
+    }
+    manager.config = {"mode": "paper"}
+    manager._running = True
+    manager.lifecycle_state = "RUNNING"
+
+    authority = manager.get_authoritative_pending_order_state()
+
+    assert authority["known"] is True
+    assert authority["pending"] is False
+    assert authority["safe"] is True
+    assert authority["reason"] == "NO_PENDING_ORDER"
+    assert authority["source"] == "manager_and_engine"
+
+
+def test_stopped_durable_memory_with_engine_still_fails_closed():
+    manager = BotManager.__new__(BotManager)
+    manager.pending_order = False
+    manager.engine = SimpleNamespace(pending_order=False)
+    manager.account_snapshot = {
+        "authorityReason": "STOPPED_PAPER_DURABLE_EVIDENCE_REBOUND",
+    }
+    manager.config = {"mode": "paper"}
+    manager._running = False
+    manager.lifecycle_state = "STOPPED"
+
+    authority = manager.get_authoritative_pending_order_state()
+
+    assert authority["known"] is False
+    assert authority["pending"] is None
+    assert authority["safe"] is False
+    assert authority["reason"] == "ENGINE_AVAILABLE"
 
 
 def test_initial_auto_cycle_requires_accepted_typed_runtime():

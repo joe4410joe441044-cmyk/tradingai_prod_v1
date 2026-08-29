@@ -7764,7 +7764,12 @@ class BotManager:
                 )
             )
         )
-        if durable_memory and engine is not None:
+        running_engine_authority = bool(
+            engine is not None
+            and self._running is True
+            and self.lifecycle_state == "RUNNING"
+        )
+        if durable_memory and engine is not None and not running_engine_authority:
             return self._pending_order_authority_payload(
                 known=False,
                 pending=None,
