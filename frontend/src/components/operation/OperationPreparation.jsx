@@ -302,6 +302,7 @@ export default function OperationPreparation({
         mmConfigurationError: Boolean(mmConfigurationError),
         allowLive: config.allowLive,
         tradeMode: config.tradeMode,
+        paperBootstrapEligible: config.paperBootstrapEligible,
     });
     const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);

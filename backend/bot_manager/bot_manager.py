@@ -9412,6 +9412,84 @@ class BotManager:
             live_readiness.get("realOrderAllowed", False)
         )
 
+        paper_bootstrap_eligible = False
+        paper_bootstrap_status = "UNAVAILABLE"
+        paper_bootstrap_reason_codes = []
+        paper_bootstrap_evaluated_at = time.time()
+        paper_bootstrap_source = None
+        if (
+            not self._running
+            and self.lifecycle_state == "STOPPED"
+            and str(self.config.get("mode", "paper")).strip().lower() == "paper"
+            and dry_run is True
+            and real_order_allowed is False
+            and self.engine is None
+        ):
+            durable_snapshot, _durable_reason = (
+                self._load_stopped_paper_durable_snapshot(
+                    allow_current_runtime=True,
+                )
+            )
+            if isinstance(durable_snapshot, dict):
+                durable_start_safe = bool(
+                    durable_snapshot.get("mode") == "paper"
+                    and durable_snapshot.get("lifecycleState")
+                    == "STOPPED"
+                    and durable_snapshot.get("stateUnknown") is False
+                    and durable_snapshot.get("positionRemaining")
+                    is False
+                    and durable_snapshot.get("pendingOrder") is False
+                    and durable_snapshot.get("openOrderCount") == 0
+                    and type(
+                        durable_snapshot.get("openOrderCount")
+                    ) is int
+                )
+                if durable_start_safe:
+                    paper_bootstrap_eligible = True
+                    paper_bootstrap_status = "READY"
+                    paper_bootstrap_source = (
+                        "STOPPED_PAPER_DURABLE_SNAPSHOT"
+                    )
+                else:
+                    paper_bootstrap_status = "BLOCKED"
+                    paper_bootstrap_source = (
+                        "STOPPED_PAPER_DURABLE_SNAPSHOT"
+                    )
+                    codes = []
+                    if durable_snapshot.get("mode") != "paper":
+                        codes.append("MODE_NOT_PAPER")
+                    if (
+                        durable_snapshot.get("lifecycleState")
+                        != "STOPPED"
+                    ):
+                        codes.append("LIFECYCLE_NOT_STOPPED")
+                    if durable_snapshot.get(
+                        "stateUnknown"
+                    ) is not False:
+                        codes.append("STATE_UNKNOWN")
+                    if durable_snapshot.get(
+                        "positionRemaining"
+                    ) is not False:
+                        codes.append("POSITION_REMAINING")
+                    if durable_snapshot.get(
+                        "pendingOrder"
+                    ) is not False:
+                        codes.append("PENDING_ORDER")
+                    if durable_snapshot.get("openOrderCount") != 0:
+                        codes.append("OPEN_ORDERS")
+                    paper_bootstrap_reason_codes = codes
+            else:
+                paper_bootstrap_status = "BLOCKED"
+                paper_bootstrap_reason_codes = [
+                    _durable_reason or "DURABLE_SNAPSHOT_MISSING"
+                ]
+        elif self.engine is not None:
+            paper_bootstrap_status = "UNAVAILABLE"
+            paper_bootstrap_reason_codes = ["ENGINE_ATTACHED"]
+        elif self._running or self.lifecycle_state != "STOPPED":
+            paper_bootstrap_status = "UNAVAILABLE"
+            paper_bootstrap_reason_codes = ["BOT_NOT_STOPPED"]
+
         trace = (
             completed_runtime_result.get("runtimeStageTrace", {})
             if isinstance(completed_runtime_result, dict) else {}
@@ -9972,6 +10050,16 @@ class BotManager:
                     else None
                 )
             ),
+
+            "paperBootstrapEligible": paper_bootstrap_eligible,
+
+            "paperBootstrapStatus": paper_bootstrap_status,
+
+            "paperBootstrapReasonCodes": paper_bootstrap_reason_codes,
+
+            "paperBootstrapEvaluatedAt": paper_bootstrap_evaluated_at,
+
+            "paperBootstrapSource": paper_bootstrap_source,
 
             "allowLive": backend_config.ALLOW_LIVE,
 

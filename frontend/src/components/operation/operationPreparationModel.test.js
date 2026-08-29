@@ -64,9 +64,7 @@ test("PAPER stopped runtime-only MM unavailability permits START but not entry",
 });
 
 for (const [name, overrides] of [
-    ["Pending UNKNOWN", { pendingOrder: null }],
     ["Pending exists", { pendingOrder: true }],
-    ["Position UNKNOWN", { position: null }],
     ["Position OPEN", { position: "OPEN" }],
     ["Emergency unsafe", { emergencyState: "LOCKED" }],
     ["saved MM invalid", { mmConfiguration: { maximumLeverage: 5 } }],
@@ -81,6 +79,154 @@ for (const [name, overrides] of [
         assert.equal(result.startReady, false);
     });
 }
+
+test("Pending UNKNOWN allows PAPER bootstrap with backend authority", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        pendingOrder: null,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, true);
+});
+
+test("Position UNKNOWN allows PAPER bootstrap with backend authority", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, true);
+});
+
+test("STOPPED PAPER bootstrap allows START with runtime-only unknowns", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        pendingOrder: null,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.entryReady, false);
+    assert.equal(result.entryReadiness, "WAITING");
+});
+
+test("STOPPED PAPER bootstrap still blocks entry permission", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        pendingOrder: null,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.entryReady, false);
+    assert.equal(result.entryReadiness, "WAITING");
+    assert.equal(result.startReady, true);
+});
+
+test("STOPPED PAPER bootstrap blocks on known position", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: "OPEN",
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, false);
+});
+
+test("STOPPED PAPER bootstrap blocks on known pending order", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        pendingOrder: true,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, false);
+});
+
+test("paperBootstrapEligible=false blocks START with UNKNOWN position/order", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        pendingOrder: null,
+        paperBootstrapEligible: false,
+    }));
+    assert.equal(result.startReady, false);
+});
+
+test("missing paperBootstrapEligible blocks START with UNKNOWN position/order", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        pendingOrder: null,
+    }));
+    assert.equal(result.startReady, false);
+});
+
+test("LIVE bootstrap prohibits START with unknown runtime authority", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        tradingMode: "LIVE",
+        dryRun: false,
+        realOrderAllowed: true,
+        allowLive: false,
+        tradeMode: "paper",
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.liveAuthorityReadiness, "BLOCKED");
+});
+
+test("LIVE bootstrap allows START only when ALLOW_LIVE and TRADE_MODE=live", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        tradingMode: "LIVE",
+        dryRun: false,
+        realOrderAllowed: true,
+        allowLive: true,
+        tradeMode: "live",
+    }));
+    assert.equal(result.liveAuthorityReadiness, "READY");
+});
+
+test("START after STOP confirms safe state restoration", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        position: null,
+        pendingOrder: null,
+        paperBootstrapEligible: true,
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.executionReadiness, "SAFE");
+    assert.equal(result.emergencyReadiness, "READY");
+});
+
+test("Max Drawdown regression: saved config matches readiness", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: {
+            riskPerTradePercent: "0.50",
+            totalExposurePercent: "20",
+            maximumDrawdownPercent: "5",
+            maximumLeverage: "5",
+        },
+    }));
+    assert.equal(result.savedMmReadiness, "READY");
+    assert.equal(result.startMmReadiness, "READY");
+});
+
+test("Max Drawdown regression: missing field blocks", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: {
+            riskPerTradePercent: "0.50",
+            totalExposurePercent: "20",
+            maximumLeverage: "5",
+        },
+    }));
+    assert.equal(result.savedMmReadiness, "BLOCKED");
+    assert.equal(result.startMmReadiness, "BLOCKED");
+});
 
 test("running runtime authority allows entry only with MM and execution authority", () => {
     const allowed = deriveOperationReadiness(readyInputs({

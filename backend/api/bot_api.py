@@ -115,6 +115,16 @@ class StatusResponse(BaseModel):
 
     tradeMode: str = "paper"
 
+    paperBootstrapEligible: Optional[bool] = None
+
+    paperBootstrapStatus: Optional[str] = None
+
+    paperBootstrapReasonCodes: List[str] = Field(default_factory=list)
+
+    paperBootstrapEvaluatedAt: Optional[float] = None
+
+    paperBootstrapSource: Optional[str] = None
+
     exchangeAuth: str = "NOT_VERIFIED"
 
     realAccountConnected: bool = False

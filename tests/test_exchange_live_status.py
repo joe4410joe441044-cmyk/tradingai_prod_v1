@@ -9919,6 +9919,64 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         )
         return bot
 
+    def test_paper_bootstrap_authority_is_typed_and_ready_from_durable_snapshot(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, _ = self._persist_flat_stopped_paper_durable_snapshot(path)
+
+        with patch(
+            "backend.bot_manager.bot_manager.backend_config.TRADE_MODE",
+            "paper",
+        ), patch(
+            "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE",
+            False,
+        ):
+            status = bot.get_status()
+
+        self.assertIs(type(status["paperBootstrapEligible"]), bool)
+        self.assertTrue(status["paperBootstrapEligible"])
+        self.assertEqual(status["paperBootstrapStatus"], "READY")
+        self.assertEqual(status["paperBootstrapReasonCodes"], [])
+        self.assertEqual(status["paperBootstrapSource"], "STOPPED_PAPER_DURABLE_SNAPSHOT")
+        self.assertIsInstance(status["paperBootstrapEvaluatedAt"], float)
+        projected = StatusResponse(**status).model_dump()
+        for field in (
+            "paperBootstrapEligible", "paperBootstrapStatus",
+            "paperBootstrapReasonCodes", "paperBootstrapSource",
+            "paperBootstrapEvaluatedAt",
+        ):
+            self.assertIn(field, projected)
+        self.assertIs(type(projected["paperBootstrapEligible"]), bool)
+
+    def test_paper_bootstrap_authority_blocks_unsafe_durable_snapshot(self):
+        path = self._temporary_durable_snapshot_path()
+        bot, payload = self._persist_flat_stopped_paper_durable_snapshot(path)
+        payload["pendingOrder"] = True
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        with patch(
+            "backend.bot_manager.bot_manager.backend_config.TRADE_MODE", "paper",
+        ), patch(
+            "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE", False,
+        ):
+            status = bot.get_status()
+        self.assertIs(status["paperBootstrapEligible"], False)
+        self.assertEqual(status["paperBootstrapStatus"], "BLOCKED")
+        self.assertTrue(status["paperBootstrapReasonCodes"])
+
+    def test_paper_bootstrap_authority_fails_closed_without_snapshot(self):
+        bot = self._bootstrap_bot()
+        with patch(
+            "backend.bot_manager.bot_manager.backend_config.TRADE_MODE", "paper",
+        ), patch(
+            "backend.bot_manager.bot_manager.backend_config.ALLOW_LIVE", False,
+        ):
+            status = bot.get_status()
+        self.assertIs(type(status["paperBootstrapEligible"]), bool)
+        self.assertFalse(status["paperBootstrapEligible"])
+        self.assertEqual(status["paperBootstrapStatus"], "BLOCKED")
+        self.assertTrue(status["paperBootstrapReasonCodes"])
+        self.assertIsNone(status["paperBootstrapSource"])
+
     def test_initial_stopped_paper_bootstrap_is_authoritative_for_start(
         self,
     ):

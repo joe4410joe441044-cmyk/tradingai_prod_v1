@@ -801,6 +801,7 @@ export default function BotControl({
         mmBlockReasons: mmStatus?.blockReasons || [],
         mmRecoveryRequired: mmStatus?.recoveryRequired || false,
         mmConfigurationError: Boolean(mmConfigurationError),
+        paperBootstrapEligible: config?.paperBootstrapEligible,
     });
     const { startReady, automationReady } = startReadiness;
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);

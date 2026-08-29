@@ -158,6 +158,7 @@ export const deriveOperationReadiness = ({
     mmConfigurationError = false,
     allowLive,
     tradeMode,
+    paperBootstrapEligible,
 } = {}) => {
     const selectionRuntime = normalizeReadiness(
         autoMarketState,
@@ -272,11 +273,27 @@ export const deriveOperationReadiness = ({
         return "READY";
     })();
 
+    const paperPreStart = (
+        botRunning !== true
+        && normalizedMode === "PAPER"
+        && dryRun === true
+        && realOrderAllowed !== true
+    );
+    const paperBootstrapActive = (
+        paperPreStart && paperBootstrapEligible === true
+    );
+    const startPositionReadiness = (
+        paperBootstrapActive && positionState === "UNKNOWN"
+    ) ? "READY" : positionState;
+    const startOrderReadiness = (
+        paperBootstrapActive && orderAuthority === "UNKNOWN"
+    ) ? "READY" : orderAuthority;
+
     // Calculate readiness values for all modes
     const paperStartReadinessValues = [
         emergencyReadiness,
-        positionState,
-        orderAuthority,
+        startPositionReadiness,
+        startOrderReadiness,
         selectionReadiness,
         startMmReadiness,
         executionReadiness,
@@ -292,12 +309,6 @@ export const deriveOperationReadiness = ({
         executionReadiness,
         leverageReadiness,
     ];
-    const paperPreStart = (
-        botRunning !== true
-        && normalizedMode === "PAPER"
-        && dryRun === true
-        && realOrderAllowed !== true
-    );
     let startReadinessValues = paperPreStart
         ? paperStartReadinessValues
         : legacyReadinessValues;
