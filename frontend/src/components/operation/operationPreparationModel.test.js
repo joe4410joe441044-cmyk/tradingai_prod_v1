@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveOperationReadiness } from "./operationPreparationModel.js";
+import {
+    deriveOperationReadiness,
+    pendingOrderAuthorityValue,
+} from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
     botRunning: false,
@@ -61,6 +64,43 @@ test("PAPER stopped runtime-only MM unavailability permits START but not entry",
     assert.equal(result.startReady, true);
     assert.equal(result.entryReady, false);
     assert.equal(result.entryReadiness, "WAITING");
+});
+
+test("PAPER stopped recovery remains an entry guard, not a BOT START guard", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        mmRecoveryRequired: true,
+    }));
+    assert.equal(result.startMmReadiness, "READY");
+    assert.equal(result.startReady, true);
+    assert.equal(result.entryReadiness, "WAITING");
+    assert.equal(result.entryReady, false);
+});
+
+test("AUTO pre-start accepts a formal selected runtime symbol while lifecycle is observing", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        selectionMode: "AUTO",
+        autoMarketState: "OBSERVING",
+        displaySymbol: "YGGUSDT",
+    }));
+    assert.equal(result.selectedRuntimeSymbol, "YGGUSDT");
+    assert.equal(result.selectionReadiness, "READY");
+    assert.equal(result.startReady, true);
+});
+
+test("typed pending authority distinguishes stale projection from known pending", () => {
+    assert.equal(pendingOrderAuthorityValue({
+        pendingOrder: true,
+        pendingOrderState: { known: false, pending: null },
+    }), null);
+    assert.equal(pendingOrderAuthorityValue({
+        pendingOrder: true,
+        pendingOrderState: { known: true, pending: true },
+    }), true);
+    assert.equal(pendingOrderAuthorityValue({ pendingOrder: false }), false);
 });
 
 for (const [name, overrides] of [
@@ -256,7 +296,7 @@ test("runtime-only exception is PAPER pre-start only", () => {
     })).startReady, false);
     assert.equal(deriveOperationReadiness(readyInputs({
         ...inputs, mmRecoveryRequired: true,
-    })).startReady, false);
+    })).startReady, true);
     assert.equal(deriveOperationReadiness(readyInputs({
         ...inputs, mmBlockReasons: [
             "TRADING_RUNTIME_METRICS_UNAVAILABLE",

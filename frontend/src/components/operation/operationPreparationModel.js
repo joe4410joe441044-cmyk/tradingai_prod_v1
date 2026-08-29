@@ -79,6 +79,21 @@ export const pendingOrderReadiness = (pendingOrder) => {
     return "UNKNOWN";
 };
 
+export const pendingOrderAuthorityValue = (status) => {
+    const authority = status?.pendingOrderState ?? status?.pending_order_state;
+    if (authority && typeof authority === "object") {
+        if (authority.known !== true) return null;
+        if (typeof authority.pending === "boolean") return authority.pending;
+        if (typeof authority.pending_order === "boolean") {
+            return authority.pending_order;
+        }
+        return null;
+    }
+    return typeof status?.pendingOrder === "boolean"
+        ? status.pendingOrder
+        : null;
+};
+
 export const savedMmConfigurationReadiness = (configuration) => {
     if (!configuration || typeof configuration !== "object") return "BLOCKED";
 
@@ -154,7 +169,6 @@ export const deriveOperationReadiness = ({
     maximumLeverage,
     mmConfiguration,
     mmBlockReasons = [],
-    mmRecoveryRequired = false,
     mmConfigurationError = false,
     allowLive,
     tradeMode,
@@ -171,7 +185,7 @@ export const deriveOperationReadiness = ({
         : null;
     const selectionReadiness = selectionMode === "MANUAL"
         ? "READY"
-        : selectionRuntime === "READY" && selectedRuntimeSymbol
+        : selectedRuntimeSymbol
             ? "READY"
             : selectionRuntime === "READY" ? "WAITING" : selectionRuntime;
     const emergencyReadiness = normalizeReadiness(emergencyState, ["READY"]);
@@ -248,7 +262,6 @@ export const deriveOperationReadiness = ({
         && dryRun === true
         && realOrderAllowed !== true
         && executionEntryAllowed === false
-        && mmRecoveryRequired !== true
         && normalizedMmBlockReasons.length === 1
         && normalizedMmBlockReasons[0] === "TRADING_RUNTIME_METRICS_UNAVAILABLE"
     );
