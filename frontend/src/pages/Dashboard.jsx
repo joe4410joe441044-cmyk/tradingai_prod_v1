@@ -21,6 +21,9 @@ import {
 import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
+import {
+    pendingOrderAuthorityValue,
+} from "../components/operation/operationPreparationModel";
 
 
 const fetchBotStatus = async () => {
@@ -334,6 +337,10 @@ useEffect(() => {
                                 allowLive: botStatus?.allowLive,
                                 tradeMode: botStatus?.tradeMode,
                                 leverageAuthority: botStatus?.leverageAuthority ?? null,
+                                paperBootstrapEligible: botStatus?.paperBootstrapEligible,
+                                paperBootstrapStatus: botStatus?.paperBootstrapStatus,
+                                paperBootstrapReasonCodes: botStatus?.paperBootstrapReasonCodes,
+                                paperBootstrapSource: botStatus?.paperBootstrapSource,
                             }}
 
                             executionEnabled={
@@ -368,7 +375,7 @@ useEffect(() => {
                             }
 
                             pendingOrder={
-                                botStatus?.pendingOrder
+                                pendingOrderAuthorityValue(botStatus)
                             }
 
                             position={position}
