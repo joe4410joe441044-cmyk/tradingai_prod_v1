@@ -22,10 +22,12 @@ const textOf = (node) => {
 };
 
 test("Money Management shell defines the complete R1 card layout", () => {
-    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 19);
+    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 17);
     assert.deepEqual(MONEY_MANAGEMENT_CARD_TITLES, [
         "Equity / Peak Equity",
+        "Cumulative Realized P&L",
         "Drawdown",
+        "Risk / Exposure",
         "Capital",
         "Risk",
         "Exposure",
@@ -36,15 +38,11 @@ test("Money Management shell defines the complete R1 card layout", () => {
         "Recovery",
         "Statistics",
         "Projection",
-        "Equity Curve",
-        "Cumulative Realized P&L",
-        "Drawdown",
-        "Risk / Exposure",
         "Timeline",
         "History",
         "Future Chart",
     ]);
-    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 18);
+    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 17);
 });
 
 test("page composes Header, Graph, Summary, Runtime, Main, and Lower sections", async () => {

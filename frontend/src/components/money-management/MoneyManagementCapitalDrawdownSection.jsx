@@ -20,58 +20,37 @@ import MoneyManagementCardShell from "./MoneyManagementCardShell";
 
 const PERIODS = Object.values(MONEY_MANAGEMENT_ANALYTICS_PERIOD);
 
-function parseMetricAsNumber(value) {
-    if (value === null || value === undefined) return null;
-    if (typeof value === "number") return Number.isFinite(value) ? value : null;
-    if (typeof value === "string") {
-        const parsed = Number.parseFloat(value);
-        return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-}
-
-function CapitalChart({ data, loading }) {
+function PerformanceChart({ data, lines, loading, title, unit = null }) {
     if (loading) {
         return (
-            <MoneyManagementCardShell loading title="Equity / Peak Equity" />
+            <MoneyManagementCardShell loading title={title} />
         );
     }
-
     const available = data.some((point) => (
-        point.equity !== null || point.peakEquity !== null
+        lines.some(({ metric }) => point[metric] !== null)
     ));
-
     if (!available) {
         return (
             <MoneyManagementCardShell
                 className="mm-card--top-graph"
-                title="Equity / Peak Equity"
+                title={title}
             >
-                <p className="mm-card__placeholder">No capital history</p>
+                <p className="mm-card__placeholder">No data</p>
             </MoneyManagementCardShell>
         );
     }
-
-    const chartLines = [];
-    if (data.some((p) => p.equity !== null)) {
-        chartLines.push({ metric: "equity", name: "Equity", stroke: "#10b981" });
-    }
-    if (data.some((p) => p.peakEquity !== null)) {
-        chartLines.push({ metric: "peakEquity", name: "Peak Equity", stroke: "#6366f1" });
-    }
-
     return (
         <MoneyManagementCardShell
             className="mm-card--top-graph"
-            title="Equity / Peak Equity"
+            title={title}
         >
-            <ResponsiveContainer height={220} width="100%">
+            <ResponsiveContainer height={176} width="100%">
                 <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="timestamp" minTickGap={24} />
-                    <YAxis domain={["auto", "auto"]} unit=" USDT" />
+                    <YAxis domain={["auto", "auto"]} unit={unit} />
                     <Tooltip />
-                    {chartLines.map(({ metric, name, stroke }) => (
+                    {lines.map(({ metric, name }) => (
                         <Line
                             connectNulls={false}
                             dataKey={metric}
@@ -79,80 +58,21 @@ function CapitalChart({ data, loading }) {
                             isAnimationActive={false}
                             key={metric}
                             name={name}
-                            stroke={stroke}
                             type="monotone"
                         />
                     ))}
                     {data
                         .filter((point) => (
-                            point.transition && point.equity !== null
+                            point.transition &&
+                            point[lines[0].metric] !== null
                         ))
                         .map((point) => (
                             <ReferenceDot
-                                key={`equity-${point.sequence}`}
+                                key={`${lines[0].metric}-${point.sequence}`}
                                 label={point.state}
                                 r={3}
                                 x={point.timestamp}
-                                y={point.equity}
-                            />
-                        ))}
-                </LineChart>
-            </ResponsiveContainer>
-        </MoneyManagementCardShell>
-    );
-}
-
-function DrawdownChart({ data, loading }) {
-    if (loading) {
-        return (
-            <MoneyManagementCardShell loading title="Drawdown" />
-        );
-    }
-
-    const available = data.some((point) => point.drawdownPercent !== null);
-
-    if (!available) {
-        return (
-            <MoneyManagementCardShell
-                className="mm-card--top-graph"
-                title="Drawdown"
-            >
-                <p className="mm-card__placeholder">No drawdown history</p>
-            </MoneyManagementCardShell>
-        );
-    }
-
-    return (
-        <MoneyManagementCardShell
-            className="mm-card--top-graph"
-            title="Drawdown"
-        >
-            <ResponsiveContainer height={220} width="100%">
-                <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="timestamp" minTickGap={24} />
-                    <YAxis domain={["auto", 0]} unit="%" />
-                    <Tooltip />
-                    <Line
-                        connectNulls={false}
-                        dataKey="drawdownPercent"
-                        dot={false}
-                        isAnimationActive={false}
-                        name="Drawdown %"
-                        stroke="#ef4444"
-                        type="monotone"
-                    />
-                    {data
-                        .filter((point) => (
-                            point.transition && point.drawdownPercent !== null
-                        ))
-                        .map((point) => (
-                            <ReferenceDot
-                                key={`drawdown-${point.sequence}`}
-                                label={point.state}
-                                r={3}
-                                x={point.timestamp}
-                                y={point.drawdownPercent}
+                                y={point[lines[0].metric]}
                             />
                         ))}
                 </LineChart>
@@ -196,41 +116,32 @@ export default function MoneyManagementCapitalDrawdownSection() {
         () => filterMoneyManagementAnalyticsEvents(events, period),
         [events, period],
     );
-
-    const data = useMemo(() => {
-        return [...filteredEvents]
+    const data = useMemo(() => (
+        [...filteredEvents]
             .sort((left, right) => left.sequence - right.sequence)
-            .map((event) => {
-                const equity = parseMetricAsNumber(event.metrics?.equity);
-                const peakEquity = parseMetricAsNumber(event.metrics?.peakEquity);
-
-                return {
-                    sequence: event.sequence,
-                    timestamp: event.timestamp,
-                    state: event.state,
-                    transition: [
-                        "LOSS_STATE_CHANGED",
-                        "RECOVERY_STATE_CHANGED",
-                        "MONEY_MANAGEMENT_LOCKED",
-                        "MONEY_MANAGEMENT_UNLOCKED",
-                    ].includes(event.eventType),
-                    equity,
-                    peakEquity,
-                    drawdownPercent: parseMetricAsNumber(event.metrics?.drawdownPercent),
-                };
-            });
-    }, [filteredEvents]);
-
-    const hasData = data.some((point) => (
-        point.equity !== null ||
-        point.peakEquity !== null ||
-        point.drawdownPercent !== null
-    ));
-
+            .map((event) => ({
+                sequence: event.sequence,
+                timestamp: event.timestamp,
+                state: event.state,
+                transition: [
+                    "LOSS_STATE_CHANGED",
+                    "RECOVERY_STATE_CHANGED",
+                    "MONEY_MANAGEMENT_LOCKED",
+                    "MONEY_MANAGEMENT_UNLOCKED",
+                ].includes(event.eventType),
+                equity: event.metrics?.equity ?? null,
+                peakEquity: event.metrics?.peakEquity ?? null,
+                realizedPnl: event.metrics?.realizedPnl ?? null,
+                drawdownPercent: event.metrics?.drawdownPercent ?? null,
+                exposureUtilization:
+                    event.metrics?.exposureUtilization ?? null,
+                riskUtilization: event.metrics?.riskUtilization ?? null,
+            }))
+    ), [filteredEvents]);
     return (
-        <section aria-label="Capital / Drawdown Graph" className="mm-top-graph-section">
+        <section aria-label="Capital / Performance Graphs" className="mm-top-graph-section">
             <div className="mm-analytics-header">
-                <h2 className="mm-section-title">Capital / Drawdown</h2>
+                <h2 className="mm-section-title">Capital / Performance</h2>
                 <div
                     aria-label="Graph period"
                     className="mm-analytics-periods"
@@ -253,29 +164,57 @@ export default function MoneyManagementCapitalDrawdownSection() {
                     className="mm-operation-notice mm-operation-notice--danger"
                     role="alert"
                 >
-                    Capital / Drawdown history unavailable
+                    Capital / Performance history unavailable
                 </p>
             )}
-            {!error && !loading && !hasData && (
+            {!error && (
                 <div className="mm-top-graph">
-                    <MoneyManagementCardShell
-                        className="mm-card--top-graph"
+                    <PerformanceChart
+                        data={data}
+                        loading={loading}
+                        lines={[
+                            { metric: "equity", name: "Equity" },
+                            { metric: "peakEquity", name: "Peak Equity" },
+                        ]}
                         title="Equity / Peak Equity"
-                    >
-                        <p className="mm-card__placeholder">No runtime history yet</p>
-                    </MoneyManagementCardShell>
-                    <MoneyManagementCardShell
-                        className="mm-card--top-graph"
+                        unit=" USDT"
+                    />
+                    <PerformanceChart
+                        data={data}
+                        loading={loading}
+                        lines={[{
+                            metric: "realizedPnl",
+                            name: "Cumulative Realized P&L",
+                        }]}
+                        title="Cumulative Realized P&L"
+                        unit=" USDT"
+                    />
+                    <PerformanceChart
+                        data={data}
+                        loading={loading}
+                        lines={[{
+                            metric: "drawdownPercent",
+                            name: "Drawdown",
+                        }]}
                         title="Drawdown"
-                    >
-                        <p className="mm-card__placeholder">No runtime history yet</p>
-                    </MoneyManagementCardShell>
-                </div>
-            )}
-            {!error && (loading || hasData) && (
-                <div className="mm-top-graph">
-                    <CapitalChart data={data} loading={loading} />
-                    <DrawdownChart data={data} loading={loading} />
+                        unit="%"
+                    />
+                    <PerformanceChart
+                        data={data}
+                        loading={loading}
+                        lines={[
+                            {
+                                metric: "riskUtilization",
+                                name: "Risk Utilization",
+                            },
+                            {
+                                metric: "exposureUtilization",
+                                name: "Exposure Utilization",
+                            },
+                        ]}
+                        title="Risk / Exposure"
+                        unit="%"
+                    />
                 </div>
             )}
         </section>

@@ -56,10 +56,9 @@ export default function MoneyManagementRiskStateCard({ viewModel }) {
                 variant={risk.state.variant}
             />
             <MoneyManagementMetricRows rows={rows} />
-            <div
-                aria-label="Money Management reasons and diagnostics"
-                className="mm-reason-grid"
-            >
+            <details className="mm-disclosure mm-disclosure--nested">
+                <summary>Detailed Reasons（詳細理由）</summary>
+                <div aria-label="Money Management reasons and diagnostics" className="mm-disclosure__content mm-reason-grid">
                 <MoneyManagementReasonList
                     group={risk.reasons.warning}
                     title="Warning Reasons"
@@ -76,7 +75,8 @@ export default function MoneyManagementRiskStateCard({ viewModel }) {
                     group={risk.reasons.diagnostic}
                     title="Diagnostic Reasons"
                 />
-            </div>
+                </div>
+            </details>
         </MoneyManagementCardShell>
     );
 }

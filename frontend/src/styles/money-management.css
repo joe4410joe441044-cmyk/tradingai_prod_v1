@@ -159,6 +159,20 @@
     outline-offset: -2px;
 }
 
+.market-intelligence .mm-disclosure__summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--mm-card-gap);
+}
+
+.market-intelligence .mm-disclosure__meta {
+    color: var(--mi-text-muted);
+    font: 600 10px/1.3 var(--mi-font-mono);
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
 .market-intelligence .mm-disclosure__content {
     padding: var(--mm-card-gap);
     border-top: 1px solid var(--mi-border-soft);
@@ -377,6 +391,27 @@
 
 .market-intelligence .mm-card--risk-state {
     min-height: 0;
+}
+
+.market-intelligence .mm-disclosure--nested {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.market-intelligence .mm-card--projection > .mi-panel__content {
+    padding-block: 6px;
+}
+
+.market-intelligence .mm-card--projection .mm-card__body--content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--mm-card-gap);
+}
+
+.market-intelligence .mm-card--projection .mm-projection-note {
+    font-size: 10px;
+    text-align: right;
 }
 
 .market-intelligence .mm-card--configuration,

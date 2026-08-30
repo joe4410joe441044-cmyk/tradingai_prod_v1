@@ -1,6 +1,5 @@
 import { lazy, Suspense } from "react";
 
-import MoneyManagementAnalyticsSection from "./MoneyManagementAnalyticsSection";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
 import MoneyManagementConfigurationCard from "./MoneyManagementConfigurationCard";
 import { ProjectionCard, StatisticsCard } from "./MoneyManagementMetricsCards";
@@ -26,27 +25,35 @@ export default function MoneyManagementBottomSection({
                 <h2 className="mm-section-title" id="mm-analysis-heading">
                     Configuration / Analysis
                 </h2>
-                <MoneyManagementConfigurationCard
-                    draft={moneyManagement.configurationDraft}
-                    interaction={interaction}
-                    onDraftChange={moneyManagement.updateConfigurationDraft}
-                    onReset={moneyManagement.resetConfigurationDraft}
-                    onSave={moneyManagement.saveConfiguration}
-                />
-                <div className="mm-bottom">
-                    <Suspense fallback={(
-                        <MoneyManagementCardShell loading title="Simulation" />
-                    )}>
-                        <MoneyManagementSimulationCard
-                            configuration={moneyManagement.configuration}
+                <StatisticsCard viewModel={viewModel} />
+                <details className="mm-disclosure">
+                    <summary className="mm-disclosure__summary-row">
+                        <span>Configuration（設定）</span>
+                        <span className="mm-disclosure__meta">
+                            {interaction.configuration.draftStatus} · Revision {interaction.configuration.revision}
+                        </span>
+                    </summary>
+                    <div className="mm-disclosure__content">
+                        <MoneyManagementConfigurationCard
+                            draft={moneyManagement.configurationDraft}
+                            interaction={interaction}
+                            onDraftChange={moneyManagement.updateConfigurationDraft}
+                            onReset={moneyManagement.resetConfigurationDraft}
+                            onSave={moneyManagement.saveConfiguration}
                         />
-                    </Suspense>
-                    <div className="mm-card-column">
-                        <ProjectionCard viewModel={viewModel} />
-                        <StatisticsCard viewModel={viewModel} />
                     </div>
-                </div>
-                <MoneyManagementAnalyticsSection />
+                </details>
+                <details className="mm-disclosure">
+                    <summary>Simulation（シミュレーション）</summary>
+                    <div className="mm-disclosure__content">
+                        <Suspense fallback={(
+                            <MoneyManagementCardShell loading title="Simulation" />
+                        )}>
+                            <MoneyManagementSimulationCard configuration={moneyManagement.configuration} />
+                        </Suspense>
+                    </div>
+                </details>
+                <ProjectionCard viewModel={viewModel} />
             </section>
             <section
                 aria-labelledby="mm-history-heading"

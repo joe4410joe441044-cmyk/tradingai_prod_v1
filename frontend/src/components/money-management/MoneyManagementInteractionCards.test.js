@@ -113,7 +113,6 @@ test("lower hierarchy keeps analysis available and history collapsed by default"
     "MoneyManagementSimulationCard",
     "ProjectionCard",
     "StatisticsCard",
-    "MoneyManagementAnalyticsSection",
     "History / Diagnostics",
     "MoneyManagementRuntimeHistoryCard",
   ]) {
@@ -130,13 +129,12 @@ test("lower hierarchy keeps analysis available and history collapsed by default"
     bottom.indexOf("MoneyManagementConfigurationCard")
       < bottom.indexOf("MoneyManagementSimulationCard"),
   );
-  assert.ok(
-    bottom.indexOf("MoneyManagementAnalyticsSection")
-      < bottom.indexOf("<details"),
-  );
+  assert.doesNotMatch(bottom, /MoneyManagementAnalyticsSection/);
+  assert.match(bottom, /<summary className="mm-disclosure__summary-row">/);
+  assert.match(bottom, /<summary>Simulation/);
 });
 
-test("analytics section renders four history-backed Recharts", async () => {
+test("legacy analytics component retains reusable history-backed charts", async () => {
   const source = [
     await readSource("MoneyManagementAnalyticsSection.jsx"),
     await readFile(
