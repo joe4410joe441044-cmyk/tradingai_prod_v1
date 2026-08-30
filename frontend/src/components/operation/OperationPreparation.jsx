@@ -112,13 +112,11 @@ export default function OperationPreparation({
     loopChecked,
     loopState,
     loopStateTone,
-    loopPending = false,
     loopDisabled,
     handleLoopChange,
     autoTradeChecked,
     autoTradeStateText,
     autoTradeDisabled,
-    autoTradePending = false,
     handleAutoTradeChange,
     mmRuntime = "UNKNOWN",
     lifecycleState,
@@ -256,7 +254,6 @@ export default function OperationPreparation({
      const {
         reviewReadiness,
         startReadiness,
-        entryReady,
         entryReadiness,
         selectionRuntime,
         selectedRuntimeSymbol,
@@ -267,7 +264,6 @@ export default function OperationPreparation({
         governanceReadiness,
         executionReadiness,
         mmEntryReadiness,
-        mmReadiness,
         startMmReadiness,
         mmReadinessSource,
         leverageReadiness,
@@ -465,44 +461,6 @@ return (
                         )}
                     </div>
 
-                    {emergencyConfirmOpen && (
-                        <div
-                            className="operation-emergency-confirm"
-                            role="dialog"
-                            aria-modal="false"
-                            aria-label="Confirm emergency stop"
-                        >
-                            <div className="operation-emergency-confirm__title">
-                                EMERGENCY STOP
-                            </div>
-
-                            <div className="operation-emergency-confirm__body">
-                                This action will activate Emergency Lock, disable Auto Trade,
-                                cancel eligible open orders, and flatten eligible positions.
-                            </div>
-
-                            <div className="operation-emergency-confirm__actions">
-                                <button
-                                    className="operation-emergency-confirm__cancel"
-                                    disabled={emergencyPending}
-                                    onClick={cancelEmergencyConfirm}
-                                    type="button"
-                                >
-                                    CANCEL
-                                </button>
-
-                                <button
-                                    className="operation-emergency-confirm__confirm"
-                                    disabled={emergencyPending}
-                                    onClick={confirmEmergency}
-                                    type="button"
-                                >
-                                    CONFIRM EMERGENCY
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
                     {emergencyStateCode === "LOCKED" && (
                         <div className="operation-emergency-note">
                             Emergency Lock is active.（Emergency Lockが有効です）
@@ -545,6 +503,39 @@ return (
                             {unlockError}
                         </div>
                     )}
+                </div>
+            )}
+
+            {emergencyConfirmOpen && (
+                <div
+                    aria-label="Confirm emergency stop"
+                    aria-modal="false"
+                    className="operation-emergency-confirm"
+                    role="dialog"
+                >
+                    <div className="operation-emergency-confirm__title">EMERGENCY STOP</div>
+                    <div className="operation-emergency-confirm__body">
+                        This action will activate Emergency Lock, disable Auto Trade,
+                        cancel eligible open orders, and flatten eligible positions.
+                    </div>
+                    <div className="operation-emergency-confirm__actions">
+                        <button
+                            className="operation-emergency-confirm__cancel"
+                            disabled={emergencyPending}
+                            onClick={cancelEmergencyConfirm}
+                            type="button"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            className="operation-emergency-confirm__confirm"
+                            disabled={emergencyPending}
+                            onClick={confirmEmergency}
+                            type="button"
+                        >
+                            CONFIRM EMERGENCY
+                        </button>
+                    </div>
                 </div>
             )}
 

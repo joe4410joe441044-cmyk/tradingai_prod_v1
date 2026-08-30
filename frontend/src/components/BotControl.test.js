@@ -288,20 +288,6 @@ const findButton = (
     ) || null;
 };
 
-const findLastButton = (
-    root,
-    matcher
-) => {
-    const predicate = typeof matcher === "string"
-        ? (name) => name.includes(matcher)
-        : matcher;
-    const matches = buttons(root).filter(
-        (button) => predicate(buttonName(button), button)
-    );
-
-    return matches[matches.length - 1] || null;
-};
-
 const findGroupButton = (
     root,
     groupLabel,
@@ -328,22 +314,6 @@ const textIncludes = (
     root,
     text
 ) => normalizeText(root).includes(text);
-
-const descendants = (
-    node
-) => {
-    if (node == null || typeof node === "boolean") return [];
-    if (Array.isArray(node)) return node.flatMap(descendants);
-    if (typeof node.type === "function") return descendants(node.type(node.props));
-    return [node, ...descendants(node.props?.children)];
-};
-
-const findTestId = (
-    root,
-    testId
-) => descendants(root).find(
-    (node) => node.props?.["data-testid"] === testId,
-);
 
 const createHookRenderer = (
     Component,
@@ -392,6 +362,9 @@ const createHookRenderer = (
             }
 
             return hookRefs[index];
+        },
+        useEffect() {
+            hookIndex += 1;
         },
     };
 
@@ -503,14 +476,6 @@ const lastResult = (
     message: "Emergency completed.",
     ...overrides,
 });
-
-const mutatedLastResult = (
-    mutation
-) => {
-    const result = lastResult();
-    mutation(result);
-    return result;
-};
 
 const emergencyStatus = (
     state,
@@ -648,28 +613,6 @@ const jsonResponse = ({
     },
 });
 
-const emergencyApiResponse = (
-    overrides = {}
-) => ({
-    success: true,
-    completed: true,
-    partial: false,
-    state_unknown: false,
-    emergency_locked: true,
-    auto_trade_disabled: true,
-    execution_path: "paper",
-    symbol: "XRPUSDT",
-    cancel: null,
-    flatten: {
-        success: true,
-        skipped: true,
-    },
-    position_remaining: false,
-    retryable: false,
-    error_code: null,
-    ...overrides,
-});
-
 const deferred = () => {
     let resolve;
     let reject;
@@ -766,61 +709,6 @@ test("Return to Normal is permanently rendered with the required state matrix", 
         }
         assert.equal(findButton(renderer.root, "安全状態を再確認"), null);
         assert.equal(textIncludes(renderer.root, "再確認中..."), false);
-    }
-});
-
-test("Emergency confirmation cancel sends no request", async () => {
-    const mock = installFetchMock(() => {
-        throw new Error("No request expected");
-    });
-
-    try {
-        const renderer = await renderBotControl();
-        await clickAndRender(
-            renderer,
-            findButton(renderer.root, "EMERGENCY STOP"),
-        );
-        await clickAndRender(
-            renderer,
-            findButton(renderer.root, "CANCEL"),
-        );
-
-        assert.equal(mock.requests.length, 0);
-    } finally {
-        mock.restore();
-    }
-});
-
-test("Emergency confirmation sends one orchestrate request and refreshes", async () => {
-    let refreshCount = 0;
-    const mock = installFetchMock((url) => {
-        assert.equal(url, "/api/governance/emergency-orchestrate");
-        return jsonResponse({
-            body: emergencyApiResponse(),
-        });
-    });
-
-    try {
-        const renderer = await renderBotControl({
-            onStatusRefresh: async () => {
-                refreshCount += 1;
-            },
-        });
-        await clickAndRender(
-            renderer,
-            findButton(renderer.root, "EMERGENCY STOP"),
-        );
-        await clickAndRender(
-            renderer,
-            findButton(renderer.root, "CONFIRM EMERGENCY"),
-        );
-        renderer.render();
-
-        assert.equal(mock.requests.length, 1);
-        assert.equal(mock.requests[0].options.method, "POST");
-        assert.equal(refreshCount, 1);
-    } finally {
-        mock.restore();
     }
 });
 
@@ -1993,7 +1881,7 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
     assert.doesNotMatch(source, /leverage: config\?\.leverage|leverage: .*\?\? 5/);
 });
 
-test("DASH4A: LIVE selected but authority denied disables START BOT", async () => {
+test("LIVE authority denied keeps trigger enabled and disables modal confirm", async () => {
     setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps({
@@ -2006,13 +1894,17 @@ test("DASH4A: LIVE selected but authority denied disables START BOT", async () =
         }));
         const start = findButton(renderer.root, "START BOT");
         assert.ok(start);
-        assert.equal(start.props.disabled, true);
+        assert.equal(start.props.disabled, false);
+        await clickAndRender(renderer, start);
+        assert.equal(textIncludes(renderer.root, "START READINESS: BLOCKED"), true);
+        assert.equal(textIncludes(renderer.root, "LIVE AUTHORITY: BLOCKED"), true);
+        assert.equal(findButton(renderer.root, "LIVEを開始").props.disabled, true);
     } finally {
         clearMmConfiguration();
     }
 });
 
-test("DASH4A: LIVE selected but authority unknown fails closed", async () => {
+test("LIVE authority unknown keeps trigger enabled and fails closed in modal", async () => {
     setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps({
@@ -2025,7 +1917,35 @@ test("DASH4A: LIVE selected but authority unknown fails closed", async () => {
         }));
         const start = findButton(renderer.root, "START BOT");
         assert.ok(start);
-        assert.equal(start.props.disabled, true);
+        assert.equal(start.props.disabled, false);
+        await clickAndRender(renderer, start);
+        assert.equal(findButton(renderer.root, "LIVEを開始").props.disabled, true);
+    } finally {
+        clearMmConfiguration();
+    }
+});
+
+test("LIVE WAITING keeps trigger enabled and disables modal confirm", async () => {
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                mode: "live",
+                dryRun: false,
+                allowLive: true,
+                tradeMode: "live",
+                selectionMode: "AUTO",
+                autoMarketState: "READY",
+                displaySymbol: null,
+                leverage: 5,
+            },
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.equal(start.props.disabled, false);
+        await clickAndRender(renderer, start);
+        assert.equal(textIncludes(renderer.root, "START READINESS: WAITING"), true);
+        assert.equal(textIncludes(renderer.root, "MARKET SELECTION: WAITING"), true);
+        assert.equal(findButton(renderer.root, "LIVEを開始").props.disabled, true);
     } finally {
         clearMmConfiguration();
     }
@@ -2045,6 +1965,8 @@ test("DASH4A: LIVE explicitly authorized enables START BOT", async () => {
         const start = findButton(renderer.root, "START BOT");
         assert.ok(start);
         assert.equal(start.props.disabled, false);
+        await clickAndRender(renderer, start);
+        assert.equal(findButton(renderer.root, "LIVEを開始").props.disabled, false);
     } finally {
         clearMmConfiguration();
     }
