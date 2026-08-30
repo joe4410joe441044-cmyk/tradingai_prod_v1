@@ -1,6 +1,10 @@
 import {
     createNetworkIsolation,
 } from "./networkIsolation.js";
+import {
+    validConfiguration,
+    validStatus,
+} from "../../src/features/money-management/contracts/moneyManagementFixtures.js";
 
 export const ENDPOINTS = {
     status: "/api/bot/status",
@@ -9,6 +13,8 @@ export const ENDPOINTS = {
     execution: "/api/governance/execution",
     emergency: "/api/governance/emergency-orchestrate",
     unlock: "/api/governance/emergency/unlock",
+    mmConfig: "/api/money-management/configuration",
+    mmStatus: "/api/money-management/status",
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -139,6 +145,7 @@ const initialState = () => ({
     timeline: [],
     nextEmergencyOutcome: "success",
     tradingDecision: null,
+    allowLive: true,
 });
 
 const buildRuntimeHealth = (state) => {
@@ -202,7 +209,7 @@ const buildRuntimeHealth = (state) => {
             reached: running,
         },
         governance: {
-            status: blockedByEmergency ? state.emergencyState : "IDLE",
+            status: blockedByEmergency ? state.emergencyState : "READY",
             reached: true,
         },
         executionQueue: {
@@ -323,10 +330,14 @@ const buildStatus = (state) => {
         realOrderAllowed: false,
         executionMode: "SIMULATION",
         dryRun: state.dryRun,
+        paperBootstrapEligible: true,
+        paperBootstrapStatus: "ELIGIBLE",
+        paperBootstrapReasonCodes: [],
+        paperBootstrapSource: "E2E_LOCAL_MOCK",
         selectedMode: state.selectedMode,
         safetyReason: "DRY_RUN_ACTIVE",
-        allowLive: false,
-        tradeMode: "paper",
+        allowLive: state.allowLive,
+        tradeMode: state.allowLive ? "live" : "paper",
         exchangeAuth: "NOT_VERIFIED",
         realAccountConnected: false,
         realBalance: null,
@@ -418,6 +429,15 @@ const buildStatus = (state) => {
         ai_state: null,
         governance_state: null,
         tradingDecision: state.tradingDecision ? clone(state.tradingDecision) : null,
+        selectionMode: "AUTO",
+        activeSymbol: "XRPUSDTM",
+        autoMarketSelection: {
+            selectionMode: "AUTO",
+            activeSymbol: "XRPUSDTM",
+            autoRuntime: {
+                runtimeState: "READY",
+            },
+        },
         runtime_health: buildRuntimeHealth(state),
         latestRuntimeResult: null,
         executionRuntimeReached: state.botStatus === "RUNNING",
@@ -428,8 +448,8 @@ const buildStatus = (state) => {
         exchange: "KUCOIN",
         orderbookSource: "E2E_LOCAL_MOCK",
         orderbookSymbol: "XRPUSDT",
-        position: [],
-        actual_position: [],
+        position: [{ side: "FLAT" }],
+        actual_position: [{ side: "FLAT" }],
     };
 };
 
@@ -445,6 +465,7 @@ export function createEmergencyMock() {
     let calls = {};
     let queuedFailures = {};
     let routeDelays = {};
+    let requests = [];
     const unexpectedApiRequests = [];
     const networkIsolation = createNetworkIsolation({
         apiHandler: async (route, { path }) => {
@@ -457,6 +478,7 @@ export function createEmergencyMock() {
         calls = {};
         queuedFailures = {};
         routeDelays = {};
+        requests = [];
     };
 
     const increment = (path) => {
@@ -637,6 +659,7 @@ export function createEmergencyMock() {
 
     const handleEmergency = async (route, path) => {
         increment(path);
+        requests.push({ method: route.request().method(), path, body: route.request().postDataJSON?.() ?? null });
 
         if (await handleQueuedFailure(route, path)) {
             return;
@@ -720,6 +743,7 @@ export function createEmergencyMock() {
 
     const handleBotStart = async (route, path) => {
         increment(path);
+        requests.push({ method: route.request().method(), path, body: route.request().postDataJSON?.() ?? null });
 
         if (state.emergencyState !== "READY") {
             await jsonFulfill(
@@ -742,6 +766,7 @@ export function createEmergencyMock() {
 
     const handleBotStop = async (route, path) => {
         increment(path);
+        requests.push({ method: route.request().method(), path, body: route.request().postDataJSON?.() ?? null });
         mutate((current) => {
             current.botStatus = "STOPPED";
             current.loopEnabled = false;
@@ -751,6 +776,7 @@ export function createEmergencyMock() {
         });
         await jsonFulfill(route, {
             status: "stopped",
+            success: true,
         });
     };
 
@@ -782,6 +808,22 @@ export function createEmergencyMock() {
         if (path === ENDPOINTS.status) {
             increment(path);
             await jsonFulfill(route, buildStatus(state));
+            return;
+        }
+
+        if (path === ENDPOINTS.mmConfig) {
+            increment(path);
+            await jsonFulfill(route, validConfiguration());
+            return;
+        }
+
+        if (path === ENDPOINTS.mmStatus) {
+            increment(path);
+            await jsonFulfill(route, validStatus({
+                capitalAuthorityStatus: "AVAILABLE",
+                runtimeTradingMetricsStatus: "AVAILABLE",
+                capitalEligibility: { availableCapital: "900.25", riskBudget: "4.50" },
+            }));
             return;
         }
 
@@ -865,6 +907,26 @@ export function createEmergencyMock() {
         },
         getCallCount(path) {
             return calls[path] || 0;
+        },
+        getRequests(path) {
+            return clone(requests.filter((request) => request.path === path));
+        },
+        setEmergencyUnsafe() {
+            mutate((current) => {
+                current.emergencyStop = true;
+                current.emergencyLocked = true;
+                current.emergencyState = "LOCKED";
+            });
+        },
+        setBotRunning() {
+            mutate((current) => {
+                current.botStatus = "RUNNING";
+            });
+        },
+        setLiveAuthorityAllowed(allowed) {
+            mutate((current) => {
+                current.allowLive = allowed === true;
+            });
         },
         getExternalRequests() {
             return networkIsolation.getExternalRequests();

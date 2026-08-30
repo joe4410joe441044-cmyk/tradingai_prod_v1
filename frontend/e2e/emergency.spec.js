@@ -5,9 +5,19 @@ import {
     ENDPOINTS,
 } from "./support/emergencyMock.js";
 
-const waitForDashboard = async (page) => {
+const waitForDashboard = async (page, mock, { emergencyReady = true } = {}) => {
     await page.goto("/");
-    await expect(page.getByText("EMERGENCY STATUS")).toBeVisible();
+    await expect(page.getByRole("group", { name: "Trading mode" })).toBeVisible();
+    await expect(page.getByText("BOT STOPPED", { exact: true })).toBeVisible();
+    await expect(page.getByText("MM RUNTIME").locator("..")).toContainText("RUNNING");
+    await expect(page.getByText("CAPITAL AUTHORITY").locator("..")).toContainText("AVAILABLE");
+    await expect(page.getByRole("button", { name: "EMERGENCY STOP" }))[
+        emergencyReady ? "toBeEnabled" : "toBeDisabled"
+    ]();
+    await expect.poll(() => mock.getCallCount(ENDPOINTS.status)).toBeGreaterThan(0);
+    await expect.poll(() => mock.getCallCount(ENDPOINTS.mmConfig)).toBeGreaterThan(0);
+    await expect.poll(() => mock.getCallCount(ENDPOINTS.mmStatus)).toBeGreaterThan(0);
+    expectNoUnsafeRequests(mock);
 };
 
 const emergencyStateLabel = (page) => (
@@ -35,6 +45,22 @@ const clickEmergencyConfirm = async (page) => {
     ).click();
 };
 
+const clickEmergencyCancel = async (page) => {
+    await page.getByRole(
+        "button",
+        { name: /EMERGENCY STOP/ },
+    ).click();
+    const dialog = page.getByRole(
+        "dialog",
+        { name: "Confirm emergency stop" },
+    );
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole(
+        "button",
+        { name: "CANCEL" },
+    ).click();
+};
+
 test.describe.configure({
     mode: "serial",
 });
@@ -50,18 +76,68 @@ test.describe("Emergency Stop / Return to Normal local-only E2E", () => {
         expectNoUnsafeRequests(mock);
     });
 
-    test("Emergency locks, permanent Return button unlocks to READY, and trading stays OFF", async ({
+    test("Emergency confirmation cancel sends no request and closes modal", async ({
         page,
     }) => {
-        await waitForDashboard(page);
+        await waitForDashboard(page, mock);
+
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(0);
+
+        await clickEmergencyCancel(page);
+
+        await expect(
+            page.getByRole("dialog", { name: "Confirm emergency stop" }),
+        ).toBeHidden();
+
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(0);
+        expect(mock.getCallCount(ENDPOINTS.botStart)).toBe(0);
+        expect(mock.getCallCount(ENDPOINTS.botStop)).toBe(0);
+
+        await expect(page.getByText("Emergency（緊急停止）").locator("..")).toContainText("READY");
+    });
+
+    test("Emergency confirmation sends one orchestrate request and refreshes", async ({
+        page,
+    }) => {
+        await waitForDashboard(page, mock);
+
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(0);
+        const statusCountBefore = mock.getCallCount(ENDPOINTS.status);
+
+        const emergencyResponse = page.waitForResponse((response) => (
+            response.url().endsWith(ENDPOINTS.emergency)
+            && response.request().method() === "POST"
+        ));
+        await clickEmergencyConfirm(page);
+        expect((await emergencyResponse).ok()).toBeTruthy();
+
+        expect(mock.getCallCount(ENDPOINTS.emergency)).toBe(1);
+        await expect.poll(() => mock.getCallCount(ENDPOINTS.status)).toBeGreaterThan(statusCountBefore);
+        expect(mock.getRequests(ENDPOINTS.emergency)).toEqual([{
+            method: "POST",
+            path: ENDPOINTS.emergency,
+            body: null,
+        }]);
+        await expect(
+            page.getByRole("dialog", { name: "Confirm emergency stop" }),
+        ).toBeHidden();
+
+        const lastEmergencyRequest = mock.getState();
+        expect(lastEmergencyRequest.emergencyLocked).toBe(true);
+        expect(lastEmergencyRequest.emergencyState).not.toBe("READY");
+    });
+
+    test("Emergency locks, Return button unlocks to READY, and trading stays OFF", async ({
+        page,
+    }) => {
+        await waitForDashboard(page, mock);
 
         const returnButton = page.getByRole(
             "button",
             { name: "通常に戻す" },
         );
-        await expect(emergencyStateLabel(page)).toHaveText("READY");
-        await expect(returnButton).toBeVisible();
-        await expect(returnButton).toBeDisabled();
+        await expect(page.getByText("Emergency（緊急停止）").locator("..")).toContainText("READY");
+        await expect(returnButton).toBeHidden();
         await expect(
             page.getByRole("button", { name: "安全状態を再確認" }),
         ).toHaveCount(0);
@@ -85,18 +161,16 @@ test.describe("Emergency Stop / Return to Normal local-only E2E", () => {
         await returnButton.click();
         expect((await unlockResponse).ok()).toBeTruthy();
 
-        await expect(emergencyStateLabel(page)).toHaveText("READY");
-        await expect(returnButton).toBeVisible();
-        await expect(returnButton).toBeDisabled();
+        await expect(page.getByText("Emergency（緊急停止）").locator("..")).toContainText("READY");
+        await expect(returnButton).toBeHidden();
         await expect(
-            page.getByRole("switch", { name: "Toggle trading loop" }),
-        ).toBeEnabled();
+            page.getByRole("group", { name: "Loop on start" })
+                .getByRole("button", { name: "OFF" }),
+        ).toHaveAttribute("aria-pressed", "true");
         await expect(
-            page.getByRole("switch", { name: "Toggle trading loop" }),
-        ).toHaveAttribute("aria-checked", "false");
-        await expect(
-            page.getByRole("switch", { name: "Toggle automatic trading" }),
-        ).toHaveAttribute("aria-checked", "false");
+            page.getByRole("group", { name: "Auto Trade on start" })
+                .getByRole("button", { name: "OFF" }),
+        ).toHaveAttribute("aria-pressed", "true");
 
         const finalStatus = mock.getStatus();
         expect(finalStatus).toMatchObject({
@@ -122,7 +196,7 @@ test.describe("Emergency Stop / Return to Normal local-only E2E", () => {
             "BOT_STOP_FAILED",
         );
 
-        await waitForDashboard(page);
+        await waitForDashboard(page, mock, { emergencyReady: false });
 
         const returnButton = page.getByRole(
             "button",
@@ -144,8 +218,8 @@ test.describe("Emergency Stop / Return to Normal local-only E2E", () => {
         expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(1);
 
         await returnButton.click();
-        await expect(emergencyStateLabel(page)).toHaveText("READY");
-        await expect(returnButton).toBeDisabled();
+        await expect(page.getByText("Emergency（緊急停止）").locator("..")).toContainText("READY");
+        await expect(returnButton).toBeHidden();
         expect(mock.getCallCount(ENDPOINTS.unlock)).toBe(2);
         expect(mock.getStatus()).toMatchObject({
             loopEnabled: false,

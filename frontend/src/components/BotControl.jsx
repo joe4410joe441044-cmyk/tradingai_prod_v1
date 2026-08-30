@@ -307,44 +307,6 @@ const formatEmergencyTimestamp = (
     return String(value).replace("T", " ").replace("Z", " UTC");
 };
 
-const emergencyStateCopy = {
-    READY: {
-        label: "READY",
-        text: "緊急停止は作動していません",
-        tone: "ready",
-    },
-    PROCESSING: {
-        label: "PROCESSING",
-        text: "緊急停止処理を実行中です",
-        tone: "processing",
-    },
-    LOCKED: {
-        label: "STOPPED SAFELY",
-        text: "緊急停止が正常に完了しました",
-        tone: "locked",
-    },
-    ACTION_REQUIRED: {
-        label: "ACTION REQUIRED",
-        text: "緊急停止は一部完了、失敗、または確認不能です",
-        tone: "action",
-    },
-    FAILED: {
-        label: "FAILED",
-        text: "緊急停止処理に失敗しました",
-        tone: "action",
-    },
-    PARTIAL: {
-        label: "PARTIAL",
-        text: "緊急停止処理は一部完了しました",
-        tone: "action",
-    },
-    STATE_UNKNOWN: {
-        label: "STATE UNKNOWN",
-        text: "緊急停止後の状態を確認できません",
-        tone: "action",
-    },
-};
-
 export default function BotControl({
 
     config,
@@ -385,10 +347,7 @@ export default function BotControl({
     ] = useState(false);
     const [botPending, setBotPending] = useState(false);
     const [botError, setBotError] = useState(null);
-    const [
-        loopPendingAction,
-        setLoopPendingAction,
-    ] = useState(null);
+    const [, setLoopPendingAction] = useState(null);
     const [
         loopError,
         setLoopError,
@@ -414,6 +373,10 @@ export default function BotControl({
         setEmergencyConfirmOpen,
     ] = useState(false);
     const [
+        liveConfirmOpen,
+        setLiveConfirmOpen,
+    ] = useState(false);
+    const [
         unlockPending,
         setUnlockPending,
     ] = useState(false);
@@ -421,10 +384,7 @@ export default function BotControl({
         unlockError,
         setUnlockError,
     ] = useState(null);
-    const [
-        unlockNotice,
-        setUnlockNotice,
-    ] = useState(null);
+    const [, setUnlockNotice] = useState(null);
     const loopPendingRef =
         useRef(false);
     const botPendingRef = useRef(false);
@@ -489,9 +449,6 @@ export default function BotControl({
                     : "STOPPED"
             )
     );
-    const loopStateDisplay = (
-        loopStateText
-    );
     const loopStateTone = (
         loopStateText === "RUNNING"
             ? "running"
@@ -501,11 +458,6 @@ export default function BotControl({
             )
                 ? "pending"
                 : "stopped"
-    );
-    const loopStatusText = (
-        loopPending && loopPendingAction
-            ? `${loopPendingAction}...（処理中）`
-            : loopStateDisplay
     );
     const emergencyStatus = (
         emergency
@@ -528,7 +480,6 @@ export default function BotControl({
         decision: runtimeHealth?.tradingAction?.decision,
     });
     const autoTradeStateText = autoTradeActivity.state;
-    const autoTradeStateReason = autoTradeActivity.detail;
     const lastEmergencyResult = (
         emergencyStatus?.lastResult
         && typeof emergencyStatus.lastResult === "object"
@@ -544,10 +495,6 @@ export default function BotControl({
         emergencyStateCode === "PROCESSING"
         || emergencyStateCode === "LOCKED"
         || emergencyStateCode === "ACTION_REQUIRED"
-    );
-    const emergencyStateDetails = (
-        emergencyStateCopy[emergencyStateCode]
-        || emergencyStateCopy.READY
     );
     const positionRemaining = pickEmergencyValue(
         lastEmergencyResult,
@@ -589,26 +536,6 @@ export default function BotControl({
             "result",
         ) || ""
     ).toUpperCase();
-    const emergencyOperationId = pickEmergencyValue(
-        lastEmergencyResult,
-        "operationId",
-        "operation_id",
-    );
-    const emergencyOperationIdPresent = (
-        typeof emergencyOperationId === "string"
-        && emergencyOperationId.trim().length > 0
-    );
-    const emergencyResultSuccess = (
-        emergencyResultCode === "SUCCESS"
-        && pickEmergencyValue(
-            lastEmergencyResult,
-            "success",
-        ) === true
-        && pickEmergencyValue(
-            lastEmergencyResult,
-            "completed",
-        ) === true
-    );
     const cancelCompleted = (
         cancelResult
         && typeof cancelResult === "object"
@@ -819,6 +746,54 @@ export default function BotControl({
         Number.isFinite(startMaxDrawdownPercent)
         && startMaxDrawdownPercent > 0
     );
+    const isLiveMode = startSettings?.tradingMode === "LIVE";
+    const paperStartAllowed = !botRunning && !botPending && !isLiveMode && startReady === true;
+    const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !liveConfirmOpen;
+    const liveConfirmAllowed = (
+        !botRunning
+        && !botPending
+        && isLiveMode
+        && startReady === true
+        && startRiskAvailable
+        && startMaxDrawdownAvailable
+        && !emergencyBlocksOperations
+        && emergencyStateCode === "READY"
+    );
+    const liveReadinessDetails = [
+        ["EMERGENCY", startReadiness.emergencyReadiness],
+        ["POSITION", startReadiness.positionState],
+        ["PENDING ORDER", startReadiness.orderAuthority],
+        ["MARKET SELECTION", startReadiness.selectionReadiness],
+        ["MONEY MANAGEMENT", startReadiness.mmReadiness],
+        ["GOVERNANCE", startReadiness.governanceReadiness],
+        ["EXECUTION", startReadiness.executionReadiness],
+        ["LEVERAGE", startReadiness.leverageReadiness],
+        ["LIVE AUTHORITY", startReadiness.liveAuthorityReadiness],
+    ];
+    const liveBlockReasons = [
+        ...liveReadinessDetails
+            .filter(([, value]) => !["READY", "SAFE", "NOT_RELEVANT"].includes(value))
+            .map(([label, value]) => `${label}: ${value}`),
+        ...mmBlockReasons,
+        ...(!startRiskAvailable ? ["MM_RISK_PER_TRADE_UNAVAILABLE"] : []),
+        ...(!startMaxDrawdownAvailable ? ["MM_MAXIMUM_DRAWDOWN_UNAVAILABLE"] : []),
+    ].filter((reason, index, reasons) => reasons.indexOf(reason) === index);
+
+    useEffect(() => {
+        if (!liveConfirmOpen) {
+            return;
+        }
+
+        if (startSettings?.tradingMode !== "LIVE") {
+            setLiveConfirmOpen(false);
+            return;
+        }
+
+        if (botRunning) {
+            setLiveConfirmOpen(false);
+            return;
+        }
+    }, [startSettings?.tradingMode, botRunning, liveConfirmOpen, setLiveConfirmOpen]);
 
     const refreshStatusSafely = async () => {
         if (typeof onStatusRefresh !== "function") {
@@ -833,17 +808,54 @@ export default function BotControl({
     };
 
     const handleBotLifecycle = async () => {
-        if (botPendingRef.current || emergencyBlocksOperations) return;
-        if (!botRunning && startReady !== true) return;
-        if (!botRunning && !startRiskAvailable) {
+        if (botPendingRef.current) return;
+        if (botRunning) {
+            await executeBotStop();
+            return;
+        }
+        if (isLiveMode) {
+            openLiveConfirm();
+            return;
+        }
+        if (!paperStartAllowed) return;
+        if (!startRiskAvailable) {
             setBotError("START failed: authoritative Money Management risk-per-trade is unavailable.");
             return;
         }
-        if (!botRunning && !startMaxDrawdownAvailable) {
+        if (!startMaxDrawdownAvailable) {
             setBotError("START failed: authoritative Money Management maximum drawdown is unavailable.");
             return;
         }
+        await executeBotStart();
+    };
 
+    const executeBotStop = async () => {
+        botPendingRef.current = true;
+        setBotPending(true);
+        setBotError(null);
+
+        try {
+            const response = await fetch(API.botStop(), {
+                method: "POST",
+            });
+            const result = await response.json().catch(() => null);
+
+            const lifecycleConfirmed = result?.status === "stopped" && result?.success === true;
+
+            if (!response.ok || !lifecycleConfirmed) {
+                throw new Error(result?.reason || result?.detail || "BOT STOP request was rejected.");
+            }
+
+            await refreshStatusSafely();
+        } catch (error) {
+            setBotError(`STOP failed: ${error?.message || "UNKNOWN ERROR"}`);
+        } finally {
+            botPendingRef.current = false;
+            setBotPending(false);
+        }
+    };
+
+    const executeBotStart = async () => {
         botPendingRef.current = true;
         setBotPending(true);
         setBotError(null);
@@ -851,10 +863,10 @@ export default function BotControl({
         setAutoTradeError(null);
 
         try {
-            const response = await fetch(botRunning ? API.botStop() : API.botStart(), {
+            const response = await fetch(API.botStart(), {
                 method: "POST",
-                headers: botRunning ? undefined : { "Content-Type": "application/json" },
-                body: botRunning ? undefined : JSON.stringify({
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
                     symbol: effectiveStartSymbol,
                     selection_mode: startSettings.selectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
@@ -872,54 +884,50 @@ export default function BotControl({
             });
             const result = await response.json().catch(() => null);
 
-            const lifecycleConfirmed = botRunning
-                ? result?.status === "stopped" && result?.success === true
-                : result?.status === "started";
+            const lifecycleConfirmed = result?.status === "started";
 
             if (!response.ok || !lifecycleConfirmed) {
                 throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
             }
 
-            if (!botRunning) {
-                // 使用已经计算过的 startSettings，而不是重新创建
-                if (startSettings.loopOnStart && automationReady) {
-                    try {
-                        await startLoop();
-                    } catch (error) {
-                        console.error("LOOP ON START ERROR", error);
-                        setLoopError(formatLoopError(error, true));
-                    }
+            // Handle automation on start
+            if (startSettings.loopOnStart && automationReady) {
+                try {
+                    await startLoop();
+                } catch (error) {
+                    console.error("LOOP ON START ERROR", error);
+                    setLoopError(formatLoopError(error, true));
                 }
+            }
 
-                if (startSettings.autoTradeOnStart && automationReady) {
-                    try {
-                        const executionResult = await setExecutionEnabled(true);
+            if (startSettings.autoTradeOnStart && automationReady) {
+                try {
+                    const executionResult = await setExecutionEnabled(true);
 
-                        if (executionResult.execution_enabled !== true) {
-                            const error = new Error("Governance response did not confirm Auto Trade state.");
-                            error.code = "AUTO_TRADE_STATE_MISMATCH";
-                            error.status = 200;
-                            error.data = executionResult;
-                            throw error;
-                        }
-
-                        updateExecutionRuntimeTelemetry({
-                            executionAllowed: true,
-                            governanceReason: "START_AUTO_TRADE_ENABLE",
-                            suppressionReason: "NONE",
-                        });
-
-                        setExecutionEnabledState(true);
-                    } catch (error) {
-                        console.error("AUTO TRADE ON START ERROR", error);
-                        setAutoTradeError(formatAutoTradeError(error));
+                    if (executionResult.execution_enabled !== true) {
+                        const error = new Error("Governance response did not confirm Auto Trade state.");
+                        error.code = "AUTO_TRADE_STATE_MISMATCH";
+                        error.status = 200;
+                        error.data = executionResult;
+                        throw error;
                     }
+
+                    updateExecutionRuntimeTelemetry({
+                        executionAllowed: true,
+                        governanceReason: "START_AUTO_TRADE_ENABLE",
+                        suppressionReason: "NONE",
+                    });
+
+                    setExecutionEnabledState(true);
+                } catch (error) {
+                    console.error("AUTO TRADE ON START ERROR", error);
+                    setAutoTradeError(formatAutoTradeError(error));
                 }
             }
 
             await refreshStatusSafely();
         } catch (error) {
-            setBotError(`${botRunning ? "STOP" : "START"} failed: ${error?.message || "UNKNOWN ERROR"}`);
+            setBotError(`START failed: ${error?.message || "UNKNOWN ERROR"}`);
         } finally {
             botPendingRef.current = false;
             setBotPending(false);
@@ -1139,6 +1147,35 @@ export default function BotControl({
         setEmergencyConfirmOpen(false);
     };
 
+    const openLiveConfirm = () => {
+        if (botPendingRef.current || botRunning || !isLiveMode || liveConfirmOpen) {
+            return;
+        }
+
+        setLiveConfirmOpen(true);
+    };
+
+    const cancelLiveConfirm = () => {
+        if (botPendingRef.current) {
+            return;
+        }
+
+        setLiveConfirmOpen(false);
+    };
+
+    const confirmLiveStart = async () => {
+        if (botPendingRef.current) {
+            return;
+        }
+
+        if (!liveConfirmAllowed) {
+            return;
+        }
+
+        setLiveConfirmOpen(false);
+        await executeBotStart();
+    };
+
     const confirmEmergency = async () => {
         if (emergencyPendingRef.current) {
             return;
@@ -1295,7 +1332,7 @@ export default function BotControl({
                 mmRecoveryRequired={mmRecoveryRequired}
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
-                    <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botPending || (botRunning ? emergencyBlocksOperations : !startReady)} onClick={handleBotLifecycle} type="button">
+                    <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botRunning ? botPending : isLiveMode ? !liveStartTriggerAllowed : !paperStartAllowed} onClick={handleBotLifecycle} type="button">
                         {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? "STOP BOT" : "START BOT")}
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
@@ -1304,6 +1341,126 @@ export default function BotControl({
                     {autoTradeError && <div className="operation-inline-error" role="alert">{autoTradeError}</div>}
                 </div>
             </OperationPreparation>
+
+            {/* LIVE START Confirmation Modal */}
+            {liveConfirmOpen && (
+                <div
+                    className="operation-live-confirm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Confirm LIVE start"
+                    onClick={(e) => {
+                        // Close on backdrop click
+                        if (e.target === e.currentTarget) {
+                            cancelLiveConfirm();
+                        }
+                    }}
+                    onKeyDown={(e) => {
+                        // ESC to cancel
+                        if (e.key === "Escape") {
+                            cancelLiveConfirm();
+                        }
+                        if (e.key === "Tab") {
+                            const buttons = [...e.currentTarget.querySelectorAll("button:not(:disabled)")];
+                            if (buttons.length === 1) {
+                                e.preventDefault();
+                                buttons[0].focus();
+                            } else if (buttons.length > 1) {
+                                const first = buttons[0];
+                                const last = buttons[buttons.length - 1];
+                                if (e.shiftKey && document.activeElement === first) {
+                                    e.preventDefault();
+                                    last.focus();
+                                } else if (!e.shiftKey && document.activeElement === last) {
+                                    e.preventDefault();
+                                    first.focus();
+                                }
+                            }
+                        }
+                    }}
+                >
+                    <div className="operation-live-confirm__content">
+                        <div className="operation-live-confirm__title">
+                            LIVE取引を開始します
+                        </div>
+
+                        <div className="operation-live-confirm__body">
+                            <p>
+                                現在のモードはLIVEです。
+                                実際の注文が送信される可能性があります。
+                                本当にBOTをスタートさせますか？
+                            </p>
+
+                            <div className="operation-live-confirm__details">
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>START READINESS:</span>
+                                    <strong>{startReadiness.startReadiness}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Mode:</span>
+                                    <strong>{startSettings?.tradingMode}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Market Selection:</span>
+                                    <strong>{startSettings?.selectionMode}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Symbol:</span>
+                                    <strong>{effectiveStartSymbol}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Risk / Trade:</span>
+                                    <strong>{startRiskPercent}%</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Leverage:</span>
+                                    <strong>{startSettings?.requestedLeverage}x</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Execution Authority:</span>
+                                    <strong>{executionEnabled ? "ENABLED" : "DISABLED"}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Real Order Authority:</span>
+                                    <strong className="operation-live-confirm__danger">
+                                        {config?.realOrderAllowed === true ? "ALLOWED" : "BLOCKED"}
+                                    </strong>
+                                </div>
+                            </div>
+                            {!liveConfirmAllowed && (
+                                <div className="operation-live-confirm__blocked" id="live-confirm-block-reasons">
+                                    <strong>現在はLIVEを開始できません。</strong>
+                                    <span>設定またはRuntime Authorityを確認してください。</span>
+                                    <ul>
+                                        {liveBlockReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="operation-live-confirm__actions">
+                            <button
+                                className="operation-live-confirm__cancel"
+                                onClick={cancelLiveConfirm}
+                                type="button"
+                                autoFocus
+                            >
+                                キャンセル
+                            </button>
+
+                            <button
+                                className="operation-live-confirm__confirm"
+                                aria-describedby={!liveConfirmAllowed ? "live-confirm-block-reasons" : undefined}
+                                onClick={confirmLiveStart}
+                                disabled={!liveConfirmAllowed}
+                                type="button"
+                            >
+                                {botPending ? "STARTING..." : "LIVEを開始"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
 
