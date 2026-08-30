@@ -1,8 +1,17 @@
-export const MONEY_MANAGEMENT_SUMMARY_CARDS = Object.freeze([
-    "Runtime",
+export const MONEY_MANAGEMENT_TOP_GRAPH_CARDS = Object.freeze([
+    "Equity / Peak Equity",
+    "Drawdown",
+]);
+
+export const MONEY_MANAGEMENT_TOP_SUMMARY_CARDS = Object.freeze([
+    "Capital",
     "Risk",
     "Exposure",
-    "Capital",
+    "Performance",
+]);
+
+export const MONEY_MANAGEMENT_REMAINING_SUMMARY_CARDS = Object.freeze([
+    "Runtime",
 ]);
 
 export const MONEY_MANAGEMENT_MAIN_LEFT_CARDS = Object.freeze([
@@ -12,7 +21,6 @@ export const MONEY_MANAGEMENT_MAIN_LEFT_CARDS = Object.freeze([
 ]);
 
 export const MONEY_MANAGEMENT_MAIN_RIGHT_CARDS = Object.freeze([
-    "Performance",
     "Statistics",
     "Projection",
 ]);
@@ -31,7 +39,9 @@ export const MONEY_MANAGEMENT_BOTTOM_CARDS = Object.freeze([
 ]);
 
 export const MONEY_MANAGEMENT_CARD_TITLES = Object.freeze([
-    ...MONEY_MANAGEMENT_SUMMARY_CARDS,
+    ...MONEY_MANAGEMENT_TOP_GRAPH_CARDS,
+    ...MONEY_MANAGEMENT_TOP_SUMMARY_CARDS,
+    ...MONEY_MANAGEMENT_REMAINING_SUMMARY_CARDS,
     ...MONEY_MANAGEMENT_MAIN_LEFT_CARDS,
     ...MONEY_MANAGEMENT_MAIN_RIGHT_CARDS,
     ...MONEY_MANAGEMENT_ANALYTICS_CARDS,

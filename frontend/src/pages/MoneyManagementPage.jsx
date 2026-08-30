@@ -1,8 +1,9 @@
 import MoneyManagementBottomSection from "../components/money-management/MoneyManagementBottomSection";
-import MoneyManagementAnalyticsSection from "../components/money-management/MoneyManagementAnalyticsSection";
+import MoneyManagementCapitalDrawdownSection from "../components/money-management/MoneyManagementCapitalDrawdownSection";
 import MoneyManagementHeader from "../components/money-management/MoneyManagementHeader";
 import MoneyManagementMainSection from "../components/money-management/MoneyManagementMainSection";
-import MoneyManagementSummarySection from "../components/money-management/MoneyManagementSummarySection";
+import MoneyManagementRuntimeSummarySection from "../components/money-management/MoneyManagementRuntimeSummarySection";
+import MoneyManagementTopSummarySection from "../components/money-management/MoneyManagementTopSummarySection";
 import {
     createMoneyManagementInteractionViewModel,
     useMoneyManagement,
@@ -37,15 +38,18 @@ export default function MoneyManagementPage() {
                 </p>
             )}
 
-            <MoneyManagementSummarySection viewModel={viewModel} />
+            <MoneyManagementCapitalDrawdownSection />
+            <MoneyManagementTopSummarySection viewModel={viewModel} />
+            <MoneyManagementRuntimeSummarySection viewModel={viewModel} />
             <MoneyManagementMainSection
                 interaction={interaction}
                 moneyManagement={moneyManagement}
                 viewModel={viewModel}
             />
-            <MoneyManagementAnalyticsSection />
             <MoneyManagementBottomSection
-                configuration={moneyManagement.configuration}
+                interaction={interaction}
+                moneyManagement={moneyManagement}
+                viewModel={viewModel}
             />
         </main>
     );

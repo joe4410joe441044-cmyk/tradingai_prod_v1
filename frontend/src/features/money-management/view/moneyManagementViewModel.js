@@ -364,16 +364,7 @@ export function createMoneyManagementViewModel(input = {}) {
       row("Updated", displayValue(updatedTime)),
     ]),
     riskSummary: Object.freeze({
-      state: Object.freeze({
-        text: riskState,
-        variant: riskVariant(riskState),
-      }),
       rows: Object.freeze([
-        row("Recommended Action", displayValue(recommendedAction)),
-        row("Entry Permission", displayValue(entryPermission.text), {
-          variant: entryPermission.variant,
-        }),
-        row("Primary Reason", displayValue(primaryReason(reasons))),
         row(
           "Risk Limit",
           displayDecimal(metrics?.riskLimitAmount, "USDT"),
@@ -389,6 +380,10 @@ export function createMoneyManagementViewModel(input = {}) {
         row(
           "Risk Budget Remaining",
           displayDecimal(metrics?.riskBudgetRemaining, "USDT"),
+        ),
+        row(
+          "Risk Utilization",
+          displayDecimal(metrics?.riskUtilization, "%"),
         ),
       ]),
     }),
@@ -445,14 +440,12 @@ export function createMoneyManagementViewModel(input = {}) {
       row("Daily P&L", displayDecimal(metrics?.dailyPnl, "USDT")),
       row("Weekly P&L", displayDecimal(metrics?.weeklyPnl, "USDT")),
       row("Monthly P&L", displayDecimal(metrics?.monthlyPnl, "USDT")),
-      row("Drawdown", displayDecimal(metrics?.drawdownPercent, "%")),
       row("Peak Equity", displayDecimal(metrics?.peakEquity, "USDT")),
+      row("Current Drawdown", displayDecimal(metrics?.drawdownAmount, "USDT")),
+      row("Drawdown", displayDecimal(metrics?.drawdownPercent, "%")),
+      row("Consecutive Losses", unavailableValue()),
     ]),
     statistics: Object.freeze([
-      row(
-        "Current Drawdown",
-        displayDecimal(metrics?.drawdownAmount, "USDT"),
-      ),
       row(
         "Maximum Drawdown",
         displayDecimal(
@@ -461,11 +454,6 @@ export function createMoneyManagementViewModel(input = {}) {
         ),
       ),
       row("Loss Period", unavailableValue("Not reported")),
-      row("Consecutive Losses", unavailableValue()),
-      row(
-        "Risk Utilization",
-        displayDecimal(metrics?.riskUtilization, "%"),
-      ),
       row("Metric Quality", displayValue(metricQuality(metrics))),
     ]),
     projection: Object.freeze({

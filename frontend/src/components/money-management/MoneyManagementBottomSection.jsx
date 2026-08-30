@@ -1,7 +1,9 @@
 import { lazy, Suspense } from "react";
 
+import MoneyManagementAnalyticsSection from "./MoneyManagementAnalyticsSection";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
-import { MONEY_MANAGEMENT_BOTTOM_CARDS } from "./moneyManagementLayout";
+import MoneyManagementConfigurationCard from "./MoneyManagementConfigurationCard";
+import { ProjectionCard, StatisticsCard } from "./MoneyManagementMetricsCards";
 
 const MoneyManagementSimulationCard = lazy(
     () => import("./MoneyManagementSimulationCard"),
@@ -10,37 +12,63 @@ const MoneyManagementRuntimeHistoryCard = lazy(
     () => import("./MoneyManagementRuntimeHistoryCard"),
 );
 
-export default function MoneyManagementBottomSection({ configuration }) {
+export default function MoneyManagementBottomSection({
+    interaction,
+    moneyManagement,
+    viewModel,
+}) {
     return (
-        <section
-            aria-label="Money Management bottom area"
-            className="mm-bottom"
-        >
-            <Suspense
-                fallback={(
-                    <MoneyManagementCardShell loading title="Simulation" />
-                )}
+        <div className="mm-lower-sections">
+            <section
+                aria-labelledby="mm-analysis-heading"
+                className="mm-section-group"
             >
-                <MoneyManagementSimulationCard
-                    configuration={configuration}
+                <h2 className="mm-section-title" id="mm-analysis-heading">
+                    Configuration / Analysis
+                </h2>
+                <MoneyManagementConfigurationCard
+                    draft={moneyManagement.configurationDraft}
+                    interaction={interaction}
+                    onDraftChange={moneyManagement.updateConfigurationDraft}
+                    onReset={moneyManagement.resetConfigurationDraft}
+                    onSave={moneyManagement.saveConfiguration}
                 />
-            </Suspense>
-            <Suspense
-                fallback={(
-                    <MoneyManagementCardShell loading title="Runtime History" />
-                )}
+                <div className="mm-bottom">
+                    <Suspense fallback={(
+                        <MoneyManagementCardShell loading title="Simulation" />
+                    )}>
+                        <MoneyManagementSimulationCard
+                            configuration={moneyManagement.configuration}
+                        />
+                    </Suspense>
+                    <div className="mm-card-column">
+                        <ProjectionCard viewModel={viewModel} />
+                        <StatisticsCard viewModel={viewModel} />
+                    </div>
+                </div>
+                <MoneyManagementAnalyticsSection />
+            </section>
+            <section
+                aria-labelledby="mm-history-heading"
+                className="mm-section-group"
             >
-                <MoneyManagementRuntimeHistoryCard />
-            </Suspense>
-            {MONEY_MANAGEMENT_BOTTOM_CARDS
-                .filter((title) => ![
-                    "Timeline",
-                    "History",
-                    "Future Chart",
-                ].includes(title))
-                .map((title) => (
-                <MoneyManagementCardShell key={title} title={title} />
-            ))}
-        </section>
+                <h2 className="mm-section-title" id="mm-history-heading">
+                    History / Diagnostics
+                </h2>
+                <details className="mm-disclosure">
+                    <summary>Runtime History（実行履歴）</summary>
+                    <div className="mm-disclosure__content">
+                        <Suspense fallback={(
+                            <MoneyManagementCardShell
+                                loading
+                                title="Runtime History"
+                            />
+                        )}>
+                            <MoneyManagementRuntimeHistoryCard />
+                        </Suspense>
+                    </div>
+                </details>
+            </section>
+        </div>
     );
 }
