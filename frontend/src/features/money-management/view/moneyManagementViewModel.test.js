@@ -164,7 +164,7 @@ test("null metrics remain unavailable and never become zero", () => {
     ...model.exposure,
     ...model.capital,
     ...model.performance,
-    ...model.statistics.slice(0, 5),
+    ...model.statistics,
   ]) {
     assert.notEqual(metric.value.text, "0");
   }
@@ -182,10 +182,10 @@ test("actual Backend metrics are mapped without invented projections", () => {
   assert.equal(model.capital[0].value.text, "9007199254740993.123456789");
   assert.equal(model.capital[1].value.text, "8007199254740993.123456789");
   assert.equal(model.performance[0].value.text, "-1234.5000");
-  assert.equal(model.performance[3].value.text, "0.00000001");
-  assert.equal(model.statistics[1].value.text, "5.0000");
-  assert.equal(model.statistics[2].value.text, "Not reported");
-  assert.equal(model.statistics[4].value.text, "—");
+  assert.equal(model.performance[3].value.text, "9007199254741000.00000000");
+  assert.equal(model.statistics[0].value.text, "5.0000");
+  assert.equal(model.statistics[1].value.text, "Not reported");
+  assert.equal(model.riskSummary.rows[4].value.text, "—");
   assert.equal(model.projection.current.text, "ALLOW");
   assert.match(model.projection.description, /later phase/);
 });
@@ -218,11 +218,11 @@ test("runtime metric values and unknowns use safe existing displays", () => {
   }));
   assert.equal(populated.exposure[2].value.text, "42.50");
   assert.equal(populated.exposure[3].value.text, "FLAT");
-  assert.equal(populated.statistics[4].value.text, "37.25");
-  assert.equal(populated.riskSummary.rows[3].value.text, "10.00");
-  assert.equal(populated.riskSummary.rows[4].value.text, "4.00");
-  assert.equal(populated.riskSummary.rows[5].value.text, "1.00");
-  assert.equal(populated.riskSummary.rows[6].value.text, "5.00");
+  assert.equal(populated.riskSummary.rows[4].value.text, "37.25");
+  assert.equal(populated.riskSummary.rows[0].value.text, "10.00");
+  assert.equal(populated.riskSummary.rows[1].value.text, "4.00");
+  assert.equal(populated.riskSummary.rows[2].value.text, "1.00");
+  assert.equal(populated.riskSummary.rows[3].value.text, "5.00");
 
   const unknown = createMoneyManagementViewModel(readyInput({
     status: status({
@@ -236,7 +236,7 @@ test("runtime metric values and unknowns use safe existing displays", () => {
   }));
   assert.equal(unknown.exposure[2].value.text, "—");
   assert.equal(unknown.exposure[3].value.text, "UNKNOWN");
-  assert.equal(unknown.statistics[4].value.text, "—");
+  assert.equal(unknown.riskSummary.rows[4].value.text, "—");
 });
 
 test("unknown Available Capital remains unavailable", () => {
@@ -301,4 +301,96 @@ test("loading, unavailable, stale, and updating banners are explicit", () => {
     const model = createMoneyManagementViewModel(readyInput(input));
     assert.equal(model.banner, banner);
   }
+});
+
+test("Risk summary contains only numerical risk metrics without decision fields", () => {
+  const model = createMoneyManagementViewModel(readyInput());
+  const labels = model.riskSummary.rows.map((r) => r.label);
+  assert.deepEqual(labels, [
+    "Risk Limit",
+    "Current Risk",
+    "Reserved Risk",
+    "Risk Budget Remaining",
+    "Risk Utilization",
+  ]);
+  assert.ok(!("state" in model.riskSummary));
+});
+
+test("Risk State retains decision, permission, and safety fields", () => {
+  const model = createMoneyManagementViewModel(readyInput({
+    status: status({
+      riskState: "LOCKED",
+      recommendedAction: "BLOCK_EXECUTION",
+      executionEntryAllowed: false,
+    }),
+  }));
+  assert.equal(model.riskState.state.text, "LOCKED");
+  assert.equal(model.riskState.entryPermission.text, "ENTRY BLOCKED");
+  assert.equal(model.riskState.recommendedAction, "BLOCK_EXECUTION");
+  assert.ok(model.riskState.reasons);
+  assert.ok(model.riskState.protectionLevel);
+  assert.ok(model.riskState.primaryReason);
+});
+
+test("Performance consolidates P&L, Peak Equity, Current Drawdown, and Consecutive Losses", () => {
+  const model = createMoneyManagementViewModel(readyInput());
+  const labels = model.performance.map((r) => r.label);
+  assert.deepEqual(labels, [
+    "Daily P&L",
+    "Weekly P&L",
+    "Monthly P&L",
+    "Peak Equity",
+    "Current Drawdown",
+    "Drawdown",
+    "Consecutive Losses",
+  ]);
+});
+
+test("Statistics retains only non-duplicate fields: Maximum Drawdown, Loss Period, Metric Quality", () => {
+  const model = createMoneyManagementViewModel(readyInput());
+  const labels = model.statistics.map((r) => r.label);
+  assert.deepEqual(labels, [
+    "Maximum Drawdown",
+    "Loss Period",
+    "Metric Quality",
+  ]);
+});
+
+test("Risk Utilization is in Risk summary, not in Statistics or Performance", () => {
+  const model = createMoneyManagementViewModel(readyInput({
+    status: status({
+      metrics: {
+        ...status().metrics,
+        riskUtilization: "55.00",
+      },
+    }),
+  }));
+  assert.equal(model.riskSummary.rows[4].label, "Risk Utilization");
+  assert.equal(model.riskSummary.rows[4].value.text, "55.00");
+  const statLabels = model.statistics.map((r) => r.label);
+  const perfLabels = model.performance.map((r) => r.label);
+  assert.ok(!statLabels.includes("Risk Utilization"));
+  assert.ok(!perfLabels.includes("Risk Utilization"));
+});
+
+test("UNKNOWN risk state and ENTRY BLOCKED are preserved in Risk State", () => {
+  const model = createMoneyManagementViewModel(readyInput({
+    status: status({
+      riskState: "UNKNOWN",
+      recommendedAction: "UNKNOWN",
+      executionEntryAllowed: false,
+    }),
+  }));
+  assert.equal(model.riskState.state.text, "UNKNOWN");
+  assert.equal(model.riskState.entryPermission.text, "ENTRY STATUS UNKNOWN");
+  assert.equal(model.riskState.protectionLevel, "FAIL CLOSED");
+});
+
+test("null Consecutive Losses remains unavailable, not zero", () => {
+  const model = createMoneyManagementViewModel(readyInput());
+  const consecutiveLosses = model.performance.find(
+    (r) => r.label === "Consecutive Losses",
+  );
+  assert.equal(consecutiveLosses.value.text, "—");
+  assert.equal(consecutiveLosses.value.unavailable, true);
 });

@@ -21,17 +21,19 @@ const textOf = (node) => {
     return textOf(node.props?.children);
 };
 
-test("Money Management shell defines the complete 17-card layout", () => {
-    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 17);
+test("Money Management shell defines the complete R1 card layout", () => {
+    assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 19);
     assert.deepEqual(MONEY_MANAGEMENT_CARD_TITLES, [
-        "Runtime",
+        "Equity / Peak Equity",
+        "Drawdown",
+        "Capital",
         "Risk",
         "Exposure",
-        "Capital",
+        "Performance",
+        "Runtime",
         "Risk State",
         "Configuration",
         "Recovery",
-        "Performance",
         "Statistics",
         "Projection",
         "Equity Curve",
@@ -42,16 +44,17 @@ test("Money Management shell defines the complete 17-card layout", () => {
         "History",
         "Future Chart",
     ]);
-    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 17);
+    assert.equal(new Set(MONEY_MANAGEMENT_CARD_TITLES).size, 18);
 });
 
-test("page composes Header, Summary, Main, Analytics, Bottom, and the data hook", async () => {
+test("page composes Header, Graph, Summary, Runtime, Main, and Lower sections", async () => {
     const source = await readSource("./MoneyManagementPage.jsx");
     for (const expected of [
         "MoneyManagementHeader",
-        "MoneyManagementSummarySection",
+        "MoneyManagementCapitalDrawdownSection",
+        "MoneyManagementTopSummarySection",
         "MoneyManagementMainSection",
-        "MoneyManagementAnalyticsSection",
+        "MoneyManagementRuntimeSummarySection",
         "MoneyManagementBottomSection",
         "useMoneyManagement",
         "createMoneyManagementViewModel",
@@ -62,7 +65,7 @@ test("page composes Header, Summary, Main, Analytics, Bottom, and the data hook"
     assert.doesNotMatch(source, /console\.|canvas|<svg|<table|<form/iu);
 });
 
-test("page render keeps Header, Summary, Main, Analytics, and Bottom order", async (context) => {
+test("page render keeps Header, Graph, Summary, Runtime, Main, Lower order (R1/R3)", async (context) => {
     let transformWithOxc;
     try {
         ({ transformWithOxc } = await import("vite"));
@@ -88,9 +91,10 @@ test("page render keeps Header, Summary, Main, Analytics, and Bottom order", asy
     let code = transformed.code;
     for (const [name, label] of [
         ["MoneyManagementHeader", "HEADER"],
-        ["MoneyManagementSummarySection", "SUMMARY"],
+        ["MoneyManagementCapitalDrawdownSection", "GRAPH"],
+        ["MoneyManagementTopSummarySection", "SUMMARY"],
+        ["MoneyManagementRuntimeSummarySection", "RUNTIME"],
         ["MoneyManagementMainSection", "MAIN"],
-        ["MoneyManagementAnalyticsSection", "ANALYTICS"],
         ["MoneyManagementBottomSection", "BOTTOM"],
     ]) {
         code = code.replace(
@@ -115,7 +119,7 @@ test("page render keeps Header, Summary, Main, Analytics, and Bottom order", asy
         const text = textOf(module.default());
         assert.equal(
             text.replace(/\s+/gu, " ").trim(),
-            "HEADER SUMMARY MAIN ANALYTICS BOTTOM",
+            "HEADER GRAPH SUMMARY RUNTIME MAIN BOTTOM",
         );
     } finally {
         await rm(temporary, { recursive: true, force: true });

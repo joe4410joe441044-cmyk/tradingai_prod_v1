@@ -1,7 +1,6 @@
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
 import {
     MoneyManagementMetricRows,
-    MoneyManagementStatusBadge,
 } from "./MoneyManagementPrimitives";
 
 export function RuntimeSummaryCard({ viewModel }) {
@@ -26,10 +25,6 @@ export function RiskSummaryCard({ viewModel }) {
             loading={viewModel.state === "LOADING"}
             title="Risk"
         >
-            <MoneyManagementStatusBadge
-                text={viewModel.riskSummary.state.text}
-                variant={viewModel.riskSummary.state.variant}
-            />
             <MoneyManagementMetricRows
                 rows={viewModel.riskSummary.rows}
             />

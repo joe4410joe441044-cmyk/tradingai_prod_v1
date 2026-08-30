@@ -20,9 +20,10 @@ test("Summary renders Runtime, Risk, Exposure, and Capital cards", async () => {
     }
 });
 
-test("Main cards render Risk State, Performance, Statistics, and Projection", async () => {
-    const [main, risk, metrics] = await Promise.all([
+test("operation and analysis areas preserve all status cards", async () => {
+    const [main, bottom, risk, metrics] = await Promise.all([
         source("MoneyManagementMainSection.jsx"),
+        source("MoneyManagementBottomSection.jsx"),
         source("MoneyManagementRiskStateCard.jsx"),
         source("MoneyManagementMetricsCards.jsx"),
     ]);
@@ -32,12 +33,18 @@ test("Main cards render Risk State, Performance, Statistics, and Projection", as
         "StatisticsCard",
         "ProjectionCard",
     ]) {
-        assert.match(`${main} ${risk} ${metrics}`, new RegExp(component));
+        assert.match(
+            [main, bottom, risk, metrics].join("\n"),
+            new RegExp(component),
+        );
     }
-    assert.match(main, /MoneyManagementConfigurationCard/);
+    assert.match(bottom, /MoneyManagementConfigurationCard/);
+    assert.match(main, /MoneyManagementPositionSizingCard/);
+    assert.match(main, new RegExp("Operation / Decision"));
     assert.match(main, /MoneyManagementRecoveryCard/);
+    assert.doesNotMatch(main, /<details/);
     assert.doesNotMatch(
-        `${main} ${risk} ${metrics}`,
+        [main, bottom, risk, metrics].join("\n"),
         /canvas|<svg|<table|<form|Monte Carlo|Risk of Ruin/iu,
     );
 });
@@ -60,6 +67,25 @@ test("Risk card keeps reason categories separate with semantic lists", async () 
     assert.match(primitives, /<dl/);
     assert.match(primitives, /<dt>/);
     assert.match(primitives, /<dd/);
+});
+
+test("Risk summary card renders numerical fields only without status badge", async () => {
+    const content = await source("MoneyManagementSummaryCards.jsx");
+    assert.doesNotMatch(content, /MoneyManagementStatusBadge/);
+    assert.match(content, /RiskSummaryCard/);
+    assert.match(content, /riskSummary\.rows/);
+});
+
+test("Risk State card preserves decision, permission, and safety fields", async () => {
+    const risk = await source("MoneyManagementRiskStateCard.jsx");
+    assert.match(risk, /MoneyManagementStatusBadge/);
+    assert.match(risk, /Recommended Action/);
+    assert.match(risk, /Entry Permission/);
+    assert.match(risk, /Protection Level/);
+    assert.match(risk, /Primary Reason/);
+    assert.match(risk, /Warning Reasons/);
+    assert.match(risk, /Hold Reasons/);
+    assert.match(risk, /Block Reasons/);
 });
 
 test("display components do not calculate or coerce Backend values", async () => {

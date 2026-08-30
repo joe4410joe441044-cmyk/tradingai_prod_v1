@@ -105,6 +105,37 @@ test("runtime history focuses on filters, pagination, and event state", async ()
   assert.doesNotMatch(source, /LineChart|ResponsiveContainer|hasChartData/);
 });
 
+test("lower hierarchy keeps analysis available and history collapsed by default", async () => {
+  const bottom = await readSource("MoneyManagementBottomSection.jsx");
+  for (const expected of [
+    "Configuration / Analysis",
+    "MoneyManagementConfigurationCard",
+    "MoneyManagementSimulationCard",
+    "ProjectionCard",
+    "StatisticsCard",
+    "MoneyManagementAnalyticsSection",
+    "History / Diagnostics",
+    "MoneyManagementRuntimeHistoryCard",
+  ]) {
+    assert.ok(bottom.includes(expected));
+  }
+  assert.match(bottom, /<details className="mm-disclosure">/);
+  assert.match(bottom, /<summary>Runtime History/);
+  assert.doesNotMatch(bottom, /<details[^>]*\sopen(?:=|\s|>)/);
+  assert.ok(
+    bottom.indexOf("MoneyManagementRiskStateCard") === -1,
+    "critical Risk State remains outside the collapsed lower disclosure",
+  );
+  assert.ok(
+    bottom.indexOf("MoneyManagementConfigurationCard")
+      < bottom.indexOf("MoneyManagementSimulationCard"),
+  );
+  assert.ok(
+    bottom.indexOf("MoneyManagementAnalyticsSection")
+      < bottom.indexOf("<details"),
+  );
+});
+
 test("analytics section renders four history-backed Recharts", async () => {
   const source = [
     await readSource("MoneyManagementAnalyticsSection.jsx"),

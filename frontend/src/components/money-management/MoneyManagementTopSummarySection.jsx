@@ -2,19 +2,19 @@ import {
     CapitalSummaryCard,
     ExposureSummaryCard,
     RiskSummaryCard,
-    RuntimeSummaryCard,
 } from "./MoneyManagementSummaryCards";
+import { PerformanceCard } from "./MoneyManagementMetricsCards";
 
-export default function MoneyManagementSummarySection({ viewModel }) {
+export default function MoneyManagementTopSummarySection({ viewModel }) {
     return (
         <section
             aria-label="Money Management summary"
             className="mm-summary"
         >
-            <RuntimeSummaryCard viewModel={viewModel} />
+            <CapitalSummaryCard viewModel={viewModel} />
             <RiskSummaryCard viewModel={viewModel} />
             <ExposureSummaryCard viewModel={viewModel} />
-            <CapitalSummaryCard viewModel={viewModel} />
+            <PerformanceCard viewModel={viewModel} />
         </section>
     );
 }

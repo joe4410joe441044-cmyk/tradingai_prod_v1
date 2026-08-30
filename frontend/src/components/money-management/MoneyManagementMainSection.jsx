@@ -1,9 +1,3 @@
-import MoneyManagementConfigurationCard from "./MoneyManagementConfigurationCard";
-import {
-    PerformanceCard,
-    ProjectionCard,
-    StatisticsCard,
-} from "./MoneyManagementMetricsCards";
 import MoneyManagementRiskStateCard from "./MoneyManagementRiskStateCard";
 import MoneyManagementRecoveryCard from "./MoneyManagementRecoveryCard";
 import MoneyManagementPositionSizingCard from "./MoneyManagementPositionSizingCard";
@@ -14,30 +8,20 @@ export default function MoneyManagementMainSection({
     viewModel,
 }) {
     return (
-        <section aria-label="Money Management main area" className="mm-main">
-            <div aria-label="Risk and controls" className="mm-card-column">
+        <section aria-labelledby="mm-operation-heading" className="mm-section-group">
+            <h2 className="mm-section-title" id="mm-operation-heading">
+                Operation / Decision
+            </h2>
+            <div className="mm-main">
                 <MoneyManagementRiskStateCard viewModel={viewModel} />
-                <MoneyManagementConfigurationCard
-                    draft={moneyManagement.configurationDraft}
-                    interaction={interaction}
-                    onDraftChange={moneyManagement.updateConfigurationDraft}
-                    onReset={moneyManagement.resetConfigurationDraft}
-                    onSave={moneyManagement.saveConfiguration}
-                />
-                <MoneyManagementRecoveryCard
-                    interaction={interaction}
-                    isRecovering={moneyManagement.isRecovering}
-                    onRecover={moneyManagement.recover}
-                />
-            </div>
-            <div
-                aria-label="Performance and projection"
-                className="mm-card-column"
-            >
-                <PerformanceCard viewModel={viewModel} />
-                <StatisticsCard viewModel={viewModel} />
-                <ProjectionCard viewModel={viewModel} />
-                <MoneyManagementPositionSizingCard viewModel={viewModel} />
+                <div aria-label="Position sizing and recovery" className="mm-card-column">
+                    <MoneyManagementPositionSizingCard viewModel={viewModel} />
+                    <MoneyManagementRecoveryCard
+                        interaction={interaction}
+                        isRecovering={moneyManagement.isRecovering}
+                        onRecover={moneyManagement.recover}
+                    />
+                </div>
             </div>
         </section>
     );

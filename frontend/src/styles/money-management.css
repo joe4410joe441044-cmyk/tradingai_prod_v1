@@ -62,14 +62,34 @@
 .market-intelligence .mm-main,
 .market-intelligence .mm-analytics,
 .market-intelligence .mm-bottom,
+.market-intelligence .mm-top-graph,
 .market-intelligence .mm-card-column {
     display: grid;
     min-width: 0;
     gap: var(--mm-card-gap);
 }
 
+.market-intelligence .mm-lower-sections,
+.market-intelligence .mm-section-group {
+    display: grid;
+    min-width: 0;
+    gap: var(--mm-card-gap);
+}
+
+.market-intelligence .mm-section-group {
+    padding-top: 4px;
+    border-top: 1px solid var(--mi-border-soft);
+}
+
 .market-intelligence .mm-summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.market-intelligence .mm-runtime-summary {
+    display: grid;
+    min-width: 0;
+    gap: var(--mm-card-gap);
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .market-intelligence .mm-main {
@@ -107,8 +127,41 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.market-intelligence .mm-top-graph {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .market-intelligence .mm-bottom {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.market-intelligence .mm-disclosure {
+    min-width: 0;
+    border: 1px solid var(--mi-border);
+    border-radius: 6px;
+    background: var(--mi-surface);
+    overflow: hidden;
+}
+
+.market-intelligence .mm-disclosure > summary {
+    padding: 9px var(--mm-card-padding-inline);
+    color: var(--mi-text);
+    font: 700 11px/1.3 var(--mi-font-ui);
+    cursor: pointer;
+}
+
+.market-intelligence .mm-disclosure > summary:hover {
+    background: var(--mi-surface-raised);
+}
+
+.market-intelligence .mm-disclosure > summary:focus-visible {
+    outline: 2px solid var(--mi-focus);
+    outline-offset: -2px;
+}
+
+.market-intelligence .mm-disclosure__content {
+    padding: var(--mm-card-gap);
+    border-top: 1px solid var(--mi-border-soft);
 }
 
 .market-intelligence .mm-card {
@@ -731,6 +784,7 @@
 
     .market-intelligence .mm-summary,
     .market-intelligence .mm-analytics,
+    .market-intelligence .mm-top-graph,
     .market-intelligence .mm-bottom,
     .market-intelligence .mm-configuration-meta,
     .market-intelligence .mm-configuration-fields {
