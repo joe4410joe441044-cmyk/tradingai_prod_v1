@@ -226,6 +226,10 @@ class BotManager:
 
         self.last_update_time = 0
 
+        # The exchange feed runs on its own thread.  AUTO startup waits on
+        # this notification instead of racing the first production cycle.
+        self._market_data_ready_event = threading.Event()
+
         # This is the scalar Browser market contract authority. The exchange
         # callback replaces it atomically from one accepted book snapshot.
         self.market_snapshot_lock = threading.Lock()
@@ -2618,6 +2622,8 @@ class BotManager:
         """Require the existing PAPER AUTO cycle to accept START authority."""
         if self.selection_mode != "AUTO":
             return None
+        if not self._wait_for_initial_auto_market_data():
+            return None
         result = self.run_auto_market_selection_cycle()
         runtime = result.get("runtime") if isinstance(result, dict) else None
         runtime = runtime if isinstance(runtime, dict) else {}
@@ -2628,6 +2634,42 @@ class BotManager:
             reason = reason_codes[0] if isinstance(reason_codes, (list, tuple)) and reason_codes else "AUTO_RUNTIME_CYCLE_NOT_ACCEPTED"
             raise RuntimeError(reason)
         return result
+
+    def _wait_for_initial_auto_market_data(self):
+        """Wait briefly for the exchange callback's existing readiness state."""
+        if self.selection_mode != "AUTO":
+            return False
+
+        timeout = getattr(
+            self, "_auto_market_data_startup_timeout_seconds", 3.0,
+        )
+        wait_interval = getattr(
+            self, "_auto_market_data_wait_interval_seconds", 0.05,
+        )
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        ready_event = getattr(self, "_market_data_ready_event", None)
+        if ready_event is None:
+            ready_event = threading.Event()
+            self._market_data_ready_event = ready_event
+
+        while True:
+            if self.selection_mode != "AUTO" or self._running is not True:
+                return False
+            updated = self.last_update_time
+            if (
+                self.market_ready is True
+                and not isinstance(updated, bool)
+                and isinstance(updated, (int, float))
+                and math.isfinite(updated)
+                and updated > 0
+            ):
+                return True
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("MARKET_DATA_NOT_READY")
+            ready_event.wait(min(max(0.001, float(wait_interval)), remaining))
+            ready_event.clear()
 
     def _pause_new_entries_for_safe_switch(self, transaction_id):
         if not transaction_id or not self.symbol_switch_lock.acquire(blocking=False):
@@ -3399,6 +3441,8 @@ class BotManager:
 
                     self._store_market_snapshot(data)
 
+                    self._market_data_ready_event.set()
+
                     # ============================================
                     # RUNTIME PIPELINE
                     # ============================================
@@ -3708,6 +3752,8 @@ class BotManager:
             runtime_metrics[
                 "ws_thread_alive"
             ] = True
+
+            self._market_data_ready_event.clear()
 
             self.ws.start()
 
@@ -8950,6 +8996,12 @@ class BotManager:
         )
 
         self._running = False
+
+        market_data_ready_event = getattr(
+            self, "_market_data_ready_event", None,
+        )
+        if market_data_ready_event is not None:
+            market_data_ready_event.set()
 
         governance_state["execution_enabled"] = False
 
