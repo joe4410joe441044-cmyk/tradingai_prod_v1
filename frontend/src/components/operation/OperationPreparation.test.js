@@ -50,8 +50,8 @@ const modelSource =
 '        Number(config.leverage),' + "\n" +
 '        3,' + "\n" +
 '    ),' + "\n" +
-'    loopOnStart: false,' + "\n" +
-'    autoTradeOnStart: false,' + "\n" +
+'    loopOnStart: Boolean(config.loopOnStart),' + "\n" +
+'    autoTradeOnStart: Boolean(config.autoTradeOnStart),' + "\n" +
 ' });' + "\n" +
 "\n" +
 'export const operationPreparationSummary = (settings, selectedSymbol, riskPerTradePercent) => ({' + "\n" +
@@ -202,6 +202,7 @@ const loadComponent = async () => {
 const createRenderer = (Component, props) => {
     const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     const values = [];
+    let currentProps = props;
     let hookIndex = 0;
     let root;
     const dispatcher = {
@@ -213,11 +214,12 @@ const createRenderer = (Component, props) => {
             }];
         },
     };
-    const render = () => {
+    const render = (nextProps) => {
+        if (nextProps) currentProps = { ...currentProps, ...nextProps };
         hookIndex = 0;
         const previous = internals.H;
         internals.H = dispatcher;
-        try { root = Component(props); } finally { internals.H = previous; }
+        try { root = Component(currentProps); } finally { internals.H = previous; }
         return root;
     };
     render();
@@ -366,14 +368,16 @@ test("manual/auto, leverage, and automation controls update the reactive summary
     });
 
     findButton(renderer.root, "MANUAL").props.onClick();
-    renderer.render();
+    renderer.render({ config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "MANUAL" } });
     findSelect(renderer.root, "operation-prep-symbol").props.onChange({ target: { value: "BTCUSDTM" } });
+    renderer.render({ config: { mode: "PAPER", symbol: "BTCUSDTM", selectionMode: "MANUAL", leverage: 5 } });
     findSelect(renderer.root, "operation-prep-leverage").props.onChange({ target: { value: "4" } });
+    renderer.render({ config: { mode: "PAPER", symbol: "BTCUSDTM", selectionMode: "MANUAL", leverage: 4 } });
     const onButtons = descendants(renderer.root).filter(
         (node) => node.type === "button" && normalizedText(node) === "ON",
     );
     onButtons.forEach((button) => button.props.onClick());
-    renderer.render();
+    renderer.render({ config: { mode: "PAPER", symbol: "BTCUSDTM", selectionMode: "MANUAL", leverage: 4, loopOnStart: true, autoTradeOnStart: true } });
 
     const content = normalizedText(descendants(renderer.root));
     assert.equal(content.includes("BTCUSDTM"), true);

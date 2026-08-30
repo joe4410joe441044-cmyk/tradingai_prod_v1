@@ -777,6 +777,9 @@ export default function BotControl({
 
     const startSettings = createOperationPreparationSettings(config);
     const effectiveSelectionMode = startSettings.selectionMode;
+    const effectiveStartSymbol = effectiveSelectionMode === "AUTO"
+        ? config?.displaySymbol
+        : startSettings.manualSymbol;
     const startReadiness = deriveOperationReadiness({
         botRunning,
         tradingMode: startSettings.tradingMode,
@@ -852,7 +855,7 @@ export default function BotControl({
                 method: "POST",
                 headers: botRunning ? undefined : { "Content-Type": "application/json" },
                 body: botRunning ? undefined : JSON.stringify({
-                    symbol: config?.symbol,
+                    symbol: effectiveStartSymbol,
                     selection_mode: startSettings.selectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
                     risk_percent: startRiskPercent,

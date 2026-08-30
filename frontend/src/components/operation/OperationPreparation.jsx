@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import {
     OPERATION_PREPARATION_OPTIONS,
     createOperationPreparationSettings,
@@ -163,11 +161,8 @@ export default function OperationPreparation({
     confirmEmergency,
     handleReturnToNormal,
 }) {
-    const [settings, setSettings] = useState(() => (
-        createOperationPreparationSettings(config)
-    ));
+    const settings = createOperationPreparationSettings(config);
      const changeSetting = (key, value) => {
-        setSettings((current) => ({ ...current, [key]: value }));
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
         if (key === "manualSymbol") onLegacyConfigChange({ symbol: value });

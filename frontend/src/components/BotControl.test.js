@@ -1079,6 +1079,7 @@ test("START payload uses the single effective selectionMode source", async () =>
         }));
         await clickAndRender(manualRenderer, findButton(manualRenderer.root, "START BOT"));
         assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "MANUAL");
+        assert.equal(JSON.parse(mock.requests[0].options.body).symbol, "XRPUSDTM");
 
         const autoRenderer = await renderBotControl(readyStartProps({
             config: { 
@@ -1089,6 +1090,42 @@ test("START payload uses the single effective selectionMode source", async () =>
         }));
         await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
         assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
+        assert.equal(JSON.parse(mock.requests[1].options.body).symbol, "BTCUSDTM");
+        assert.notEqual(JSON.parse(mock.requests[1].options.body).symbol, "XRPUSDTM");
+    } finally { clearMmConfiguration(); mock.restore(); }
+});
+
+test("polling rerender keeps AUTO display, runtime symbol, and START payload aligned", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        }));
+
+        renderer.render(readyStartProps({
+            config: {
+                selectionMode: "AUTO",
+                symbol: "XRPUSDTM",
+                displaySymbol: "YGGUSDT",
+                autoMarketState: "READY",
+                paperBootstrapEligible: true,
+            },
+        }));
+
+        assert.equal(textIncludes(renderer.root, "AUTO"), true);
+        assert.equal(textIncludes(renderer.root, "YGGUSDT"), true);
+        const start = findButton(renderer.root, "START BOT");
+        assert.equal(start.props.disabled, false);
+        await clickAndRender(renderer, start);
+
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.selection_mode, "AUTO");
+        assert.equal(payload.symbol, "YGGUSDT");
+        assert.notEqual(payload.symbol, "XRPUSDTM");
     } finally { clearMmConfiguration(); mock.restore(); }
 });
 
