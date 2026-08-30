@@ -47,7 +47,10 @@ export default function MoneyManagementPositionSizingCard({ viewModel }) {
     };
 
     return (
-        <MoneyManagementCardShell title="Position Size">
+        <MoneyManagementCardShell
+            className="mm-card--position-sizing"
+            title="Position Size"
+        >
             <dl className="mm-metric-list">
                 {viewModel.positionSizing.map((row) => (
                     <div className="mm-metric-row" key={row.label}>

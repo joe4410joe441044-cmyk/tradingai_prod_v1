@@ -17,6 +17,7 @@ import {
     MONEY_MANAGEMENT_ANALYTICS_PERIOD,
 } from "../../features/money-management/analytics/moneyManagementAnalytics.js";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
+import { formatMoneyManagementAxisTimestamp } from "./moneyManagementChartFormatters.js";
 
 const PERIODS = Object.values(MONEY_MANAGEMENT_ANALYTICS_PERIOD);
 
@@ -47,7 +48,11 @@ function PerformanceChart({ data, lines, loading, title, unit = null }) {
             <ResponsiveContainer height={176} width="100%">
                 <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="timestamp" minTickGap={24} />
+                    <XAxis
+                        dataKey="timestamp"
+                        minTickGap={24}
+                        tickFormatter={formatMoneyManagementAxisTimestamp}
+                    />
                     <YAxis domain={["auto", "auto"]} unit={unit} />
                     <Tooltip />
                     {lines.map(({ metric, name }) => (
