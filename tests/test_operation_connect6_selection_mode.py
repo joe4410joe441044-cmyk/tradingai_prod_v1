@@ -6,6 +6,8 @@ Covers the runtime hand-off of operator-selected MANUAL/AUTO:
         -> start_bot() -> BotManager.start() -> BotManager.selection_mode
 """
 
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -242,6 +244,9 @@ def test_stopped_durable_memory_with_engine_still_fails_closed():
 def test_initial_auto_cycle_requires_accepted_typed_runtime():
     manager = _bare_manager()
     manager.selection_mode = "AUTO"
+    manager._running = True
+    manager.market_ready = True
+    manager.last_update_time = 1.0
     manager.auto_market_selection_lifecycle.run_one_cycle = lambda **_kwargs: {
         "accepted": True, "reasonCodes": [], "runtime": {"amsRuntimeState": "READY"}
     }
@@ -251,6 +256,9 @@ def test_initial_auto_cycle_requires_accepted_typed_runtime():
 def test_initial_auto_cycle_blocked_preserves_reason_and_mode():
     manager = _bare_manager()
     manager.selection_mode = "AUTO"
+    manager._running = True
+    manager.market_ready = True
+    manager.last_update_time = 1.0
     manager.auto_market_selection_lifecycle.run_one_cycle = lambda **_kwargs: {
         "accepted": False, "reasonCodes": ["AUTO_RUNTIME_MM_UNAVAILABLE"],
         "runtime": {"amsRuntimeState": "BLOCKED"},
@@ -258,6 +266,143 @@ def test_initial_auto_cycle_blocked_preserves_reason_and_mode():
     with pytest.raises(RuntimeError, match="AUTO_RUNTIME_MM_UNAVAILABLE"):
         manager._run_initial_auto_market_selection_cycle()
     assert manager.selection_mode == "AUTO"
+
+
+def _auto_wait_manager():
+    manager = _bare_manager()
+    manager.selection_mode = "AUTO"
+    manager._running = True
+    manager.market_ready = False
+    manager.last_update_time = 0
+    manager._market_data_ready_event = threading.Event()
+    manager._auto_market_data_startup_timeout_seconds = 0.01
+    manager._auto_market_data_wait_interval_seconds = 0.001
+    return manager
+
+
+def test_initial_auto_cycle_does_not_wait_when_market_data_is_ready(monkeypatch):
+    manager = _auto_wait_manager()
+    manager.market_ready = True
+    manager.last_update_time = 1.0
+    cycles = []
+    manager.run_auto_market_selection_cycle = lambda: cycles.append(True) or {
+        "accepted": True, "reasonCodes": [],
+        "runtime": {"amsRuntimeState": "READY"},
+    }
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", lambda _timeout: pytest.fail("unexpected wait"))
+
+    assert manager._run_initial_auto_market_selection_cycle()["accepted"] is True
+    assert cycles == [True]
+
+
+def test_initial_auto_cycle_waits_for_controlled_market_data_transition(monkeypatch):
+    manager = _auto_wait_manager()
+    cycles = []
+
+    def become_ready(_timeout):
+        manager.market_ready = True
+        manager.last_update_time = 1.0
+        return True
+
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", become_ready)
+    manager.run_auto_market_selection_cycle = lambda: cycles.append(True) or {
+        "accepted": True, "reasonCodes": [],
+        "runtime": {"amsRuntimeState": "READY"},
+    }
+
+    assert manager._run_initial_auto_market_selection_cycle()["accepted"] is True
+    assert cycles == [True]
+
+
+def test_initial_auto_cycle_times_out_without_market_data(monkeypatch):
+    manager = _auto_wait_manager()
+    cycles = []
+    ticks = iter((10.0, 10.0, 10.02))
+    monkeypatch.setattr("backend.bot_manager.bot_manager.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", lambda _timeout: False)
+    manager.run_auto_market_selection_cycle = lambda: cycles.append(True)
+
+    with pytest.raises(RuntimeError, match="MARKET_DATA_NOT_READY"):
+        manager._run_initial_auto_market_selection_cycle()
+    assert cycles == []
+
+
+def test_initial_auto_cycle_requires_positive_last_update(monkeypatch):
+    manager = _auto_wait_manager()
+    manager.market_ready = True
+    ticks = iter((10.0, 10.0, 10.02))
+    monkeypatch.setattr("backend.bot_manager.bot_manager.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", lambda _timeout: False)
+
+    with pytest.raises(RuntimeError, match="MARKET_DATA_NOT_READY"):
+        manager._run_initial_auto_market_selection_cycle()
+
+
+def test_initial_auto_cycle_stop_during_wait_skips_cycle(monkeypatch):
+    manager = _auto_wait_manager()
+    cycles = []
+
+    def stop_during_wait(_timeout):
+        manager._running = False
+        manager.selection_mode = "MANUAL"
+        return True
+
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", stop_during_wait)
+    manager.run_auto_market_selection_cycle = lambda: cycles.append(True)
+
+    assert manager._run_initial_auto_market_selection_cycle() is None
+    assert cycles == []
+
+
+def test_manual_initial_cycle_never_waits(monkeypatch):
+    manager = _auto_wait_manager()
+    manager.selection_mode = "MANUAL"
+    monkeypatch.setattr(manager._market_data_ready_event, "wait", lambda _timeout: pytest.fail("unexpected wait"))
+
+    assert manager._run_initial_auto_market_selection_cycle() is None
+
+
+def _paper_pipeline_manager():
+    return SimpleNamespace(
+        config={"mode": "paper", "dry_run": True, "realOrderAllowed": False},
+        _running=True,
+        activeSymbol="XRPUSDT",
+        active_runtime_id="runtime-1",
+        exchange_name="kucoin",
+        orderbook_symbol="XRPUSDTM",
+        last_update_time=time.time(),
+        market_ready=True,
+        ob_manager=SimpleNamespace(bids={}, asks={}, current_price=1.0),
+    )
+
+
+def test_ready_fields_do_not_bypass_incomplete_orderbook_authority():
+    from backend.auto_market_selection.paper_production import (
+        PaperProductionPipelineAdapter,
+    )
+    manager = _paper_pipeline_manager()
+
+    result = PaperProductionPipelineAdapter(manager).run({
+        "symbol": "XRPUSDT", "runtimeId": "runtime-1",
+    })
+
+    assert result["valid"] is False
+    assert result["reason"] == "MARKET_DATA_NOT_READY"
+
+
+def test_ready_fields_do_not_bypass_stale_market_authority():
+    from backend.auto_market_selection.paper_production import (
+        PaperProductionPipelineAdapter,
+    )
+    manager = _paper_pipeline_manager()
+    manager.last_update_time = time.time() - 6.0
+
+    result = PaperProductionPipelineAdapter(manager).run({
+        "symbol": "XRPUSDT", "runtimeId": "runtime-1",
+    })
+
+    assert result["valid"] is False
+    assert result["reason"] == "MARKET_DATA_STALE"
 
 
 # =========================
