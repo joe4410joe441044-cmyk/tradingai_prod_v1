@@ -25,12 +25,15 @@ export const MarkerInspector = ({ marker, marketContext }) => {
         ["Source", marker.source], ["Data Quality", marker.dataQuality],
     ] : [];
     const optional = marker ? [
+        ["Marker ID", marker.id, "id"],
         ["Reason", marker.reason, "reason"], ["Order ID", marker.orderId, "id"],
         ["Event ID", marker.eventId, "id"], ["Trade ID", marker.tradeId, "id"],
         ["Decision ID", marker.decisionId, "id"], ["Position ID", marker.positionId, "id"],
         ["Sequence", marker.sequence], ["Reduce Only", booleanValue(marker.reduceOnly)],
         ["Flatten", booleanValue(marker.flatten)], ["Blocked", booleanValue(marker.blocked)],
         ["Failed", booleanValue(marker.failed)],
+        ["Context", marker.contextKey, "id"],
+        ["Runtime Instance", marker.runtimeInstanceId, "id"],
     ].filter(([, value]) => present(value)) : [];
     return <section aria-labelledby="mi-marker-inspector-title" className={`mi-marker-inspector${marker ? "" : " mi-marker-inspector--empty"}`}>
         <header><h3 id="mi-marker-inspector-title">MARKER INSPECTOR</h3>
@@ -273,15 +276,24 @@ export function ReplayMarketViewContent({
 }
 
 export default function ReplayMarketView() {
-    const { marketContext, normalizedMarketModel: providedMarketModel, replayEngine } = useMarketIntelligence();
+    const { marketContext, marketViewDisplayState, normalizedMarketModel: providedMarketModel, replayEngine } = useMarketIntelligence();
     const [displayMode, setDisplayMode] = useState("BOTH");
     const [rowLimit, setRowLimit] = useState(20);
     const [tradeRowLimit, setTradeRowLimit] = useState(20);
     const normalizedMarketModel = providedMarketModel ?? (isReplayMarketContextActive(replayEngine)
         ? normalizeReplayMarketModel({ replayEngine })
         : createDashboardContextMarketModel(marketContext));
-    const model = buildReplayMarketViewModel(replayEngine, normalizedMarketModel);
-    const markerModel = buildReplayMarkerOverlayModel(replayEngine, model);
+    const baseModel = buildReplayMarketViewModel(replayEngine, normalizedMarketModel);
+    const model = marketViewDisplayState ? {
+        ...baseModel,
+        currentPriceSummary: {
+            ...baseModel.currentPriceSummary,
+            state: marketViewDisplayState,
+        },
+    } : baseModel;
+    const markerModel = buildReplayMarkerOverlayModel(replayEngine, {
+        ...model, normalizedMarketModel,
+    });
     const contextKey = model.marketContext.key;
     const [markerUi, setMarkerUi] = useState({
         contextKey, expandedMarkerGroupKey: null, selectedMarkerId: null,

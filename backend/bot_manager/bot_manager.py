@@ -2587,6 +2587,13 @@ class BotManager:
             }
         return deepcopy(self.auto_market_selection_lifecycle.get_status())
 
+    def _prepare_selection_mode_start(self, requested):
+        """Apply MANUAL immediately but defer AUTO until feed startup is complete."""
+        requested = str(requested or "MANUAL").strip().upper()
+        if requested != "AUTO":
+            self._handoff_selection_mode(requested)
+        return requested
+
     def _handoff_selection_mode(self, requested):
         """Hand off operator MANUAL/AUTO selection to runtime/AMS authority.
 
@@ -3234,11 +3241,9 @@ class BotManager:
                 config.get("selection_mode"), 
                 type(config.get("selection_mode"))
             )
-            requested_selection_mode = str(
+            requested_selection_mode = self._prepare_selection_mode_start(
                 config.get("selection_mode", "MANUAL")
-            ).strip().upper()
-            if requested_selection_mode != "AUTO":
-                self._handoff_selection_mode(requested_selection_mode)
+            )
 
             runtime_metrics = (
                 self.state.runtime_metrics
@@ -9268,6 +9273,20 @@ class BotManager:
                 "syncState": "UNAVAILABLE",
             }
 
+        recent_trades = data.get("recent_trades")
+        if not isinstance(recent_trades, list):
+            recent_trades = []
+        recent_trades = [
+            deepcopy(trade) for trade in recent_trades
+            if isinstance(trade, dict)
+            and trade.get("exchangeSymbol") == data.get("exchange_symbol")
+            and trade.get("contextKey") == (
+                f"{str(self.exchange_name).upper()}:"
+                f"{data.get('market_type')}:"
+                f"{data.get('exchange_symbol')}"
+            )
+        ]
+
         market_snapshot = {
             "exchange": self.exchange_name,
             "marketType": data.get("market_type"),
@@ -9280,6 +9299,8 @@ class BotManager:
             "spread": data.get("spread"),
             "dataQuality": "VALID",
             "orderBook": deepcopy(order_book),
+            "recentTrades": recent_trades,
+            "tradeStreamReady": data.get("trade_stream_ready") is True,
         }
 
         if order_book.get("dataQuality") != "VALID":
@@ -9326,6 +9347,8 @@ class BotManager:
                 "bestAsk": None,
                 "spread": None,
                 "dataQuality": "UNAVAILABLE",
+                "recentTrades": [],
+                "tradeStreamReady": False,
                 "orderBook": {
                     "timestamp": None,
                     "sequence": None,
@@ -9338,6 +9361,8 @@ class BotManager:
             }
         elif not self._running:
             market_payload["dataQuality"] = "UNAVAILABLE"
+            market_payload["recentTrades"] = []
+            market_payload["tradeStreamReady"] = False
             market_payload["orderBook"] = {
                 "timestamp": None,
                 "sequence": None,
@@ -9357,6 +9382,26 @@ class BotManager:
                 "asks": [],
                 "syncState": "UNAVAILABLE",
             })["dataQuality"] = "STALE"
+
+        marker_context_key = (
+            f"{str(market_payload.get('exchange') or self.exchange_name).upper()}:"
+            f"{market_payload.get('marketType') or self.market_type}:"
+            f"{market_payload.get('exchangeSymbol') or self.orderbook_symbol}"
+        )
+        from backend.market.paper_execution_markers import (
+            build_paper_execution_markers,
+            paper_marker_authority_available,
+        )
+        market_payload["markers"] = build_paper_execution_markers(
+            self.engine,
+            active_symbol=self.activeSymbol,
+            context_key=marker_context_key,
+            runtime_instance_id=self.runtime_instance_id,
+        )
+        market_payload["markerStatus"] = (
+            "READY" if paper_marker_authority_available(self.engine)
+            else "MARKERS_UNAVAILABLE"
+        )
 
         safe_price = (
             float(self.last_price)

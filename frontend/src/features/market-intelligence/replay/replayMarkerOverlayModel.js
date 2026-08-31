@@ -57,6 +57,7 @@ const markerFromContract = (marker, index) => {
         reason: normalizedScalar(marker.reason), sequence: marker.sequence,
         reduceOnly: marker.reduceOnly, flatten: marker.flatten, blocked: marker.blocked, failed: marker.failed,
         source: marker.source, eventType: marker.eventType, dataQuality: marker.dataQuality,
+        symbol: marker.symbol, contextKey: marker.contextKey, runtimeInstanceId: marker.runtimeInstanceId,
         sourceSequence: marker.sequence,
         tradeId: normalizedScalar(marker.tradeId), invalid: false,
     };
@@ -150,13 +151,18 @@ const scopedSummary = (markers) => {
 
 export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}) {
     const markerContext = replayEngine?.projection?.markerContext;
-    const unscopedSource = Array.isArray(markerContext?.markers) ? markerContext.markers : [];
+    const liveMarkers = marketViewModel?.normalizedMarketModel?.source?.mode === "LIVE"
+        && Array.isArray(marketViewModel.normalizedMarketModel.markers)
+        ? marketViewModel.normalizedMarketModel.markers : null;
+    const unscopedSource = liveMarkers ?? (Array.isArray(markerContext?.markers) ? markerContext.markers : []);
     const contextEventIds = Array.isArray(marketViewModel?.contextEventIds)
         ? new Set(marketViewModel.contextEventIds) : null;
-    const contextScopeActive = Boolean(marketViewModel?.marketContext?.key && contextEventIds);
+    const contextScopeActive = liveMarkers === null
+        && Boolean(marketViewModel?.marketContext?.key && contextEventIds);
     const source = contextScopeActive ? unscopedSource.filter((marker) => contextEventIds.has(marker?.eventId)) : unscopedSource;
     const normalized = source.map(markerFromContract).filter(Boolean).sort(markerOrder);
-    const summary = contextScopeActive ? scopedSummary(normalized) : formalSummary(markerContext);
+    const summary = liveMarkers !== null || contextScopeActive
+        ? scopedSummary(normalized) : formalSummary(markerContext);
     const bookRows = [...(Array.isArray(marketViewModel?.orderBook?.asks) ? marketViewModel.orderBook.asks : []),
         ...(Array.isArray(marketViewModel?.orderBook?.bids) ? marketViewModel.orderBook.bids : [])];
     const tickSize = marketViewModel?.marketContext?.tickSize;
@@ -186,7 +192,8 @@ export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}
     const allTimeMarkers = markers.filter(({ timestamp }) => timestamp !== DASH);
     const allUnmatched = markers.filter(({ priceMatch, timeMatch }) => !priceMatch && !timeMatch);
     const formalLatestId = markerContext?.latestMarker?.id;
-    const latestMarker = markers.find(({ id }) => id === formalLatestId) ?? null;
+    const latestMarker = liveMarkers !== null ? markers[0] ?? null
+        : markers.find(({ id }) => id === formalLatestId) ?? null;
     const byQuality = Object.fromEntries(REPLAY_DATA_QUALITY.map((quality) => [
         quality, markers.filter((marker) => marker.dataQuality === quality).length,
     ]));
@@ -206,7 +213,7 @@ export function buildReplayMarkerOverlayModel(replayEngine, marketViewModel = {}
         latestMarker,
         summary,
         counts: {
-            visible: contextScopeActive ? markers.length
+            visible: liveMarkers !== null || contextScopeActive ? markers.length
                 : Number.isInteger(markerContext?.count) && markerContext.count >= 0 ? markerContext.count : 0,
             priceMatched: markers.filter(({ priceMatch }) => priceMatch).length,
             timeMatched: markers.filter(({ timeMatch }) => timeMatch).length,

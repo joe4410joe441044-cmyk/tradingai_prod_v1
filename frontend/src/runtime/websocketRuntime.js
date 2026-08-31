@@ -373,6 +373,10 @@ function connectWebSocket() {
                 bestAsk: formalMarket.bestAsk,
                 spread: formalMarket.spread,
                 orderBook: formalMarket.orderBook,
+                recentTrades: formalMarket.recentTrades,
+                tradeStreamReady: formalMarket.tradeStreamReady,
+                markers: formalMarket.markers,
+                markerStatus: formalMarket.markerStatus,
                 dataQuality: formalMarket.dataQuality,
                 lastUpdate: lastPacketTimestamp,
             });

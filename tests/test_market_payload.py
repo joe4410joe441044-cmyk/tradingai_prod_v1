@@ -121,6 +121,18 @@ class BrowserMarketPayloadTest(unittest.TestCase):
                 "dataQuality": "VALID",
                 "syncState": "SYNCED",
             },
+            "recent_trades": [{
+                "symbol": "XRPUSDT",
+                "exchangeSymbol": "XRPUSDTM",
+                "contextKey": "KUCOIN:FUTURES:XRPUSDTM",
+                "tradeId": "trade-1",
+                "timestamp": captured_at,
+                "price": 0.6124,
+                "quantity": 2.0,
+                "side": "BUY",
+                "sequence": 12344,
+            }],
+            "trade_stream_ready": True,
         }
         snapshot = {
             "exchange": "kucoin",
@@ -136,6 +148,20 @@ class BrowserMarketPayloadTest(unittest.TestCase):
             "orderBook": {
                 **callback_snapshot["order_book"],
             },
+            "recentTrades": [{
+                "symbol": "XRPUSDT",
+                "exchangeSymbol": "XRPUSDTM",
+                "contextKey": "KUCOIN:FUTURES:XRPUSDTM",
+                "tradeId": "trade-1",
+                "timestamp": captured_at,
+                "price": 0.6124,
+                "quantity": 2.0,
+                "side": "BUY",
+                "sequence": 12344,
+            }],
+            "tradeStreamReady": True,
+            "markers": [],
+            "markerStatus": "MARKERS_UNAVAILABLE",
         }
         manager._running = True
         manager.market_ready = True
@@ -149,8 +175,9 @@ class BrowserMarketPayloadTest(unittest.TestCase):
         self.assertIsNot(result["market"], manager.market_snapshot)
         self.assertNotIn("bids", result["market"])
         self.assertNotIn("asks", result["market"])
-        self.assertNotIn("recentTrades", result["market"])
-        self.assertNotIn("markers", result["market"])
+        self.assertEqual(result["market"]["recentTrades"], snapshot["recentTrades"])
+        self.assertEqual(result["market"]["markers"], [])
+        self.assertEqual(result["market"]["markerStatus"], "MARKERS_UNAVAILABLE")
 
     def test_get_result_market_contract_is_null_safe_before_first_tick(self):
         manager = BotManager()
@@ -174,6 +201,10 @@ class BrowserMarketPayloadTest(unittest.TestCase):
                 "spread",
                 "dataQuality",
                 "orderBook",
+                "recentTrades",
+                "tradeStreamReady",
+                "markers",
+                "markerStatus",
             },
         )
         self.assertEqual(market["exchange"], "kucoin")
@@ -189,6 +220,10 @@ class BrowserMarketPayloadTest(unittest.TestCase):
         self.assertEqual(market["orderBook"]["bids"], [])
         self.assertEqual(market["orderBook"]["asks"], [])
         self.assertEqual(market["orderBook"]["syncState"], "UNAVAILABLE")
+        self.assertEqual(market["recentTrades"], [])
+        self.assertFalse(market["tradeStreamReady"])
+        self.assertEqual(market["markers"], [])
+        self.assertEqual(market["markerStatus"], "MARKERS_UNAVAILABLE")
 
     def test_stale_status_changes_quality_without_mixing_snapshot_values(self):
         manager = BotManager()

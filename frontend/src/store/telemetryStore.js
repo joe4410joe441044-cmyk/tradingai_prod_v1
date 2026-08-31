@@ -114,6 +114,10 @@ export const telemetryState = {
         price: null,
         bestBid: null,
         bestAsk: null,
+        recentTrades: [],
+        tradeStreamReady: false,
+        markers: [],
+        markerStatus: "MARKERS_UNAVAILABLE",
 
         spread: null,
         orderBook: {

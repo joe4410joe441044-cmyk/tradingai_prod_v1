@@ -10,6 +10,7 @@ import math
 
 from backend.utils.log_buffer import add_log, logger, ws_debug
 from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+from backend.market.recent_trades import RecentMarketTrades
 
 
 def normalize_futures_symbol(symbol):
@@ -120,6 +121,13 @@ class OrderBookWS:
         self.dropped_old_diff_count = 0
 
         self._orderbook_lock = threading.RLock()
+        self._trade_subscription_id = None
+        self.recent_trades = RecentMarketTrades(
+            symbol=self.original_symbol,
+            exchange_symbol=self.symbol,
+            context_key=f"KUCOIN:{self.MARKET_TYPE}:{self.symbol}",
+            maximum=100,
+        )
 
         self._sync_in_progress = False
 
@@ -498,6 +506,7 @@ class OrderBookWS:
                 order_book = self._browser_book_snapshot_locked(
                     self.last_price_update
                 )
+                trade_snapshot = self.recent_trades.snapshot()
                 payload = {
                     "symbol": self.original_symbol,
                     "exchange_symbol": self.symbol,
@@ -511,6 +520,8 @@ class OrderBookWS:
                     "order_book": order_book,
                     "bids": dict(self.bids),
                     "asks": dict(self.asks),
+                    "recent_trades": trade_snapshot["rows"],
+                    "trade_stream_ready": trade_snapshot["ready"],
                     "price_path_debug": {
                         "lastWsPrice": self.last_price,
                         "lastWsReceiveTime": self.last_ws_receive_time,
@@ -567,12 +578,21 @@ class OrderBookWS:
 
             data = json.loads(message)
 
+            if (data.get("type") == "ack"
+                    and data.get("id") == self._trade_subscription_id):
+                self.recent_trades.mark_ready()
+                return
+
             # =========================
             # MESSAGE FILTER
             # =========================
 
             if data.get("type") != "message":
 
+                return
+
+            if data.get("topic") == f"/contractMarket/execution:{self.symbol}":
+                self.recent_trades.append(data.get("data"))
                 return
 
             try:
@@ -635,29 +655,27 @@ class OrderBookWS:
             "success"
         )
 
-        subscribe_data = {
-
-            "id": str(
-                int(time.time() * 1000)
-            ),
-
-            "type": "subscribe",
-
-            "topic": (
-                f"/contractMarket/level2:"
-                f"{self.symbol}"
-            ),
-
-            "privateChannel": False,
-
-            "response": True
-        }
-
-        ws.send(
-            json.dumps(
-                subscribe_data
-            )
+        self.recent_trades.reset()
+        orderbook_subscription_id = str(int(time.time() * 1000))
+        self._trade_subscription_id = f"{orderbook_subscription_id}-trades"
+        subscriptions = (
+            {
+                "id": orderbook_subscription_id,
+                "type": "subscribe",
+                "topic": f"/contractMarket/level2:{self.symbol}",
+                "privateChannel": False,
+                "response": True,
+            },
+            {
+                "id": self._trade_subscription_id,
+                "type": "subscribe",
+                "topic": f"/contractMarket/execution:{self.symbol}",
+                "privateChannel": False,
+                "response": True,
+            },
         )
+        for subscription in subscriptions:
+            ws.send(json.dumps(subscription))
 
         add_log(
             f"📡 SUBSCRIBED: "
@@ -691,6 +709,8 @@ class OrderBookWS:
         close_msg,
     ):
         self.connected = False
+        self._trade_subscription_id = None
+        self.recent_trades.reset()
 
         add_log(
             "🔴 ORDERBOOK WS CLOSED",
@@ -715,6 +735,8 @@ class OrderBookWS:
 
     def on_error(self, ws, error):
         self.connected = False
+        self._trade_subscription_id = None
+        self.recent_trades.reset()
 
         add_log(
             f"❌ ORDERBOOK WS ERROR: "
@@ -884,6 +906,8 @@ class OrderBookWS:
         self.running = False
 
         self.connected = False
+        self._trade_subscription_id = None
+        self.recent_trades.reset()
 
         add_log(
             "🛑 WS STOP",

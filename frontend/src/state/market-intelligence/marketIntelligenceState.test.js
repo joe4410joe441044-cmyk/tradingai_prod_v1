@@ -92,6 +92,10 @@ const loadProviderModule = async () => {
         stateDirectory,
         "../../features/market-intelligence/market/marketContextSelection.js",
     )).href;
+    const autoMarketViewStateUrl = pathToFileURL(join(
+        stateDirectory,
+        "../../features/market-intelligence/market/autoMarketViewState.js",
+    )).href;
     const dashboardContextStub = "data:text/javascript,export const useOptionalDashboardMarketContext=()=>globalThis.__DASHBOARD_MARKET_CONTEXT__??null";
     const runtimeTelemetryStub = "data:text/javascript,export const useRuntimeMarketTelemetry=()=>globalThis.__RUNTIME_MARKET_TELEMETRY__??({market:{},runtime:{}})";
     const code = transformed.code
@@ -119,6 +123,10 @@ const loadProviderModule = async () => {
         .replace(
             'from "../dashboard-market/DashboardMarketContext.jsx";',
             `from "${dashboardContextStub}";`,
+        )
+        .replace(
+            'from "../../features/market-intelligence/market/autoMarketViewState.js";',
+            `from "${autoMarketViewStateUrl}";`,
         )
         .replace(
             'from "../../hooks/useRuntimeMarketTelemetry.js";',

@@ -146,6 +146,15 @@ def test_auto_handoff_starts_auto_and_becomes_auto():
     assert manager.auto_market_selection_lifecycle.stopped == 0
 
 
+def test_auto_start_preparation_defers_lifecycle_handoff_until_feed_is_running():
+    manager = _bare_manager()
+
+    assert manager._prepare_selection_mode_start("AUTO") == "AUTO"
+    assert manager.selection_mode == "MANUAL"
+    assert manager.auto_market_selection_lifecycle.started == 0
+    assert manager.auto_market_selection_lifecycle.stopped == 0
+
+
 @pytest.mark.parametrize("value", ["BOGUS", "", None, 42])
 def test_invalid_or_missing_handoff_falls_back_to_manual(value):
     manager = _bare_manager()

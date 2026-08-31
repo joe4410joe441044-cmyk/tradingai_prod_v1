@@ -139,7 +139,8 @@ export function validateReplayMarker(marker) {
             errors.push(error(field, "INVALID_TYPE", `${field} must be a boolean.`));
         }
     }
-    if (Object.hasOwn(marker, "source") && !REPLAY_EVENT_SOURCES.includes(marker.source)) {
+    if (Object.hasOwn(marker, "source")
+        && ![...REPLAY_EVENT_SOURCES, "PAPER_RUNTIME"].includes(marker.source)) {
         errors.push(error("source", "UNKNOWN_VALUE", "source is not supported."));
     }
     if (Object.hasOwn(marker, "eventType") && !REPLAY_EVENT_TYPES.includes(marker.eventType)) {

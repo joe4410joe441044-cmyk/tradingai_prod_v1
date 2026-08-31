@@ -265,12 +265,19 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
 
         client.on_open(ws)
 
-        subscription = json.loads(ws.send.call_args.args[0])
+        subscriptions = [
+            json.loads(item.args[0]) for item in ws.send.call_args_list
+        ]
         self.assertEqual(
-            subscription["topic"],
-            "/contractMarket/level2:XRPUSDTM",
+            [item["topic"] for item in subscriptions],
+            [
+                "/contractMarket/level2:XRPUSDTM",
+                "/contractMarket/execution:XRPUSDTM",
+            ],
         )
-        self.assertFalse(subscription["privateChannel"])
+        self.assertTrue(all(
+            not item["privateChannel"] for item in subscriptions
+        ))
         client._start_snapshot_sync.assert_called_once_with()
 
     def test_kucoin_snapshot_tracks_sequence(self):

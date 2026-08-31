@@ -13,6 +13,7 @@ import {
     runtimeMarketMatchesContext,
 } from "../../features/market-intelligence/market/marketContextSelection.js";
 import { useRuntimeMarketTelemetry } from "../../hooks/useRuntimeMarketTelemetry.js";
+import { projectAutoMarketViewState } from "../../features/market-intelligence/market/autoMarketViewState.js";
 import { useOptionalDashboardMarketContext } from "../dashboard-market/DashboardMarketContext.jsx";
 
 export const MarketIntelligenceContext = createContext(null);
@@ -79,6 +80,14 @@ export function MarketIntelligenceProvider({ children }) {
     }), [liveAuthorityContext, replayMarketModel, state.replayEngine]);
     const normalizedMarketModel = isReplayMarketContextActive(state.replayEngine)
         ? replayMarketModel : liveMarketModel;
+    const autoMarketSelectionStatus = (
+        runtimeTelemetry.runtime?.botStatus?.autoMarketSelection ?? null
+    );
+    const marketViewDisplayState = projectAutoMarketViewState({
+        contextMode: activeMarket.mode,
+        marketModel: normalizedMarketModel,
+        selectionStatus: autoMarketSelectionStatus,
+    });
     const contextValue = useMemo(() => ({
         state,
         dispatch,
@@ -87,7 +96,9 @@ export function MarketIntelligenceProvider({ children }) {
         marketContext: activeMarket.context,
         marketContextMode: activeMarket.mode,
         normalizedMarketModel,
-    }), [activeMarket, applyReplayCommand, normalizedMarketModel, state]);
+        autoMarketSelectionStatus,
+        marketViewDisplayState,
+    }), [activeMarket, applyReplayCommand, autoMarketSelectionStatus, marketViewDisplayState, normalizedMarketModel, state]);
 
     return (
         <MarketIntelligenceContext.Provider value={contextValue}>

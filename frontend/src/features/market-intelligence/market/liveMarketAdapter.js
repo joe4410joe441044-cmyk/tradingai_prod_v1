@@ -31,10 +31,11 @@ export function normalizeLiveMarketModel({
     const connected = connectionValue.connected ?? runtimeValue.websocketConnected
         ?? runtimeValue.wsStatus === "LIVE";
     const unavailable = connected === false;
-    const issues = [
-        NORMALIZED_MARKET_ISSUES.TRADES_UNAVAILABLE,
-        NORMALIZED_MARKET_ISSUES.MARKERS_UNAVAILABLE,
-    ];
+    const tradeStreamReady = marketValue.tradeStreamReady === true;
+    const markersReady = marketValue.markerStatus === "READY" && Array.isArray(marketValue.markers);
+    const issues = [];
+    if (!markersReady) issues.push(NORMALIZED_MARKET_ISSUES.MARKERS_UNAVAILABLE);
+    if (!tradeStreamReady) issues.push(NORMALIZED_MARKET_ISSUES.TRADES_UNAVAILABLE);
     if (staleResult.issue) issues.push(staleResult.issue);
     const timestampStatus = staleResult.issue === NORMALIZED_MARKET_ISSUES.SOURCE_TIMESTAMP_INVALID
         ? "INVALID" : staleResult.issue === NORMALIZED_MARKET_ISSUES.SOURCE_TIMESTAMP_MISSING
@@ -74,8 +75,8 @@ export function normalizeLiveMarketModel({
         bestBid,
         bestAsk,
         orderBook: book,
-        recentTrades: [],
-        markers: [],
+        recentTrades: tradeStreamReady ? marketValue.recentTrades : [],
+        markers: markersReady ? marketValue.markers : [],
         issues,
         status: unavailable || bookQuality === "UNAVAILABLE" ? "UNAVAILABLE"
             : bookQuality === "INVALID" || syncState === "UNSYNCED" ? "INVALID"
