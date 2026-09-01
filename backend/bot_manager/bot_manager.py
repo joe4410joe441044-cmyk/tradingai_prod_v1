@@ -3768,6 +3768,10 @@ class BotManager:
                 "RUNNING"
             )
 
+            self._handoff_money_management_runtime_baseline(
+                current_session
+            )
+
             # Starting the bot establishes monitoring infrastructure only.
             # Loop and AUTO TRADE remain explicitly disabled.
             self._set_loop_state("STOPPED")
@@ -4242,6 +4246,85 @@ class BotManager:
                 event_type,
             )
             return None
+
+    def _handoff_money_management_runtime_baseline(self, current_session):
+
+        """Dispatch a complete current-session baseline after RUNNING."""
+
+        if (
+            self.lifecycle_state != "RUNNING"
+            or self.session_id != current_session
+            or self.money_management_runtime_baseline_session
+            == current_session
+        ):
+            return None
+
+        metrics = self.money_management_runtime_metrics.snapshot()
+        if (
+            metrics.runtime_instance_id != self.runtime_instance_id
+            or metrics.session_id != current_session
+        ):
+            return None
+
+        event_type = "BALANCE_UPDATE"
+        event_key = (
+            f"{self.runtime_instance_id}:"
+            f"{current_session}:BASELINE:{event_type}"
+        )
+        if not metrics.is_complete:
+            startup_values_complete = all(
+                getattr(metrics, name, None) is not None
+                for name in (
+                    "current_equity",
+                    "balance",
+                    "available_balance",
+                    "realized_pnl",
+                    "unrealized_pnl",
+                    "peak_equity",
+                    "current_drawdown_amount",
+                    "current_drawdown_pct",
+                    "daily_realized_pnl",
+                    "weekly_realized_pnl",
+                    "monthly_realized_pnl",
+                    "open_exposure",
+                    "position_count",
+                )
+            ) and bool(
+                metrics.session_trade_count is not None
+                and metrics.trade_count_authority_scope
+                == "RUNTIME_SESSION"
+                and metrics.trade_count_authority_session_id
+                == current_session
+            )
+            if not (
+                getattr(metrics, "source_state", None) == "STARTING"
+                and getattr(metrics, "observation_valid", False)
+                and startup_values_complete
+            ):
+                return None
+            metrics = self._observe_money_management_runtime_metrics(
+                self._money_management_runtime_event_signature(),
+                None,
+                event_key,
+            )
+            if (
+                metrics is None
+                or metrics.runtime_instance_id != self.runtime_instance_id
+                or metrics.session_id != current_session
+                or not metrics.is_complete
+            ):
+                return None
+        hook_result = self._notify_money_management_runtime_event(
+            event_type,
+            event_key,
+        )
+        if getattr(
+            getattr(hook_result, "status", None),
+            "value",
+            None,
+        ) in ("DISPATCHED", "DUPLICATE"):
+            self.money_management_runtime_baseline_session = current_session
+        return hook_result
 
     def _money_management_runtime_event_signature(self):
 

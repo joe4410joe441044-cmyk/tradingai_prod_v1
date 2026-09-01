@@ -10,10 +10,13 @@ All tests are isolated mocks; no production runtime mutation.
 
 import math
 import os
+import time
 
 os.environ.setdefault("TEST_MODE", "1")
 
+from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -24,6 +27,8 @@ from backend.money_management.enums import (
     TradingMode,
 )
 from backend.money_management.models import MoneyManagementConfig
+from backend.money_management.loss_runtime_integration_models import StateSource
+from tests.test_money_management_loss_authoritative_runtime_metrics import persisted
 
 
 def D(value):
@@ -503,6 +508,193 @@ def test_engine_propagation_unknown_not_coerced_to_zero():
         assert manager.engine.config["max_drawdown_pct"] > 0
         assert manager.config["max_drawdown_pct"] != 0
         assert manager.config["max_drawdown_pct"] > 0
+    finally:
+        positions_router.set_engine(previous_positions_engine)
+        if execution_runtime is not None:
+            execution_runtime.set_engine(previous_runtime_engine)
+
+
+def _complete_startup_metrics(manager, session_id):
+    return SimpleNamespace(
+        runtime_instance_id=manager.runtime_instance_id,
+        session_id=session_id,
+        is_complete=True,
+        position_count=0,
+        open_exposure=D("0"),
+        available_balance=D("1000"),
+    )
+
+
+def _dispatch_result(value="DISPATCHED"):
+    return SimpleNamespace(status=SimpleNamespace(value=value))
+
+
+def test_post_running_mm_baseline_hands_off_starting_observation_once():
+    manager = BotManager()
+    manager.session_id = 1
+    metrics = _complete_startup_metrics(manager, 1)
+    manager.money_management_runtime_metrics.snapshot = lambda: metrics
+    calls = []
+    manager._notify_money_management_runtime_event = (
+        lambda event_type, event_key: calls.append(
+            (manager.lifecycle_state, event_type, event_key)
+        ) or _dispatch_result()
+    )
+
+    manager.lifecycle_state = "STARTING"
+    assert manager._handoff_money_management_runtime_baseline(1) is None
+    assert calls == []
+
+    manager.lifecycle_state = "RUNNING"
+    result = manager._handoff_money_management_runtime_baseline(1)
+
+    assert result.status.value == "DISPATCHED"
+    assert calls == [(
+        "RUNNING",
+        "BALANCE_UPDATE",
+        f"{manager.runtime_instance_id}:1:BASELINE:BALANCE_UPDATE",
+    )]
+    assert manager.money_management_runtime_baseline_session == 1
+    assert metrics.position_count == 0
+    assert metrics.open_exposure == D("0")
+    assert metrics.available_balance == D("1000")
+
+
+def test_post_running_mm_baseline_is_safe_when_callback_already_dispatched():
+    manager = BotManager()
+    manager.session_id = 2
+    manager.lifecycle_state = "RUNNING"
+    manager.money_management_runtime_baseline_session = 2
+    manager.money_management_runtime_metrics.snapshot = Mock(
+        side_effect=AssertionError("already handed off")
+    )
+    manager._notify_money_management_runtime_event = Mock()
+
+    assert manager._handoff_money_management_runtime_baseline(2) is None
+    manager.money_management_runtime_metrics.snapshot.assert_not_called()
+    manager._notify_money_management_runtime_event.assert_not_called()
+
+
+def test_post_running_mm_baseline_rejects_invalid_or_wrong_session_metrics():
+    manager = BotManager()
+    manager.session_id = 3
+    manager.lifecycle_state = "RUNNING"
+    manager._notify_money_management_runtime_event = Mock()
+
+    for session_id, complete in ((2, True), (3, False)):
+        manager.money_management_runtime_metrics.snapshot = lambda: SimpleNamespace(
+            runtime_instance_id=manager.runtime_instance_id,
+            session_id=session_id,
+            is_complete=complete,
+        )
+        assert manager._handoff_money_management_runtime_baseline(3) is None
+
+    manager._notify_money_management_runtime_event.assert_not_called()
+    assert manager.money_management_runtime_baseline_session is None
+
+
+def test_post_running_mm_baseline_never_dispatches_after_stop():
+    manager = BotManager()
+    manager.session_id = 4
+    manager.lifecycle_state = "STOPPED"
+    manager.money_management_runtime_metrics.snapshot = Mock(
+        side_effect=AssertionError("stopped state must not inspect startup metrics")
+    )
+    manager._notify_money_management_runtime_event = Mock()
+
+    assert manager._handoff_money_management_runtime_baseline(4) is None
+    manager.money_management_runtime_metrics.snapshot.assert_not_called()
+    manager._notify_money_management_runtime_event.assert_not_called()
+
+
+def test_start_synchronous_first_callback_hands_baseline_off_after_running():
+    from backend.routers import positions as positions_router
+    from backend.runtime import runtime_registry
+
+    previous_positions_engine = positions_router.engine
+    execution_runtime = (
+        getattr(runtime_registry.trading_runtime, "execution_runtime", None)
+        if runtime_registry.trading_runtime is not None
+        else None
+    )
+    previous_runtime_engine = (
+        getattr(execution_runtime, "engine", None)
+        if execution_runtime is not None
+        else None
+    )
+    manager = BotManager()
+    manager.money_management_runtime_metrics.restore(
+        persisted(),
+        StateSource.INITIAL_STATE,
+        datetime.now(timezone.utc),
+    )
+    manager.configure_money_management_config_provider(
+        lambda: _mm_config(D("7.00")),
+    )
+    observed_lifecycles = []
+    dispatched = []
+    original_observe = manager._observe_money_management_runtime_metrics
+
+    def observe(*args, **kwargs):
+        observed_lifecycles.append(manager.lifecycle_state)
+        return original_observe(*args, **kwargs)
+
+    manager._observe_money_management_runtime_metrics = observe
+    manager.set_money_management_runtime_hook(
+        lambda event_type, event_key: dispatched.append(
+            (manager.lifecycle_state, event_type, event_key)
+        ) or _dispatch_result()
+    )
+
+    def create_ws(**kwargs):
+        callback = kwargs["on_update"]
+        runtime_id = kwargs["runtime_id"]
+        return SimpleNamespace(
+            MARKET_TYPE="spot",
+            connected=False,
+            start=lambda: callback(
+                "XRPUSDT",
+                {
+                    "symbol": "XRPUSDT",
+                    "bids": {"99": "1"},
+                    "asks": {"101": "1"},
+                    "price": 100,
+                    "best_bid": 99,
+                    "best_ask": 101,
+                    "timestamp": time.time(),
+                },
+                runtime_id,
+            ),
+        )
+
+    config = {
+        "symbol": "XRPUSDT", "exchange": "kucoin",
+        "mode": "paper", "dry_run": True, "risk_percent": 1,
+        "position_size": 100, "max_drawdown_pct": 7,
+        "sl_percent": 0.5, "tp_percent": 1, "timeframe": "5m",
+        "trailing_stop": True, "leverage": 4.0,
+    }
+    try:
+        with patch(
+            "backend.bot_manager.bot_manager.ExchangeFactory.create_market_ws",
+            side_effect=create_ws,
+        ):
+            result = manager.start(config)
+
+        metrics = manager.money_management_runtime_metrics.snapshot()
+        assert result["status"] == "started"
+        assert observed_lifecycles == ["STARTING", "RUNNING"]
+        assert dispatched == [(
+            "RUNNING",
+            "BALANCE_UPDATE",
+            f"{manager.runtime_instance_id}:1:BASELINE:BALANCE_UPDATE",
+        )]
+        assert manager.lifecycle_state == "RUNNING"
+        assert manager.money_management_runtime_baseline_session == 1
+        assert metrics.is_complete is True
+        assert metrics.position_count == 0
+        assert metrics.open_exposure == D("0")
+        assert metrics.available_balance == D("1000.0")
     finally:
         positions_router.set_engine(previous_positions_engine)
         if execution_runtime is not None:
