@@ -76,3 +76,10 @@ test("Dashboard no longer renders the standalone Auto Market Selection card", as
     assert.doesNotMatch(dashboard, /AutoMarketSelectionCard/);
     assert.doesNotMatch(dashboard, /data-testid=["']auto-market-selection-card/);
 });
+
+test("Dashboard connects the formal AUTO candidate and readiness to Operation", async () => {
+    const dashboard = await readFile(new URL("./Dashboard.jsx", import.meta.url), "utf8");
+    assert.match(dashboard, /displaySymbol: botStatus\?\.autoMarketSelection\?\.topCandidate\?\.symbol/);
+    assert.match(dashboard, /autoMarketState: botStatus\?\.autoMarketSelection\?\.productionIntegration\?\.status/);
+    assert.doesNotMatch(dashboard, /displaySymbol: botStatus\?\.activeSymbol/);
+});

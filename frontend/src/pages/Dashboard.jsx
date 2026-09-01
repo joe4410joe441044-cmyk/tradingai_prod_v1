@@ -328,8 +328,8 @@ useEffect(() => {
                             config={{
                                 ...tradeSettings,
                                 selectionMode: tradeSettings.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
-                                displaySymbol: botStatus?.activeSymbol || botStatus?.autoMarketSelection?.activeSymbol,
-                                autoMarketState: botStatus?.autoMarketSelection?.autoRuntime?.runtimeState || "NOT AVAILABLE",
+                                displaySymbol: botStatus?.autoMarketSelection?.topCandidate?.symbol,
+                                autoMarketState: botStatus?.autoMarketSelection?.productionIntegration?.status || "NOT AVAILABLE",
                                 executionMode: botStatus?.executionMode || botStatus?.execution_mode,
                                 realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,
                                 realOrderAuthorityKnown: typeof botStatus?.realOrderAllowed === "boolean"

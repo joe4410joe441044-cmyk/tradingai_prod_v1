@@ -179,6 +179,7 @@ export const deriveOperationReadiness = ({
         ["READY", "RUNNING", "AVAILABLE"],
     );
     const selectedRuntimeSymbol = selectionMode === "AUTO"
+        && selectionRuntime === "READY"
         && displaySymbol
         && !["UNKNOWN", "NOT AVAILABLE"].includes(String(displaySymbol).toUpperCase())
         ? displaySymbol
