@@ -80,10 +80,21 @@ test("PAPER stopped recovery remains an entry guard, not a BOT START guard", () 
     assert.equal(result.entryReady, false);
 });
 
-test("AUTO pre-start accepts a formal selected runtime symbol while lifecycle is observing", () => {
+test("AUTO pre-start rejects a stale candidate while runtime is not ready", () => {
     const result = deriveOperationReadiness(readyInputs({
         selectionMode: "AUTO",
         autoMarketState: "OBSERVING",
+        displaySymbol: "YGGUSDT",
+    }));
+    assert.equal(result.selectedRuntimeSymbol, null);
+    assert.equal(result.selectionReadiness, "OBSERVING");
+    assert.equal(result.startReady, false);
+});
+
+test("AUTO pre-start accepts the formal candidate only while runtime is ready", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        selectionMode: "AUTO",
+        autoMarketState: "READY",
         displaySymbol: "YGGUSDT",
     }));
     assert.equal(result.selectedRuntimeSymbol, "YGGUSDT");
