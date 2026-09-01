@@ -306,6 +306,38 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
         self.assertEqual(client.snapshot_sequence, 20)
         self.assertEqual(client.last_sequence_end, 20)
 
+    def test_kucoin_snapshot_publishes_ready_book_without_cached_diff(self):
+        response = Mock()
+        response.json.return_value = {
+            "data": {
+                "sequence": 20,
+                "bids": [["0.50", "100"]],
+                "asks": [["0.51", "90"]],
+            },
+        }
+        client = KuCoinFuturesOrderBookWS(
+            symbol="C98USDT",
+            on_update=Mock(),
+            runtime_id="runtime-test",
+        )
+
+        with patch(
+            "backend.market.exchanges.kucoin_market_ws.requests.get",
+            return_value=response,
+        ):
+            synced = client.load_snapshot()
+
+        self.assertTrue(synced)
+        client.on_update.assert_called_once()
+        symbol, payload, runtime_id = client.on_update.call_args.args
+        self.assertEqual(symbol, "C98USDT")
+        self.assertEqual(runtime_id, "runtime-test")
+        self.assertEqual(payload["exchange_symbol"], "C98USDTM")
+        self.assertEqual(payload["sequence"], 20)
+        self.assertEqual(payload["order_book"]["dataQuality"], "VALID")
+        self.assertTrue(payload["bids"])
+        self.assertTrue(payload["asks"])
+
     @staticmethod
     def _kucoin_message(sequence, change):
         return json.dumps({

@@ -253,8 +253,7 @@ class OrderBookWS:
                 debug,
             )
 
-            if replayed_diff is not None:
-                self._publish_current_book(replayed_diff)
+            self._publish_current_book(replayed_diff)
 
             return True
 
@@ -484,7 +483,7 @@ class OrderBookWS:
         with self._orderbook_lock:
             return self._get_orderbook_debug_locked()
 
-    def _publish_current_book(self, diff):
+    def _publish_current_book(self, diff=None):
 
         with self._orderbook_lock:
             if not self.is_orderbook_synced:
@@ -538,20 +537,21 @@ class OrderBookWS:
             self._start_snapshot_sync(is_resync=True)
             return
 
-        ws_debug(
-            "KuCoin delta sequenceStart=%s sequenceEnd=%s "
-            "side=%s price=%s size=%s best_bid=%s best_ask=%s "
-            "mid_price=%s spread=%s",
-            diff["sequence_start"],
-            diff["sequence_end"],
-            diff["side"],
-            diff["price"],
-            diff["size"],
-            payload["best_bid"],
-            payload["best_ask"],
-            payload["price"],
-            payload["spread"],
-        )
+        if diff is not None:
+            ws_debug(
+                "KuCoin delta sequenceStart=%s sequenceEnd=%s "
+                "side=%s price=%s size=%s best_bid=%s best_ask=%s "
+                "mid_price=%s spread=%s",
+                diff["sequence_start"],
+                diff["sequence_end"],
+                diff["side"],
+                diff["price"],
+                diff["size"],
+                payload["best_bid"],
+                payload["best_ask"],
+                payload["price"],
+                payload["spread"],
+            )
 
         self.on_update(
             self.original_symbol,
