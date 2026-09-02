@@ -22,7 +22,11 @@ const modelSource =
 '    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],' + "\n" +
 '    maxExposure: [10, 20, 30, 40, 50],' + "\n" +
 '    maxDrawdown: [5, 7, 10],' + "\n" +
-'    requestedLeverage: [1, 2, 3, 4, 5, 10],' + "\n" +
+'    requestedLeverage: [1, 2, 3, 4, 5, 7, 10],' + "\n" +
+'    positionSize: [0, 25, 50, 75, 100],' + "\n" +
+'    stopLossPercent: [0.25, 0.5, 0.75, 1, 1.5, 2],' + "\n" +
+'    takeProfitPercent: [0.5, 1, 1.5, 2, 3, 5],' + "\n" +
+'    timeframes: ["1m", "5m", "15m", "1h"],' + "\n" +
 ' });' + "\n" +
 "\n" +
 'const supportedValue = (values, candidate, fallback) => (' + "\n" +
@@ -50,6 +54,11 @@ const modelSource =
 '        Number(config.leverage),' + "\n" +
 '        3,' + "\n" +
 '    ),' + "\n" +
+'    positionSize: config.positionSize == null ? 0 : Number(config.positionSize),' + "\n" +
+'    stopLossPercent: config.sl == null ? 1 : Number(config.sl),' + "\n" +
+'    takeProfitPercent: config.tp == null ? 2 : Number(config.tp),' + "\n" +
+'    trailingStop: config.trailing === true,' + "\n" +
+'    timeframe: supportedValue(OPERATION_PREPARATION_OPTIONS.timeframes, String(config.timeframe || ""), "1m"),' + "\n" +
 '    loopOnStart: Boolean(config.loopOnStart),' + "\n" +
 '    autoTradeOnStart: Boolean(config.autoTradeOnStart),' + "\n" +
 ' });' + "\n" +
@@ -64,6 +73,11 @@ const modelSource =
 '        ? `${Number(riskPerTradePercent).toFixed(2)}%`' + "\n" +
 '        : "UNAVAILABLE",' + "\n" +
 '    requestedLeverage: `${settings.requestedLeverage}x`,' + "\n" +
+'    positionSize: String(settings.positionSize) + " USDT",' + "\n" +
+'    stopLoss: String(settings.stopLossPercent) + "%",' + "\n" +
+'    takeProfit: String(settings.takeProfitPercent) + "%",' + "\n" +
+'    trailingStop: settings.trailingStop ? "ON" : "OFF",' + "\n" +
+'    timeframe: settings.timeframe,' + "\n" +
 '    loop: settings.loopOnStart ? "ON" : "OFF",' + "\n" +
 '    autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",' + "\n" +
 ' });' + "\n" +
@@ -312,7 +326,7 @@ test("renders all six preparation sections, controls, derived fields, and existi
     assert.equal(findButton(renderer.root, "AUTO").props["aria-pressed"], true);
     assert.equal(findSelect(renderer.root, "operation-prep-symbol"), undefined);
     assert.equal(content.includes("AUTO SELECT"), true);
-    assert.equal(content.includes("PREVIEW"), true);
+    assert.equal(content.includes("NOT CONNECTED"), true);
     assert.equal(content.includes("UI-FIRST"), false);
     assert.equal(descendants(renderer.root).some(
         (node) => node.type === "a" && node.props.href === "/market-intelligence",
@@ -346,9 +360,6 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     assert.deepEqual(orderedTestIds.filter((testId, index) => indexes[index] < 0), []);
     assert.deepEqual(indexes, [...indexes].sort((left, right) => left - right));
 
-    const startIndex = nodes.findIndex(
-        (node) => node.type === "button" && normalizedText(node) === "START BOT",
-    );
     // Note: UI-9 integrates Emergency section into OperationPreparation,
     // shifting node indices. The following assertions are adjusted accordingly.
     assert.equal(normalizedText(findTestId(renderer.root, "automation-section")).includes("LOOP ON START"), true);
@@ -887,4 +898,24 @@ test("DASH4A: A-R1 requested leverage at MM max is allowed", async () => {
     }));
     assert.equal(result.startReady, true);
     assert.equal(result.leverageReadiness, "READY");
+});
+
+
+test("trade/execution fields preserve distinct nondefault values and runtime summary", async () => {
+    const legacyChanges = [];
+    const Component = await loadComponent();
+    const config = { mode: "PAPER", selectionMode: "MANUAL", symbol: "ETHUSDTM", leverage: 4, positionSize: 75, sl: 1.5, tp: 3, timeframe: "15m", trailing: true };
+    const renderer = createRenderer(Component, { config, botRunning: false, onLegacyConfigChange: (update) => legacyChanges.push(update) });
+    const content = normalizedText(descendants(renderer.root));
+    for (const expected of ["75 USDT", "1.5%", "3%", "15m", "TRAILING STOP"]) {
+        assert.equal(content.includes(expected), true, expected);
+    }
+    findSelect(renderer.root, "operation-prep-position-size").props.onChange({ target: { value: "50" } });
+    findSelect(renderer.root, "operation-prep-stop-loss").props.onChange({ target: { value: "0.75" } });
+    findSelect(renderer.root, "operation-prep-take-profit").props.onChange({ target: { value: "5" } });
+    findSelect(renderer.root, "operation-prep-timeframe").props.onChange({ target: { value: "1h" } });
+    assert.ok(legacyChanges.some((change) => change.positionSize === 50));
+    assert.ok(legacyChanges.some((change) => change.sl === 0.75));
+    assert.ok(legacyChanges.some((change) => change.tp === 5));
+    assert.ok(legacyChanges.some((change) => change.timeframe === "1h"));
 });

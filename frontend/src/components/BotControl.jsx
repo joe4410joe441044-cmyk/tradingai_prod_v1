@@ -732,8 +732,10 @@ export default function BotControl({
         mmRecoveryRequired: mmStatus?.recoveryRequired || false,
         mmConfigurationError: Boolean(mmConfigurationError),
         paperBootstrapEligible: config?.paperBootstrapEligible,
+        loopOnStart: startSettings.loopOnStart,
+        autoTradeOnStart: startSettings.autoTradeOnStart,
     });
-    const { startReady, automationReady } = startReadiness;
+    const { startReady } = startReadiness;
     const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)
@@ -880,6 +882,8 @@ export default function BotControl({
                     trailing_stop: config?.trailing === true,
                     dry_run: startSettings.tradingMode === "PAPER",
                     mode: startSettings.tradingMode.toLowerCase(),
+                    loop_on_start: isLiveMode ? false : startSettings.loopOnStart,
+                    auto_trade_on_start: isLiveMode ? false : startSettings.autoTradeOnStart,
                 }),
             });
             const result = await response.json().catch(() => null);
@@ -890,39 +894,16 @@ export default function BotControl({
                 throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
             }
 
-            // Handle automation on start
-            if (startSettings.loopOnStart && automationReady) {
-                try {
-                    await startLoop();
-                } catch (error) {
-                    console.error("LOOP ON START ERROR", error);
-                    setLoopError(formatLoopError(error, true));
-                }
+            if (result?.loopState === "RUNNING") {
+                setLoopError(null);
             }
-
-            if (startSettings.autoTradeOnStart && automationReady) {
-                try {
-                    const executionResult = await setExecutionEnabled(true);
-
-                    if (executionResult.execution_enabled !== true) {
-                        const error = new Error("Governance response did not confirm Auto Trade state.");
-                        error.code = "AUTO_TRADE_STATE_MISMATCH";
-                        error.status = 200;
-                        error.data = executionResult;
-                        throw error;
-                    }
-
-                    updateExecutionRuntimeTelemetry({
-                        executionAllowed: true,
-                        governanceReason: "START_AUTO_TRADE_ENABLE",
-                        suppressionReason: "NONE",
-                    });
-
-                    setExecutionEnabledState(true);
-                } catch (error) {
-                    console.error("AUTO TRADE ON START ERROR", error);
-                    setAutoTradeError(formatAutoTradeError(error));
-                }
+            if (result?.autoTradeEnabled === true) {
+                updateExecutionRuntimeTelemetry({
+                    executionAllowed: true,
+                    governanceReason: "START_AUTO_TRADE_ENABLE",
+                    suppressionReason: "NONE",
+                });
+                setExecutionEnabledState(true);
             }
 
             await refreshStatusSafely();
@@ -1386,8 +1367,8 @@ export default function BotControl({
 
                         <div className="operation-live-confirm__body">
                             <p>
-                                現在のモードはLIVEです。
-                                実際の注文が送信される可能性があります。
+                                LIVE runtimeをDISARMEDで開始します。
+                                Market Data / Monitoringのみを起動し、実注文は許可しません。
                                 本当にBOTをスタートさせますか？
                             </p>
 
@@ -1418,13 +1399,17 @@ export default function BotControl({
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Execution Authority:</span>
-                                    <strong>{executionEnabled ? "ENABLED" : "DISABLED"}</strong>
+                                    <strong>DISABLED</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Real Order Authority:</span>
                                     <strong className="operation-live-confirm__danger">
-                                        {config?.realOrderAllowed === true ? "ALLOWED" : "BLOCKED"}
+                                        DISABLED
                                     </strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>Loop / Auto Trade:</span>
+                                    <strong>OFF / OFF</strong>
                                 </div>
                             </div>
                             {!liveConfirmAllowed && (

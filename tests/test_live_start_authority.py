@@ -257,3 +257,61 @@ def test_requested_leverage_at_or_below_mm_max_allowed():
     result = resolve_effective_leverage(D("5"), D("5"))
     assert result.allowed is True
     assert result.effective_leverage == D("5")
+
+
+# LIVE DISARMED runtime/order authority separation
+
+def test_live_disarmed_rejects_loop_or_auto_intent_before_side_effects():
+    manager = _live_authorized_manager()
+    manager.get_authoritative_pending_order_state = Mock(return_value={
+        "known": True, "pending": False, "safe": True,
+    })
+    with patch.object(backend_config, "ALLOW_LIVE", True), patch.object(
+        backend_config, "TRADE_MODE", "live"
+    ):
+        result = manager.start(_live_config(loop_on_start=True))
+    _assert_live_rejected(
+        result, "LIVE_DISARMED_REQUIRES_LOOP_AND_AUTO_OFF"
+    )
+
+
+def test_live_disarmed_blocks_auto_trade_mutation():
+    manager = _bare_manager(
+        config={
+            "mode": "live",
+            "liveOrderEntryAllowed": False,
+        },
+    )
+    result = manager.set_execution_enabled(True)
+    assert result == {
+        "success": False,
+        "reason": "LIVE_ORDER_ENTRY_DISARMED",
+        "execution_enabled": False,
+    }
+
+
+def test_start_config_rejects_live_automation_intent():
+    from pydantic import ValidationError
+    from backend.api.bot_api import StartConfig
+
+    with pytest.raises(ValidationError, match="LIVE_DISARMED_REQUIRES_LOOP_AND_AUTO_OFF"):
+        StartConfig(**_live_config(loop_on_start=True))
+
+
+def test_execution_engine_final_guard_blocks_disarmed_live_before_mm():
+    from Bot.engine.execution_engine import ExecutionEngine
+
+    engine = ExecutionEngine.__new__(ExecutionEngine)
+    engine.mode = "live"
+    engine.config = {
+        "realOrderAllowed": False,
+        "executionEntryAllowed": False,
+        "liveOrderEntryAllowed": False,
+    }
+    allowed, rejection = engine._evaluate_execution_entry_guard({
+        "symbol": "XRPUSDTM", "side": "BUY", "qty": 1,
+    })
+    assert allowed is False
+    assert rejection["reason"] == "LIVE_ORDER_ENTRY_DISARMED"
+    assert rejection["providerCall"] is False
+    assert rejection["exchangeCall"] is False

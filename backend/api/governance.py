@@ -48,47 +48,10 @@ async def set_execution(payload: dict):
         "enabled",
         False,
     ))
-
-    if enabled:
-        if governance_state.get("emergency_stop", False):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "AUTO_TRADE_BLOCKED_BY_EMERGENCY_LOCK",
-                    "execution_enabled": (
-                        governance_state["execution_enabled"]
-                    ),
-                    "emergency_stop": (
-                        governance_state["emergency_stop"]
-                    ),
-                },
-            )
-
-        bot_manager = get_bot_manager()
-        loop_running = (
-            bool(getattr(bot_manager, "_running", False))
-            and getattr(bot_manager, "lifecycle_state", None) == "RUNNING"
-            and getattr(bot_manager, "loop_state", None) == "RUNNING"
-        )
-
-        if not loop_running:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "AUTO_TRADE_REQUIRES_LOOP_ON",
-                    "execution_enabled": (
-                        governance_state["execution_enabled"]
-                    ),
-                },
-            )
-
-    governance_state["execution_enabled"] = enabled
-
-    return {
-        "success": True,
-        "execution_enabled":
-            governance_state["execution_enabled"],
-    }
+    result = get_bot_manager().set_execution_enabled(enabled)
+    if result.get("success") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 # ============================================================

@@ -167,6 +167,11 @@ export default function OperationPreparation({
         if (key === "loopOnStart") onLegacyConfigChange({ loopOnStart: value });
         if (key === "autoTradeOnStart") onLegacyConfigChange({ autoTradeOnStart: value });
         if (key === "requestedLeverage") onLegacyConfigChange({ leverage: value });
+        if (key === "positionSize") onLegacyConfigChange({ positionSize: value });
+        if (key === "stopLossPercent") onLegacyConfigChange({ sl: value });
+        if (key === "takeProfitPercent") onLegacyConfigChange({ tp: value });
+        if (key === "trailingStop") onLegacyConfigChange({ trailing: value });
+        if (key === "timeframe") onLegacyConfigChange({ timeframe: value });
     };
 
     const emergencyStateCode = String(emergencyState ?? "UNKNOWN").trim().toUpperCase();
@@ -209,9 +214,7 @@ export default function OperationPreparation({
         },
     };
     const emergencyStateDetails =
-        emergencyStateCode && emergencyStateCode !== "UNKNOWN"
-            ? emergencyStateCopy[emergencyStateCode]
-            : emergencyStateCopy.READY;
+        emergencyStateCopy[emergencyStateCode] || emergencyStateCopy.STATE_UNKNOWN;
 
     const resolvedEmergencyLocked = (
         typeof emergencyLocked === "boolean"
@@ -246,10 +249,9 @@ export default function OperationPreparation({
             : emergencyStateCode !== "READY"
     );
 
-    const executionMode = config.executionMode
-        || (settings.tradingMode === "PAPER" ? "PAPER / SIMULATION" : "NOT CONNECTED");
-    const executionSource = config.executionMode ? "RUNTIME" : "UI FALLBACK";
-    const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "UI FALLBACK";
+    const executionMode = config.executionMode || "UNAVAILABLE";
+    const executionSource = config.executionMode ? "RUNTIME" : "NOT CONNECTED";
+    const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "NOT CONNECTED";
 
      const {
         reviewReadiness,
@@ -622,8 +624,14 @@ return (
                         <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
                         <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
                         <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
+                        <SelectField disabled={controlsDisabled} id="operation-prep-position-size" label="Position Size Cap（ポジション上限）" onChange={(value) => changeSetting("positionSize", Number(value))} options={OPERATION_PREPARATION_OPTIONS.positionSize} value={settings.positionSize} />
+                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-stop-loss" label="Stop Loss（損切り）" onChange={(value) => changeSetting("stopLossPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.stopLossPercent} value={settings.stopLossPercent} />
+                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-take-profit" label="Take Profit（利確）" onChange={(value) => changeSetting("takeProfitPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.takeProfitPercent} value={settings.takeProfitPercent} />
+                        <span className="operation-prep-label">TRAILING STOP</span>
+                        <ToggleControl disabled={controlsDisabled} label="Trailing stop" onChange={(value) => changeSetting("trailingStop", value)} value={settings.trailingStop} />
+                        <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
                         <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
-                        <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "BLOCKED" : "DISABLED"} />
+                        <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
@@ -667,6 +675,11 @@ return (
                             <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
                             <DerivedRow label="RISK / Trade（1取引リスク）" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={summary.riskPerTrade} />
                             <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
+                            <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} />
+                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} />
+                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} />
+                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} />
+                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} />
                             <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
                             <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
                             <DerivedRow label="START READINESS" source="UI REVIEW" status value={startReadiness} />

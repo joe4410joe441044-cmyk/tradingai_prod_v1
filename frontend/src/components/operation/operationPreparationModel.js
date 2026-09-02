@@ -6,6 +6,10 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     maxExposure: [10, 20, 30, 40, 50],
     maxDrawdown: [5, 7, 10],
     requestedLeverage: [1, 2, 3, 4, 5, 7, 10],
+    positionSize: [0, 25, 50, 75, 100],
+    stopLossPercent: [0.25, 0.5, 0.75, 1, 1.5, 2],
+    takeProfitPercent: [0.5, 1, 1.5, 2, 3, 5],
+    timeframes: ["1m", "5m", "15m", "1h"],
 });
 
 const supportedValue = (values, candidate, fallback) => (
@@ -32,6 +36,11 @@ export const createOperationPreparationSettings = (config = {}) => ({
     requestedLeverage: config.leverage == null || config.leverage === ""
         ? 3
         : Number(config.leverage),
+    positionSize: config.positionSize == null || config.positionSize === "" ? 0 : Number(config.positionSize),
+    stopLossPercent: config.sl == null || config.sl === "" ? 1 : Number(config.sl),
+    takeProfitPercent: config.tp == null || config.tp === "" ? 2 : Number(config.tp),
+    trailingStop: config.trailing === true,
+    timeframe: supportedValue(OPERATION_PREPARATION_OPTIONS.timeframes, String(config.timeframe || ""), "1m"),
     loopOnStart: Boolean(config.loopOnStart),
     autoTradeOnStart: Boolean(config.autoTradeOnStart),
 });
@@ -46,6 +55,11 @@ export const operationPreparationSummary = (settings, selectedSymbol, riskPerTra
         ? `${Number(riskPerTradePercent).toFixed(2)}%`
         : "UNAVAILABLE",
     requestedLeverage: `${settings.requestedLeverage}x`,
+    positionSize: `${settings.positionSize} USDT`,
+    stopLoss: `${settings.stopLossPercent}%`,
+    takeProfit: `${settings.takeProfitPercent}%`,
+    trailingStop: settings.trailingStop ? "ON" : "OFF",
+    timeframe: settings.timeframe,
     loop: settings.loopOnStart ? "ON" : "OFF",
     autoTrade: settings.autoTradeOnStart ? "ON" : "OFF",
 });
@@ -173,6 +187,8 @@ export const deriveOperationReadiness = ({
     allowLive,
     tradeMode,
     paperBootstrapEligible,
+    loopOnStart = false,
+    autoTradeOnStart = false,
 } = {}) => {
     const selectionRuntime = normalizeReadiness(
         autoMarketState,
@@ -286,6 +302,10 @@ export const deriveOperationReadiness = ({
         }
         return "READY";
     })();
+    const liveAutomationReadiness = (
+        normalizedMode !== "LIVE"
+        || (loopOnStart === false && autoTradeOnStart === false)
+    ) ? "READY" : "BLOCKED";
 
     const paperPreStart = (
         botRunning !== true
@@ -328,8 +348,16 @@ export const deriveOperationReadiness = ({
         : legacyReadinessValues;
     if (normalizedMode === "LIVE") {
         startReadinessValues = [
-            ...startReadinessValues,
+            emergencyReadiness,
+            positionState,
+            orderAuthority,
+            selectionReadiness,
+            savedMmReadiness,
+            governanceReadiness,
+            executionReadiness,
+            leverageReadiness,
             liveAuthorityReadiness,
+            liveAutomationReadiness,
         ];
     }
     if (normalizedMode !== "PAPER" && normalizedMode !== "LIVE") {
@@ -348,6 +376,7 @@ export const deriveOperationReadiness = ({
         startReadinessValues,
         startReady,
         liveAuthorityReadiness,
+        liveAutomationReadiness,
         entryReadiness,
         entryReadinessValues,
         entryReady,

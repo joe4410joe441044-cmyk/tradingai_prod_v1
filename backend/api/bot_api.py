@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from backend.bot_manager import get_bot_manager
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from decimal import Decimal
 from enum import Enum
 from typing import Any, List, Optional
@@ -59,19 +59,33 @@ class LiveAutoApprovalRequest(BaseModel):
 # CONFIG（仕様書）
 # =========================
 class StartConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     symbol: str = Field(..., example="BTCUSDT")
     exchange: Exchange = Exchange.kucoin
-    risk_percent: float = Field(..., gt=0)
-    position_size: float = Field(0.0, ge=0)
-    max_drawdown_pct: float = Field(5.0, gt=0)
-    sl_percent: float = Field(..., gt=0)
-    leverage: float = Field(..., gt=0)
-    timeframe: str = Field("1m")
-    tp_percent: float = Field(2.0, gt=0)
+    risk_percent: float = Field(..., gt=0, le=1)
+    position_size: float = Field(0.0, ge=0, le=1000000000)
+    max_drawdown_pct: float = Field(5.0, gt=0, le=100)
+    sl_percent: float = Field(..., gt=0, le=100)
+    leverage: float = Field(..., gt=0, le=100)
+    timeframe: str = Field("1m", pattern=r"^(1m|5m|15m|1h)$")
+    tp_percent: float = Field(2.0, gt=0, le=100)
     trailing_stop: bool = False
     dry_run: bool = True
     mode: Mode
     selection_mode: SelectionMode = SelectionMode.manual
+    loop_on_start: bool = False
+    auto_trade_on_start: bool = False
+
+    @model_validator(mode="after")
+    def validate_automation_order(self):
+        if self.auto_trade_on_start and not self.loop_on_start:
+            raise ValueError("AUTO_TRADE_ON_START_REQUIRES_LOOP_ON_START")
+        if self.mode is Mode.live and (
+            self.loop_on_start or self.auto_trade_on_start
+        ):
+            raise ValueError("LIVE_DISARMED_REQUIRES_LOOP_AND_AUTO_OFF")
+        return self
 
 
 # =========================
@@ -102,6 +116,12 @@ class StatusResponse(BaseModel):
     positionSource: str = "PAPER_SIMULATION"
 
     realOrderAllowed: bool = False
+
+    liveRuntimeStartAllowed: bool = False
+
+    liveOrderEntryAllowed: bool = False
+
+    executionEntryAllowed: bool = False
 
     executionMode: str = "SIMULATION"
 
