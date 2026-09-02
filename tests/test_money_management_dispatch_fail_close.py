@@ -51,7 +51,7 @@ class DispatchFailCloseRegressionTests(unittest.TestCase):
         )
         now = OBSERVED + timedelta(seconds=10)
         dispatcher = LossRuntimeUpdateDispatcher(
-            Source([production_metrics()])
+            Source([production_metrics(equity=None)])
         )
         hook = MoneyManagementRuntimeHook(
             app, dispatcher, timestamp_source=lambda: now

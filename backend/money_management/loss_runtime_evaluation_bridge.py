@@ -6,7 +6,12 @@ from enum import Enum
 from threading import RLock
 from typing import Optional, Tuple
 
-from .enums import RiskState
+from .enums import RiskState, TradingMode
+from .loss_accounting_rebase import (
+    AccountingRebaseAuthorization,
+    AccountingRebaseStatus,
+    build_accounting_rebase_update,
+)
 from .loss_decision import evaluate_loss_decision
 from .loss_models import (
     CashFlowAdjustmentState,
@@ -14,6 +19,9 @@ from .loss_models import (
     MoneyManagementLossDecisionInput,
 )
 from .loss_persistence_models import (
+    AccountingRebaseAuthoritySource,
+    AccountingRebaseAuthorizationState,
+    AccountingRebaseReason,
     FreshnessStatus,
     PERSISTENCE_SCHEMA_VERSION,
     PeriodCode,
@@ -166,6 +174,61 @@ def _periods_match(current, daily, weekly, monthly):
     )
 
 
+def _attempt_period_rollover(metrics, runtime_snapshot, trading_mode):
+    """Roll expired accounting periods forward using authoritative equity.
+
+    Reuses the existing accounting-rebase contract for every validation and
+    state-construction step. Returns the rebased ``PersistedLossState`` when
+    the current runtime observation carries the authoritative starting equity
+    required to establish a new accounting period, otherwise ``None``.
+
+    Fail-closed: authority is never established when the authoritative equity
+    is absent, non-positive, stale, predates persisted state, belongs to a
+    different runtime/account scope, lacks authoritative period PnL, or when
+    the trading mode is not PAPER.
+    """
+    state = (
+        runtime_snapshot.state
+        if isinstance(runtime_snapshot, LossLimitRuntimeSnapshot)
+        else None
+    )
+    if not isinstance(state, PersistedLossState):
+        return None
+    runtime_instance_id = metrics.runtime_instance_id
+    if (
+        not isinstance(runtime_instance_id, str)
+        or not runtime_instance_id.strip()
+        or not isinstance(state.account_scope, str)
+        or not state.account_scope.strip()
+    ):
+        return None
+    rebase_id = (
+        f"runtime-rollover:{runtime_instance_id}:"
+        f"{metrics.captured_at.isoformat()}"
+    )
+    authorization = AccountingRebaseAuthorization(
+        rebase_id,
+        state.account_scope,
+        runtime_instance_id,
+        AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY,
+        AccountingRebaseReason.HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE,
+        AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED,
+    )
+    result = build_accounting_rebase_update(
+        authorization,
+        metrics,
+        runtime_snapshot,
+        metrics.captured_at,
+        trading_mode=trading_mode,
+    )
+    if result.status is not AccountingRebaseStatus.ACCEPTED:
+        return None
+    update = result.update
+    if update is None or not isinstance(update.next_state, PersistedLossState):
+        return None
+    return update.next_state
+
+
 def _save_triggers(previous, next_state):
     triggers = []
     if previous.risk_state is not next_state.risk_state:
@@ -201,6 +264,8 @@ class LossRuntimeEvaluationBridge:
         config=None,
         domain_evaluator=evaluate_loss_decision,
         reason_builder=build_reason_contract,
+        trading_mode=TradingMode.PAPER,
+        trading_mode_provider=None,
     ):
         self._config = config or LossLimitConfig()
         if not isinstance(self._config, LossLimitConfig):
@@ -209,6 +274,12 @@ class LossRuntimeEvaluationBridge:
             raise TypeError("domain services required")
         self._domain_evaluator = domain_evaluator
         self._reason_builder = reason_builder
+        self._trading_mode = TradingMode(trading_mode)
+        if trading_mode_provider is not None and not callable(
+            trading_mode_provider
+        ):
+            raise TypeError("trading mode provider must be callable")
+        self._trading_mode_provider = trading_mode_provider
         self._lock = RLock()
 
     def get_configuration(self):
@@ -244,15 +315,27 @@ class LossRuntimeEvaluationBridge:
         with self._lock:
             config = self._config
         try:
+            trading_mode = (
+                TradingMode(self._trading_mode_provider())
+                if self._trading_mode_provider is not None
+                else self._trading_mode
+            )
             sequence = runtime_snapshot.sequence + 1
             daily = _aggregate(metrics, PeriodType.DAILY, sequence)
             weekly = _aggregate(metrics, PeriodType.WEEKLY, sequence)
             monthly = _aggregate(metrics, PeriodType.MONTHLY, sequence)
+            period_rollover = False
             if not _periods_match(previous, daily, weekly, monthly):
-                return _failure(
-                    LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
-                    "period rollover requires authoritative starting equity",
+                rebased = _attempt_period_rollover(
+                    metrics, runtime_snapshot, trading_mode
                 )
+                if rebased is None:
+                    return _failure(
+                        LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
+                        "period rollover requires authoritative starting equity",
+                    )
+                previous = rebased
+                period_rollover = True
             daily = _apply_rebase_pnl_baseline(previous, daily, PeriodCode.DAILY)
             weekly = _apply_rebase_pnl_baseline(previous, weekly, PeriodCode.WEEKLY)
             monthly = _apply_rebase_pnl_baseline(previous, monthly, PeriodCode.MONTHLY)
@@ -335,12 +418,15 @@ class LossRuntimeEvaluationBridge:
                 False,
                 "recovery not required",
             )
+            triggers = _save_triggers(previous, next_state)
+            if period_rollover and SaveTrigger.PERIOD_ROLLOVER not in triggers:
+                triggers = (SaveTrigger.PERIOD_ROLLOVER,) + triggers
             context = LossRuntimeUpdateBuildContext(
                 event_id,
                 next_state,
                 governance,
                 recovery,
-                _save_triggers(previous, next_state),
+                triggers,
                 f"runtime metrics evaluated: {reason.primary_reason.value}",
             )
             return LossRuntimeEvaluationResult(

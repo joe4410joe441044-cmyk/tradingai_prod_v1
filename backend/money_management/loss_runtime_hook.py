@@ -6,6 +6,7 @@ from enum import Enum
 from threading import RLock
 from typing import Optional, Tuple
 
+from .enums import TradingMode
 from .loss_application_models import (
     ApplicationLifecycleState,
     CompositionReadinessStatus,
@@ -15,6 +16,7 @@ from .loss_runtime_event_models import LossRuntimeEventType
 from .loss_governance_projection_dispatcher import (
     LossGovernanceProjectionDispatcher,
 )
+from .loss_runtime_evaluation_bridge import LossRuntimeEvaluationBridge
 from .loss_runtime_metrics_models import LossRuntimeMetricsReadRequest
 from .loss_runtime_metrics_source import BotManagerLossRuntimeMetricsSource
 from .loss_runtime_update_dispatcher import (
@@ -553,7 +555,22 @@ def register_money_management_runtime_hook(
             bot_manager,
             timestamp_source=timestamp_source,
         )
-        dispatcher = LossRuntimeUpdateDispatcher(source)
+        def runtime_trading_mode():
+            mode = getattr(bot_manager, "config", {}).get("mode")
+            if not isinstance(mode, str) or not mode.strip():
+                mode = getattr(
+                    getattr(bot_manager, "engine", None), "mode", None
+                )
+            if not isinstance(mode, str) or not mode.strip():
+                raise ValueError("runtime trading mode unavailable")
+            return TradingMode(mode.strip().upper())
+
+        evaluation_bridge = LossRuntimeEvaluationBridge(
+            trading_mode_provider=runtime_trading_mode
+        )
+        dispatcher = LossRuntimeUpdateDispatcher(
+            source, evaluation_bridge=evaluation_bridge
+        )
         hook = MoneyManagementRuntimeHook(
             app,
             dispatcher,
