@@ -171,6 +171,9 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
                 Decimal("5"), False,
             )
         )
+        manager.configure_money_management_config_provider(
+            manager.production_ams_mm_config_provider
+        )
         ws = Mock()
         ws.connected = False
         ws.start = Mock()

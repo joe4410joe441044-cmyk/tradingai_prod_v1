@@ -582,6 +582,7 @@ class ExecutionEngine:
             "balanceCheckOk": balance_check_ok,
             "positionCheckOk": position_check_ok,
             "executionEnabled": execution_enabled,
+            "liveOrderEntryAllowed": self.config.get("liveOrderEntryAllowed") is True,
             "emergencyStopClear": not emergency_stop,
         }
 
@@ -605,6 +606,8 @@ class ExecutionEngine:
             block_reasons.append("POSITION_CHECK_FAILED")
         if not checks["executionEnabled"]:
             block_reasons.append("EXECUTION_DISABLED")
+        if not checks["liveOrderEntryAllowed"]:
+            block_reasons.append("LIVE_ORDER_ENTRY_DISARMED")
         if not checks["emergencyStopClear"]:
             block_reasons.append("EMERGENCY_STOP_ACTIVE")
 
@@ -1226,6 +1229,18 @@ class ExecutionEngine:
         return result
 
     def _evaluate_execution_entry_guard(self, order):
+
+        if (
+            self.mode == "live"
+            and (
+                self.config.get("realOrderAllowed") is not True
+                or self.config.get("executionEntryAllowed") is not True
+                or self.config.get("liveOrderEntryAllowed") is not True
+            )
+        ):
+            return False, self._entry_rejection(
+                "LIVE_ORDER_ENTRY_DISARMED"
+            )
 
         with self.execution_entry_guard_lock:
             preapproval = self.execution_entry_preapproval

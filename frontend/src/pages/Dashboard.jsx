@@ -327,6 +327,14 @@ useEffect(() => {
 
                             config={{
                                 ...tradeSettings,
+                                ...(runtimeHealth.running ? {
+                                    positionSize: firstAvailable(botStatus?.positionSize, botStatus?.position_size, tradeSettings.positionSize),
+                                    timeframe: firstAvailable(botStatus?.timeframe, tradeSettings.timeframe),
+                                    tp: firstAvailable(botStatus?.tp_percent, botStatus?.tradeSettings?.tp_percent, tradeSettings.tp),
+                                    sl: firstAvailable(botStatus?.sl_percent, botStatus?.tradeSettings?.sl_percent, tradeSettings.sl),
+                                    trailing: firstAvailable(botStatus?.trailingStop, botStatus?.trailing_stop, botStatus?.tradeSettings?.trailing_stop, tradeSettings.trailing) === true,
+                                    leverage: firstAvailable(botStatus?.leverage, botStatus?.tradeSettings?.leverage, tradeSettings.leverage),
+                                } : {}),
                                 selectionMode: tradeSettings.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
                                 displaySymbol: botStatus?.autoMarketSelection?.topCandidate?.symbol,
                                 autoMarketState: botStatus?.autoMarketSelection?.productionIntegration?.status || "NOT AVAILABLE",

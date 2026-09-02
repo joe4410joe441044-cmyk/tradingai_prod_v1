@@ -540,6 +540,9 @@ class BotManager:
             "dryRun": dry_run,
             "executionMode": execution_mode,
             "realOrderAllowed": real_order_allowed,
+            "liveRuntimeStartAllowed": self.config.get("liveRuntimeStartAllowed") is True,
+            "liveOrderEntryAllowed": self.config.get("liveOrderEntryAllowed") is True,
+            "executionEntryAllowed": self.config.get("executionEntryAllowed") is True,
             "risk_percent": engine_config.get("risk_percent"),
             "leverage": engine_config.get("leverage"),
             "timeframe": engine_config.get(
@@ -1390,6 +1393,7 @@ class BotManager:
                 "balanceCheckOk": balance_check_ok,
                 "positionCheckOk": position_check_ok,
                 "executionEnabled": execution_enabled,
+                "liveOrderEntryAllowed": self.config.get("liveOrderEntryAllowed") is True,
                 "emergencyStopClear": not emergency_stop,
             }
 
@@ -1413,6 +1417,8 @@ class BotManager:
                 block_reasons.append("POSITION_CHECK_FAILED")
             if not checks["executionEnabled"]:
                 block_reasons.append("EXECUTION_DISABLED")
+            if not checks["liveOrderEntryAllowed"]:
+                block_reasons.append("LIVE_ORDER_ENTRY_DISARMED")
             if not checks["emergencyStopClear"]:
                 block_reasons.append("EMERGENCY_STOP_ACTIVE")
 
@@ -1789,6 +1795,9 @@ class BotManager:
             "tradeMode": backend_config.TRADE_MODE,
             "dryRun": dry_run,
             "realOrderAllowed": real_order_allowed,
+            "liveRuntimeStartAllowed": self.config.get("liveRuntimeStartAllowed") is True,
+            "liveOrderEntryAllowed": self.config.get("liveOrderEntryAllowed") is True,
+            "executionEntryAllowed": self.config.get("executionEntryAllowed") is True,
             "selectedMode": selected_mode,
             "executionMode": execution_mode,
             "safetyReason": safety_reason,
@@ -1953,6 +1962,39 @@ class BotManager:
             self._set_loop_state("STOPPING")
         self._set_loop_state("STOPPED")
         return {"status": "stopped", "success": True, "loopState": "STOPPED"}
+
+    def set_execution_enabled(self, enabled):
+
+        enabled = bool(enabled)
+        if (
+            enabled
+            and str(self.config.get("mode", "paper")).strip().lower()
+            == "live"
+            and self.config.get("liveOrderEntryAllowed") is not True
+        ):
+            return {
+                "success": False,
+                "reason": "LIVE_ORDER_ENTRY_DISARMED",
+                "execution_enabled": False,
+            }
+        if enabled and governance_state.get("emergency_stop", False):
+            return {
+                "success": False,
+                "reason": "AUTO_TRADE_BLOCKED_BY_EMERGENCY_LOCK",
+                "execution_enabled": governance_state.get("execution_enabled", False),
+            }
+        if enabled and (
+            not self._running
+            or self.lifecycle_state != "RUNNING"
+            or self.loop_state != "RUNNING"
+        ):
+            return {
+                "success": False,
+                "reason": "AUTO_TRADE_REQUIRES_LOOP_ON",
+                "execution_enabled": governance_state.get("execution_enabled", False),
+            }
+        governance_state["execution_enabled"] = enabled
+        return {"success": True, "execution_enabled": enabled}
 
     def _recheck_stale_stopped_paper_start_authority(
         self,
@@ -2928,6 +2970,32 @@ class BotManager:
                         "completed": False,
                         "stateUnknown": False,
                     }
+                if (
+                    config.get("loop_on_start") is True
+                    or config.get("auto_trade_on_start") is True
+                ):
+                    return {
+                        "status": "error",
+                        "reason": "LIVE_DISARMED_REQUIRES_LOOP_AND_AUTO_OFF",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": False,
+                    }
+
+                live_start_authority = self.get_authoritative_pending_order_state()
+                if (
+                    live_start_authority.get("known") is not True
+                    or live_start_authority.get("pending") is not False
+                    or live_start_authority.get("safe") is not True
+                ):
+                    return {
+                        "status": "error",
+                        "reason": live_start_authority.get("reason")
+                        or "LIVE_RUNTIME_START_AUTHORITY_REQUIRED",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": live_start_authority.get("known") is not True,
+                    }
 
         except Exception as e:
             return {
@@ -3050,6 +3118,17 @@ class BotManager:
             )
 
             self.config = dict(config)
+
+            if requested_mode == "live":
+                # LIVE runtime activation is distinct from order arming.
+                self.config.update({
+                    "liveRuntimeStartAllowed": True,
+                    "liveOrderEntryAllowed": False,
+                    "realOrderAllowed": False,
+                    "executionEntryAllowed": False,
+                    "loop_on_start": False,
+                    "auto_trade_on_start": False,
+                })
 
             # Leverage is resolved by Money Management authority at the START
             # boundary; Execution consumes the validated effective leverage,
@@ -3787,6 +3866,17 @@ class BotManager:
                 self._handoff_selection_mode("AUTO")
                 self._run_initial_auto_market_selection_cycle()
 
+            # Apply pre-start automation only after BOT and market selection.
+            # Failures enter the existing START cleanup path below.
+            if config.get("loop_on_start") is True:
+                loop_result = self.start_loop()
+                if loop_result.get("success") is not True:
+                    raise RuntimeError(loop_result.get("reason") or "LOOP_ON_START_FAILED")
+            if config.get("auto_trade_on_start") is True:
+                execution_result = self.set_execution_enabled(True)
+                if execution_result.get("success") is not True:
+                    raise RuntimeError(execution_result.get("reason") or "AUTO_TRADE_ON_START_FAILED")
+
             return {
                 "status": "started",
                 "symbol": self.activeSymbol,
@@ -3795,6 +3885,8 @@ class BotManager:
                 "exchange": self.exchange_name,
                 "orderbookSource": self.orderbook_source,
                 "orderbookSymbol": self.orderbook_symbol,
+                "loopState": self.loop_state,
+                "autoTradeEnabled": governance_state.get("execution_enabled") is True,
             }
 
         except Exception as e:

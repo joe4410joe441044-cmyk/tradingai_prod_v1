@@ -315,3 +315,36 @@ test("runtime-only exception is PAPER pre-start only", () => {
         ],
     })).startReady, false);
 });
+
+
+test("LIVE DISARMED runtime readiness does not require order-entry permission", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: true,
+        tradeMode: "live",
+        realOrderAllowed: false,
+        executionEnabled: false,
+        executionEntryAllowed: false,
+        loopOnStart: false,
+        autoTradeOnStart: false,
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.liveAuthorityReadiness, "READY");
+    assert.equal(result.liveAutomationReadiness, "READY");
+    assert.equal(result.executionReadiness, "SAFE");
+});
+
+test("LIVE DISARMED runtime readiness blocks Loop or Auto intent", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        tradingMode: "LIVE",
+        dryRun: false,
+        allowLive: true,
+        tradeMode: "live",
+        realOrderAllowed: false,
+        executionEnabled: false,
+        loopOnStart: true,
+    }));
+    assert.equal(result.startReady, false);
+    assert.equal(result.liveAutomationReadiness, "BLOCKED");
+});
