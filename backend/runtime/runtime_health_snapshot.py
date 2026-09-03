@@ -523,6 +523,10 @@ def build_runtime_health_snapshot(
     lifecycle_state=None,
     cycle_id=None,
     generated_at=None,
+    loop_state=None,
+    session_id=None,
+    runtime_instance_id=None,
+    active_runtime_id=None,
 ):
     """Return UI-ready facts sourced only from backend runtime state."""
 
@@ -532,10 +536,34 @@ def build_runtime_health_snapshot(
     trace = runtime_trace if isinstance(runtime_trace, dict) else {}
     metrics = runtime_metrics if isinstance(runtime_metrics, dict) else {}
     active = bool(running)
+    resolved_loop_state = str(loop_state or "STOPPED").upper()
+    loop_running = active and resolved_loop_state == "RUNNING"
+    snapshot_authority = completed_result.get("runtimeSnapshotAuthority")
+    snapshot_authority = (
+        snapshot_authority if isinstance(snapshot_authority, dict) else {}
+    )
+    captured_at = snapshot_authority.get("capturedAt")
+    snapshot_age = (
+        float(snapshot_timestamp) - float(captured_at)
+        if isinstance(snapshot_timestamp, (int, float))
+        and not isinstance(snapshot_timestamp, bool)
+        and isinstance(captured_at, (int, float))
+        and not isinstance(captured_at, bool)
+        else None
+    )
+    snapshot_current = bool(
+        completed_result
+        and snapshot_authority
+        and snapshot_authority.get("sessionId") == session_id
+        and snapshot_authority.get("runtimeInstanceId") == runtime_instance_id
+        and snapshot_authority.get("runtimeId") == active_runtime_id
+        and snapshot_age is not None
+        and 0 <= snapshot_age <= 5
+    ) if loop_running else False
     execution_available = active and bool(engine_available)
     # A completed cycle remains useful as history, but it must not be exposed
     # as the current decision after the bot lifecycle has stopped.
-    result = completed_result if active else {}
+    result = completed_result if snapshot_current else {}
 
     market_reached = active and not market_stale and (
         _trace_reached(trace.get("ws_receive"))
@@ -547,17 +575,17 @@ def build_runtime_health_snapshot(
     )
     adapter_reached = False
     runtime_state_reached = False
-    strategy_reached = active and result.get("strategyRuntimeReached", True)
+    strategy_reached = loop_running and result.get("strategyRuntimeReached", True)
     ai_reached = False
-    money_reached = active and bool(result.get("moneyManagementReached"))
-    governance_reached = active and bool(result.get("governanceRuntimeReached"))
-    execution_reached = active and bool(result.get("executionRuntimeReached"))
-    execution_governance_reached = active and bool(
+    money_reached = loop_running and bool(result.get("moneyManagementReached"))
+    governance_reached = loop_running and bool(result.get("governanceRuntimeReached"))
+    execution_reached = loop_running and bool(result.get("executionRuntimeReached"))
+    execution_governance_reached = loop_running and bool(
         result.get("executionGovernanceReached")
     )
-    signal_adapter_reached = active and bool(result.get("signalAdapterReached"))
-    handoff_attempted = active and bool(result.get("handoffAttempted"))
-    handoff_executed = active and bool(result.get("handoffExecuted"))
+    signal_adapter_reached = loop_running and bool(result.get("signalAdapterReached"))
+    handoff_attempted = loop_running and bool(result.get("handoffAttempted"))
+    handoff_executed = loop_running and bool(result.get("handoffExecuted"))
 
     execution_runtime = result.get("runtime")
     execution_runtime = (
@@ -792,9 +820,9 @@ def build_runtime_health_snapshot(
         issues.append("MARKET_DATA_MISSING_OR_STALE")
     if active and not orderbook_reached:
         issues.append("ORDERBOOK_MISSING_OR_STALE")
-    if active and not result:
+    if loop_running and not result:
         issues.append("RUNTIME_SNAPSHOT_MISSING")
-    if active and not runtime_healthy:
+    if loop_running and not runtime_healthy:
         issues.append("RUNTIME_EXCEPTION")
     if active and not engine_available:
         issues.append("ENGINE_UNAVAILABLE")
@@ -810,7 +838,8 @@ def build_runtime_health_snapshot(
         blocking_reason = None
 
     pipeline_status = "SUSPENDED_BY_BOT_STOP" if not active else (
-        "OK" if execution_reached else "ACTIVE"
+        "IDLE" if not loop_running
+        else "OK" if execution_reached else "ACTIVE"
     )
     if not active:
         execution_engine_status = "UNAVAILABLE_BY_BOT_STOP"
@@ -860,14 +889,14 @@ def build_runtime_health_snapshot(
             "connected": bool(exchange_ws_connected),
         },
         "runtimeEngine": {
-            "status": "ACTIVE" if active and runtime_healthy else (
-                "ERROR" if active else "STOPPED"
+            "status": "ACTIVE" if loop_running and runtime_healthy else (
+                "ERROR" if loop_running else "STOPPED"
             ),
-            "healthy": bool(runtime_healthy),
+            "healthy": bool(runtime_healthy) if loop_running else True,
         },
         "runtimeLoop": {
-            "status": "RUNNING" if active else "STOPPED",
-            "running": active,
+            "status": resolved_loop_state,
+            "running": loop_running,
         },
         "marketFeed": {
             "status": "LIVE" if market_reached else (

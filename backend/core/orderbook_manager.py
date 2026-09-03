@@ -296,7 +296,7 @@ class OrderBookManager:
 
     def get_current_price(self):
 
-        logger.error(
+        logger.debug(
             f"🟢 GET_CURRENT_PRICE="
             f"{self.current_price}"
         )
