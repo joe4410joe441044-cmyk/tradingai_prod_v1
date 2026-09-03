@@ -994,6 +994,18 @@ class MoneyManagementHttpBoundary:
             metrics.captured_at if metrics else None,
         )
 
+    @staticmethod
+    def _actual_runtime_mode(hook_registration):
+        bot_manager = getattr(hook_registration, "bot_manager", None)
+        config = getattr(bot_manager, "config", None)
+        mode = config.get("mode") if isinstance(config, dict) else None
+        if not isinstance(mode, str) or not mode.strip():
+            mode = getattr(getattr(bot_manager, "engine", None), "mode", None)
+        try:
+            return TradingMode(mode.strip().upper())
+        except (AttributeError, TypeError, ValueError):
+            return None
+
     def get_status(self):
         now = self._now()
         with self._lock:
@@ -1040,6 +1052,7 @@ class MoneyManagementHttpBoundary:
             if hook_authority_failed
             else ()
         )
+        actual_runtime_mode = self._actual_runtime_mode(hook_registration)
         lifecycle_status = None
         runtime_snapshot = None
         if (
@@ -1163,15 +1176,25 @@ class MoneyManagementHttpBoundary:
             and live_projection_valid
             and base_config is not None
         )
-        available = bool(runtime_metrics_available or live_authority_available)
+        available = bool(
+            runtime_metrics_available
+            if actual_runtime_mode is TradingMode.PAPER
+            else live_authority_available
+            if actual_runtime_mode is TradingMode.LIVE
+            else False
+        )
         execution_allowed = bool(
             available
             and projection is not None
             and projection.entry_permission is LossEntryPermission.ALLOW
             and projection.new_entry_allowed is True
             and (
-                runtime_metrics_available
-                or monitoring_capital.execution_entry_allowed is True
+                actual_runtime_mode is TradingMode.PAPER
+                or (
+                    actual_runtime_mode is TradingMode.LIVE
+                    and monitoring_capital is not None
+                    and monitoring_capital.execution_entry_allowed is True
+                )
             )
         )
         safe_reason = None
@@ -1189,13 +1212,32 @@ class MoneyManagementHttpBoundary:
             )
         elif not hook_healthy:
             safe_reason = "AUTHORITATIVE_EVALUATION_NOT_ESTABLISHED"
-        elif not metrics_fresh and not live_capital_complete:
+        elif actual_runtime_mode is None:
+            safe_reason = "RUNTIME_MODE_AUTHORITY_UNAVAILABLE"
+        elif (
+            actual_runtime_mode is TradingMode.PAPER
+            and not metrics_fresh
+        ):
             safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
-        elif live_capital_complete and not cash_flow_ready:
+        elif (
+            actual_runtime_mode is TradingMode.LIVE
+            and not live_capital_complete
+        ):
+            safe_reason = "AUTHORITATIVE_METRICS_INCOMPLETE"
+        elif (
+            actual_runtime_mode is TradingMode.LIVE
+            and not cash_flow_ready
+        ):
             safe_reason = "CASH_FLOW_AUTHORITY_UNAVAILABLE"
-        elif live_capital_complete and not live_equity_matches_mm_state:
+        elif (
+            actual_runtime_mode is TradingMode.LIVE
+            and not live_equity_matches_mm_state
+        ):
             safe_reason = "LIVE_MM_EQUITY_NOT_RECONCILED"
-        elif live_capital_complete and not live_projection_valid:
+        elif (
+            actual_runtime_mode is TradingMode.LIVE
+            and not live_projection_valid
+        ):
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"
         elif not projection_fresh or not revisions_match:
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"

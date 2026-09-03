@@ -9,10 +9,12 @@ from types import SimpleNamespace
 
 from backend.money_management.loss_governance_projection_dispatcher import (
     LossGovernanceProjectionDispatcher,
+    get_money_management_governance_projection,
 )
 from backend.money_management.enums import RiskState
 from backend.money_management.loss_application_models import (
     ApplicationLifecycleState,
+    LifecycleOperationStatus,
 )
 from backend.money_management.loss_application_registration import (
     MoneyManagementConfigProvider,
@@ -80,7 +82,7 @@ class Clock:
             return self.value
 
 
-def ready_boundary(*, publish=True, runtime_metrics=None):
+def ready_boundary(*, publish=True, runtime_metrics=None, runtime_mode="paper"):
     clock = Clock()
     lifecycle = Lifecycle()
     dispatcher = LossRuntimeUpdateDispatcher(
@@ -105,7 +107,8 @@ def ready_boundary(*, publish=True, runtime_metrics=None):
     )
     hook.record_evaluation_status(applied.status)
     bot = SimpleNamespace(
-        set_money_management_runtime_hook=lambda callback: True
+        config={"mode": runtime_mode} if runtime_mode is not None else {},
+        set_money_management_runtime_hook=lambda callback: True,
     )
     app.state.money_management_runtime_hook = (
         MoneyManagementRuntimeHookRegistration(hook, bot, clock())
@@ -138,7 +141,9 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         )
 
     def test_live_authorities_make_official_mm_available_without_legacy_metrics(self):
-        _, app, _, lifecycle, clock = ready_boundary(publish=False)
+        _, app, _, lifecycle, clock = ready_boundary(
+            publish=False, runtime_mode="live"
+        )
         authority = ams_capital(evaluated_at=clock())
         current_equity = lifecycle.get_snapshot().state.drawdown_state.current_equity
         authority = replace(
@@ -164,7 +169,9 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertNotIn("UNKNOWN_STATE", payload["blockReasons"])
 
     def test_live_authority_stays_fail_closed_when_cash_flow_is_stale(self):
-        _, app, _, lifecycle, clock = ready_boundary(publish=False)
+        _, app, _, lifecycle, clock = ready_boundary(
+            publish=False, runtime_mode="live"
+        )
         authority = replace(
             ams_capital(evaluated_at=clock()),
             equity=lifecycle.get_snapshot().state.drawdown_state.current_equity,
@@ -180,7 +187,9 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(payload["safeReason"], "CASH_FLOW_AUTHORITY_UNAVAILABLE")
 
     def test_live_authority_stays_fail_closed_when_equity_is_not_reconciled(self):
-        _, app, _, _, clock = ready_boundary(publish=False)
+        _, app, _, _, clock = ready_boundary(
+            publish=False, runtime_mode="live"
+        )
         authority = replace(
             ams_capital(evaluated_at=clock()),
             equity=Decimal("999"),
@@ -693,6 +702,88 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertFalse(recovery.execution_entry_allowed)
         self.assertTrue(recovery.recovery_required)
         self.assertEqual(recovery.projection_status, "RECOVERY_REQUIRED")
+
+    def test_applied_runtime_hook_republishes_current_public_authority(self):
+        boundary, app, dispatcher, lifecycle, _ = ready_boundary()
+        before = get_money_management_governance_projection(app)
+        dispatcher._metrics_source.values.append(
+            metrics(revision="9", at=NOW + timedelta(seconds=2))
+        )
+
+        result = app.state.money_management_runtime_hook.hook.handle(
+            "BALANCE_UPDATE", "projection-propagation"
+        )
+
+        current = lifecycle.get_snapshot()
+        public = get_money_management_governance_projection(app)
+        self.assertEqual(result.status.value, "DISPATCHED")
+        self.assertGreater(current.revision, before.revision)
+        self.assertGreater(current.sequence, before.sequence)
+        self.assertEqual(public.revision, current.revision)
+        self.assertEqual(public.sequence, current.sequence)
+        self.assertTrue(boundary.get_status().available)
+
+    def test_rejected_runtime_hook_cannot_advance_public_authority(self):
+        _, app, dispatcher, lifecycle, _ = ready_boundary()
+        before = get_money_management_governance_projection(app)
+        lifecycle.operation_status = LifecycleOperationStatus.REJECTED
+        dispatcher._metrics_source.values.append(
+            metrics(revision="9", at=NOW + timedelta(seconds=2))
+        )
+
+        result = app.state.money_management_runtime_hook.hook.handle(
+            "BALANCE_UPDATE", "rejected-projection"
+        )
+
+        current = lifecycle.get_snapshot()
+        public = get_money_management_governance_projection(app)
+        self.assertEqual(result.status.value, "FAILED")
+        self.assertEqual(current.revision, before.revision)
+        self.assertEqual(current.sequence, before.sequence)
+        self.assertEqual(public.revision, current.revision)
+        self.assertEqual(public.sequence, current.sequence)
+        self.assertFalse(public.projection.new_entry_allowed)
+
+    def test_live_monitoring_mismatch_does_not_invalidate_actual_paper(self):
+        _, app, dispatcher, _, clock = ready_boundary(runtime_mode="paper")
+        authority = replace(
+            ams_capital(evaluated_at=clock()),
+            equity=Decimal("999"),
+            input_authority="REAL_LIVE_ACCOUNT",
+            capital_source="REAL_LIVE_ACCOUNT",
+        )
+        payload = MoneyManagementHttpBoundary(
+            app, dispatcher, timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        ).get_status().to_dict()
+
+        self.assertTrue(payload["available"])
+        self.assertNotEqual(
+            payload["safeReason"], "LIVE_MM_EQUITY_NOT_RECONCILED"
+        )
+        self.assertEqual(payload["capitalEligibility"], authority.to_dict())
+
+    def test_actual_live_cannot_use_paper_runtime_equity_as_reconciliation(self):
+        boundary, _, _, _, _ = ready_boundary(runtime_mode="live")
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertFalse(payload["available"])
+        self.assertFalse(payload["executionEntryAllowed"])
+        self.assertEqual(
+            payload["safeReason"], "AUTHORITATIVE_METRICS_INCOMPLETE"
+        )
+
+    def test_unknown_actual_runtime_mode_fails_closed(self):
+        boundary, _, _, _, _ = ready_boundary(runtime_mode=None)
+
+        payload = boundary.get_status().to_dict()
+
+        self.assertFalse(payload["available"])
+        self.assertFalse(payload["executionEntryAllowed"])
+        self.assertEqual(
+            payload["safeReason"], "RUNTIME_MODE_AUTHORITY_UNAVAILABLE"
+        )
 
 
 class MoneyManagementConfigurationApiTests(unittest.TestCase):

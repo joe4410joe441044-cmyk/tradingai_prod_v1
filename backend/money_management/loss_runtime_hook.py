@@ -15,6 +15,8 @@ from .loss_application_registration import MoneyManagementApplicationRegistratio
 from .loss_runtime_event_models import LossRuntimeEventType
 from .loss_governance_projection_dispatcher import (
     LossGovernanceProjectionDispatcher,
+    dispatch_money_management_governance_projection,
+    get_money_management_governance_projection,
 )
 from .loss_runtime_evaluation_bridge import LossRuntimeEvaluationBridge
 from .loss_runtime_metrics_models import LossRuntimeMetricsReadRequest
@@ -133,6 +135,9 @@ class MoneyManagementRuntimeHook:
         if not callable(self._timestamp_source):
             raise TypeError("timestamp source required")
         self._maximum_age = maximum_age
+        self._projection_dispatcher = LossGovernanceProjectionDispatcher(
+            timestamp_source=self._timestamp_source
+        )
         self._logger = logger
         self._active = True
         self._last_event_key = None
@@ -195,6 +200,37 @@ class MoneyManagementRuntimeHook:
                 result.runtime_revision,
                 result.runtime_sequence,
             )
+
+    def _publish_applied_authority(self, result):
+        if result.status is not LossRuntimeDispatchStatus.APPLIED:
+            return True
+        try:
+            projected = dispatch_money_management_governance_projection(
+                self._app, self._projection_dispatcher
+            )
+            published = get_money_management_governance_projection(self._app)
+            if (
+                published is not None
+                and published.to_dict() == projected.public_snapshot.to_dict()
+            ):
+                return True
+        except Exception:
+            pass
+        self._last_dispatch_status = LossRuntimeDispatchStatus.FAILED
+        self._last_dispatch_safe_reasons = (
+            "governance projection publication failed",
+        )
+        try:
+            self._projection_dispatcher.invalidate_runtime_authority(
+                self._app,
+                self._last_dispatch_status,
+                self._last_dispatch_safe_reasons,
+                result.runtime_revision,
+                result.runtime_sequence,
+            )
+        except Exception:
+            pass
+        return False
 
     def _record_dispatch_failure(self, reason):
         registration = getattr(
@@ -291,6 +327,9 @@ class MoneyManagementRuntimeHook:
                 self._record_dispatch_failure("authority refresh result invalid")
                 return False
             self._record_dispatch_result(result)
+            if not self._publish_applied_authority(result):
+                _safe_log(self._logger, "warning", "Projection Refresh Failed")
+                return False
             authoritative = result.status in (
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,
@@ -415,6 +454,15 @@ class MoneyManagementRuntimeHook:
                     ("runtime hook dispatch result invalid",),
                 )
             self._record_dispatch_result(result)
+            if not self._publish_applied_authority(result):
+                _safe_log(self._logger, "warning", "Projection Refresh Failed")
+                return MoneyManagementRuntimeHookResult(
+                    MoneyManagementRuntimeHookStatus.FAILED,
+                    event_type,
+                    event_key,
+                    LossRuntimeDispatchStatus.FAILED,
+                    ("governance projection publication failed",),
+                )
             if result.status in (
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,

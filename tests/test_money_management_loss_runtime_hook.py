@@ -191,6 +191,35 @@ class RuntimeHookTests(unittest.TestCase):
         self.assertNotIn("secret", repr(raised))
         self.assertNotIn("/private", repr(raised))
 
+    def test_projection_publication_failure_invalidates_stale_authority(self):
+        app = application()
+        hook = MoneyManagementRuntimeHook(
+            app, dispatcher(), timestamp_source=lambda: NOW
+        )
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            return_value=dispatch_result(),
+        ), patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_governance_projection",
+            side_effect=RuntimeError("projection unavailable"),
+        ):
+            result = hook.handle("BALANCE_UPDATE", "projection-failure")
+
+        public = app.state.money_management_governance_projection
+        self.assertEqual(result.status, MoneyManagementRuntimeHookStatus.FAILED)
+        self.assertEqual(
+            result.runtime_dispatch_status, LossRuntimeDispatchStatus.FAILED
+        )
+        self.assertEqual(public.revision, 2)
+        self.assertEqual(public.sequence, 3)
+        self.assertFalse(public.projection.new_entry_allowed)
+        self.assertEqual(
+            hook.last_dispatch_safe_reasons,
+            ("governance projection publication failed",),
+        )
+
     def test_concurrent_duplicate_hook_is_serial_and_deadlock_free(self):
         hook = MoneyManagementRuntimeHook(
             application(), dispatcher(), timestamp_source=lambda: NOW
