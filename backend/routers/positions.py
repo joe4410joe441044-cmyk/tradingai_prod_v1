@@ -59,13 +59,30 @@ def get_positions():
 
     try:
 
+        snapshot = engine.get_result()
+
+        if (
+            not isinstance(snapshot, dict)
+            or "actual_position" not in snapshot
+        ):
+            raise TypeError("ExecutionEngine.get_result() returned invalid data")
+
         result = []
 
-        actual_position = getattr(
-            engine,
-            "actual_position",
-            None
-        )
+        actual_position = snapshot["actual_position"]
+
+        if actual_position is not None:
+            if (
+                not isinstance(actual_position, dict)
+                or not (
+                    actual_position.get("symbol")
+                    or getattr(engine, "symbol", None)
+                )
+                or actual_position.get("side") is None
+                or actual_position.get("entry_price") is None
+                or actual_position.get("qty") is None
+            ):
+                raise TypeError("ExecutionEngine position result is invalid")
 
         if actual_position:
 
@@ -93,8 +110,6 @@ def get_positions():
                     "qty"
                 )
             })
-
-        snapshot = engine.get_status()
 
         return {
 
