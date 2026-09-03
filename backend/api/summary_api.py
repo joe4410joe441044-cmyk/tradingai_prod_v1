@@ -14,7 +14,7 @@ router = APIRouter()
 def risk_quick():
     try:
         bot = get_bot_manager()
-        engine = bot.get_engine()
+        engine = getattr(bot, "engine", None)
 
         r = getattr(engine, "risk", None)
 
@@ -56,7 +56,18 @@ def risk_quick():
 def get_bot_summary():
     try:
         bot = get_bot_manager()
-        engine = bot.get_engine()
+        engine = getattr(bot, "engine", None)
+
+        if engine is None:
+            return {
+                "status": "STOPPED", "price": 0, "balance": 0,
+                "equity": 0, "pnl": 0, "positions": [],
+                "risk": {
+                    "kill_switch": False, "reason": "", "dd_limit": 0,
+                    "loss_limit": 0, "loss_count": 0, "peak_equity": 0,
+                },
+                "logs": [], "connection": "OFFLINE",
+            }
 
         # =========================
         # Engine結果取得（安全）

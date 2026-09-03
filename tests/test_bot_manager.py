@@ -699,3 +699,48 @@ def test_start_synchronous_first_callback_hands_baseline_off_after_running():
         positions_router.set_engine(previous_positions_engine)
         if execution_runtime is not None:
             execution_runtime.set_engine(previous_runtime_engine)
+
+
+def test_mm_lifecycle_callback_propagates_opaque_identity_and_fail_closed():
+    manager = BotManager()
+    calls = []
+    manager.set_money_management_lifecycle_hook(
+        lambda state, session, runtime: calls.append((state, session, runtime))
+        or {"success": state in {"STARTING", "STOPPED"}}
+    )
+    manager.session_id = 7
+    assert manager._notify_money_management_lifecycle("STARTING") is True
+    assert manager._notify_money_management_lifecycle("STOPPED") is True
+    assert calls == [
+        ("STARTING", 7, manager.runtime_instance_id),
+        ("STOPPED", 7, manager.runtime_instance_id),
+    ]
+    manager.set_money_management_lifecycle_hook(lambda *_: {"success": False})
+    assert manager._notify_money_management_lifecycle("STOPPED") is False
+
+
+def test_summary_uses_current_manager_engine_contract_without_runtime_error():
+    from backend.api import summary_api
+
+    with patch.object(
+        summary_api, "get_bot_manager", return_value=SimpleNamespace(engine=None)
+    ), patch.object(summary_api.logger, "error") as logged:
+        payload = summary_api.get_bot_summary()
+    assert payload["status"] == "STOPPED"
+    assert payload["connection"] == "OFFLINE"
+    logged.assert_not_called()
+
+
+def test_kucoin_transport_timeout_is_recoverable_warning_not_runtime_error():
+    from backend.market.exchanges.kucoin_market_ws import OrderBookWS
+
+    ws = OrderBookWS("XRPUSDT", lambda *_: None, "runtime-1")
+    with patch(
+        "backend.market.exchanges.kucoin_market_ws.add_log"
+    ) as logged:
+        ws.on_error(None, TimeoutError("ping/pong timed out"))
+    message, level = logged.call_args.args
+    assert "DISCONNECTED" in message
+    assert "ping/pong timed out" in message
+    assert "ERROR" not in message
+    assert level == "warning"

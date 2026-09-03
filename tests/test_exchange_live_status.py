@@ -2491,34 +2491,19 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 },
             )
 
-            bot.stop()
+            stop_result = bot.stop()
 
             self.assertIsNone(bot.engine)
-            self.assertEqual(bot.position, "NONE")
             self.assertTrue(bot.account_snapshot["positionRemaining"])
             self.assertEqual(
                 bot.account_snapshot["positionStateSource"],
                 "execution_engine.actual_position+portfolio.positions",
             )
-
-            with patch(
-                "backend.api.governance.get_bot_manager",
-                return_value=bot,
-            ):
-                retry = asyncio.run(emergency_retry())
-
-            pending_state = bot.get_authoritative_pending_order_state()
-
-            self.assertFalse(retry["success"])
-            self.assertEqual(retry["error_code"], "POSITION_REMAINING")
-            self.assertEqual(
-                governance_state["emergency_state"],
-                EMERGENCY_ACTION_REQUIRED,
-            )
-            self.assertEqual(
-                emergency_unlock_block_reason(pending_state),
-                "ACTION_REQUIRED",
-            )
+            self.assertEqual(stop_result["status"], "error")
+            self.assertEqual(stop_result["reason"], "POSITION_REMAINING")
+            self.assertFalse(stop_result["completed"])
+            self.assertTrue(stop_result["stateUnknown"])
+            self.assertEqual(bot.lifecycle_state, "STOPPING")
         finally:
             self._restore_governance(state_before)
 

@@ -273,6 +273,13 @@ class MoneyManagementRuntimeHook:
             )
             return recorder
 
+    def set_active(self, active):
+        if type(active) is not bool:
+            return False
+        with self._lock:
+            self._active = active
+        return True
+
     def stop(self):
         with self._lock:
             already_stopped = not self._active
@@ -637,6 +644,33 @@ def register_money_management_runtime_hook(
         if installed is not True:
             hook.stop()
             return None
+
+        def lifecycle(state_name, session_id, runtime_instance_id):
+            identity_valid = bool(
+                type(session_id) is int
+                and session_id >= 0
+                and isinstance(runtime_instance_id, str)
+                and runtime_instance_id
+            )
+            if state_name == "STARTING":
+                success = hook.set_active(True) and identity_valid
+            elif state_name == "STOPPED":
+                success = hook.set_active(False) and identity_valid
+            else:
+                success = False
+            return {
+                "success": success,
+                "sessionId": session_id,
+                "runtimeInstanceId": runtime_instance_id,
+            }
+
+        lifecycle_setter = getattr(
+            bot_manager, "set_money_management_lifecycle_hook", None
+        )
+        if callable(lifecycle_setter) and lifecycle_setter(lifecycle) is not True:
+            bot_manager.set_money_management_runtime_hook(None)
+            hook.stop()
+            return None
         setattr(state, APPLICATION_STATE_ATTRIBUTE, hook_registration)
         current_metrics = getattr(
             bot_manager, "get_runtime_metrics_snapshot", lambda: {}
@@ -677,6 +711,11 @@ def unregister_money_management_runtime_hook(app, logger=None):
     registration.hook.stop()
     try:
         registration.bot_manager.set_money_management_runtime_hook(None)
+        lifecycle_setter = getattr(
+            registration.bot_manager, "set_money_management_lifecycle_hook", None
+        )
+        if callable(lifecycle_setter):
+            lifecycle_setter(None)
     except Exception:
         _safe_log(logger, "warning", "Unregistration Failed")
         return False
