@@ -126,6 +126,7 @@ class BotManager:
         self.stopped_paper_durable_rebind_lock = threading.Lock()
         self.money_management_runtime_hook_lock = threading.RLock()
         self.money_management_runtime_hook = None
+        self.money_management_lifecycle_hook = None
         self.money_management_execution_guard_lock = threading.RLock()
         self.money_management_execution_guard = None
         self.money_management_runtime_baseline_session = None
@@ -3042,6 +3043,9 @@ class BotManager:
                 self.session_id
             )
 
+            if self._notify_money_management_lifecycle("STARTING") is not True:
+                raise RuntimeError("MONEY_MANAGEMENT_START_LIFECYCLE_FAILED")
+
             if requested_mode == "paper":
                 self.money_management_runtime_metrics.begin_paper_session(
                     current_session,
@@ -3851,6 +3855,17 @@ class BotManager:
                 current_session
             )
 
+            baseline_complete = bool(
+                self.money_management_runtime_baseline_session == current_session
+                and self.money_management_runtime_metrics.snapshot().is_complete
+            )
+            if (
+                requested_mode == "paper"
+                and self.money_management_runtime_hook is not None
+                and baseline_complete is not True
+            ):
+                raise RuntimeError("MONEY_MANAGEMENT_BASELINE_INCOMPLETE")
+
             # Starting the bot establishes monitoring infrastructure only.
             # Loop and AUTO TRADE remain explicitly disabled.
             self._set_loop_state("STOPPED")
@@ -3887,6 +3902,10 @@ class BotManager:
                 "orderbookSymbol": self.orderbook_symbol,
                 "loopState": self.loop_state,
                 "autoTradeEnabled": governance_state.get("execution_enabled") is True,
+                "sessionId": current_session,
+                "runtimeInstanceId": self.runtime_instance_id,
+                "mmBaselineSessionId": self.money_management_runtime_baseline_session,
+                "baselineComplete": baseline_complete,
             }
 
         except Exception as e:
@@ -4213,6 +4232,26 @@ class BotManager:
             self.money_management_runtime_hook = callback
 
         return True
+
+    def set_money_management_lifecycle_hook(self, callback):
+        """Install or clear the application-owned Bot lifecycle callback."""
+        if callback is not None and not callable(callback):
+            return False
+        with self.money_management_runtime_hook_lock:
+            self.money_management_lifecycle_hook = callback
+        return True
+
+    def _notify_money_management_lifecycle(self, state):
+        with self.money_management_runtime_hook_lock:
+            callback = self.money_management_lifecycle_hook
+        if callback is None:
+            return True
+        try:
+            result = callback(state, self.session_id, self.runtime_instance_id)
+            return isinstance(result, dict) and result.get("success") is True
+        except Exception:
+            logger.warning("Money Management lifecycle callback failed: %s", state)
+            return False
 
     def set_money_management_execution_entry_guard(self, callback):
 
@@ -9260,6 +9299,21 @@ class BotManager:
                     isinstance(engine_stop_result, dict)
                     and engine_stop_result.get("status") == "stopped"
                 )
+                if (
+                    engine_stopped is True
+                    and engine_mode == "paper"
+                    and self._stopped_paper_snapshot_authority_state(
+                        self.account_snapshot
+                    ).get("valid") is not True
+                ):
+                    final_preserved = (
+                        self._preserve_stopped_paper_engine_safety_snapshot()
+                    )
+                    if final_preserved is None:
+                        cleanup_failures.append(
+                            "FINAL_INVENTORY_REFRESH_FAILED"
+                        )
+
                 if engine_stopped is not True:
                     if engine_mode == "paper":
                         self._invalidate_stopped_paper_durable_snapshot(
@@ -9376,6 +9430,34 @@ class BotManager:
                 "STOPPED"
             )
 
+            final_snapshot = self.account_snapshot
+            if engine_mode == "paper":
+                final_authority = self._stopped_paper_snapshot_authority_state(
+                    final_snapshot
+                )
+                if final_authority.get("valid") is not True:
+                    cleanup_failures.append(
+                        final_authority.get("reason")
+                        or "FINAL_INVENTORY_REFRESH_FAILED"
+                    )
+                elif final_authority.get("position_state") != "flat":
+                    cleanup_failures.append("POSITION_REMAINING")
+                elif final_authority.get("pending_order_state") != "flat":
+                    cleanup_failures.append("PENDING_ORDER_REMAINING")
+                elif final_authority.get("open_order_state") != "flat":
+                    cleanup_failures.append("OPEN_ORDER_REMAINING")
+            if self._notify_money_management_lifecycle("STOPPED") is not True:
+                cleanup_failures.append("MONEY_MANAGEMENT_STOP_LIFECYCLE_FAILED")
+            if cleanup_failures:
+                self._set_lifecycle_state("STOPPING")
+                return {
+                    "status": "error", "reason": cleanup_failures[0],
+                    "success": False, "completed": False, "stateUnknown": True,
+                    "sessionId": self.session_id,
+                    "runtimeInstanceId": self.runtime_instance_id,
+                    "mmBaselineSessionId": self.money_management_runtime_baseline_session,
+                }
+
             self.position = "NONE"
 
             self.entry_price = None
@@ -9409,6 +9491,13 @@ class BotManager:
                 "success": True,
                 "completed": True,
                 "stateUnknown": False,
+                "sessionId": self.session_id,
+                "runtimeInstanceId": self.runtime_instance_id,
+                "mmBaselineSessionId": self.money_management_runtime_baseline_session,
+                "baselineComplete": bool(
+                    self.money_management_runtime_baseline_session == self.session_id
+                    and self.money_management_runtime_metrics.snapshot().is_complete
+                ),
             }
 
         except Exception as e:
@@ -10134,6 +10223,17 @@ class BotManager:
             "pendingOrderState": pending_order_status_state,
 
             "pending_order_state": deepcopy(pending_order_state),
+
+            "sessionId": self.session_id,
+
+            "runtimeInstanceId": self.runtime_instance_id,
+
+            "mmBaselineSessionId": self.money_management_runtime_baseline_session,
+
+            "baselineComplete": bool(
+                self.money_management_runtime_baseline_session == self.session_id
+                and self.money_management_runtime_metrics.snapshot().is_complete
+            ),
 
             "signal": self.last_signal,
 

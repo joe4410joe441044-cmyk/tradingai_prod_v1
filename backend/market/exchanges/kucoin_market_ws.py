@@ -738,10 +738,14 @@ class OrderBookWS:
         self._trade_subscription_id = None
         self.recent_trades.reset()
 
+        recoverable_timeout = "ping/pong timed out" in str(error).lower()
         add_log(
-            f"❌ ORDERBOOK WS ERROR: "
-            f"{error}",
-            "error"
+            (
+                f"⚠️ ORDERBOOK WS DISCONNECTED: {error}"
+                if recoverable_timeout
+                else f"❌ ORDERBOOK WS ERROR: {error}"
+            ),
+            "warning" if recoverable_timeout else "error",
         )
 
     # =========================

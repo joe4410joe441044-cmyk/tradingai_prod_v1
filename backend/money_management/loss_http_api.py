@@ -296,6 +296,10 @@ class MoneyManagementStatusResponse:
     cash_flow_authority: object
     capital_authority_status: str = "UNAVAILABLE"
     runtime_trading_metrics_status: str = "UNAVAILABLE"
+    session_id: object = None
+    runtime_instance_id: object = None
+    baseline_session_id: object = None
+    baseline_complete: bool = False
 
     def to_dict(self):
         return {
@@ -324,6 +328,10 @@ class MoneyManagementStatusResponse:
             "configuration": self.configuration.to_dict(),
             "capitalEligibility": self.capital_eligibility.to_dict(),
             "cashFlowAuthority": self.cash_flow_authority,
+            "sessionId": self.session_id,
+            "runtimeInstanceId": self.runtime_instance_id,
+            "baselineSessionId": self.baseline_session_id,
+            "baselineComplete": self.baseline_complete,
         }
 
 
@@ -1027,6 +1035,9 @@ class MoneyManagementHttpBoundary:
         )
         cash_flow_authority = get_money_management_cash_flow_status(self._app)
         hook_registration = self._hook_registration()
+        bot_manager = getattr(hook_registration, "bot_manager", None)
+        bot_session_lifecycle = getattr(bot_manager, "lifecycle_state", None)
+        bot_session_running = bot_session_lifecycle == "RUNNING"
         hook_healthy = bool(
             hook_registration is not None
             and hook_registration.hook.last_dispatch_status
@@ -1120,6 +1131,7 @@ class MoneyManagementHttpBoundary:
             enabled
             and registration_ready
             and lifecycle_running
+            and bot_session_running
             and hook_healthy
             and metrics_fresh
             and projection_fresh
@@ -1170,6 +1182,7 @@ class MoneyManagementHttpBoundary:
             enabled
             and registration_ready
             and lifecycle_running
+            and bot_session_running
             and hook_healthy
             and live_equity_matches_mm_state
             and cash_flow_ready
@@ -1361,10 +1374,33 @@ class MoneyManagementHttpBoundary:
             and not isinstance(metrics_result, LossRuntimeMetricsReadResult)
         ):
             recovery_required = False
+        hook_registration = getattr(
+            getattr(self._app, "state", None),
+            "money_management_runtime_hook",
+            None,
+        )
+        correlation_session = getattr(bot_manager, "session_id", None)
+        correlation_runtime = getattr(bot_manager, "runtime_instance_id", None)
+        correlation_baseline = getattr(
+            bot_manager, "money_management_runtime_baseline_session", None
+        )
+        correlation_complete = bool(
+            type(correlation_session) is int
+            and isinstance(correlation_runtime, str)
+            and bool(correlation_runtime)
+            and type(correlation_baseline) is int
+            and isinstance(metrics, LossRuntimeMetrics)
+            and metrics.data_quality is LossRuntimeDataQuality.COMPLETE
+            and metrics.session_id == correlation_session
+            and metrics.runtime_instance_id == correlation_runtime
+            and correlation_baseline == correlation_session
+        )
         return MoneyManagementStatusResponse(
             available,
             enabled,
-            lifecycle_status.lifecycle_state.value
+            bot_session_lifecycle
+            if bot_session_lifecycle in {"STARTING", "RUNNING", "STOPPING", "STOPPED"}
+            else lifecycle_status.lifecycle_state.value
             if lifecycle_status is not None
             else "UNAVAILABLE",
             risk_state,
@@ -1402,6 +1438,10 @@ class MoneyManagementHttpBoundary:
             metrics_result.status.value
             if isinstance(metrics_result, LossRuntimeMetricsReadResult)
             else LossRuntimeMetricsReadStatus.UNAVAILABLE.value,
+            correlation_session,
+            correlation_runtime,
+            correlation_baseline,
+            correlation_complete,
         )
 
     def _normalize_update(self, payload):

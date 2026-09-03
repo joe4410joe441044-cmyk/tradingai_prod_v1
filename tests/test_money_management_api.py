@@ -107,6 +107,7 @@ def ready_boundary(*, publish=True, runtime_metrics=None, runtime_mode="paper"):
     )
     hook.record_evaluation_status(applied.status)
     bot = SimpleNamespace(
+        lifecycle_state="RUNNING",
         config={"mode": runtime_mode} if runtime_mode is not None else {},
         set_money_management_runtime_hook=lambda callback: True,
     )
@@ -1182,3 +1183,15 @@ class MoneyManagementHttpRegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_public_status_uses_bot_session_lifecycle_and_fails_closed_when_stopped():
+    boundary, app, _, _, _ = ready_boundary()
+    bot = app.state.money_management_runtime_hook.bot_manager
+    bot.lifecycle_state = "STOPPED"
+    payload = boundary.get_status().to_dict()
+    assert payload["lifecycleState"] == "STOPPED"
+    assert payload["available"] is False
+    assert payload["executionEntryAllowed"] is False
+    assert payload["runtimeInstanceId"] is None
+    assert payload["baselineComplete"] is False
