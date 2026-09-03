@@ -2223,12 +2223,22 @@ class BotManager:
         )
         return capital if isinstance(capital, CapitalEligibilityContract) else None
 
-    def _production_ams_safety_state(self):
+    def _production_ams_safety_state(
+        self, *, requested_mode=None, requested_dry_run=None,
+    ):
+        effective_mode = str(
+            self.config.get("mode", "")
+            if requested_mode is None else requested_mode
+        ).strip().lower()
+        effective_dry_run = (
+            self.config.get("dry_run", True)
+            if requested_dry_run is None else requested_dry_run
+        )
         state = {
             "realOrderAllowed": bool(
                 self.config.get("realOrderAllowed", False)
             ),
-            "dryRun": bool(self.config.get("dry_run", True)),
+            "dryRun": bool(effective_dry_run),
             "executionRealOrderDisabled": not bool(
                 self.config.get("executionRealOrderEnabled", False)
             ),
@@ -2242,8 +2252,8 @@ class BotManager:
             "governanceAvailable": True,
         }
         state["liveSelectionOnly"] = bool(
-            str(self.config.get("mode", "")).strip().lower() == "live"
-            and self.config.get("dry_run") is False
+            effective_mode == "live"
+            and effective_dry_run is False
             and state["realOrderAllowed"] is False
             and state["executionRealOrderDisabled"] is True
             and state["autoTradeDisabled"] is True
@@ -2255,8 +2265,8 @@ class BotManager:
         state["stoppedLiveMonitoring"] = bool(
             self._running is False
             and self.lifecycle_state == "STOPPED"
-            and str(self.config.get("mode", "")).strip().lower() == "live"
-            and self.config.get("dry_run") is False
+            and effective_mode == "live"
+            and effective_dry_run is False
             and state["realOrderAllowed"] is False
             and state["executionRealOrderDisabled"] is True
             and state["autoTradeDisabled"] is True
@@ -2264,7 +2274,9 @@ class BotManager:
         )
         return state
 
-    def refresh_production_ams_read_model(self, *, force=False):
+    def refresh_production_ams_read_model(
+        self, *, force=False, requested_mode=None, requested_dry_run=None,
+    ):
         """Run one cached GET-only account/MM/public-market observation cycle."""
         provider = self.production_ams_mm_config_provider
         if not callable(provider):
@@ -2288,7 +2300,11 @@ class BotManager:
             self.account_read_client = client
             self.account_read_client_exchange = self.exchange_name
             authority = ExistingKucoinLiveAccountAuthority(
-                client, safety_provider=self._production_ams_safety_state,
+                client,
+                safety_provider=lambda: self._production_ams_safety_state(
+                    requested_mode=requested_mode,
+                    requested_dry_run=requested_dry_run,
+                ),
             )
             account = authority.read()
             capital = authority.build_capital_eligibility(
@@ -2297,7 +2313,10 @@ class BotManager:
             validation = LiveReadOnlyValidation(
                 KucoinFuturesPublicClient(), capital_provider=lambda: capital,
                 active_symbol_provider=lambda: self.activeSymbol,
-                safety_provider=self._production_ams_safety_state,
+                safety_provider=lambda: self._production_ams_safety_state(
+                    requested_mode=requested_mode,
+                    requested_dry_run=requested_dry_run,
+                ),
                 position_provider=lambda: account.open_position_state,
                 pending_order_provider=lambda: account.pending_order_state,
                 emergency_provider=lambda: not bool(
@@ -2983,7 +3002,11 @@ class BotManager:
                         "stateUnknown": False,
                     }
 
-                live_start_authority = self.get_authoritative_pending_order_state()
+                live_start_authority = self.get_authoritative_pending_order_state(
+                    requested_mode=requested_mode,
+                    requested_dry_run=requested_dry_run,
+                    requested_exchange=config.get("exchange"),
+                )
                 if (
                     live_start_authority.get("known") is not True
                     or live_start_authority.get("pending") is not False
@@ -3012,6 +3035,28 @@ class BotManager:
             }
 
         try:
+
+            if requested_mode == "live":
+                # READY/status evidence is not reusable START authority. Read
+                # again at the final boundary before lifecycle/session effects.
+                live_start_authority = self.get_authoritative_pending_order_state(
+                    requested_mode=requested_mode,
+                    requested_dry_run=requested_dry_run,
+                    requested_exchange=config.get("exchange"),
+                )
+                if (
+                    live_start_authority.get("known") is not True
+                    or live_start_authority.get("pending") is not False
+                    or live_start_authority.get("safe") is not True
+                ):
+                    return {
+                        "status": "error",
+                        "reason": live_start_authority.get("reason")
+                        or "LIVE_RUNTIME_START_AUTHORITY_REQUIRED",
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": live_start_authority.get("known") is not True,
+                    }
 
             stop_result = self.stop()
             if (
@@ -7975,7 +8020,10 @@ class BotManager:
             "open_order_count": 0,
         }
 
-    def get_authoritative_pending_order_state(self):
+    def get_authoritative_pending_order_state(
+        self, *, requested_mode=None, requested_dry_run=None,
+        requested_exchange=None,
+    ):
 
         missing = object()
 
@@ -8058,14 +8106,22 @@ class BotManager:
         if engine is None:
             configured_mode = str(
                 self.config.get("mode", "")
+                if requested_mode is None else requested_mode
             ).strip().lower()
             if (
                 configured_mode == "live"
                 and self._running is False
                 and self.lifecycle_state == "STOPPED"
             ):
+                if requested_mode is None:
+                    return self._stopped_live_pending_order_authority(
+                        manager_pending_order
+                    )
                 return self._stopped_live_pending_order_authority(
-                    manager_pending_order
+                    manager_pending_order,
+                    requested_mode=configured_mode,
+                    requested_dry_run=requested_dry_run,
+                    requested_exchange=requested_exchange,
                 )
 
             # Manager state is current process authority.  A pending order
@@ -8261,7 +8317,10 @@ class BotManager:
             engine_pending_order=engine_pending_order,
         )
 
-    def _stopped_live_pending_order_authority(self, manager_pending_order):
+    def _stopped_live_pending_order_authority(
+        self, manager_pending_order, *, requested_mode="live",
+        requested_dry_run=False, requested_exchange=None,
+    ):
         """Resolve pending orders from the real GET-only exchange authority."""
         def unknown(reason):
             return self._pending_order_authority_payload(
@@ -8274,7 +8333,10 @@ class BotManager:
                 engine_available=False,
             )
 
-        safety = self._production_ams_safety_state()
+        safety = self._production_ams_safety_state(
+            requested_mode=requested_mode,
+            requested_dry_run=requested_dry_run,
+        )
         if safety.get("stoppedLiveMonitoring") is not True:
             return unknown("STOPPED_LIVE_MONITORING_UNAVAILABLE")
 
@@ -8301,8 +8363,14 @@ class BotManager:
             except (TypeError, ValueError):
                 fresh = False
 
-        if not fresh:
-            current = self.refresh_production_ams_read_model(force=True)
+        # START supplies an expected exchange identity. At that boundary a
+        # cached READY/status projection is evidence only, never authority.
+        if requested_exchange is not None or not fresh:
+            current = self.refresh_production_ams_read_model(
+                force=True,
+                requested_mode=requested_mode,
+                requested_dry_run=requested_dry_run,
+            )
             account = (
                 current.get("liveAccountAuthority")
                 if isinstance(current, dict) else None
@@ -8310,12 +8378,37 @@ class BotManager:
 
         if not isinstance(account, dict):
             return unknown("LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE")
+        expected_exchange = str(requested_exchange or "").strip().lower()
+        observed_exchange = str(
+            getattr(self, "account_read_client_exchange", "") or ""
+        ).strip().lower()
+        if expected_exchange and observed_exchange != expected_exchange:
+            return unknown("LIVE_ACCOUNT_IDENTITY_MISMATCH")
         if (
-            account.get("authorityFresh") is not True
+            account.get("sourceAuthority") != "REAL_LIVE_ACCOUNT"
+            or account.get("capitalAuthority") != "REAL_LIVE_ACCOUNT"
+            or account.get("accountFresh") is not True
+            or account.get("positionFresh") is not True
+            or account.get("authorityFresh") is not True
             or account.get("pendingOrdersFresh") is not True
             or account.get("snapshotConsistent") is not True
         ):
             return unknown("LIVE_PENDING_ORDER_AUTHORITY_STALE")
+
+        if account.get("reasonCodes") not in ([], ()):
+            return unknown("LIVE_ACCOUNT_AUTHORITY_INCOMPLETE")
+        if account.get("openPositionState") != "FLAT":
+            return unknown(
+                "LIVE_POSITION_OPEN"
+                if account.get("openPositionState") == "OPEN"
+                else "LIVE_POSITION_UNKNOWN"
+            )
+        try:
+            current_exposure = Decimal(str(account.get("currentExposure")))
+        except (ArithmeticError, TypeError, ValueError):
+            return unknown("LIVE_EXPOSURE_AUTHORITY_UNAVAILABLE")
+        if current_exposure != Decimal("0"):
+            return unknown("LIVE_EXPOSURE_REMAINING")
 
         state = account.get("pendingOrderState")
         if state == "NONE":

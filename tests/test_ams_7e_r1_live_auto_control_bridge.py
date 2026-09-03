@@ -95,15 +95,22 @@ def test_stopped_live_pending_none_comes_from_fresh_exchange_authority():
     manager.auto_market_selection_observation = None
     observed = {
         "liveAccountAuthority": {
+            "sourceAuthority": "REAL_LIVE_ACCOUNT",
+            "capitalAuthority": "REAL_LIVE_ACCOUNT",
+            "accountFresh": True,
+            "positionFresh": True,
             "authorityFresh": True,
             "pendingOrdersFresh": True,
             "snapshotConsistent": True,
+            "openPositionState": "FLAT",
             "pendingOrderState": "NONE",
+            "currentExposure": "0",
+            "reasonCodes": [],
             "authorityEvaluatedAt": "2099-01-01T00:00:00Z",
         },
         "productionIntegration": {"status": "READY"},
     }
-    manager.refresh_production_ams_read_model = lambda force=False: observed
+    manager.refresh_production_ams_read_model = lambda **kwargs: observed
     result = manager.get_authoritative_pending_order_state()
     assert result["known"] is True
     assert result["pending"] is False
@@ -124,7 +131,7 @@ def test_stopped_live_get_failure_remains_unknown_fail_closed():
     manager.engine = None
     manager.pending_order = False
     manager.auto_market_selection_observation = None
-    manager.refresh_production_ams_read_model = lambda force=False: {
+    manager.refresh_production_ams_read_model = lambda **kwargs: {
         "productionIntegration": {"status": "BLOCKED"},
     }
     result = manager.get_authoritative_pending_order_state()
