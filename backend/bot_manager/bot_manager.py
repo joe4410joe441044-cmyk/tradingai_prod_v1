@@ -3595,6 +3595,16 @@ class BotManager:
                                 )
                             )
 
+                            if isinstance(self.latest_runtime_result, dict):
+                                self.latest_runtime_result[
+                                    "runtimeSnapshotAuthority"
+                                ] = {
+                                    "sessionId": current_session,
+                                    "runtimeInstanceId": self.runtime_instance_id,
+                                    "runtimeId": runtime_id,
+                                    "capturedAt": time.time(),
+                                }
+
                             self.attach_orderbook_runtime_debug(
                                 self.latest_runtime_result
                             )
@@ -9784,6 +9794,10 @@ class BotManager:
                 f"{self.session_id}:{self.update_id}"
             ),
             generated_at=datetime.now(timezone.utc).isoformat(),
+            loop_state=self.loop_state,
+            session_id=self.session_id,
+            runtime_instance_id=self.runtime_instance_id,
+            active_runtime_id=self.active_runtime_id,
         )
         runtime_states = runtime_health["states"]
 

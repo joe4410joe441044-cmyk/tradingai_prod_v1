@@ -10,6 +10,12 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
     @staticmethod
     def _active_snapshot(**overrides):
         runtime_result = {
+            "runtimeSnapshotAuthority": {
+                "sessionId": 7,
+                "runtimeInstanceId": "instance-1",
+                "runtimeId": "feed-1",
+                "capturedAt": 1_700_000_000.5,
+            },
             "valid": False,
             "tradingAiMode": "OFF",
             "tradingAiStatus": "NOT_INSTALLED",
@@ -58,7 +64,11 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
                 },
             },
         }
-        runtime_result.update(overrides.pop("runtime_result", {}))
+        runtime_result_override = overrides.pop("runtime_result", {})
+        if runtime_result_override is None:
+            runtime_result = {}
+        else:
+            runtime_result.update(runtime_result_override)
         values = {
             "running": True,
             "market_stale": False,
@@ -84,6 +94,10 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
                 "emergency_stop": False,
             },
             "snapshot_timestamp": 1_700_000_001.0,
+            "loop_state": "RUNNING",
+            "session_id": 7,
+            "runtime_instance_id": "instance-1",
+            "active_runtime_id": "feed-1",
         }
         values.update(overrides)
         return build_runtime_health_snapshot(**values)
@@ -188,6 +202,49 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["health"], "CRITICAL")
         self.assertFalse(snapshot["runtimeHealthy"])
         self.assertEqual(snapshot["blockingReason"], "RUNTIME_EXCEPTION")
+
+    def test_running_bot_with_stopped_loop_does_not_require_snapshot(self):
+        snapshot = self._active_snapshot(loop_state="STOPPED", runtime_result={})
+
+        self.assertEqual(snapshot["runtimeLoop"]["status"], "STOPPED")
+        self.assertFalse(snapshot["runtimeLoop"]["running"])
+        self.assertNotIn("RUNTIME_SNAPSHOT_MISSING", snapshot["issues"])
+        self.assertNotEqual(snapshot["health"], "CRITICAL")
+        self.assertEqual(snapshot["pipelineStatus"], "IDLE")
+
+    def test_running_loop_with_valid_current_snapshot_is_healthy(self):
+        snapshot = self._active_snapshot()
+
+        self.assertEqual(snapshot["runtimeLoop"]["status"], "RUNNING")
+        self.assertEqual(snapshot["health"], "HEALTHY")
+        self.assertNotIn("RUNTIME_SNAPSHOT_MISSING", snapshot["issues"])
+
+    def test_running_loop_with_missing_snapshot_fails_closed(self):
+        snapshot = self._active_snapshot(runtime_result=None)
+
+        self.assertEqual(snapshot["health"], "CRITICAL")
+        self.assertIn("RUNTIME_SNAPSHOT_MISSING", snapshot["issues"])
+
+    def test_running_loop_rejects_stale_snapshot(self):
+        snapshot = self._active_snapshot(runtime_result={
+            "runtimeSnapshotAuthority": {"capturedAt": 1_699_999_990.0},
+        })
+
+        self.assertEqual(snapshot["health"], "CRITICAL")
+        self.assertIn("RUNTIME_SNAPSHOT_MISSING", snapshot["issues"])
+
+    def test_running_loop_rejects_wrong_session_or_runtime_snapshot(self):
+        for name, authority in (
+            ("session", {"sessionId": 6}),
+            ("runtime", {"runtimeInstanceId": "instance-old"}),
+            ("feed", {"runtimeId": "feed-old"}),
+        ):
+            with self.subTest(name=name):
+                snapshot = self._active_snapshot(runtime_result={
+                    "runtimeSnapshotAuthority": authority,
+                })
+                self.assertEqual(snapshot["health"], "CRITICAL")
+                self.assertIn("RUNTIME_SNAPSHOT_MISSING", snapshot["issues"])
 
     def test_browser_and_exchange_websockets_are_not_mixed(self):
         browser_down = self._active_snapshot(browser_ws_connected=False)
