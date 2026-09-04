@@ -1,4 +1,16 @@
-"""Static, versioned, local-only knowledge allowlist."""
+"""Static, versioned, local-only knowledge allowlist.
+
+DEPRECATED / DORMANT (D-2): this module defines the legacy
+:class:`ApprovedKnowledgeRegistry` which stays disabled via
+``retrievalEnabled=False``.  It is intentionally left in place for
+backward compatibility and is NOT wired into any runtime path.  No runtime
+component imports its read-only retrieval (``load`` raises
+``KNOWLEDGE_RETRIEVAL_DISABLED``).
+
+The canonical loading/verification boundary for TradingAI now lives in
+:mod:`backend.knowledge_core.canonical_loader`.  New consumers must use that
+shared loader.
+"""
 
 import hashlib
 import re
@@ -80,7 +92,13 @@ class KnowledgeSourceError(ValueError):
 
 
 class ApprovedKnowledgeRegistry:
-    """Immutable manifest registry; no repository search or network access."""
+    """Immutable manifest registry; no repository search or network access.
+
+    DEPRECATED / DORMANT (D-2): ``retrievalEnabled`` is ``False``, so ``load``
+    always raises ``KNOWLEDGE_RETRIEVAL_DISABLED``.  It is preserved for
+    backward compatibility and is not used by any runtime component.  Prefer
+    :mod:`backend.knowledge_core.canonical_loader`.
+    """
 
     def __init__(
         self,

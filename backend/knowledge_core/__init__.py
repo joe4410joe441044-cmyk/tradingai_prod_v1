@@ -42,6 +42,21 @@ from .core import (
     build_default_knowledge_core,
     mutation_interface_names,
 )
+from .canonical_loader import (
+    AUTHORITY_PRIORITY,
+    CanonicalKnowledgeAuthority,
+    CanonicalKnowledgeDocument,
+    CanonicalKnowledgeEntry,
+    CanonicalKnowledgeLoadError,
+    CanonicalKnowledgeLoader,
+    CanonicalKnowledgeLoadResult,
+    CanonicalKnowledgeManifest,
+    VerificationState,
+    default_repository_root,
+    load_canonical_knowledge,
+    production_canonical_knowledge_manifest,
+    sha256_digest,
+)
 
 __all__ = [
     "KnowledgeCore",
@@ -73,6 +88,19 @@ __all__ = [
     "UNKNOWN",
     "ReasonCodeCatalog",
     "ReasonCodeRecord",
+    "AUTHORITY_PRIORITY",
+    "CanonicalKnowledgeAuthority",
+    "CanonicalKnowledgeDocument",
+    "CanonicalKnowledgeEntry",
+    "CanonicalKnowledgeLoadError",
+    "CanonicalKnowledgeLoader",
+    "CanonicalKnowledgeLoadResult",
+    "CanonicalKnowledgeManifest",
+    "VerificationState",
+    "default_repository_root",
+    "load_canonical_knowledge",
+    "production_canonical_knowledge_manifest",
+    "sha256_digest",
 ]
 
 __version__ = "0.1.0"
