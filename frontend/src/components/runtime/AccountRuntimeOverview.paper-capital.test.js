@@ -22,7 +22,8 @@ test("presets only populate input and real available uses an explicit source", (
     assert.match(source, /REAL_AVAILABLE_PRESET/);
     assert.match(source, /disabled=\{!realAvailablePresetEnabled\}/);
     assert.match(source, /REAL_ACCOUNT_NOT_SYNCED/);
-    assert.equal((source.match(/fetch\(API\.paperAccountCapital\(\)/g) || []).length, 1);
+    assert.equal((source.match(/fetch\(API\.paperAccountCapital\(\)/g) || []).length, 0);
+    assert.equal((source.match(/authenticatedControlRequest\(API\.paperAccountCapital\(\)/g) || []).length, 1);
 });
 
 test("paper reset uses the same-origin backend API and refreshes authority", () => {

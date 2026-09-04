@@ -20,6 +20,11 @@ import {
     requestBotStop,
 } from "../runtime/botLifecycle";
 import {
+    authenticatedControlRequest,
+    authErrorMessage,
+    isAuthErrorStatus,
+} from "../features/auth/operatorAuth";
+import {
     useMoneyManagement,
 } from "../features/money-management/hooks/useMoneyManagement";
 import OperationToggle from "./common/OperationToggle";
@@ -837,14 +842,20 @@ export default function BotControl({
         setBotError(null);
 
         try {
-            const response = await fetch(API.botStop(), {
+            const response = await authenticatedControlRequest(API.botStop(), {
                 method: "POST",
             });
             const result = await response.json().catch(() => null);
 
             const lifecycleConfirmed = result?.status === "stopped" && result?.success === true;
 
-            if (!response.ok || !lifecycleConfirmed) {
+            if (!response.ok) {
+                if (isAuthErrorStatus(response.status)) {
+                    throw new Error(authErrorMessage(response.status));
+                }
+                throw new Error(result?.reason || result?.detail || "BOT STOP request was rejected.");
+            }
+            if (!lifecycleConfirmed) {
                 throw new Error(result?.reason || result?.detail || "BOT STOP request was rejected.");
             }
 
@@ -865,7 +876,7 @@ export default function BotControl({
         setAutoTradeError(null);
 
         try {
-            const response = await fetch(API.botStart(), {
+            const response = await authenticatedControlRequest(API.botStart(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -890,7 +901,13 @@ export default function BotControl({
 
             const lifecycleConfirmed = result?.status === "started";
 
-            if (!response.ok || !lifecycleConfirmed) {
+            if (!response.ok) {
+                if (isAuthErrorStatus(response.status)) {
+                    throw new Error(authErrorMessage(response.status));
+                }
+                throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
+            }
+            if (!lifecycleConfirmed) {
                 throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
             }
 
@@ -917,7 +934,7 @@ export default function BotControl({
 
     const startLoop = async () => {
         const response =
-            await fetch(
+            await authenticatedControlRequest(
                 API.loopStart(),
                 {
                     method: "POST",
@@ -925,6 +942,13 @@ export default function BotControl({
             );
 
         if (!response.ok) {
+            if (isAuthErrorStatus(response.status)) {
+                const error = new Error(
+                    authErrorMessage(response.status)
+                );
+                error.status = response.status;
+                throw error;
+            }
             const text =
                 await response.text();
 

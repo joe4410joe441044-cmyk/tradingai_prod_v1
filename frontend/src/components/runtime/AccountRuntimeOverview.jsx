@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { API } from "../../api";
+import {
+    authenticatedControlRequest,
+    authErrorMessage,
+    isAuthErrorStatus,
+} from "../../features/auth/operatorAuth";
 
 const EMPTY_VALUES = new Set([
     "UNKNOWN",
@@ -272,7 +277,7 @@ export default function AccountRuntimeOverview({
         setCapitalSubmitting(true);
         setCapitalMessage(null);
         try {
-            const response = await fetch(API.paperAccountCapital(), {
+            const response = await authenticatedControlRequest(API.paperAccountCapital(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -282,6 +287,9 @@ export default function AccountRuntimeOverview({
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
+                if (isAuthErrorStatus(response.status)) {
+                    throw new Error(authErrorMessage(response.status));
+                }
                 throw new Error(payload.detail || "Unable to reset paper capital.");
             }
             if (onPaperCapitalApplied) await onPaperCapitalApplied();

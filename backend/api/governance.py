@@ -1,10 +1,11 @@
 # backend/api/governance.py
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from backend.bot_manager import (
     get_bot_manager,
 )
+from backend.auth.dependencies import require_operator_session
 
 from backend.runtime.governance_runtime import (
     EMERGENCY_ACTION_REQUIRED,
@@ -24,7 +25,10 @@ router = APIRouter(
 # ============================================================
 
 @router.post("/mode")
-async def set_mode(payload: dict):
+async def set_mode(
+    payload: dict,
+    _operator: str = Depends(require_operator_session),
+):
 
     governance_state["mode"] = payload.get(
         "mode",
@@ -42,7 +46,10 @@ async def set_mode(payload: dict):
 # ============================================================
 
 @router.post("/execution")
-async def set_execution(payload: dict):
+async def set_execution(
+    payload: dict,
+    _operator: str = Depends(require_operator_session),
+):
 
     enabled = bool(payload.get(
         "enabled",
@@ -59,7 +66,10 @@ async def set_execution(payload: dict):
 # ============================================================
 
 @router.post("/risk-profile")
-async def set_risk_profile(payload: dict):
+async def set_risk_profile(
+    payload: dict,
+    _operator: str = Depends(require_operator_session),
+):
 
     governance_state["risk_profile"] = payload.get(
         "risk_profile",
@@ -78,7 +88,7 @@ async def set_risk_profile(payload: dict):
 # ============================================================
 
 @router.post("/emergency-stop")
-async def emergency_stop():
+async def emergency_stop(_operator: str = Depends(require_operator_session)):
 
     governance_state["emergency_stop"] = True
 
@@ -93,7 +103,7 @@ async def emergency_stop():
 
 
 @router.post("/emergency-orchestrate")
-async def emergency_orchestrate():
+async def emergency_orchestrate(_operator: str = Depends(require_operator_session)):
 
     bot_manager = get_bot_manager()
 
@@ -113,7 +123,7 @@ async def emergency_orchestrate():
 
 
 @router.post("/emergency/unlock")
-async def emergency_unlock():
+async def emergency_unlock(_operator: str = Depends(require_operator_session)):
     bot_manager = get_bot_manager()
 
     if governance_state.get("emergency_state") == "PROCESSING":
@@ -189,7 +199,7 @@ async def emergency_unlock():
 
 
 @router.post("/emergency/retry")
-async def emergency_retry():
+async def emergency_retry(_operator: str = Depends(require_operator_session)):
 
     bot_manager = get_bot_manager()
     result = bot_manager.retry_emergency_orchestrator()

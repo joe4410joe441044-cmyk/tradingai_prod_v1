@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from backend.bot_manager import get_bot_manager
+from backend.auth.dependencies import require_operator_session
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from decimal import Decimal
@@ -348,7 +349,10 @@ class StatusResponse(BaseModel):
 # BOT START
 # =========================
 @router.post("/start")
-def start_bot(config: StartConfig):
+def start_bot(
+    config: StartConfig,
+    _operator: str = Depends(require_operator_session),
+):
 
     bot_manager = get_bot_manager()
 
@@ -401,7 +405,7 @@ def start_bot(config: StartConfig):
 # BOT STOP
 # =========================
 @router.post("/stop")
-def stop_bot():
+def stop_bot(_operator: str = Depends(require_operator_session)):
 
     bot_manager = get_bot_manager()
     runtime_debug("Bot stop request manager_id=%s", id(bot_manager))
@@ -412,7 +416,7 @@ def stop_bot():
 
 
 @router.post("/loop/start")
-def start_loop():
+def start_loop(_operator: str = Depends(require_operator_session)):
     result = get_bot_manager().start_loop()
     if result.get("success") is not True:
         raise HTTPException(status_code=409, detail=result)
@@ -420,12 +424,15 @@ def start_loop():
 
 
 @router.post("/loop/stop")
-def stop_loop():
+def stop_loop(_operator: str = Depends(require_operator_session)):
     return get_bot_manager().stop_loop()
 
 
 @router.post("/live-auto/approve")
-def approve_live_auto(request: LiveAutoApprovalRequest):
+def approve_live_auto(
+    request: LiveAutoApprovalRequest,
+    _operator: str = Depends(require_operator_session),
+):
     result = get_bot_manager().approve_live_auto_control(
         approval_identity=request.approvalIdentity,
         approval_source=request.approvalSource,
@@ -437,7 +444,7 @@ def approve_live_auto(request: LiveAutoApprovalRequest):
 
 
 @router.post("/live-auto/start")
-def start_live_auto():
+def start_live_auto(_operator: str = Depends(require_operator_session)):
     result = get_bot_manager().start_live_auto_control()
     if result.get("accepted") is not True:
         raise HTTPException(status_code=409, detail=result)
@@ -445,7 +452,7 @@ def start_live_auto():
 
 
 @router.post("/live-auto/stop")
-def stop_live_auto():
+def stop_live_auto(_operator: str = Depends(require_operator_session)):
     return get_bot_manager().stop_live_auto_control()
 
 
@@ -479,7 +486,10 @@ def reject_direct_symbol_switch():
 
 
 @router.post("/paper-account/capital")
-def reset_paper_capital(request: PaperCapitalRequest):
+def reset_paper_capital(
+    request: PaperCapitalRequest,
+    _operator: str = Depends(require_operator_session),
+):
     bot_manager = get_bot_manager()
 
     try:

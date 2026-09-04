@@ -17,7 +17,11 @@ test("UI bot stop request posts to the bot lifecycle endpoint", async () => {
 
     assert.deepEqual(requests, [{
         url: "/api/bot/stop",
-        options: { method: "POST" },
+        options: {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {},
+        },
     }]);
     assert.deepEqual(result, { status: "stopped" });
 });

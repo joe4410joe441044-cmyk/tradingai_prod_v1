@@ -37,6 +37,9 @@ const botLifecycleUrl = pathToFileURL(
 const operationPreparationModelUrl = pathToFileURL(
     join(sourceDir, "./operation/operationPreparationModel.js")
 ).href;
+const operatorAuthUrl = pathToFileURL(
+    join(sourceDir, "../features/auth/operatorAuth.js")
+).href;
 
 const transformJsxFile = async (
     inputUrl
@@ -145,6 +148,10 @@ const loadBotControl = async () => {
             .replace(
                 'from "../runtime/botLifecycle";',
                 `from "${botLifecycleUrl}";`,
+            )
+            .replace(
+                'from "../features/auth/operatorAuth";',
+                `from "${operatorAuthUrl}";`,
             )
             .replace(
                 'from "./common/OperationToggle";',

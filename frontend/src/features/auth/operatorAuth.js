@@ -28,6 +28,33 @@ export function readCsrfToken() {
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+export function isAuthErrorStatus(status) {
+    return status === 401 || status === 403;
+}
+
+export function authErrorMessage(status) {
+    if (status === 403) {
+        return "Authorization required. Please re-authenticate as the operator.";
+    }
+    return "Authentication required. Please log in as the operator.";
+}
+
+export async function authenticatedControlRequest(path, options = {}) {
+    const method = String(options.method || "GET").toUpperCase();
+    const headers = { ...(options.headers || {}) };
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+        const csrfToken = readCsrfToken();
+        if (csrfToken) {
+            headers[CSRF_TOKEN_HEADER] = csrfToken;
+        }
+    }
+    return fetch(path, {
+        ...options,
+        credentials: "same-origin",
+        headers,
+    });
+}
+
 let operatorAuthStatus = null;
 const operatorAuthStatusListeners = new Set();
 
