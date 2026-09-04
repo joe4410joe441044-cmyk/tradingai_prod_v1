@@ -8018,7 +8018,6 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_emergency_orchestrator_blocks_non_bool_live_readiness(self):
         cases = [
-            ("false", {"realOrderAllowed": False}),
             ("none", {"realOrderAllowed": None}),
             ("string-false", {"realOrderAllowed": "false"}),
             ("string-true", {"realOrderAllowed": "true"}),
@@ -8373,7 +8372,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         finally:
             self._restore_governance(state_before)
 
-    def test_emergency_orchestrator_selected_mode_live_is_not_enough(self):
+    def test_emergency_orchestrator_live_disarmed_still_uses_exit_capability(
+        self,
+    ):
+        # After the Governance lock revokes new-entry order authority
+        # (realOrderAllowed re-evaluated to False), Emergency exit capability
+        # must remain available because it is confirmed by the exchange
+        # adapter, not by realOrderAllowed.
         state_before = self._set_governance(
             execution_enabled=True,
             emergency_stop=False,
@@ -8387,16 +8392,330 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
             result = bot.run_emergency_orchestrator()
 
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertEqual(result["execution_path"], "live")
+            self.assertFalse(result["retryable"])
+            exchange.cancel_all_orders.assert_called_once_with("XRPUSDTM")
+            exchange.flatten_current_position.assert_called_once_with(
+                "XRPUSDTM"
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertFalse(bot._running)
+        finally:
+            self._restore_governance(state_before)
+
+    @staticmethod
+    def _live_known_zero_authority(**overrides):
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        authority = {
+            "capitalAuthority": "REAL_LIVE_ACCOUNT",
+            "sourceAuthority": "REAL_LIVE_ACCOUNT",
+            "openPositionState": "FLAT",
+            "pendingOrderState": "NONE",
+            "currentExposure": "0",
+            "evaluatedAt": now,
+            "authorityEvaluatedAt": now,
+            "accountEvaluatedAt": now,
+            "positionEvaluatedAt": now,
+            "pendingOrdersEvaluatedAt": now,
+            "accountFresh": True,
+            "positionFresh": True,
+            "pendingOrdersFresh": True,
+            "authorityFresh": True,
+            "snapshotSkewSeconds": 0,
+            "snapshotConsistent": True,
+            "reasonCodes": [],
+        }
+        authority.update(overrides)
+        return {"liveAccountAuthority": authority}
+
+    def test_emergency_orchestrator_live_disarmed_known_zero_safe_noop(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            bot, engine, exchange = self._live_emergency_bot(
+                real_order_allowed=False,
+                exchange=Mock(),
+            )
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority()
+            )
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertEqual(result["execution_path"], "live")
+            self.assertEqual(result["symbol"], "XRPUSDTM")
+            self.assertFalse(result["position_remaining"])
+            self.assertFalse(result["retryable"])
+            self.assertEqual(result["cancel"]["status"], "NOT_REQUIRED")
+            self.assertEqual(result["flatten"]["status"], "NOT_REQUIRED")
+            exchange.cancel_all_orders.assert_not_called()
+            exchange.flatten_current_position.assert_not_called()
+            engine.flatten_paper_position.assert_not_called()
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_live_stale_inventory_fails_closed(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            engine = Mock()
+            engine.mode = "live"
+            engine.exchange = None
+            engine.symbol = "XRPUSDT"
+            engine.build_live_readiness.return_value = {
+                "realOrderAllowed": False,
+            }
+            engine.flatten_paper_position = Mock()
+            bot = self._emergency_bot_with_engine(engine)
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority(
+                    authorityFresh=False,
+                )
+            )
+
+            result = bot.run_emergency_orchestrator()
+
             self.assertFalse(result["success"])
             self.assertFalse(result["completed"])
-            self.assertFalse(result["partial"])
             self.assertTrue(result["state_unknown"])
+            self.assertFalse(result["partial"])
             self.assertEqual(
                 result["error_code"],
                 "EXECUTION_PATH_UNAVAILABLE",
             )
-            exchange.cancel_all_orders.assert_not_called()
-            exchange.flatten_current_position.assert_not_called()
+            self.assertTrue(result["retryable"])
+            engine.flatten_paper_position.assert_not_called()
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_live_unknown_inventory_fails_closed(self):
+        cases = [
+            ("position-unknown", {"openPositionState": "UNKNOWN"}),
+            ("pending-unknown", {"pendingOrderState": "UNKNOWN"}),
+            ("exposure-unknown", {"currentExposure": None}),
+        ]
+        for name, overrides in cases:
+            with self.subTest(name=name):
+                state_before = self._set_governance(
+                    execution_enabled=True,
+                    emergency_stop=False,
+                )
+                try:
+                    engine = Mock()
+                    engine.mode = "live"
+                    engine.exchange = None
+                    engine.symbol = "XRPUSDT"
+                    engine.build_live_readiness.return_value = {
+                        "realOrderAllowed": False,
+                    }
+                    engine.flatten_paper_position = Mock()
+                    bot = self._emergency_bot_with_engine(engine)
+                    bot.pending_order = False
+                    bot.set_auto_market_selection_observation(
+                        self._live_known_zero_authority(**overrides)
+                    )
+
+                    result = bot.run_emergency_orchestrator()
+
+                    self.assertFalse(result["success"])
+                    self.assertFalse(result["completed"])
+                    self.assertTrue(result["state_unknown"])
+                    self.assertFalse(result["partial"])
+                    self.assertEqual(
+                        result["error_code"],
+                        "EXECUTION_PATH_UNAVAILABLE",
+                    )
+                    self.assertTrue(result["retryable"])
+                    engine.flatten_paper_position.assert_not_called()
+                finally:
+                    self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_live_nonzero_without_exit_capability(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            engine = Mock()
+            engine.mode = "live"
+            engine.exchange = None
+            engine.symbol = "XRPUSDT"
+            engine.build_live_readiness.return_value = {
+                "realOrderAllowed": False,
+            }
+            engine.flatten_paper_position = Mock()
+            bot = self._emergency_bot_with_engine(engine)
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority(
+                    openPositionState="OPEN",
+                    currentExposure="42000",
+                )
+            )
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertTrue(result["position_remaining"])
+            self.assertEqual(
+                result["error_code"],
+                "EXECUTION_PATH_UNAVAILABLE",
+            )
+            self.assertTrue(result["retryable"])
+            engine.flatten_paper_position.assert_not_called()
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_live_exit_capability_after_lock(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            bot, engine, exchange = self._live_emergency_bot(
+                real_order_allowed=False,
+                exchange=Mock(),
+            )
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority(
+                    openPositionState="OPEN",
+                    currentExposure="42000",
+                )
+            )
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertFalse(result["partial"])
+            self.assertFalse(result["state_unknown"])
+            self.assertEqual(result["execution_path"], "live")
+            exchange.cancel_all_orders.assert_called_once_with("XRPUSDTM")
+            exchange.flatten_current_position.assert_called_once_with(
+                "XRPUSDTM"
+            )
+            self.assertTrue(governance_state["emergency_stop"])
+            self.assertFalse(governance_state["execution_enabled"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_live_cancel_failure_is_not_success(
+        self,
+    ):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            bot, _, _ = self._live_emergency_bot(
+                real_order_allowed=False,
+                cancel_result={
+                    "success": False,
+                    "error": "OPEN_ORDERS_FAILED",
+                },
+                flatten_result={
+                    "success": False,
+                    "accepted": False,
+                    "confirmed": False,
+                    "error_code": "API_ERROR",
+                },
+            )
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority(
+                    openPositionState="OPEN",
+                    currentExposure="1000",
+                )
+            )
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["partial"])
+            self.assertTrue(result["state_unknown"])
+            self.assertTrue(result["retryable"])
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_paper_regression(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            bot, engine = self._paper_emergency_bot({
+                "success": True,
+                "skipped": True,
+            })
+            bot._running = True
+            bot.lifecycle_state = "RUNNING"
+
+            result = bot.run_emergency_orchestrator()
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["completed"])
+            self.assertEqual(result["path"], "paper")
+            self.assertFalse(result["state_unknown"])
+            self.assertFalse(bot._running)
+            self.assertEqual(bot.lifecycle_state, "STOPPED")
+        finally:
+            self._restore_governance(state_before)
+
+    def test_emergency_orchestrator_is_single_flight_locked(self):
+        state_before = self._set_governance(
+            execution_enabled=True,
+            emergency_stop=False,
+        )
+        try:
+            bot, _, _ = self._live_emergency_bot(
+                real_order_allowed=False,
+            )
+            bot.pending_order = False
+            bot.set_auto_market_selection_observation(
+                self._live_known_zero_authority()
+            )
+            acquired = bot.emergency_orchestrator_lock.acquire(blocking=False)
+            self.assertTrue(acquired)
+            try:
+                result = bot.run_emergency_orchestrator()
+            finally:
+                bot.emergency_orchestrator_lock.release()
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["completed"])
+            self.assertEqual(
+                result["error_code"],
+                "EMERGENCY_ALREADY_RUNNING",
+            )
+            self.assertTrue(result["retryable"])
         finally:
             self._restore_governance(state_before)
 
