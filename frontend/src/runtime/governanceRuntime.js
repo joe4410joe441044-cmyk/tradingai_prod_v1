@@ -1,5 +1,11 @@
 // frontend/src/runtime/governanceRuntime.js
 
+import {
+    authenticatedControlRequest,
+    authErrorMessage,
+    isAuthErrorStatus,
+} from "../features/auth/operatorAuth.js";
+
 const API_BASE =
     "/api/governance";
 
@@ -11,7 +17,7 @@ export async function setMode(
     mode
 ) {
 
-    const response = await fetch(
+    const response = await authenticatedControlRequest(
 
         `${API_BASE}/mode`,
 
@@ -130,7 +136,7 @@ export async function setExecutionEnabled(
     let response;
 
     try {
-        response = await fetch(
+        response = await authenticatedControlRequest(
 
             `${API_BASE}/execution`,
 
@@ -164,6 +170,16 @@ export async function setExecutionEnabled(
     );
 
     if (!response.ok) {
+        if (isAuthErrorStatus(response.status)) {
+            throw new GovernanceApiError({
+                status: response.status,
+                code: response.status === 403
+                    ? "AUTHORIZATION_DENIED"
+                    : "AUTHENTICATION_REQUIRED",
+                message: authErrorMessage(response.status),
+                data,
+            });
+        }
         throw new GovernanceApiError({
             status: response.status,
             code: extractGovernanceErrorCode(
@@ -338,7 +354,7 @@ export async function runEmergencyOrchestrator() {
     let response;
 
     try {
-        response = await fetch(
+        response = await authenticatedControlRequest(
             `${API_BASE}/emergency-orchestrate`,
             {
                 method: "POST",
@@ -360,6 +376,16 @@ export async function runEmergencyOrchestrator() {
     );
 
     if (!response.ok) {
+        if (isAuthErrorStatus(response.status)) {
+            throw new GovernanceApiError({
+                status: response.status,
+                code: response.status === 403
+                    ? "AUTHORIZATION_DENIED"
+                    : "AUTHENTICATION_REQUIRED",
+                message: authErrorMessage(response.status),
+                data,
+            });
+        }
         throw new GovernanceApiError({
             status: response.status,
             code: extractGovernanceErrorCode(
@@ -394,7 +420,7 @@ export async function unlockEmergency() {
     let response;
 
     try {
-        response = await fetch(
+        response = await authenticatedControlRequest(
             `${API_BASE}/emergency/unlock`,
             {
                 method: "POST",
@@ -416,6 +442,16 @@ export async function unlockEmergency() {
     );
 
     if (!response.ok) {
+        if (isAuthErrorStatus(response.status)) {
+            throw new GovernanceApiError({
+                status: response.status,
+                code: response.status === 403
+                    ? "AUTHORIZATION_DENIED"
+                    : "AUTHENTICATION_REQUIRED",
+                message: authErrorMessage(response.status),
+                data,
+            });
+        }
         throw new GovernanceApiError({
             status: response.status,
             code: extractGovernanceErrorCode(
@@ -459,7 +495,7 @@ export async function setRiskProfile(
     profile
 ) {
 
-    const response = await fetch(
+    const response = await authenticatedControlRequest(
 
         `${API_BASE}/risk-profile`,
 
@@ -489,7 +525,7 @@ export async function setRiskProfile(
 
 export async function triggerEmergencyStop() {
 
-    const response = await fetch(
+    const response = await authenticatedControlRequest(
 
         `${API_BASE}/emergency-stop`,
 

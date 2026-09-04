@@ -16,6 +16,10 @@ from backend.auth.csrf import (
     generate_csrf_token,
 )
 from backend.auth.api import create_operator_auth_router
+from backend.auth.dependencies import (
+    operator_session_identity,
+    require_operator_session,
+)
 
 __all__ = [
     "OperatorAuthConfig",
@@ -31,4 +35,6 @@ __all__ = [
     "OperatorCsrfProtection",
     "generate_csrf_token",
     "create_operator_auth_router",
+    "operator_session_identity",
+    "require_operator_session",
 ]

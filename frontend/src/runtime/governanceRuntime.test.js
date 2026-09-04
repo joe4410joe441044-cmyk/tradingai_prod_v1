@@ -6,6 +6,9 @@ import {
     GovernanceApiError,
     runEmergencyOrchestrator,
     setExecutionEnabled,
+    setMode,
+    setRiskProfile,
+    triggerEmergencyStop,
     unlockEmergency,
 } from "./governanceRuntime.js";
 
@@ -540,4 +543,88 @@ test("classifyEmergencyResult prioritizes dangerous flags", () => {
         ).key,
         "failed",
     );
+});
+
+test("setMode transmits CSRF header and same-origin credentials", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDocument = globalThis.document;
+    const requests = [];
+    globalThis.document = { cookie: "tradingai_csrf=csrf-mode-abc" };
+    globalThis.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return jsonResponse({ body: { success: true, mode: "SAFE" } });
+    };
+
+    try {
+        await setMode("SAFE");
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].url, "/api/governance/mode");
+        assert.equal(requests[0].options.method, "POST");
+        assert.equal(requests[0].options.credentials, "same-origin");
+        assert.equal(
+            requests[0].options.headers["X-TradingAI-CSRF"],
+            "csrf-mode-abc",
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.document = originalDocument;
+    }
+});
+
+test("setRiskProfile transmits CSRF header and same-origin credentials", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDocument = globalThis.document;
+    const requests = [];
+    globalThis.document = { cookie: "tradingai_csrf=csrf-risk-x" };
+    globalThis.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return jsonResponse({
+            body: { success: true, risk_profile: "CONSERVATIVE" },
+        });
+    };
+
+    try {
+        await setRiskProfile("CONSERVATIVE");
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].url, "/api/governance/risk-profile");
+        assert.equal(requests[0].options.method, "POST");
+        assert.equal(requests[0].options.credentials, "same-origin");
+        assert.equal(
+            requests[0].options.headers["X-TradingAI-CSRF"],
+            "csrf-risk-x",
+        );
+        assert.deepEqual(
+            JSON.parse(requests[0].options.body),
+            { risk_profile: "CONSERVATIVE" },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.document = originalDocument;
+    }
+});
+
+test("triggerEmergencyStop transmits CSRF header and same-origin credentials", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalDocument = globalThis.document;
+    const requests = [];
+    globalThis.document = { cookie: "tradingai_csrf=csrf-emergency-y" };
+    globalThis.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return jsonResponse({ body: { success: true, emergency_stop: true } });
+    };
+
+    try {
+        await triggerEmergencyStop();
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].url, "/api/governance/emergency-stop");
+        assert.equal(requests[0].options.method, "POST");
+        assert.equal(requests[0].options.credentials, "same-origin");
+        assert.equal(
+            requests[0].options.headers["X-TradingAI-CSRF"],
+            "csrf-emergency-y",
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.document = originalDocument;
+    }
 });

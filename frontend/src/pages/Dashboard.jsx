@@ -21,6 +21,7 @@ import {
 import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMarketContext";
 
 import BotControl from "../components/BotControl";
+import OperationAuthGate from "../components/auth/OperationAuthGate";
 import {
     pendingOrderAuthorityValue,
 } from "../components/operation/operationPreparationModel";
@@ -323,7 +324,9 @@ useEffect(() => {
 
                     <div className="operations-top-section operations-bot-control">
 
-                        <BotControl
+                        <OperationAuthGate>
+
+                            <BotControl
 
                             config={{
                                 ...tradeSettings,
@@ -403,7 +406,9 @@ useEffect(() => {
                                 ...update,
                             }))}
 
-                        />
+                            />
+
+                        </OperationAuthGate>
 
                     </div>
 
