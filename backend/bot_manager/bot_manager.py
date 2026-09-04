@@ -8981,6 +8981,116 @@ class BotManager:
         finally:
             self.emergency_orchestrator_lock.release()
 
+    def _live_emergency_known_zero(self):
+        """Return an authoritative known-zero LIVE inventory signal.
+
+        Reuses the formal LIVE account authority (REAL_LIVE_ACCOUNT source)
+        to decide whether Emergency Stop can safely no-op instead of demanding
+        an execution path.  The signal is only True when every inventory
+        dimension is fresh, consistent, authoritative and provably zero.
+        """
+
+        observation = self.auto_market_selection_observation or {}
+        account = observation.get("liveAccountAuthority") or {}
+
+        if not isinstance(account, dict):
+            return {
+                "known_zero": False,
+                "reason": "LIVE_ACCOUNT_AUTHORITY_UNAVAILABLE",
+            }
+
+        if (
+            account.get("sourceAuthority") != "REAL_LIVE_ACCOUNT"
+            or account.get("capitalAuthority") != "REAL_LIVE_ACCOUNT"
+            or account.get("accountFresh") is not True
+            or account.get("positionFresh") is not True
+            or account.get("pendingOrdersFresh") is not True
+            or account.get("authorityFresh") is not True
+            or account.get("snapshotConsistent") is not True
+        ):
+            return {
+                "known_zero": False,
+                "reason": "LIVE_ACCOUNT_AUTHORITY_STALE",
+            }
+
+        if account.get("reasonCodes") not in ([], ()):
+            return {
+                "known_zero": False,
+                "reason": "LIVE_ACCOUNT_AUTHORITY_INCOMPLETE",
+            }
+
+        position_state = account.get("openPositionState")
+        if position_state != "FLAT":
+            if position_state == "OPEN":
+                return {
+                    "known_zero": False,
+                    "reason": "LIVE_POSITION_OPEN",
+                }
+            return {
+                "known_zero": False,
+                "reason": "LIVE_POSITION_UNKNOWN",
+            }
+
+        try:
+            current_exposure = Decimal(str(account.get("currentExposure")))
+        except (ArithmeticError, TypeError, ValueError):
+            return {
+                "known_zero": False,
+                "reason": "LIVE_EXPOSURE_AUTHORITY_UNAVAILABLE",
+            }
+
+        if current_exposure != Decimal("0"):
+            return {
+                "known_zero": False,
+                "reason": "LIVE_EXPOSURE_REMAINING",
+            }
+
+        pending_order_state = account.get("pendingOrderState")
+        if pending_order_state != "NONE":
+            if pending_order_state == "EXISTS":
+                return {
+                    "known_zero": False,
+                    "reason": "LIVE_PENDING_ORDER_EXISTS",
+                }
+            return {
+                "known_zero": False,
+                "reason": "LIVE_PENDING_ORDER_UNKNOWN",
+            }
+
+        if self.pending_order is not False:
+            return {
+                "known_zero": False,
+                "reason": "PENDING_ORDER_MANAGER_CONFLICT",
+            }
+
+        evaluated_at = (
+            account.get("authorityEvaluatedAt")
+            or account.get("evaluatedAt")
+        )
+        try:
+            observed = datetime.fromisoformat(
+                str(evaluated_at).replace("Z", "+00:00")
+            )
+            within_ttl = bool(
+                observed.tzinfo is not None
+                and 0
+                <= (
+                    datetime.now(timezone.utc)
+                    - observed.astimezone(timezone.utc)
+                ).total_seconds()
+                <= self.production_ams_observation_ttl
+            )
+        except (TypeError, ValueError):
+            within_ttl = False
+
+        if not within_ttl:
+            return {
+                "known_zero": False,
+                "reason": "LIVE_ACCOUNT_AUTHORITY_STALE",
+            }
+
+        return {"known_zero": True, "reason": None}
+
     def _run_emergency_orchestrator_locked(self, operation):
 
         def finalize(response):
@@ -9127,10 +9237,6 @@ class BotManager:
                 except Exception:
                     live_readiness = {}
 
-            live_allowed_before_lock = (
-                live_readiness.get("realOrderAllowed") is True
-            )
-
             if governance_state.get("execution_enabled") is not False:
                 return finalize(self._emergency_response(
                     success=False,
@@ -9245,7 +9351,40 @@ class BotManager:
                     ),
                 ))
 
-            if live_allowed_before_lock and exchange is not None:
+            known_zero = self._live_emergency_known_zero()
+            if known_zero.get("known_zero") is True:
+                cancel_not_required = self._emergency_not_required_result(
+                    "cancel"
+                )
+                flatten_not_required = self._emergency_not_required_result(
+                    "flatten"
+                )
+                return finalize(self._emergency_response(
+                    success=True,
+                    completed=True,
+                    partial=False,
+                    state_unknown=False,
+                    execution_path="live",
+                    symbol=symbol,
+                    cancel=cancel_not_required,
+                    flatten=flatten_not_required,
+                    position_remaining=False,
+                    retryable=False,
+                ))
+
+            # New-entry order authority is intentionally revoked by the lock.
+            # Emergency exit capability is independent of that authority: it is
+            # confirmed by the engine's exchange adapter exposing callable
+            # cancel/flatten primitives, never by realOrderAllowed.
+            real_order_allowed_value = live_readiness.get("realOrderAllowed")
+            readiness_is_bool = isinstance(real_order_allowed_value, bool)
+            exit_capability = (
+                exchange is not None
+                and callable(getattr(exchange, "cancel_all_orders", None))
+                and callable(getattr(exchange, "flatten_current_position", None))
+            )
+
+            if readiness_is_bool and exit_capability:
                 try:
                     cancel_result = exchange.cancel_all_orders(
                         symbol
@@ -9273,13 +9412,35 @@ class BotManager:
                     flatten_result,
                 ))
 
+            # Fail-closed: without an emergency exit capability the stop
+            # cannot guarantee zero inventory.  When the formal inventory is
+            # authoritatively non-zero this is an ACTION_REQUIRED partial
+            # outcome; when it is stale, unknown or unavailable it is a
+            # state-unknown outcome.  UNKNOWN is never converted to FLAT/0.
+            partial = False
+            state_unknown = True
+            position_remaining = None
+            known_zero_reason = known_zero.get("reason")
+            if known_zero_reason in {
+                "LIVE_POSITION_OPEN",
+                "LIVE_EXPOSURE_REMAINING",
+            }:
+                partial = True
+                state_unknown = False
+                position_remaining = True
+            elif known_zero_reason == "LIVE_PENDING_ORDER_EXISTS":
+                partial = True
+                state_unknown = False
+                position_remaining = False
+
             return finalize(self._emergency_response(
                 success=False,
                 completed=False,
-                partial=False,
-                state_unknown=True,
+                partial=partial,
+                state_unknown=state_unknown,
                 execution_path=None,
                 symbol=symbol,
+                position_remaining=position_remaining,
                 retryable=True,
                 error_code="EXECUTION_PATH_UNAVAILABLE",
             ))
