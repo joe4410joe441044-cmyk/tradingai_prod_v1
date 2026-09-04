@@ -3718,6 +3718,18 @@ class BotManager:
                             f"{self.update_id}:"
                             f"{money_management_event or 'OBSERVATION'}"
                         )
+                        # The callback passed the identity checks above while it
+                        # was still the active authority.  Reconfirm before the
+                        # observe so an in-flight callback that straddles a STOP
+                        # boundary cannot overwrite the last valid RUNNING MM
+                        # runtime metrics with a STOPPING/STOPPED source_state.
+                        if not (
+                            self._money_management_runtime_observation_authority(
+                                runtime_id,
+                                current_session,
+                            )
+                        ):
+                            return
                         money_management_metrics = (
                             self._observe_money_management_runtime_metrics(
                                 money_management_before,
@@ -3914,12 +3926,17 @@ class BotManager:
                 self.money_management_runtime_baseline_session == current_session
                 and self.money_management_runtime_metrics.snapshot().is_complete
             )
-            if (
-                requested_mode == "paper"
-                and self.money_management_runtime_hook is not None
-                and baseline_complete is not True
-            ):
-                raise RuntimeError("MONEY_MANAGEMENT_BASELINE_INCOMPLETE")
+            # START readiness is not ENTRY readiness.  A RUNNING lifecycle,
+            # engine, runtime and market feed are monitoring infrastructure.
+            # A runtime MM baseline may legitimately be incomplete until a
+            # fresh RUNNING observation is captured (or the first post-running
+            # WebSocket observation hands it off).  Blocking monitoring START on
+            # that alone fails the next PAPER session when a carried
+            # STOPPING/STOPPED snapshot is present.  ENTRY remains fail-closed:
+            # executionEntryAllowed stays False until the current-session
+            # baseline is complete, available, and dispatched to Money
+            # Management (the MM governance projection / execution guard never
+            # grants authority from an incomplete or stale baseline).
 
             # Starting the bot establishes monitoring infrastructure only.
             # Loop and AUTO TRADE remain explicitly disabled.
@@ -4433,6 +4450,28 @@ class BotManager:
             )
             return None
 
+    def _money_management_runtime_observation_authority(
+        self,
+        runtime_id,
+        session_id,
+    ):
+        """Confirm a caller still owns active MM runtime observation authority.
+
+        A WebSocket orderbook callback that began before a STOP boundary may
+        still be in flight.  It must never publish an active Money Management
+        runtime observation after the lifecycle has left RUNNING, otherwise the
+        last valid RUNNING authority is overwritten with a STOPPING/STOPPED
+        source_state (available=False -> is_complete=False) that then carries
+        into the next PAPER session.
+        """
+        return bool(
+            runtime_id is not None
+            and runtime_id == self.active_runtime_id
+            and session_id is not None
+            and session_id == self.session_id
+            and self.lifecycle_state in ("STARTING", "RUNNING")
+        )
+
     def _handoff_money_management_runtime_baseline(self, current_session):
 
         """Dispatch a complete current-session baseline after RUNNING."""
@@ -4458,48 +4497,26 @@ class BotManager:
             f"{current_session}:BASELINE:{event_type}"
         )
         if not metrics.is_complete:
-            startup_values_complete = all(
-                getattr(metrics, name, None) is not None
-                for name in (
-                    "current_equity",
-                    "balance",
-                    "available_balance",
-                    "realized_pnl",
-                    "unrealized_pnl",
-                    "peak_equity",
-                    "current_drawdown_amount",
-                    "current_drawdown_pct",
-                    "daily_realized_pnl",
-                    "weekly_realized_pnl",
-                    "monthly_realized_pnl",
-                    "open_exposure",
-                    "position_count",
-                )
-            ) and bool(
-                metrics.session_trade_count is not None
-                and metrics.trade_count_authority_scope
-                == "RUNTIME_SESSION"
-                and metrics.trade_count_authority_session_id
-                == current_session
-            )
-            if not (
-                getattr(metrics, "source_state", None) == "STARTING"
-                and getattr(metrics, "observation_valid", False)
-                and startup_values_complete
-            ):
-                return None
-            metrics = self._observe_money_management_runtime_metrics(
+            # A carried snapshot's source_state (STARTING, STOPPING, STOPPED,
+            # RESTORED_*, ...) never decides whether a current-session baseline
+            # may be re-observed.  Once the bot lifecycle has reached RUNNING,
+            # the established current engine/runtime is the authoritative
+            # source for a fresh observation.  Attempt it whenever the current
+            # snapshot is incomplete; the fresh snapshot is then re-verified
+            # below (runtime/session identity + is_complete) before dispatch.
+            fresh = self._observe_money_management_runtime_metrics(
                 self._money_management_runtime_event_signature(),
                 None,
                 event_key,
             )
             if (
-                metrics is None
-                or metrics.runtime_instance_id != self.runtime_instance_id
-                or metrics.session_id != current_session
-                or not metrics.is_complete
+                fresh is None
+                or fresh.runtime_instance_id != self.runtime_instance_id
+                or fresh.session_id != current_session
+                or not fresh.is_complete
             ):
                 return None
+            metrics = fresh
         hook_result = self._notify_money_management_runtime_event(
             event_type,
             event_key,
