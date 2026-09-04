@@ -180,3 +180,53 @@ def test_order_authority_stays_disarmed_during_live_preflight():
     assert manager.config["realOrderAllowed"] is False
     assert manager.config["executionRealOrderEnabled"] is False
     assert manager.config["autoTradeEnabled"] is False
+
+
+def test_saved_paper_without_requested_mode_uses_live_exchange_authority():
+    manager = _stopped_manager("paper")
+    manager.auto_market_selection_observation = None
+    manager.refresh_production_ams_read_model = Mock(return_value={
+        "liveAccountAuthority": _formal_live_account(),
+        "productionIntegration": {"status": "READY"},
+    })
+    with patch.object(backend_config, "ALLOW_LIVE", True), \
+         patch.object(backend_config, "TRADE_MODE", "live"), \
+         patch.object(manager, "_stopped_paper_authoritative_safety_state") as paper:
+        result = manager.get_authoritative_pending_order_state()
+    assert result["safe"] is True
+    assert result["source"] == "live_account_read_only"
+    assert result["known"] is True
+    assert result["pending"] is False
+    assert result["reason"] == "STOPPED_LIVE_GET_ONLY_SAFE"
+    paper.assert_not_called()
+    manager.refresh_production_ams_read_model.assert_called_once_with(
+        force=True, requested_mode="live", requested_dry_run=False,
+    )
+
+
+def test_saved_paper_without_requested_mode_paper_backend_stays_paper():
+    manager = _stopped_manager("paper")
+    with patch.object(backend_config, "ALLOW_LIVE", False), \
+         patch.object(backend_config, "TRADE_MODE", "paper"), \
+         patch.object(manager, "_stopped_live_pending_order_authority") as live:
+        manager.get_authoritative_pending_order_state()
+    live.assert_not_called()
+
+
+def test_saved_paper_without_requested_mode_live_pending_order_exists_fail_closed():
+    manager = _stopped_manager("paper")
+    manager.auto_market_selection_observation = None
+    manager.refresh_production_ams_read_model = Mock(return_value={
+        "liveAccountAuthority": _formal_live_account(
+            pendingOrderState="EXISTS",
+        ),
+        "productionIntegration": {"status": "READY"},
+    })
+    with patch.object(backend_config, "ALLOW_LIVE", True), \
+         patch.object(backend_config, "TRADE_MODE", "live"):
+        result = manager.get_authoritative_pending_order_state()
+    assert result["safe"] is False
+    assert result["known"] is True
+    assert result["pending"] is True
+    assert result["reason"] == "LIVE_PENDING_ORDER_EXISTS"
+    assert result["source"] == "live_account_read_only"

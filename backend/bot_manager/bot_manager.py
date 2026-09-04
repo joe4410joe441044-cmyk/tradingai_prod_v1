@@ -8121,10 +8121,20 @@ class BotManager:
             )
 
         if engine is None:
-            configured_mode = str(
-                self.config.get("mode", "")
-                if requested_mode is None else requested_mode
-            ).strip().lower()
+            if requested_mode is None:
+                saved_mode = str(
+                    self.config.get("mode", "")
+                ).strip().lower()
+                if (
+                    saved_mode != "live"
+                    and backend_config.ALLOW_LIVE is True
+                    and backend_config.TRADE_MODE == "live"
+                ):
+                    configured_mode = "live"
+                else:
+                    configured_mode = saved_mode
+            else:
+                configured_mode = str(requested_mode).strip().lower()
             if (
                 configured_mode == "live"
                 and self._running is False
