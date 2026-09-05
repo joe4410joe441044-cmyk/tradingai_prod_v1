@@ -37,6 +37,8 @@ from backend.supervisor.specialists import (
     evaluate_money_management,
     evaluate_strategy,
     evaluate_system_health,
+    worst_severity,
+    worst_status,
 )
 
 
@@ -492,4 +494,77 @@ def test_master_reason_codes_preserved_across_specialists():
     snapshot = make_snapshot(decision_status="HOLD")
     assessment = aggregate_specialists(_all_specialists(snapshot, (trace,)), NOW)
     assert "STRATEGY_HOLD" in assessment.reasonCodes
+
+
+# --------------------------------------------------------------------------- #
+# Severity / Status precedence contract (D-6 deterministic ladder)
+# --------------------------------------------------------------------------- #
+# These tests lock the public helper contract implemented by D-6
+# (``backend.supervisor.specialists.severity``).  They do NOT re-implement the
+# ordering; they assert the observable fail-closed precedence:
+#   Severity: CRITICAL > UNKNOWN > WARNING > INFO
+#   Status:   CRITICAL > UNAVAILABLE > UNKNOWN > WARNING > HEALTHY
+
+
+def test_severity_precedence_critical_over_unknown():
+    assert (
+        worst_severity((SpecialistSeverity.CRITICAL, SpecialistSeverity.UNKNOWN))
+        is SpecialistSeverity.CRITICAL
+    )
+
+
+def test_severity_precedence_unknown_over_warning():
+    assert (
+        worst_severity((SpecialistSeverity.UNKNOWN, SpecialistSeverity.WARNING))
+        is SpecialistSeverity.UNKNOWN
+    )
+
+
+def test_severity_precedence_warning_over_info():
+    assert (
+        worst_severity((SpecialistSeverity.WARNING, SpecialistSeverity.INFO))
+        is SpecialistSeverity.WARNING
+    )
+
+
+def test_severity_precedence_info_with_info_is_info():
+    assert (
+        worst_severity((SpecialistSeverity.INFO, SpecialistSeverity.INFO))
+        is SpecialistSeverity.INFO
+    )
+
+
+def test_status_precedence_critical_over_unavailable():
+    assert (
+        worst_status((SpecialistStatus.CRITICAL, SpecialistStatus.UNAVAILABLE))
+        is SpecialistStatus.CRITICAL
+    )
+
+
+def test_status_precedence_unavailable_over_unknown():
+    assert (
+        worst_status((SpecialistStatus.UNAVAILABLE, SpecialistStatus.UNKNOWN))
+        is SpecialistStatus.UNAVAILABLE
+    )
+
+
+def test_status_precedence_unknown_over_warning():
+    assert (
+        worst_status((SpecialistStatus.UNKNOWN, SpecialistStatus.WARNING))
+        is SpecialistStatus.UNKNOWN
+    )
+
+
+def test_status_precedence_warning_over_healthy():
+    assert (
+        worst_status((SpecialistStatus.WARNING, SpecialistStatus.HEALTHY))
+        is SpecialistStatus.WARNING
+    )
+
+
+def test_status_precedence_healthy_with_healthy_is_healthy():
+    assert (
+        worst_status((SpecialistStatus.HEALTHY, SpecialistStatus.HEALTHY))
+        is SpecialistStatus.HEALTHY
+    )
 
