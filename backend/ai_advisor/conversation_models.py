@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend.ai_advisor.models import AdvisorErrorDetail
+from backend.ai_advisor.models import AdvisorErrorDetail, AdvisorExecutionEntryState
 
 SCHEMA_VERSION = "1.0"
 MAX_USER_MESSAGE_LENGTH = 8_000
@@ -529,6 +529,29 @@ class AdvisorKnowledgeExcerpt(AdvisorContractModel):
         return self
 
 
+class AdvisorMarketContext(AdvisorContractModel):
+    selectionMode: Optional[Literal["MANUAL", "AUTO"]]
+    marketReady: bool
+    marketStale: bool
+
+
+class AdvisorAuthorityContext(AdvisorContractModel):
+    liveOrderEntryState: AdvisorExecutionEntryState
+    finalExecutionEntryState: AdvisorExecutionEntryState
+    mmExecutionEntryState: AdvisorExecutionEntryState
+
+
+class AdvisorMoneyManagementContext(AdvisorContractModel):
+    state: Optional[ShortText]
+    riskState: Optional[ShortText]
+    recommendedAction: Optional[ShortText]
+    executionEntryState: AdvisorExecutionEntryState
+
+
+class AdvisorHealthContext(AdvisorContractModel):
+    healthState: Literal["HEALTHY", "DEGRADED", "STOPPED", "UNKNOWN"]
+
+
 class AdvisorRuntimeContext(AdvisorContractModel):
     schemaVersion: Literal["1.0"]
     sourceId: Identifier
@@ -556,6 +579,10 @@ class AdvisorRuntimeContext(AdvisorContractModel):
     ]
     dryRun: bool
     realOrderAllowed: bool
+    market: Optional[AdvisorMarketContext] = None
+    moneyManagement: Optional[AdvisorMoneyManagementContext] = None
+    authority: Optional[AdvisorAuthorityContext] = None
+    health: Optional[AdvisorHealthContext] = None
 
 
 class AdvisorConversationMessage(AdvisorContractModel):

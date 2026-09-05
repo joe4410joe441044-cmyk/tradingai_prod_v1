@@ -14,6 +14,19 @@ class Freshness(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class AdvisorExecutionEntryState(str, Enum):
+    """Tri-state representation of an execution-entry permission.
+
+    Distinct from a plain boolean: UNKNOWN/UNAVAILABLE must never collapse into
+    a False "not allowed" when the permission simply could not be determined.
+    """
+
+    ALLOWED = "ALLOWED"
+    BLOCKED = "BLOCKED"
+    UNKNOWN = "UNKNOWN"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
 class AdvisorBotStatus(StrictModel):
     state: Literal["NOT_CONNECTED", "STOPPED", "RUNNING", "UNKNOWN"]
     mode: Optional[Literal["PAPER", "LIVE"]]
@@ -47,6 +60,29 @@ class AdvisorSafetyStatus(StrictModel):
     realOrderAllowed: bool
 
 
+class AdvisorMarketStatus(StrictModel):
+    selectionMode: Optional[Literal["MANUAL", "AUTO"]]
+    marketReady: bool
+    marketStale: bool
+
+
+class AdvisorAuthorityStatus(StrictModel):
+    liveOrderEntryState: AdvisorExecutionEntryState
+    finalExecutionEntryState: AdvisorExecutionEntryState
+    mmExecutionEntryState: AdvisorExecutionEntryState
+
+
+class AdvisorMoneyManagementStatus(StrictModel):
+    state: Optional[str]
+    riskState: Optional[str]
+    recommendedAction: Optional[str]
+    executionEntryState: AdvisorExecutionEntryState
+
+
+class AdvisorHealthStatus(StrictModel):
+    healthState: Literal["HEALTHY", "DEGRADED", "STOPPED", "UNKNOWN"]
+
+
 class AdvisorRuntimeMetadata(StrictModel):
     capturedAt: str
     sourceUpdatedAt: Optional[str]
@@ -57,6 +93,10 @@ class AdvisorRuntimeResponse(StrictModel):
     bot: AdvisorBotStatus
     operation: AdvisorOperationStatus
     safety: AdvisorSafetyStatus
+    market: Optional[AdvisorMarketStatus] = None
+    authority: Optional[AdvisorAuthorityStatus] = None
+    moneyManagement: Optional[AdvisorMoneyManagementStatus] = None
+    health: Optional[AdvisorHealthStatus] = None
     runtime: AdvisorRuntimeMetadata
     warnings: List[str]
 

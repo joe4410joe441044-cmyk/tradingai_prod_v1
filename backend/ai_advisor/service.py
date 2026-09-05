@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from backend.ai_advisor.models import (
+    AdvisorAuthorityStatus,
     AdvisorBotStatus,
+    AdvisorExecutionEntryState,
+    AdvisorHealthStatus,
+    AdvisorMarketStatus,
+    AdvisorMoneyManagementStatus,
     AdvisorOperationStatus,
     AdvisorRuntimeMetadata,
     AdvisorRuntimeResponse,
@@ -23,6 +28,10 @@ RUNTIME_FRESHNESS_SECONDS = 10.0
 
 def _epoch_iso(value: float) -> str:
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _entry_state(value: str) -> AdvisorExecutionEntryState:
+    return AdvisorExecutionEntryState(value)
 
 
 def build_runtime_response(
@@ -73,6 +82,25 @@ def build_runtime_response(
             dryRun=snapshot.dry_run,
             realOrderAllowed=snapshot.real_order_allowed,
         ),
+        market=AdvisorMarketStatus(
+            selectionMode=snapshot.selection_mode,
+            marketReady=snapshot.market_ready,
+            marketStale=snapshot.market_stale,
+        ),
+        authority=AdvisorAuthorityStatus(
+            liveOrderEntryState=_entry_state(snapshot.live_order_entry_state),
+            finalExecutionEntryState=_entry_state(
+                snapshot.final_execution_entry_state
+            ),
+            mmExecutionEntryState=_entry_state(snapshot.mm_execution_entry_state),
+        ),
+        moneyManagement=AdvisorMoneyManagementStatus(
+            state=snapshot.mm_state,
+            riskState=snapshot.mm_risk_state,
+            recommendedAction=snapshot.mm_recommended_action,
+            executionEntryState=_entry_state(snapshot.mm_execution_entry_state),
+        ),
+        health=AdvisorHealthStatus(healthState=snapshot.health_state),
         runtime=AdvisorRuntimeMetadata(
             capturedAt=_epoch_iso(captured_at),
             sourceUpdatedAt=source_iso,

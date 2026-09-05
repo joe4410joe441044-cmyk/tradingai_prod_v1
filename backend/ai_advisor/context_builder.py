@@ -7,6 +7,7 @@ from typing import Annotated, Literal, Optional, Tuple
 from pydantic import ConfigDict, Field
 
 from backend.ai_advisor.conversation_models import (
+    AdvisorAuthorityContext,
     AdvisorCapability,
     AdvisorContextEnvelope,
     AdvisorContractModel,
@@ -14,7 +15,10 @@ from backend.ai_advisor.conversation_models import (
     AdvisorDataAccessScope,
     AdvisorFreshnessMetadata,
     AdvisorFreshnessState,
+    AdvisorHealthContext,
     AdvisorKnowledgeExcerpt,
+    AdvisorMarketContext,
+    AdvisorMoneyManagementContext,
     AdvisorPermissionContext,
     AdvisorRuntimeContext,
     AdvisorSourceAuthority,
@@ -156,6 +160,16 @@ def sanitize_text(value: str) -> SanitizedText:
     )
 
 
+def _safe_scalar(value: Optional[str]) -> Optional[str]:
+    """Project a trusted runtime scalar; None stays None, empty/invalid fails."""
+    if value is None:
+        return None
+    cleaned = sanitize_text(value)
+    if not cleaned.value.strip():
+        raise ValueError("runtime scalar must contain visible characters")
+    return cleaned.value
+
+
 def build_freshness(
     *,
     state: AdvisorFreshnessState,
@@ -284,6 +298,33 @@ def build_runtime_context(
         sanitize_text(runtime.bot.exchange).value if runtime.bot.exchange else None
     )
     symbol = sanitize_text(runtime.bot.symbol).value if runtime.bot.symbol else None
+    market = None
+    if runtime.market is not None:
+        market = AdvisorMarketContext(
+            selectionMode=runtime.market.selectionMode,
+            marketReady=runtime.market.marketReady,
+            marketStale=runtime.market.marketStale,
+        )
+    authority = None
+    if runtime.authority is not None:
+        authority = AdvisorAuthorityContext(
+            liveOrderEntryState=runtime.authority.liveOrderEntryState,
+            finalExecutionEntryState=runtime.authority.finalExecutionEntryState,
+            mmExecutionEntryState=runtime.authority.mmExecutionEntryState,
+        )
+    money_management = None
+    if runtime.moneyManagement is not None:
+        money_management = AdvisorMoneyManagementContext(
+            state=_safe_scalar(runtime.moneyManagement.state),
+            riskState=_safe_scalar(runtime.moneyManagement.riskState),
+            recommendedAction=_safe_scalar(
+                runtime.moneyManagement.recommendedAction
+            ),
+            executionEntryState=runtime.moneyManagement.executionEntryState,
+        )
+    health = None
+    if runtime.health is not None:
+        health = AdvisorHealthContext(healthState=runtime.health.healthState)
     context = AdvisorRuntimeContext(
         schemaVersion="1.0",
         sourceId=source_id,
@@ -298,6 +339,10 @@ def build_runtime_context(
         emergencyState=runtime.safety.emergencyState,
         dryRun=runtime.safety.dryRun,
         realOrderAllowed=runtime.safety.realOrderAllowed,
+        market=market,
+        moneyManagement=money_management,
+        authority=authority,
+        health=health,
     )
     source = build_source_reference(
         source_id=source_id,

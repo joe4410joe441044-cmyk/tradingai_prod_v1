@@ -120,6 +120,7 @@ class AdvisorBrowserGatewayComposition:
     observationSink: AdvisorObservationSink = NoOpAdvisorObservationSink()
     approvedSpecifications: Tuple[SpecificationSourceInput, ...] = ()
     requestIdFactory: Callable[[], str] = lambda: str(uuid4())
+    runtimeSource: Optional[Callable[[], AdvisorRuntimeResponse]] = None
 
 
 class BrowserGatewayAuthenticationError(Exception):
@@ -340,8 +341,9 @@ def assemble_browser_service_input(
     now: datetime,
     request_id: Optional[str] = None,
     approved_specifications: Tuple[SpecificationSourceInput, ...] = (),
+    runtime: Optional[AdvisorRuntimeResponse] = None,
 ) -> AdvisorServiceInput:
-    """Construct the complete trusted input without runtime or client authority."""
+    """Construct the complete trusted input without client runtime authority."""
 
     request_id = request_id or str(uuid4())
     message_id = str(uuid4())
@@ -354,10 +356,12 @@ def assemble_browser_service_input(
         allowedCapabilities=(
             AdvisorCapability.SYSTEM_GUIDANCE,
             AdvisorCapability.SPECIFICATION_EXPLAIN,
+            AdvisorCapability.RUNTIME_STATUS_EXPLAIN,
         ),
         dataAccessScope=(
             AdvisorDataAccessScope.PUBLIC_UI_NAVIGATION,
             AdvisorDataAccessScope.APPROVED_LOCAL_SPECIFICATIONS,
+            AdvisorDataAccessScope.SANITIZED_RUNTIME_SUMMARY,
         ),
         policyVersion="browser-gateway/v1",
         trustedServerContext=True,
@@ -372,6 +376,7 @@ def assemble_browser_service_input(
     context = build_advisor_context(
         generated_at=now,
         permission_context=permission,
+        runtime=runtime,
         specifications=approved_specifications,
         current_message=current_message,
     )
@@ -396,6 +401,7 @@ def assemble_browser_service_input(
         request=request,
         contextInput=AdvisorServiceContextInput(
             generatedAt=now,
+            runtime=runtime,
             specifications=approved_specifications,
             conversationHistory=(),
             currentMessage=current_message,
@@ -548,6 +554,11 @@ def create_browser_gateway_router(
         _identity, failure = authorize(request)
         if failure is not None:
             return failure
+        if composition.runtimeSource is not None:
+            try:
+                return composition.runtimeSource()
+            except Exception:
+                pass
         return AdvisorRuntimeResponse(
             bot=AdvisorBotStatus(
                 state="UNKNOWN",
@@ -643,12 +654,19 @@ def create_browser_gateway_router(
         release_later = False
         try:
             now = composition.clock().astimezone(timezone.utc)
+            runtime = None
+            if composition.runtimeSource is not None:
+                try:
+                    runtime = composition.runtimeSource()
+                except Exception:
+                    runtime = None
             service_input = assemble_browser_service_input(
                 prompt=browser_request.prompt,
                 principal_id=identity,
                 now=now,
                 request_id=composition.requestIdFactory(),
                 approved_specifications=composition.approvedSpecifications,
+                runtime=runtime,
             )
             task = asyncio.create_task(
                 asyncio.to_thread(composition.service.generate_response, service_input)

@@ -209,7 +209,17 @@ class AdvisorRuntimeServiceTest(unittest.TestCase):
 
         self.assertEqual(
             set(payload),
-            {"bot", "operation", "safety", "runtime", "warnings"},
+            {
+                "bot",
+                "operation",
+                "safety",
+                "runtime",
+                "warnings",
+                "market",
+                "authority",
+                "moneyManagement",
+                "health",
+            },
         )
         self.assertEqual(payload["runtime"]["freshness"], "FRESH")
         AdvisorRuntimeResponse.model_validate_json(response.model_dump_json())
@@ -325,7 +335,7 @@ class AdvisorRuntimeApiTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        build.assert_called_once_with()
+        self.assertEqual(build.call_count, 1)
 
     @patch(
         "backend.api.ai_advisor.build_runtime_response",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
@@ -27,14 +28,18 @@ from backend.ai_advisor.api_security import (
     AdvisorAuthorizationError,
 )
 from backend.ai_advisor.conversation_models import (
+    AdvisorCapability,
+    AdvisorDataAccessScope,
     AuthenticationState,
     AuthorizationState,
 )
+from backend.ai_advisor.context_builder import build_advisor_context
 from backend.ai_advisor.models import (
     AdvisorErrorDetail,
     AdvisorErrorResponse,
     AdvisorRuntimeResponse,
 )
+from backend.ai_advisor.runtime_reader import read_runtime_scalars
 from backend.ai_advisor.service import build_runtime_response
 from backend.ai_advisor.service_models import (
     AdvisorServiceFailureCode,
@@ -48,9 +53,73 @@ def _occurred_at() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def advisor_runtime():
+def _mm_boundary(app):
+    state = getattr(app, "state", None)
+    return getattr(state, "money_management_http_boundary", None)
+
+
+def build_authoritative_runtime(app, clock=lambda: time.time()):
+    """Build server-authoritative runtime, reading the MM boundary read-only.
+
+    Never trusts client-submitted runtime authority. The reader only reads the
+    module-level bot manager registry and the app-scoped MM boundary; it never
+    mutates, starts, or refreshes any runtime component.
+    """
+    return build_runtime_response(
+        reader=lambda: read_runtime_scalars(
+            mm_boundary_provider=lambda: _mm_boundary(app)
+        ),
+        clock=clock,
+    )
+
+
+def apply_authoritative_runtime(service_input: AdvisorServiceInput, app) -> AdvisorServiceInput:
+    """Recompute the envelope so the server runtime is authoritative.
+
+    A client-assembled context may carry a runtime the operator sent. The
+    server replaces it with its own read-only projection and rebuilds the
+    context envelope so the service's envelope revalidation still succeeds.
+    """
+    context_input = service_input.contextInput
+    permission = service_input.request.permissionContext
+    if (
+        AdvisorDataAccessScope.SANITIZED_RUNTIME_SUMMARY
+        not in permission.dataAccessScope
+        or AdvisorCapability.RUNTIME_STATUS_EXPLAIN
+        not in permission.allowedCapabilities
+    ):
+        return service_input
+    captured_at = float(time.time())
     try:
-        return build_runtime_response()
+        runtime = build_authoritative_runtime(app, clock=lambda: captured_at)
+    except Exception:
+        runtime = None
+    generated = datetime.fromtimestamp(captured_at, tz=timezone.utc)
+    envelope = build_advisor_context(
+        generated_at=generated,
+        permission_context=service_input.request.permissionContext,
+        runtime=runtime,
+        runtime_source_id=context_input.runtimeSourceId,
+        specifications=context_input.specifications,
+        market_intelligence_sources=context_input.marketIntelligenceSources,
+        money_management_sources=context_input.moneyManagementSources,
+        conversation_history=context_input.conversationHistory,
+        current_message=context_input.currentMessage,
+    )
+    new_request = service_input.request.model_copy(
+        update={"contextEnvelope": envelope}
+    )
+    new_context_input = context_input.model_copy(
+        update={"runtime": runtime, "generatedAt": generated}
+    )
+    return service_input.model_copy(
+        update={"request": new_request, "contextInput": new_context_input}
+    )
+
+
+def advisor_runtime(app=None):
+    try:
+        return build_authoritative_runtime(app) if app is not None else build_runtime_response()
     except Exception:
         error = AdvisorErrorResponse(
             error=AdvisorErrorDetail(
@@ -93,7 +162,7 @@ def create_runtime_router(composition: AdvisorAPIComposition) -> APIRouter:
             return _error(403, "AUTHORIZATION_DENIED", retryable=False)
         except Exception:
             return _error(401, "AUTHENTICATION_REQUIRED", retryable=False)
-        return advisor_runtime()
+        return advisor_runtime(request.app)
 
     return runtime_router
 
@@ -260,6 +329,11 @@ def create_advice_router(composition: AdvisorAPIComposition) -> APIRouter:
             or permission.authorizationState is not AuthorizationState.AUTHORIZED
         ):
             return _error(403, "AUTHORIZATION_DENIED", retryable=False)
+
+        try:
+            service_input = apply_authoritative_runtime(service_input, request.app)
+        except Exception:
+            return _error(422, "REQUEST_INVALID", retryable=False)
 
         if not composition.rateLimiter.allow(principal.principalId):
             return _error(

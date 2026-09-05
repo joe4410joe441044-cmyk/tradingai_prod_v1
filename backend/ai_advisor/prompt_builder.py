@@ -115,25 +115,62 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
             freshness=AdvisorFreshnessState.UNKNOWN,
         )
     source = next(item for item in context.sources if item.sourceId == runtime.sourceId)
-    content = _lines(
-        (
-            ("botState", runtime.state),
-            ("mode", runtime.mode),
-            ("exchange", runtime.exchange),
-            ("symbol", runtime.symbol),
-            ("loopEnabled", runtime.loopEnabled),
-            ("loopState", runtime.loopState),
-            ("autoTradeEnabled", runtime.autoTradeEnabled),
-            ("emergencyLocked", runtime.emergencyLocked),
-            ("emergencyState", runtime.emergencyState),
-            ("dryRun", runtime.dryRun),
-            ("realOrderAllowed", runtime.realOrderAllowed),
-            ("freshness", source.freshness.state),
+    lines = [
+        ("botState", runtime.state),
+        ("mode", runtime.mode),
+        ("exchange", runtime.exchange),
+        ("symbol", runtime.symbol),
+        ("loopEnabled", runtime.loopEnabled),
+        ("loopState", runtime.loopState),
+        ("autoTradeEnabled", runtime.autoTradeEnabled),
+        ("emergencyLocked", runtime.emergencyLocked),
+        ("emergencyState", runtime.emergencyState),
+        ("dryRun", runtime.dryRun),
+        ("realOrderAllowed", runtime.realOrderAllowed),
+    ]
+    if runtime.market is not None:
+        lines.extend(
+            [
+                ("selectionMode", runtime.market.selectionMode),
+                ("marketReady", runtime.market.marketReady),
+                ("marketStale", runtime.market.marketStale),
+            ]
         )
-    )
+    else:
+        lines.append(("market", "UNAVAILABLE"))
+    if runtime.authority is not None:
+        lines.extend(
+            [
+                ("liveOrderEntryState", runtime.authority.liveOrderEntryState),
+                (
+                    "finalExecutionEntryState",
+                    runtime.authority.finalExecutionEntryState,
+                ),
+                ("mmExecutionEntryState", runtime.authority.mmExecutionEntryState),
+            ]
+        )
+    else:
+        lines.append(("authority", "UNAVAILABLE"))
+    if runtime.moneyManagement is not None:
+        lines.extend(
+            [
+                ("mmState", runtime.moneyManagement.state),
+                ("mmRiskState", runtime.moneyManagement.riskState),
+                ("mmRecommendedAction", runtime.moneyManagement.recommendedAction),
+                ("mmEntryState", runtime.moneyManagement.executionEntryState),
+            ]
+        )
+    else:
+        lines.append(("moneyManagement", "UNAVAILABLE"))
+    if runtime.health is not None:
+        lines.append(("healthState", runtime.health.healthState))
+    else:
+        lines.append(("health", "UNAVAILABLE"))
+    lines.append(("freshness", source.freshness.state))
+    content = _lines(lines)
     return _section(
         AdvisorPromptSectionType.RUNTIME_CONTEXT,
-        "Runtime Context (trusted typed scalars only)",
+        "Current Runtime Context (trusted typed scalars only)",
         content,
         authority=source.authority,
         source_ids=(source.sourceId,),

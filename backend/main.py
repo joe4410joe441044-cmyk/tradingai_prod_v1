@@ -39,7 +39,11 @@ from backend.bot_manager.bot_manager import (
     get_existing_bot_manager,
 )
 from backend.api.runtime import router as runtime_api_router
-from backend.api.ai_advisor import create_advice_router, create_runtime_router
+from backend.api.ai_advisor import (
+    build_authoritative_runtime,
+    create_advice_router,
+    create_runtime_router,
+)
 from backend.ai_advisor.credential_loader import EnvironmentCredentialLoader
 from backend.ai_advisor.production_composition import (
     ProviderInteractionPolicy,
@@ -808,6 +812,7 @@ app.include_router(
                 else "OFFLINE"
             ),
             approvedSpecifications=load_authoritative_specifications(),
+            runtimeSource=lambda: build_authoritative_runtime(app),
         )
     )
 )
