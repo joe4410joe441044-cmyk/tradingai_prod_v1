@@ -34,6 +34,15 @@ from .operator_constitution import (
     ConstitutionIdentity, OperatorConstitution, TRADINGAI_OPERATOR_CONSTITUTION,
     constitution_identity,
 )
+from .specialists import (
+    BoundedContextLimits, BoundedLlmContext, CrossDomainFinding,
+    MasterSupervisorAssessment, SourceReference, SpecialistFinding,
+    SpecialistObservation, SpecialistSeverity, SpecialistStatus,
+    aggregate_specialists, build_bounded_llm_context, evaluate_execution,
+    evaluate_money_management, evaluate_strategy, evaluate_system_health,
+    reference_from_provenance, status_from_finding_severity, worst_severity,
+    worst_status,
+)
 
 __all__ = [
     "CapitalCondition", "Freshness", "HumanAttention", "MasterSupervisorDecision",
@@ -52,4 +61,12 @@ __all__ = [
     "derive_core_status", "derive_llm_status",
     "build_master_shadow_context", "constitution_identity", "evaluate_master_shadow",
     "evaluate_mm_shadow", "get_agent_registration",
+    # D-6 deterministic Specialist architecture.
+    "BoundedContextLimits", "BoundedLlmContext", "CrossDomainFinding",
+    "MasterSupervisorAssessment", "SourceReference", "SpecialistFinding",
+    "SpecialistObservation", "SpecialistSeverity", "SpecialistStatus",
+    "aggregate_specialists", "build_bounded_llm_context", "evaluate_execution",
+    "evaluate_money_management", "evaluate_strategy", "evaluate_system_health",
+    "reference_from_provenance", "status_from_finding_severity", "worst_severity",
+    "worst_status",
 ]
