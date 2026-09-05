@@ -21,11 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.runtime.unified_trace import (
     NoTraceKind,
+    Provenance,
     TraceCompleteness,
     TraceNode,
     TraceNodeType,
     TraceReasonCode,
     UnifiedTradingTrace,
+    list_unified_traces,
 )
 
 MAX_TRACE_EVIDENCE_TRACES = 5
@@ -72,6 +74,23 @@ class AdvisorTraceReasonCode(BaseModel):
     meaning: Optional[Annotated[str, Field(min_length=1, max_length=MAX_TRACE_EVIDENCE_TEXT)]] = None
 
 
+class AdvisorTraceProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sourceSubsystem: Annotated[str, Field(min_length=1, max_length=64)]
+    sourceType: Annotated[str, Field(min_length=1, max_length=MAX_TRACE_EVIDENCE_TEXT)]
+    sourceIdentifier: Annotated[
+        str, Field(min_length=1, max_length=MAX_TRACE_EVIDENCE_IDENTIFIER)
+    ]
+    timestamp: Optional[
+        Annotated[str, Field(min_length=1, max_length=MAX_TRACE_EVIDENCE_IDENTIFIER)]
+    ] = None
+    linkageMethod: Annotated[str, Field(min_length=1, max_length=64)]
+    confidence: Optional[
+        Annotated[str, Field(min_length=1, max_length=MAX_TRACE_EVIDENCE_TEXT)]
+    ] = None
+
+
 class AdvisorTraceNode(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -81,6 +100,7 @@ class AdvisorTraceNode(BaseModel):
     noTradeKind: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
     reasonCodes: Tuple[AdvisorTraceReasonCode, ...] = Field(default_factory=tuple)
     identity: Tuple[str, ...] = Field(default_factory=tuple)
+    provenance: Optional[AdvisorTraceProvenance] = None
 
 
 class AdvisorUnifiedTrace(BaseModel):
@@ -95,6 +115,7 @@ class AdvisorUnifiedTrace(BaseModel):
     decision: Optional[AdvisorTraceNode] = None
     noTrade: Optional[AdvisorTraceNode] = None
     rejection: Optional[AdvisorTraceNode] = None
+    executionAttempt: Optional[AdvisorTraceNode] = None
     position: Optional[AdvisorTraceNode] = None
     exit: Optional[AdvisorTraceNode] = None
     tradeResult: Optional[AdvisorTraceNode] = None
@@ -102,6 +123,8 @@ class AdvisorUnifiedTrace(BaseModel):
     fillCount: int = 0
     nodes: Tuple[AdvisorTraceNode, ...] = Field(default_factory=tuple)
     reasonCodes: Tuple[AdvisorTraceReasonCode, ...] = Field(default_factory=tuple)
+    sourceReferences: Tuple[AdvisorTraceProvenance, ...] = Field(default_factory=tuple)
+    sourceReferencesTruncated: bool = False
     nodesTruncated: bool = False
     reasonCodesTruncated: bool = False
 
@@ -142,6 +165,43 @@ def _project_reason_codes(
     return projected, truncated
 
 
+def _project_provenance(prov: Provenance) -> AdvisorTraceProvenance:
+    return AdvisorTraceProvenance(
+        sourceSubsystem=prov.source_subsystem.value,
+        sourceType=prov.source_type,
+        sourceIdentifier=(
+            _bound(prov.source_identifier, MAX_TRACE_EVIDENCE_IDENTIFIER) or "unknown"
+        ),
+        timestamp=_bound(prov.timestamp, MAX_TRACE_EVIDENCE_IDENTIFIER),
+        linkageMethod=prov.linkage_method,
+        confidence=_bound(prov.confidence, MAX_TRACE_EVIDENCE_TEXT),
+    )
+
+
+def _project_source_references(
+    references: Tuple[Provenance, ...],
+    *,
+    limit: int,
+) -> tuple[list[AdvisorTraceProvenance], bool]:
+    projected: list[AdvisorTraceProvenance] = []
+    truncated = False
+    seen: set[tuple[str, str, str]] = set()
+    for reference in references:
+        if len(projected) >= limit:
+            truncated = True
+            break
+        key = (
+            reference.source_subsystem.value,
+            reference.source_type,
+            reference.source_identifier,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        projected.append(_project_provenance(reference))
+    return projected, truncated
+
+
 def _project_node(node: Optional[TraceNode]) -> Optional[AdvisorTraceNode]:
     if node is None:
         return None
@@ -153,6 +213,9 @@ def _project_node(node: Optional[TraceNode]) -> Optional[AdvisorTraceNode]:
         for key in _TRACE_ORDER_IDENTITIES
         if node.identity.get(key) is not None
     )
+    provenance = (
+        _project_provenance(node.provenance) if node.provenance is not None else None
+    )
     return AdvisorTraceNode(
         nodeType=node.node_type.value,
         status=node.status or "UNKNOWN",
@@ -160,6 +223,7 @@ def _project_node(node: Optional[TraceNode]) -> Optional[AdvisorTraceNode]:
         noTradeKind=node.no_trade_kind.value if node.no_trade_kind else None,
         reasonCodes=tuple(reason_codes),
         identity=identity,
+        provenance=provenance,
     )
 
 
@@ -178,6 +242,7 @@ def _project_trace(
             trace.decision,
             trace.no_trade,
             trace.rejection,
+            trace.execution_attempt,
             trace.position,
             trace.exit,
             trace.trade_result,
@@ -203,6 +268,9 @@ def _project_trace(
     reason_codes, reason_truncated = _project_reason_codes(
         trace.reason_codes, limit=MAX_TRACE_EVIDENCE_REASON_CODES
     )
+    source_references, source_refs_truncated = _project_source_references(
+        trace.source_references, limit=MAX_TRACE_EVIDENCE_SOURCE_REFERENCES
+    )
 
     return AdvisorUnifiedTrace(
         traceId=_bound(trace.trace_id, MAX_TRACE_EVIDENCE_IDENTIFIER) or "unknown",
@@ -214,6 +282,7 @@ def _project_trace(
         decision=next((n for n in selected_nodes if n.nodeType == TraceNodeType.DECISION.value), None),
         noTrade=next((n for n in selected_nodes if n.nodeType == TraceNodeType.NO_TRADE.value), None),
         rejection=next((n for n in selected_nodes if n.nodeType == TraceNodeType.ENTRY_REJECTION.value), None),
+        executionAttempt=next((n for n in selected_nodes if n.nodeType == TraceNodeType.EXECUTION_ATTEMPT.value), None),
         position=next((n for n in selected_nodes if n.nodeType == TraceNodeType.POSITION.value), None),
         exit=next((n for n in selected_nodes if n.nodeType == TraceNodeType.EXIT.value), None),
         tradeResult=next((n for n in selected_nodes if n.nodeType == TraceNodeType.TRADE_RESULT.value), None),
@@ -221,6 +290,8 @@ def _project_trace(
         fillCount=len(trace.fills),
         nodes=selected_nodes,
         reasonCodes=tuple(reason_codes),
+        sourceReferences=tuple(source_references),
+        sourceReferencesTruncated=source_refs_truncated,
         nodesTruncated=nodes_truncated,
         reasonCodesTruncated=reason_truncated,
     )
@@ -250,7 +321,10 @@ def build_advisor_trace_evidence(
         if isinstance(trace, UnifiedTradingTrace)
     ]
     truncated = bool(omitted) or any(
-        trace.nodesTruncated or trace.reasonCodesTruncated for trace in selected
+        trace.nodesTruncated
+        or trace.reasonCodesTruncated
+        or trace.sourceReferencesTruncated
+        for trace in selected
     )
     warning = None
     if truncated:
@@ -261,6 +335,8 @@ def build_advisor_trace_evidence(
             reasons.append("some traces truncated")
         if any(trace.reasonCodesTruncated for trace in selected):
             reasons.append("some reason codes truncated")
+        if any(trace.sourceReferencesTruncated for trace in selected):
+            reasons.append("some source references truncated")
         warning = "; ".join(reasons)
     return AdvisorTraceEvidence(
         traces=tuple(selected),
@@ -296,12 +372,14 @@ def historical_trace_lines(evidence: AdvisorTraceEvidence) -> list[tuple[str, ob
         lines.append((f"{prefix}.completeness", trace.completeness))
         lines.append((f"{prefix}.orderCount", trace.orderCount))
         lines.append((f"{prefix}.fillCount", trace.fillCount))
-        for field_name in ("decision", "noTrade", "rejection", "position", "exit", "tradeResult"):
+        for field_name in ("decision", "noTrade", "rejection", "executionAttempt", "position", "exit", "tradeResult"):
             node = getattr(trace, field_name)
             lines.extend(_node_lines(prefix, field_name, node))
         if trace.reasonCodes:
             codes = ",".join(item.code for item in trace.reasonCodes)
             lines.append((f"{prefix}.reasonCodes", codes))
+        if trace.sourceReferencesTruncated:
+            lines.append((f"{prefix}.sourceReferencesTruncated", True))
         if trace.nodesTruncated:
             lines.append((f"{prefix}.nodesTruncated", True))
         if trace.reasonCodesTruncated:
@@ -349,12 +427,36 @@ def empty_trace_evidence() -> AdvisorTraceEvidence:
     return AdvisorTraceEvidence(traces=())
 
 
+def build_default_historical_trace_evidence(
+    *,
+    limit: int = MAX_TRACE_EVIDENCE_TRACES,
+) -> AdvisorTraceEvidence:
+    """Build bounded historical evidence from the authoritative trace store.
+
+    This is the D-5 default wiring for the Advisor read-only composition.  It
+    reads the existing authoritative ``TradingTraceStore`` through the bounded
+    ``list_unified_traces`` helper and projects it with
+    ``build_advisor_trace_evidence``.  It never mutates the store and degrades
+    to empty evidence on any failure so that trace availability never affects
+    Advisor availability.
+    """
+    if limit < 0:
+        raise ValueError("limit must be non-negative")
+    try:
+        traces = list_unified_traces(limit=limit)
+        return build_advisor_trace_evidence(tuple(traces))
+    except Exception:
+        return empty_trace_evidence()
+
+
 __all__ = [
     "AdvisorTraceEvidence",
     "AdvisorUnifiedTrace",
     "AdvisorTraceNode",
     "AdvisorTraceReasonCode",
+    "AdvisorTraceProvenance",
     "build_advisor_trace_evidence",
+    "build_default_historical_trace_evidence",
     "historical_trace_lines",
     "render_historical_trace_evidence",
     "empty_trace_evidence",

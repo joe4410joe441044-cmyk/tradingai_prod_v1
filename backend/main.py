@@ -69,6 +69,9 @@ from backend.ai_advisor.browser_gateway import (
     create_browser_gateway_router,
     load_browser_gateway_config,
 )
+from backend.ai_advisor.historical_trace_evidence import (
+    build_default_historical_trace_evidence,
+)
 from backend.ai_advisor.conversation_store import (
     AdvisorConversationStore,
 )
@@ -825,6 +828,7 @@ app.include_router(
             approvedSpecifications=load_authoritative_specifications(),
             runtimeSource=lambda: build_authoritative_runtime(app),
             conversationStore=_ai_advisor_conversation_store,
+            traceEvidenceSource=build_default_historical_trace_evidence,
         )
     )
 )
