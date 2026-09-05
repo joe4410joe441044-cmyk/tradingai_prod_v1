@@ -451,9 +451,68 @@ export default function OperationPreparation({
 
 return (
         <div className="operation-preparation" data-testid="operation-preparation">
-            {/* 顶部标题和紧急操作栏 */}
-            <div className="operation-header">
+            {/* 顶部控制带：OPERATION | FINAL PREPARATION | EMERGENCY */}
+            <div className="operation-top-band">
                 <div className="operation-title">OPERATION</div>
+
+                <section className="operation-prep-final operation-prep-final--top" data-testid="operation-preparation-summary">
+                    <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
+                    <div className="operation-prep-summary">
+                        <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
+                        <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
+                        <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
+                        <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} />
+                        <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
+                        <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} />
+                        <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} />
+                        <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} />
+                        <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} />
+                        <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} />
+                        <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
+                        <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
+                        <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
+                        <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
+                    </div>
+                    <div className="operation-prep-start" data-testid="ready-to-start">
+                        {botRunning ? (
+                            <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
+                        ) : null}
+                        {!botRunning && (
+                            <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
+                        )}
+                        {blockGuidance && (
+                            <div className="operation-prep-block-guidance" data-testid="block-guidance">
+                                <span className="operation-prep-block-guidance__title">START NOT READY — resolve the following（開始不可 — 以下を解消）:</span>
+                                <ul>
+                                    {blockGuidance.map((item) => (
+                                        <li key={item.id} data-testid={`block-guidance-${item.id}`}>
+                                            <strong>{item.label}</strong> — {item.status}
+                                            <div className="operation-prep-block-guidance__values">
+                                                <span>current / 現在値: {item.current}</span>
+                                                <span>required / 必要値: {item.required}</span>
+                                            </div>
+                                            <div className="operation-prep-block-guidance__fix">
+                                                <span>{item.en}</span>
+                                                <span>{item.ja}</span>
+                                                <span>Fix / 修正: {item.fix}</span>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                    {mmRiskDivergence && (
+                        <small className="operation-prep-draft-note" data-testid="mm-risk-draft-note">
+                            RISK shown is the UNSAVED MM DRAFT; START sends the SAVED value（表示は未保存ドラフト。STARTには保存済み値を送信します）. Press Save MM to apply the draft.
+                        </small>
+                    )}
+                    {botRunning ? null : (
+                        <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
+                    )}
+                    {children}
+                </section>
+
                 <div className="operation-emergency-controls">
                     <button
                         className="emergency-stop-button operation-emergency-button"
@@ -745,67 +804,6 @@ return (
                             <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
                         </div>
                     </Section>
-                </div>
-
-                {/* 右列 */}
-                <div className="operation-column-right">
-                    <section className="operation-prep-final" data-testid="operation-preparation-summary">
-                        <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
-                        <div className="operation-prep-summary">
-                            <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
-                            <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
-                            <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
-                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} />
-                            <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
-                            <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} />
-                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} />
-                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} />
-                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} />
-                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} />
-                            <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
-                            <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
-                            <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
-                        </div>
-                        <div className="operation-prep-start" data-testid="ready-to-start">
-                            {botRunning ? (
-                                <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
-                            ) : null}
-                            {!botRunning && (
-                                <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
-                            )}
-                            {blockGuidance && (
-                                <div className="operation-prep-block-guidance" data-testid="block-guidance">
-                                    <span className="operation-prep-block-guidance__title">START NOT READY — resolve the following（開始不可 — 以下を解消）:</span>
-                                    <ul>
-                                        {blockGuidance.map((item) => (
-                                            <li key={item.id} data-testid={`block-guidance-${item.id}`}>
-                                                <strong>{item.label}</strong> — {item.status}
-                                                <div className="operation-prep-block-guidance__values">
-                                                    <span>current / 現在値: {item.current}</span>
-                                                    <span>required / 必要値: {item.required}</span>
-                                                </div>
-                                                <div className="operation-prep-block-guidance__fix">
-                                                    <span>{item.en}</span>
-                                                    <span>{item.ja}</span>
-                                                    <span>Fix / 修正: {item.fix}</span>
-                                                </div>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-                        {mmRiskDivergence && (
-                            <small className="operation-prep-draft-note" data-testid="mm-risk-draft-note">
-                                RISK shown is the UNSAVED MM DRAFT; START sends the SAVED value（表示は未保存ドラフト。STARTには保存済み値を送信します）. Press Save MM to apply the draft.
-                            </small>
-                        )}
-                        {botRunning ? null : (
-                            <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
-                        )}
-                        {children}
-                    </section>
                 </div>
             </div>
         </div>

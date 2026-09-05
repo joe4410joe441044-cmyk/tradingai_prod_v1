@@ -7,18 +7,21 @@
     justify-content: flex-start;
 }
 
-/* 顶部标题栏 */
-.operation-header {
+/* 顶部控制带: OPERATION | FINAL PREPARATION | EMERGENCY */
+.operation-top-band {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: stretch;
     gap: 16px;
     padding: 8px 0;
     border-bottom: 1px solid #2d405e;
     margin-bottom: 8px;
+    min-width: 0;
 }
 
 .operation-title {
+    flex: 0 0 auto;
+    align-self: center;
+    min-width: 96px;
     font-size: 16px;
     font-weight: 700;
     letter-spacing: 2px;
@@ -31,6 +34,7 @@
     align-items: center;
     gap: 12px;
     flex-shrink: 0;
+    align-self: center;
 }
 
 .operation-emergency-controls .emergency-stop-button {
@@ -97,17 +101,16 @@
     margin-bottom: 8px;
 }
 
-/* 主网格布局 */
+/* 主网格布局: 下段 左(①②③) + 中(④⑤⑥) */
 .operation-main-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     align-items: start;
 }
 
 .operation-column-left,
-.operation-column-center,
-.operation-column-right {
+.operation-column-center {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -123,7 +126,7 @@
     border-radius: 4px;
     border: 1px solid #2d405e;
     flex: 0 0 auto;
-    align-self: flex-start;
+    box-sizing: border-box;
 }
 
 .operation-prep-section h3,
@@ -442,45 +445,20 @@
 }
 
 /* 响应式布局 */
-@media (min-width: 1600px) {
-    .operation-main-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-main-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (min-width: 768px) and (max-width: 1199px) {
+@media (min-width: 768px) {
     .operation-main-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .operation-column-right { grid-column: 1 / -1; }
 }
 
 @media (max-width: 767px) {
     .operation-main-grid { grid-template-columns: 1fr; }
 }
 
-/* =====================================================
-   RESPONSIVE LAYOUT — flex wrap with content-sized sections
-   ===================================================== */
-
-/* Wide desktop — 1600px+: 4 columns */
-@media (min-width: 1600px) {
-    .operation-prep-section { flex-basis: 25%; }
-}
-
-/* Desktop — 1200–1599px: 3 columns */
-@media (min-width: 1200px) and (max-width: 1599px) {
-    .operation-prep-section { flex-basis: 33.333%; }
-}
-
-/* Tablet / narrow desktop — 768–1199px: 2 columns */
-@media (min-width: 768px) and (max-width: 1199px) {
-    .operation-prep-section { flex-basis: 50%; }
-}
-
-/* Mobile — below 768px: 1 column */
-@media (max-width: 767px) {
-    .operation-prep-section { flex-basis: 100%; }
+/* 顶部控制带响应式: 窄viewport时OPERATION/EMERGENCY单行, FINAL PREPARATION独占整行 */
+@media (max-width: 1199px) {
+    .operation-top-band { flex-wrap: wrap; }
+    .operation-top-band > .operation-title { flex: 1 1 auto; min-width: 0; }
+    .operation-top-band > .operation-prep-final--top { order: 3; flex: 1 1 100%; }
+    .operation-top-band > .operation-emergency-controls { justify-content: flex-end; }
 }
 
 /* =====================================================
@@ -503,6 +481,46 @@
     margin: 0;
     padding-bottom: 6px;
     border-bottom: 1px solid rgba(63, 212, 139, .2);
+}
+
+/* 顶部控制带内的FINAL PREPARATION: 横长compact(低背) */
+.operation-prep-final--top {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-top: 0;
+    gap: 6px;
+    padding: 8px 12px;
+}
+
+.operation-prep-final--top > h3 {
+    font-size: 12px;
+    padding-bottom: 4px;
+}
+
+.operation-prep-final--top .operation-prep-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px 14px;
+}
+
+.operation-prep-final--top .operation-prep-derived-row {
+    min-height: 20px;
+}
+
+.operation-prep-final--top .operation-prep-start {
+    padding-top: 6px;
+    gap: 4px;
+}
+
+.operation-prep-final--top .operation-prep-start > div > strong {
+    font-size: 12px;
+}
+
+@media (max-width: 1399px) {
+    .operation-prep-final--top .operation-prep-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+    .operation-prep-final--top .operation-prep-summary { grid-template-columns: 1fr; }
 }
 
 .operation-prep-summary {

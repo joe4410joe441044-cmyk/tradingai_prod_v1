@@ -348,15 +348,15 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     });
     const nodes = descendants(renderer.root);
     const orderedTestIds = [
+        "operation-preparation-summary",
+        "final-preparation-heading",
+        "ready-to-start",
         "trading-mode-section",
         "market-selection-section",
         "money-management-section",
         "trade-execution-section",
         "automation-section",
         "safety-readiness-section",
-        "operation-preparation-summary",
-        "final-preparation-heading",
-        "ready-to-start",
     ];
     const indexes = orderedTestIds.map((testId) => nodes.findIndex(
         (node) => node.props?.["data-testid"] === testId,
