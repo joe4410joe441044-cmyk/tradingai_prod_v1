@@ -373,6 +373,50 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     assert.equal(findTestId(renderer.root, "money-management-section").props.children != null, true);
 });
 
+test("DOM: FINAL PREPARATION sits between OPERATION and EMERGENCY in the top band and never in the lower grid", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        realOrderAllowed: false,
+        children: { type: "button", props: { children: "START BOT" } },
+    });
+    const childrenOf = (node) => {
+        const kids = node?.props?.children;
+        if (kids == null) return [];
+        return Array.isArray(kids) ? kids.filter(Boolean) : [kids];
+    };
+    const descriptor = (node) => [
+        typeof node?.type === "string" ? node.type : "*",
+        String(node?.props?.className || ""),
+    ].join(".");
+
+    const topBand = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-top-band"));
+    assert.ok(topBand, "operation-top-band wraps the three top zones");
+    const bandClasses = childrenOf(topBand).map((node) => descriptor(node).split(".")[1]);
+    assert.equal(bandClasses.length, 3, "top band has three zones: OPERATION | FINAL PREPARATION | EMERGENCY");
+    assert.equal(bandClasses.some((cls) => cls.includes("operation-title")), true, "top band contains OPERATION label");
+    assert.equal(bandClasses.some((cls) => cls.includes("operation-prep-final")), true, "top band contains FINAL PREPARATION");
+    assert.equal(bandClasses.some((cls) => cls.includes("operation-emergency-controls")), true, "top band contains EMERGENCY controls");
+    const titleIdx = bandClasses.findIndex((cls) => cls.includes("operation-title"));
+    const finalIdx = bandClasses.findIndex((cls) => cls.includes("operation-prep-final"));
+    const emergIdx = bandClasses.findIndex((cls) => cls.includes("operation-emergency-controls"));
+    assert.ok(titleIdx >= 0 && finalIdx > titleIdx && emergIdx > finalIdx, "top band order = OPERATION | FINAL PREPARATION | EMERGENCY");
+
+    const lowerColumns = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-main-grid"));
+    assert.ok(lowerColumns, "operation-main-grid wraps the ① – ⑥ lower sections");
+    const gridClasses = childrenOf(lowerColumns).map((node) => descriptor(node).split(".")[1]);
+    assert.equal(gridClasses.length, 2, "lower grid has exactly two columns (LEFT ①②③ + RIGHT ④⑤⑥)");
+    assert.equal(gridClasses.some((cls) => cls.includes("operation-column-left")), true, "lower grid LEFT column (① ② ③) present");
+    assert.equal(gridClasses.some((cls) => cls.includes("operation-column-center")), true, "lower grid RIGHT column (④ ⑤ ⑥) present");
+    assert.equal(gridClasses.some((cls) => cls.includes("operation-prep-final")), false, "lower grid must NOT contain FINAL PREPARATION");
+    assert.equal(gridClasses.some((cls) => cls.includes("operation-column-right")), false, "lower grid must NOT contain an empty third / right column");
+    assert.equal(descendants(lowerColumns).some((node) => String(node?.props?.className || "").includes("operation-prep-final")), false, "FINAL PREPARATION is not a descendant of the lower grid");
+});
+
 test("manual/auto, leverage, and automation controls update the reactive summary", async () => {
     const legacyChanges = [];
     const Component = await loadComponent();
