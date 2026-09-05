@@ -10829,6 +10829,8 @@ class BotManager:
             ),
 
             "leverageAuthority": self._leverage_authority_projection(),
+
+            "maxDrawdownAuthority": self._max_drawdown_authority_projection(),
         }
 
         status_payload.update(account_status_fields)
@@ -10859,6 +10861,41 @@ class BotManager:
             ),
             "allowed": authority.allowed,
             "reason": authority.block_reason.value,
+        }
+
+    def _max_drawdown_authority_projection(self):
+        """Read-only projection of the canonical START max-drawdown authority.
+
+        Mirrors the Money Management base configuration that the START
+        canonical validator (_resolve_max_drawdown_authority) reads, so the
+        operator can confirm the saved value will be accepted before START.
+        Never resolves or mutates authority.
+        """
+        provider = getattr(self, "money_management_config_provider", None)
+        mm_config = provider() if callable(provider) else None
+        value = (
+            getattr(mm_config, "maximum_drawdown_pct", None)
+            if mm_config is not None
+            else None
+        )
+        if value is None:
+            return {
+                "maximumDrawdownPercent": None,
+                "available": False,
+                "reason": "MONEY_MANAGEMENT_MAX_DRAWDOWN_UNAVAILABLE",
+            }
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError):
+            return {
+                "maximumDrawdownPercent": None,
+                "available": False,
+                "reason": "MONEY_MANAGEMENT_MAX_DRAWDOWN_INVALID",
+            }
+        return {
+            "maximumDrawdownPercent": normalized,
+            "available": True,
+            "reason": None,
         }
 
     # =========================

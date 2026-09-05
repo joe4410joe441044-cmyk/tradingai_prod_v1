@@ -16,6 +16,7 @@ amplify the MM-approved risk amount.
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -357,3 +358,60 @@ def test_start_transports_effective_leverage_to_execution_engine():
         positions_router.set_engine(previous_positions_engine)
         if execution_runtime is not None:
             execution_runtime.set_engine(previous_runtime_engine)
+
+
+# =========================
+# Max-drawdown START canonical authority
+# =========================
+
+
+def _dd_config(drawdown=D("5")):
+    return replace(_mm_config(), maximum_drawdown_pct=drawdown)
+
+
+def test_bot_manager_resolve_max_drawdown_accepts_default_match():
+    manager = _bare_manager(
+        money_management_config_provider=lambda: _dd_config(D("5")),
+    )
+    assert manager._resolve_max_drawdown_authority({"max_drawdown_pct": 5.0}) == D("5")
+
+
+def test_bot_manager_resolve_max_drawdown_accepts_nondefault_match():
+    manager = _bare_manager(
+        money_management_config_provider=lambda: _dd_config(D("7")),
+    )
+    assert manager._resolve_max_drawdown_authority({"max_drawdown_pct": 7.0}) == D("7")
+
+
+def test_bot_manager_resolve_max_drawdown_rejects_mismatch():
+    manager = _bare_manager(
+        money_management_config_provider=lambda: _dd_config(D("7")),
+    )
+    with pytest.raises(ValueError) as exc:
+        manager._resolve_max_drawdown_authority({"max_drawdown_pct": 5.0})
+    assert "MAX_DRAWDOWN_PAYLOAD_MISMATCH_CANONICAL" in str(exc.value)
+
+
+def test_bot_manager_resolve_max_drawdown_fail_closed_when_unavailable():
+    manager = _bare_manager()
+    with pytest.raises(ValueError) as exc:
+        manager._resolve_max_drawdown_authority({"max_drawdown_pct": 5.0})
+    assert "MAX_DRAWDOWN_UNAVAILABLE" in str(exc.value)
+
+
+def test_bot_manager_max_drawdown_authority_projection_reads_base_config():
+    manager = _bare_manager(
+        money_management_config_provider=lambda: _dd_config(D("7")),
+    )
+    projection = manager._max_drawdown_authority_projection()
+    assert projection["available"] is True
+    assert projection["maximumDrawdownPercent"] == 7.0
+    assert projection["reason"] is None
+
+
+def test_bot_manager_max_drawdown_authority_projection_unavailable():
+    manager = _bare_manager()
+    projection = manager._max_drawdown_authority_projection()
+    assert projection["available"] is False
+    assert projection["maximumDrawdownPercent"] is None
+    assert projection["reason"] == "MONEY_MANAGEMENT_MAX_DRAWDOWN_UNAVAILABLE"

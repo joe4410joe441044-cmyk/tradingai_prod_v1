@@ -855,6 +855,34 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
             "1.00",
         )
 
+    def test_maximum_drawdown_update_syncs_saved_base_start_authority(self):
+        boundary, app, _, _, _ = ready_boundary()
+        provider = app.state.money_management.base_config_provider
+
+        self.assertEqual(
+            provider.get_config().maximum_drawdown_pct,
+            Decimal("5"),
+        )
+
+        result = boundary.update_configuration({
+            "maximumDrawdownPercent": "7",
+            "expectedRevision": 1,
+        })
+
+        self.assertTrue(result.applied)
+        self.assertEqual(
+            provider.get_config().maximum_drawdown_pct,
+            Decimal("7"),
+        )
+        self.assertEqual(
+            result.configuration.maximum_drawdown_percent,
+            Decimal("7"),
+        )
+        self.assertEqual(
+            boundary.get_configuration().to_dict()["maximumDrawdownPercent"],
+            "7",
+        )
+
     def test_position_risk_configuration_fields_update_atomically(self):
         boundary, app, _, _, _ = ready_boundary()
 

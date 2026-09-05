@@ -395,6 +395,7 @@ _BASE_CONFIG_FIELDS = {
     "riskPerTradePercent": "risk_per_trade_pct",
     "maximumPositionNotional": "maximum_position_notional",
     "singleSymbolExposurePercent": "single_symbol_exposure_pct",
+    "maximumDrawdownPercent": "maximum_drawdown_pct",
     "compoundingEnabled": "compounding_enabled",
 }
 _REQUEST_FIELDS = frozenset((
