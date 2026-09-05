@@ -40,6 +40,17 @@ const displayBoolean = (value) => {
     return "--";
 };
 
+const CURRENT_CONTEXT_LABELS = {
+    "PAPER MODE — LIVE ACCOUNT INACTIVE": "PAPER MODE（ペーパーモード）— LIVE ACCOUNT INACTIVE（実口座取引停止中）",
+    "LIVE MODE — REAL ACCOUNT ACTIVE": "LIVE MODE（LIVE状態）— REAL ACCOUNT ACTIVE（実口座が有効です）",
+    "LIVE MODE — REAL EXECUTION NOT ALLOWED": "LIVE MODE（LIVE状態）— REAL EXECUTION NOT ALLOWED（実口座での取引実行は許可されていません）",
+    "RUNTIME MODE UNKNOWN": "RUNTIME MODE UNKNOWN（実行モード不明）",
+};
+
+const displayCurrentContext = (value) => (
+    CURRENT_CONTEXT_LABELS[value] ?? String(value ?? "")
+);
+
 export function AccountStatusView({
     botStatus = {},
     onPaperCapitalApplied,
@@ -115,7 +126,7 @@ export function AccountStatusView({
             <header className="as-page-header">
                 <div>
                     <span className="as-page-kicker">Live-first account hierarchy</span>
-                    <h1>Account Status</h1>
+                    <h1>Account Status（アカウント状況）</h1>
                 </div>
                 <span className="as-page-badge">READ ONLY</span>
             </header>
@@ -126,8 +137,8 @@ export function AccountStatusView({
             <article className="semantic-card as-primary-card clear" data-testid="real-account-section">
                 <header className="semantic-card-header">
                     <div>
-                        <span className="semantic-card-kicker">Production Account</span>
-                        <h2>Real / Live Account</h2>
+                        <span className="semantic-card-kicker">Production Account（本番口座）</span>
+                        <h2>Real / Live Account（実口座）</h2>
                     </div>
                     <span
                         className={`semantic-badge semantic-badge-${
@@ -147,31 +158,31 @@ export function AccountStatusView({
 
                 {paperMode && (
                     <p className="semantic-card-context" data-testid="real-account-paper-context">
-                        PAPER MODE — LIVE ACCOUNT INACTIVE
+                        {displayCurrentContext(liveContext.currentContext)}
                     </p>
                 )}
 
                 <div className="as-primary-metrics" data-testid="real-account-metrics">
                     <StatusMetric
-                        label="Balance"
+                        label="Balance（残高）"
                         value={realBalanceValue}
                         testId="real-balance"
                         tone="real"
                     />
                     <StatusMetric
-                        label="Equity"
+                        label="Equity（純資産）"
                         value={realEquityValue}
                         testId="real-equity"
                         tone="real"
                     />
                     <StatusMetric
-                        label="Available"
+                        label="Available（利用可能額）"
                         value={realAvailableValue}
                         testId="real-available"
                         tone="real"
                     />
                     <StatusMetric
-                        label="Position"
+                        label="Position（ポジション）"
                         value={realPositionValue}
                         testId="real-position"
                         tone="real"
@@ -180,49 +191,49 @@ export function AccountStatusView({
 
                 <div className="as-primary-details" data-testid="real-account-details">
                     <StatusMetric
-                        label="Exchange"
+                        label="Exchange（取引所）"
                         value={displayValue(realExchange)}
                         testId="real-exchange"
                         tone="connection"
                     />
                     <StatusMetric
-                        label="Connection"
+                        label="Connection（接続）"
                         value={displayValue(resolvedExchangeConnection)}
                         testId="real-connection"
                         tone={realConnected ? "safe" : "connection"}
                     />
                     <StatusMetric
-                        label="Authentication"
+                        label="Authentication（取引所認証）"
                         value={displayValue(resolvedExchangeAuth)}
                         testId="real-auth"
                         tone={authVerified ? "safe" : "connection"}
                     />
                     <StatusMetric
-                        label="API Key"
+                        label="API Key（APIキー）"
                         value={displayValue(resolvedApiKeyStatus)}
                         testId="real-api-key"
                         tone={authVerified ? "safe" : "connection"}
                     />
                     <StatusMetric
-                        label="Permission"
+                        label="Permission（権限）"
                         value={displayValue(resolvedPermission)}
                         testId="real-permission"
                         tone={realConnected ? "safe" : "connection"}
                     />
                     <StatusMetric
-                        label="Account Type"
+                        label="Account Type（口座種別）"
                         value={displayValue(resolvedAccountType)}
                         testId="real-account-type"
                         tone="connection"
                     />
                     <StatusMetric
-                        label="Sync Status"
+                        label="Sync Status（同期状態）"
                         value={realSyncStatus}
                         testId="real-sync-status"
                         tone={realConnected ? "safe" : "warning"}
                     />
                     <StatusMetric
-                        label="Last Sync"
+                        label="Last Sync（最終同期）"
                         value={realConnected
                             ? displayValue(accountLastSync, formatLastUpdate)
                             : "--"
@@ -240,45 +251,45 @@ export function AccountStatusView({
                 <article className="semantic-card as-card clear" data-testid="account-runtime-section">
                     <header className="semantic-card-header">
                         <div>
-                            <span className="semantic-card-kicker">Runtime state</span>
-                            <h2>Account Runtime</h2>
+                            <span className="semantic-card-kicker">Runtime state（実行状態）</span>
+                            <h2>Account Runtime（アカウント実行状態）</h2>
                         </div>
                         <span className="semantic-badge">RUNTIME</span>
                     </header>
 
                     <div className="semantic-metric-grid three-columns" data-testid="runtime-state-grid">
                         <StatusMetric
-                            label="Runtime Mode"
+                            label="Runtime Mode（実行モード）"
                             value={runtimeState.runtimeMode}
                             testId="runtime-mode"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Bot State"
+                            label="Bot State（ボット状態）"
                             value={runtimeState.botState}
                             testId="runtime-bot-state"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Position State"
+                            label="Position State（ポジション状態）"
                             value={runtimeState.positionState}
                             testId="runtime-position-state"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Pending Order"
+                            label="Pending Order（保留注文）"
                             value={runtimeState.pendingOrder}
                             testId="runtime-pending-order"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Real Orders"
+                            label="Real Orders（実注文）"
                             value={runtimeState.realOrders}
                             testId="runtime-real-orders"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Execution Mode"
+                            label="Execution Mode（実行方式）"
                             value={runtimeState.executionMode}
                             testId="runtime-execution-mode"
                             tone="execution"
@@ -287,25 +298,25 @@ export function AccountStatusView({
 
                     <div className="as-authority-grid" data-testid="execution-authority-grid">
                         <StatusMetric
-                            label="Real Order Allowed"
+                            label="Real Order Allowed（実注文許可）"
                             value={runtimeState.realOrderAllowed}
                             testId="authority-real-order-allowed"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Execution Entry"
+                            label="Execution Entry（注文実行許可）"
                             value={runtimeState.executionEntryAllowed}
                             testId="authority-execution-entry"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Live Order Entry"
+                            label="Live Order Entry（LIVE注文許可）"
                             value={runtimeState.liveOrderEntryAllowed}
                             testId="authority-live-order-entry"
                             tone="execution"
                         />
                         <StatusMetric
-                            label="Execution Enabled"
+                            label="Execution Enabled（実行有効状態）"
                             value={runtimeState.executionEnabled}
                             testId="authority-execution-enabled"
                             tone="execution"
@@ -314,46 +325,47 @@ export function AccountStatusView({
 
                     <p className="semantic-card-note">
                         Execution authority is read-only. This page does not operate the trading system.
+                        {" "}（実行権限は参照専用です。この画面から取引システムを操作することはありません。）
                     </p>
                 </article>
 
                 <article className="semantic-card as-card clear" data-testid="live-context-section">
                     <header className="semantic-card-header">
                         <div>
-                            <span className="semantic-card-kicker">Current relationship</span>
-                            <h2>Live Context</h2>
+                            <span className="semantic-card-kicker">Current relationship（現在の関係）</span>
+                            <h2>Live Context（LIVE状態）</h2>
                         </div>
                         <span className="semantic-badge">CONTEXT</span>
                     </header>
 
                     <div className="semantic-metric-grid three-columns" data-testid="live-context-grid">
                         <StatusMetric
-                            label="Current Mode"
+                            label="Current Mode（現在モード）"
                             value={liveContext.currentMode}
                             testId="live-context-mode"
                             tone="connection"
                         />
                         <StatusMetric
-                            label="Account Access"
+                            label="Account Access（口座アクセス）"
                             value={displayValue(accountAccess)}
                             testId="live-context-access"
                             tone="connection"
                         />
                         <StatusMetric
-                            label="LIVE Execution"
+                            label="LIVE Execution（LIVE実行）"
                             value={liveContext.liveExecution}
                             testId="live-context-execution"
                             tone="connection"
                         />
                         <StatusMetric
-                            label="Data Freshness"
+                            label="Data Freshness（データ鮮度）"
                             value={liveContext.dataFreshness}
                             testId="live-context-freshness"
                             tone="connection"
                         />
                         <StatusMetric
-                            label="Current Context"
-                            value={liveContext.currentContext}
+                            label="Current Context（現在状況）"
+                            value={displayCurrentContext(liveContext.currentContext)}
                             testId="live-context-message"
                             tone="connection"
                         />
@@ -361,6 +373,7 @@ export function AccountStatusView({
 
                     <p className="semantic-card-note">
                         Freshness sourced from the Real Account canonical state (stale / sync / connection).
+                        {" "}（データ鮮度は実口座のCanonical状態［stale / sync / connection］を参照しています。）
                     </p>
                 </article>
             </div>
@@ -371,15 +384,15 @@ export function AccountStatusView({
             <article className="semantic-card as-paper-card" data-testid="paper-account-section">
                 <header className="semantic-card-header">
                     <div>
-                        <span className="semantic-card-kicker">Simulation Account</span>
-                        <h2>Paper / Simulation</h2>
+                        <span className="semantic-card-kicker">Simulation Account（シミュレーション口座）</span>
+                        <h2>Paper / Simulation（ペーパー・シミュレーション）</h2>
                     </div>
                     <span className="semantic-badge">PAPER_SIMULATION</span>
                 </header>
 
                 <div className="as-paper-metrics" data-testid="paper-account-metrics">
                     <StatusMetric
-                        label="Balance"
+                        label="Balance（模擬残高）"
                         value={displayRuntimeValue(paperBalance, {
                             formatter: formatAmount,
                         })}
@@ -387,7 +400,7 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="Equity"
+                        label="Equity（模擬純資産）"
                         value={displayRuntimeValue(paperEquity, {
                             formatter: formatAmount,
                         })}
@@ -395,7 +408,7 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="Available"
+                        label="Available（模擬利用可能額）"
                         value={displayRuntimeValue(paperAvailableBalance, {
                             formatter: formatAmount,
                         })}
@@ -403,7 +416,7 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="Position"
+                        label="Position（模擬ポジション）"
                         value={formatPositionValue(
                             paperPosition,
                             derived.paperAvailable ? "NO_OPEN_POSITION" : undefined,
@@ -412,7 +425,7 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="PnL"
+                        label="PnL（模擬損益）"
                         value={displayRuntimeValue(paperPnl, {
                             formatter: formatPnl,
                         })}
@@ -420,7 +433,7 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="Source"
+                        label="Source（データソース）"
                         value={paperAccount.source || "PAPER_SIMULATION"}
                         testId="paper-source"
                         tone="paper"
@@ -438,6 +451,7 @@ export function AccountStatusView({
 
                 <p className="semantic-card-note">
                     Simulation-only account. No real funds are used.
+                    {" "}（シミュレーション専用口座です。実資金は使用されません。）
                 </p>
             </article>
         </section>

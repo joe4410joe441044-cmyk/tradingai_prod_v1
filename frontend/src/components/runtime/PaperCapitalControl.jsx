@@ -101,11 +101,11 @@ function PaperCapitalControl({
                 aria-expanded={capitalExpanded}
                 onClick={() => setCapitalExpanded((value) => !value)}
             >
-                {capitalExpanded ? "▼" : "▶"} Set Paper Capital
+                {capitalExpanded ? "▼" : "▶"} SET PAPER CAPITAL（ペーパー資金設定）
             </button>
             {capitalExpanded && (
                 <div className="paper-capital-panel">
-                    <label htmlFor="simulation-capital-input">Simulation Capital (USDT)</label>
+                    <label htmlFor="simulation-capital-input">SIMULATION CAPITAL（シミュレーション資金） (USDT)</label>
                     <input
                         id="simulation-capital-input"
                         inputMode="decimal"
@@ -120,7 +120,7 @@ function PaperCapitalControl({
                             title={realAvailablePresetEnabled ? "Copy current real available balance" : "REAL_ACCOUNT_NOT_SYNCED"}
                             onClick={() => chooseCapital(realAvailableRaw, "REAL_AVAILABLE_PRESET")}
                         >
-                            Real Available
+                            REAL AVAILABLE（実口座利用可能額）
                         </button>
                         {["100", "1000", "10000"].map((preset) => (
                             <button type="button" key={preset} onClick={() => chooseCapital(preset)}>
@@ -138,11 +138,11 @@ function PaperCapitalControl({
                             disabled={Boolean(capitalError) || capitalSubmitting}
                             onClick={() => setCapitalConfirming(true)}
                         >
-                            Apply Paper Capital
+                            APPLY PAPER CAPITAL（ペーパー資金を適用）
                         </button>
                     ) : (
                         <div className="paper-capital-confirm" role="alertdialog" aria-labelledby="paper-capital-confirm-title">
-                            <strong id="paper-capital-confirm-title">Reset Paper Account?</strong>
+                            <strong id="paper-capital-confirm-title">Reset Paper Account?（ペーパー口座をリセットしますか？）</strong>
                             <span>New Simulation Capital: {formatAmount(capitalNumber)} USDT</span>
                             <span>Balance, equity, PnL and paper positions will reset. Real funds are not affected.</span>
                             <div>

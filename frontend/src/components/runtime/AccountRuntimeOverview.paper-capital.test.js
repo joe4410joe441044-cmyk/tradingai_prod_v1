@@ -13,10 +13,11 @@ const controlSource = await readFile(
 const apiSource = await readFile(new URL("../../api/index.js", import.meta.url), "utf8");
 
 test("Paper card exposes an explicit confirmed capital reset workflow", () => {
-    assert.match(controlSource, /Set Paper Capital/);
-    assert.match(controlSource, /Simulation Capital \(USDT\)/);
-    assert.match(controlSource, /Apply Paper Capital/);
-    assert.match(controlSource, /Reset Paper Account\?/);
+    assert.match(controlSource, /SET PAPER CAPITAL（ペーパー資金設定）/);
+    assert.match(controlSource, /SIMULATION CAPITAL（シミュレーション資金） \(USDT\)/);
+    assert.match(controlSource, /APPLY PAPER CAPITAL（ペーパー資金を適用）/);
+    assert.match(controlSource, /REAL AVAILABLE（実口座利用可能額）/);
+    assert.match(controlSource, /Reset Paper Account\?（ペーパー口座をリセットしますか？）/);
     assert.match(controlSource, /Real funds are not affected/);
     assert.match(controlSource, /aria-live="polite"/);
 });

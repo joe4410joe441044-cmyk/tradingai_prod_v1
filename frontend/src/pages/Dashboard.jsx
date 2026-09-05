@@ -7,7 +7,6 @@ import {
 
 import { API } from "../api";
 import usePolling from "../hooks/usePolling";
-import AccountRuntimeOverview from "../components/runtime/AccountRuntimeOverview";
 import RuntimeDiagnosticsDisclosure from "../components/runtime/RuntimeDiagnosticsDisclosure";
 import TradingDecisionCard from "../components/runtime/TradingDecisionCard";
 import { formatActivityTime, getLastExecutionActivity } from "../runtime/runtimeDisplay";
@@ -69,22 +68,6 @@ const getPositionSide = (position) => {
     );
 };
 
-const normalizeTimestamp = (value) => {
-    if (value === null || value === undefined || value === "") {
-        return undefined;
-    }
-
-    const numericValue = Number(value);
-
-    if (Number.isFinite(numericValue)) {
-        return numericValue < 1_000_000_000_000
-            ? numericValue * 1000
-            : numericValue;
-    }
-
-    return value;
-};
-
 /* =================================================
    DASHBOARD
 ================================================= */
@@ -111,10 +94,8 @@ const refreshBotStatus = useCallback(async () => {
     return snapshot.data;
 }, []);
 
-const governance = telemetryState.governance;
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
-
 const apiBotStatusSnapshot = (
     manualBotStatusSnapshot?.receivedAt
         > (botStatusSnapshot?.receivedAt || 0)
@@ -151,13 +132,6 @@ const position = firstAvailable(
     getPositionSide(wsMarketData?.position),
 );
 
-const lastUpdate = normalizeTimestamp(firstAvailable(
-    botStatus?.last_update,
-    botStatus?.timestamp,
-    statusReceivedAt,
-    runtime?.lastMessageTimestamp,
-));
-
 const runtimeHealth = useMemo(() => deriveRuntimeHealth({
     botStatus,
 }), [
@@ -184,105 +158,6 @@ const selectedStage = runtimeHealth.stages.find(
 ) ?? runtimeHealth.stages.find(
     (stage) => stage.id === runtimeHealth.activeStageId,
 ) ?? runtimeHealth.stages[0];
-
-const accountRuntimeProps = {
-    accountRuntime: botStatus?.accountRuntime,
-    exchange: firstAvailable(
-        botStatus?.exchange,
-        tradeSettings.exchange,
-    ),
-    selectedMode: firstAvailable(
-        tradeSettings.mode,
-        botStatus?.selectedMode,
-        governance?.mode,
-    ),
-    executionMode: firstAvailable(
-        botStatus?.executionMode,
-        botStatus?.execution_mode,
-        "SIMULATION",
-    ),
-    realOrderAllowed: firstAvailable(
-        botStatus?.realOrderAllowed,
-        botStatus?.real_order_allowed,
-        false,
-    ) === true,
-    dryRun: firstAvailable(
-        botStatus?.dryRun,
-        true,
-    ) !== false,
-    safetyReason: botStatus?.safetyReason,
-    allowLive: botStatus?.allowLive,
-    tradeMode: botStatus?.tradeMode,
-    accountSource: firstAvailable(
-        botStatus?.accountSource,
-        "NOT_CONNECTED",
-    ),
-    balanceSource: firstAvailable(
-        botStatus?.balanceSource,
-        "NOT_CONNECTED",
-    ),
-    positionSource: firstAvailable(
-        botStatus?.positionSource,
-        "NOT_CONNECTED",
-    ),
-    exchangeAuth: firstAvailable(
-        botStatus?.exchangeAuth,
-        "NOT_VERIFIED",
-    ),
-    exchangeConnection: firstAvailable(
-        botStatus?.exchangeConnection,
-        "NOT_CONNECTED",
-    ),
-    apiKeyStatus: firstAvailable(
-        botStatus?.apiKeyStatus,
-        "MISSING",
-    ),
-    permission: firstAvailable(
-        botStatus?.permission,
-        "NOT_VERIFIED",
-    ),
-    accountType: firstAvailable(
-        botStatus?.accountType,
-        "UNKNOWN",
-    ),
-    exchangeAuthReason: botStatus?.exchangeAuthReason,
-    exchangeConnectionReason: botStatus?.exchangeConnectionReason,
-    accountReason: botStatus?.accountReason,
-    balanceReason: botStatus?.balanceReason,
-    positionReason: botStatus?.positionReason,
-    accountSourceReason: botStatus?.accountSourceReason,
-    balanceSourceReason: botStatus?.balanceSourceReason,
-    positionSourceReason: botStatus?.positionSourceReason,
-    realAccountConnected: botStatus?.realAccountConnected === true,
-    realBalance: botStatus?.realBalance,
-    realEquity: botStatus?.realEquity,
-    realAvailableBalance: botStatus?.realAvailableBalance,
-    realPosition: botStatus?.realPosition,
-    realPositionState: botStatus?.realPositionState,
-    realAccountLastSync: botStatus?.realAccountLastSync,
-    realLastSync: botStatus?.realLastSync,
-    balance: firstAvailable(
-        botStatus?.balance,
-        wsMarketData?.balance,
-    ),
-    equity: firstAvailable(
-        botStatus?.equity,
-        wsMarketData?.equity,
-    ),
-    availableBalance: firstAvailable(
-        wsMarketData?.availableBalance,
-        wsMarketData?.available_balance,
-        botStatus?.availableBalance,
-        botStatus?.available_balance,
-    ),
-    position,
-    pnl: firstAvailable(
-        botStatus?.pnl,
-        wsMarketData?.pnl,
-        wsMarketData?.unrealizedPnL,
-    ),
-    lastUpdate,
-};
 
 useEffect(() => {
     if (botStatus?.runtime_health) {
@@ -423,12 +298,6 @@ useEffect(() => {
             <div className="center-column">
 
                 <div className="panel-card center-terminal-panel">
-
-                    <AccountRuntimeOverview
-                        variant="summary"
-                        {...accountRuntimeProps}
-                        onPaperCapitalApplied={refreshBotStatus}
-                    />
 
                     <div className="execution-activity" data-testid="last-execution-activity">
                         <span>{lastExecutionActivity.label}</span>

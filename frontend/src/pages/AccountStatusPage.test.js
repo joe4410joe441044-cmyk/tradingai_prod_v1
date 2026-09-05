@@ -15,10 +15,10 @@ const loadModule = async () => {
     const output = join(temporary, "AccountStatusPage.mjs");
     const modelUrl = new URL("../components/runtime/accountRuntimeModel.js", import.meta.url).href;
     const statusMetricStub = moduleUrl(
-        "export default (props)=>({type:'span',props:{'data-testid':props.testId,children:props.value}});",
+        "export default (props)=>({type:'div',props:{children:[{type:'span',props:{'data-testid':props.testId,children:props.value}},props.label]}});",
     );
     const paperCapitalStub = moduleUrl(
-        "export default (props)=>({type:'div',props:{className:'paper-capital-control','data-testid':'set-paper-capital',children:props.value}});",
+        "export default (props)=>({type:'div',props:{className:'paper-capital-control','data-testid':'set-paper-capital',children:props.value || 'SET PAPER CAPITAL（ペーパー資金設定）'}});",
     );
     const usePollingStub = moduleUrl(
         "export default()=>({data:{data:null},loading:false,error:false});",
@@ -203,8 +203,11 @@ test("PAPER MODE — LIVE ACCOUNT INACTIVE renders and freshness is not invented
     const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
     const context = findByTestId(nodes, "real-account-paper-context");
     assert.ok(context, "paper context renders in paper mode");
-    assert.match(String(context.props.children), /PAPER MODE — LIVE ACCOUNT INACTIVE/);
-    assert.equal(readTestIdValue(nodes, "live-context-message"), "PAPER MODE — LIVE ACCOUNT INACTIVE");
+    assert.match(String(context.props.children), /PAPER MODE（ペーパーモード）— LIVE ACCOUNT INACTIVE（実口座取引停止中）/);
+    assert.equal(
+        readTestIdValue(nodes, "live-context-message"),
+        "PAPER MODE（ペーパーモード）— LIVE ACCOUNT INACTIVE（実口座取引停止中）",
+    );
     assert.equal(readTestIdValue(nodes, "live-context-freshness"), "NOT_FETCHED");
 });
 
@@ -316,9 +319,51 @@ test("Account Status renders no operation controls and no buttons", async () => 
     ];
     operationPhrases.forEach((phrase) => {
         assert.equal(
-            allText.some((text) => text.toUpperCase().includes(phrase.toUpperCase())),
+            allText.some((text) => new RegExp(`\\b${phrase}\\b`, "i").test(text)),
             false,
             `must not render operation control: ${phrase}`,
         );
     });
+});
+
+test("Account Status renders bilingual English（日本語）labels", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
+    const allText = texts(nodes).join(" ");
+    const required = [
+        "Account Status（アカウント状況）",
+        "Real / Live Account（実口座）",
+        "Production Account（本番口座）",
+        "Balance（残高）",
+        "Equity（純資産）",
+        "Authentication（取引所認証）",
+        "Account Runtime（アカウント実行状態）",
+        "Live Context（LIVE状態）",
+        "Paper / Simulation（ペーパー・シミュレーション）",
+        "SET PAPER CAPITAL（ペーパー資金設定）",
+    ];
+    required.forEach((label) => {
+        assert.equal(allText.includes(label), true, `missing bilingual label: ${label}`);
+    });
+});
+
+test("Account Status preserves canonical status values alongside bilingual labels", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
+    const allText = texts(nodes).join(" ");
+    const canonical = [
+        "READ ONLY",
+        "PAPER_SIMULATION",
+        "PAPER",
+        "SIMULATION",
+        "STOPPED",
+        "NOT_CONNECTED",
+        "NOT_VERIFIED",
+        "FLAT",
+        "NO",
+    ];
+    canonical.forEach((value) => {
+        assert.equal(allText.includes(value), true, `missing canonical value: ${value}`);
+    });
+    assert.equal(allText.includes("LIVE READY"), false);
 });
