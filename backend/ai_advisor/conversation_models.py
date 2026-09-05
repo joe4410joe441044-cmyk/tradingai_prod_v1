@@ -20,6 +20,7 @@ from backend.ai_advisor.historical_trace_evidence import (
     AdvisorTraceEvidence,
     MAX_TRACE_EVIDENCE_TRACES,
 )
+from backend.ai_advisor.knowledge_context import AdvisorKnowledgeContext
 
 SCHEMA_VERSION = "1.0"
 MAX_USER_MESSAGE_LENGTH = 8_000
@@ -645,6 +646,7 @@ class AdvisorContextEnvelope(AdvisorContractModel):
         ),
     ]
     traceEvidence: Optional[AdvisorTraceEvidence] = None
+    knowledgeContext: Optional[AdvisorKnowledgeContext] = None
     warnings: Annotated[
         Tuple[AdvisorWarningCode, ...],
         Field(default_factory=tuple, max_length=MAX_WARNINGS, strict=False),

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from backend.ai_advisor.context_builder import sanitize_text
 from backend.ai_advisor.historical_trace_evidence import historical_trace_lines
+from backend.ai_advisor.knowledge_context import knowledge_lines
 from backend.ai_advisor.conversation_models import (
     AdvisorContextEnvelope,
     AdvisorFreshnessState,
@@ -42,6 +43,7 @@ _SECTION_ORDER = (
     AdvisorPromptSectionType.RUNTIME_CONTEXT,
     AdvisorPromptSectionType.SPECIFICATION_REFERENCE,
     AdvisorPromptSectionType.HISTORICAL_EVIDENCE,
+    AdvisorPromptSectionType.KNOWLEDGE_EVOLUTION,
     AdvisorPromptSectionType.CONVERSATION_CONTEXT,
     AdvisorPromptSectionType.CURRENT_REQUEST,
 )
@@ -320,6 +322,72 @@ def _history_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
     )
 
 
+KNOWLEDGE_TRUTH_INSTRUCTION = (
+    "Canonical Specification is authoritative and is never overridden by "
+    "knowledge evolution.\n"
+    "Current Runtime describes current state, not historical evidence.\n"
+    "Historical Evidence describes past trace evidence, not validated knowledge.\n"
+    "Validated Knowledge is validated informational knowledge below Canonical "
+    "Specification.\n"
+    "Finding/Pattern are observations, not conclusions.\n"
+    "Hypothesis is unvalidated until validation and human review approve it.\n"
+    "Investigation is analysis only; it is not an execution instruction or "
+    "strategy update.\n"
+    "Never convert correlation into causation.\n"
+    "Never interpret EvidenceStrength as statistical significance.\n"
+    "Never claim a single event is a repeated pattern."
+)
+
+
+def _render_safe_knowledge_lines(kc) -> str:
+    """Render allowlisted knowledge lines, isolating any unsafe row.
+
+    A single unsafe knowledge value must never take down the Advisor: it is
+    omitted and surfaced as a bounded, safe status detail instead of failing the
+    whole request.  This follows the same read-only isolation as trace evidence.
+    """
+    lines = []
+    omitted = False
+    for name, value in knowledge_lines(kc):
+        try:
+            lines.append(f"{name}={_scalar(value)}")
+        except ValueError:
+            omitted = True
+    if omitted:
+        lines.append("statusDetail=KNOWLEDGE_ITEM_OMITTED_UNSAFE")
+    if not lines:
+        lines.append("status=NOT_AVAILABLE")
+    return "\n".join(lines)
+
+
+def _knowledge_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
+    """Render bounded KNOWLEDGE_EVOLUTION distinctly from CURRENT RUNTIME and
+    HISTORICAL EVIDENCE.
+
+    Knowledge is read-only informational context.  It is labelled explicitly and
+    is always presented below Canonical Specification (which remains the
+    highest authority).
+    """
+    kc = context.knowledgeContext
+    if kc is None or kc.is_unavailable:
+        return _section(
+            AdvisorPromptSectionType.KNOWLEDGE_EVOLUTION,
+            "Knowledge Evolution (read-only, below canonical)",
+            "classification=KNOWLEDGE EVOLUTION\nstatus=NOT_AVAILABLE",
+            authority=AdvisorSourceAuthority.APPROVED_DERIVED,
+            freshness=AdvisorFreshnessState.NOT_APPLICABLE,
+        )
+    rendered = _render_safe_knowledge_lines(kc)
+    content = KNOWLEDGE_TRUTH_INSTRUCTION + "\n" + rendered
+    return _section(
+        AdvisorPromptSectionType.KNOWLEDGE_EVOLUTION,
+        "Knowledge Evolution (read-only, below canonical)",
+        content,
+        authority=AdvisorSourceAuthority.APPROVED_DERIVED,
+        freshness=AdvisorFreshnessState.NOT_APPLICABLE,
+    )
+
+
 def build_advisor_prompt(
     *,
     request: AdvisorRequest,
@@ -373,6 +441,7 @@ def build_advisor_prompt(
         _runtime_section(context),
         _specification_section(context),
         _history_section(context),
+        _knowledge_section(context),
         _conversation_section(context, request.messageId),
         _section(
             AdvisorPromptSectionType.CURRENT_REQUEST,

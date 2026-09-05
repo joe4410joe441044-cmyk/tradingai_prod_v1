@@ -26,6 +26,10 @@ from backend.ai_advisor.context_builder import (
     build_advisor_context,
 )
 from backend.ai_advisor.historical_trace_evidence import AdvisorTraceEvidence
+from backend.ai_advisor.knowledge_context import (
+    AdvisorKnowledgeContext,
+    empty_advisor_knowledge_context,
+)
 from backend.ai_advisor.conversation_models import (
     AdvisorCapability,
     AdvisorConversationMessage,
@@ -133,6 +137,7 @@ class AdvisorBrowserGatewayComposition:
     runtimeSource: Optional[Callable[[], AdvisorRuntimeResponse]] = None
     conversationStore: Optional[AdvisorConversationStore] = None
     traceEvidenceSource: Optional[Callable[[], AdvisorTraceEvidence]] = None
+    knowledgeSource: Optional[Callable[[], AdvisorKnowledgeContext]] = None
 
 
 class BrowserGatewayAuthenticationError(Exception):
@@ -365,6 +370,7 @@ def assemble_browser_service_input(
     runtime: Optional[AdvisorRuntimeResponse] = None,
     conversation_history: Tuple[AdvisorConversationMessage, ...] = (),
     trace_evidence: Optional[AdvisorTraceEvidence] = None,
+    knowledge_context: Optional[AdvisorKnowledgeContext] = None,
 ) -> AdvisorServiceInput:
     """Construct the complete trusted input without client runtime authority."""
 
@@ -404,6 +410,7 @@ def assemble_browser_service_input(
         conversation_history=conversation_history,
         current_message=current_message,
         trace_evidence=trace_evidence,
+        knowledge_context=knowledge_context,
     )
     request = AdvisorRequest(
         schemaVersion="1.0",
@@ -431,6 +438,7 @@ def assemble_browser_service_input(
             conversationHistory=conversation_history,
             currentMessage=current_message,
             traceEvidence=trace_evidence,
+            knowledgeContext=knowledge_context,
         ),
         providerRequestId=request_id,
         receivedAt=now,
@@ -879,6 +887,12 @@ def create_browser_gateway_router(
                     trace_evidence = composition.traceEvidenceSource()
                 except Exception:
                     trace_evidence = None
+            knowledge_context = None
+            if composition.knowledgeSource is not None:
+                try:
+                    knowledge_context = composition.knowledgeSource()
+                except Exception:
+                    knowledge_context = empty_advisor_knowledge_context()
             if composition.conversationStore is not None:
                 try:
                     conversation_id, _created = (
@@ -905,6 +919,7 @@ def create_browser_gateway_router(
                 runtime=runtime,
                 conversation_history=history,
                 trace_evidence=trace_evidence,
+                knowledge_context=knowledge_context,
             )
             if composition.conversationStore is not None:
                 user_message = _user_record(

@@ -150,6 +150,7 @@ class AdvisorService:
                 conversation_history=context_input.conversationHistory,
                 current_message=context_input.currentMessage,
                 trace_evidence=context_input.traceEvidence,
+                knowledge_context=context_input.knowledgeContext,
             )
             if context != request.contextEnvelope:
                 raise ValueError

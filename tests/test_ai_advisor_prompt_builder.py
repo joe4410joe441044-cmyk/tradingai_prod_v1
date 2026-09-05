@@ -689,8 +689,11 @@ class AdvisorPromptBuilderTest(unittest.TestCase):
             context=context,
             policy=AdvisorPromptPolicy(),
         )
-        conversation_section = prompt.contextSections[7].content
-        current_section = prompt.contextSections[9].content
+        sections_by_type = {
+            section.sectionType: section.content for section in prompt.contextSections
+        }
+        conversation_section = sections_by_type[AdvisorPromptSectionType.CONVERSATION_CONTEXT]
+        current_section = sections_by_type[AdvisorPromptSectionType.CURRENT_REQUEST]
         self.assertNotIn("messageId=message-b", conversation_section)
         self.assertIn("content=Later question", current_section)
 

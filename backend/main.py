@@ -72,6 +72,9 @@ from backend.ai_advisor.browser_gateway import (
 from backend.ai_advisor.historical_trace_evidence import (
     build_default_historical_trace_evidence,
 )
+from backend.ai_advisor.knowledge_context import (
+    build_default_advisor_knowledge_context,
+)
 from backend.ai_advisor.conversation_store import (
     AdvisorConversationStore,
 )
@@ -832,6 +835,7 @@ app.include_router(
             runtimeSource=lambda: build_authoritative_runtime(app),
             conversationStore=_ai_advisor_conversation_store,
             traceEvidenceSource=build_default_historical_trace_evidence,
+            knowledgeSource=build_default_advisor_knowledge_context,
         )
     )
 )

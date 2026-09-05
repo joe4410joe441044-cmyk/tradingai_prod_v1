@@ -23,6 +23,7 @@ from backend.ai_advisor.conversation_models import (
     AdvisorRequest,
 )
 from backend.ai_advisor.historical_trace_evidence import AdvisorTraceEvidence
+from backend.ai_advisor.knowledge_context import AdvisorKnowledgeContext
 from backend.ai_advisor.models import AdvisorRuntimeResponse
 from backend.ai_advisor.response_models import AdvisorResponseEnvelope
 
@@ -106,6 +107,7 @@ class AdvisorServiceContextInput(AdvisorServiceContractModel):
     ]
     currentMessage: Optional[AdvisorConversationMessage] = None
     traceEvidence: Optional[AdvisorTraceEvidence] = None
+    knowledgeContext: Optional[AdvisorKnowledgeContext] = None
 
     @field_validator("generatedAt")
     @classmethod
