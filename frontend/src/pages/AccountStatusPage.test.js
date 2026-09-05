@@ -241,6 +241,57 @@ test("UNKNOWN / UNAVAILABLE / STALE are not converted to a READY state", async (
     assert.equal(allText.some((text) => /READY ONLY|FULL LIVE/i.test(text)), false);
 });
 
+test("UNKNOWN account state fails closed and is never upgraded to a READY state", async () => {
+    const { AccountStatusView } = await loadModule();
+    const unknownStatus = {
+        ...PAPER_BOT_STATUS,
+        permission: "UNKNOWN",
+        accountType: "UNKNOWN",
+        accountRuntime: {
+            ...PAPER_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...PAPER_BOT_STATUS.accountRuntime.realAccount,
+                permission: "UNKNOWN",
+                accountType: "UNKNOWN",
+                balance: null,
+                lastSync: null,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: unknownStatus }));
+    // UNKNOWN is a fail-closed placeholder ("--"), never upgraded to VERIFIED/READ_ONLY/READY
+    assert.equal(readTestIdValue(nodes, "real-permission"), "--");
+    assert.equal(readTestIdValue(nodes, "real-account-type"), "--");
+    // auth stays NOT_VERIFIED (not upgraded to VERIFIED) and balance stays NOT_CONNECTED
+    assert.equal(readTestIdValue(nodes, "real-auth"), "NOT_VERIFIED");
+    assert.equal(readTestIdValue(nodes, "real-balance"), "NOT_CONNECTED");
+    assert.equal(readTestIdValue(nodes, "real-equity"), "NOT_CONNECTED");
+    assert.equal(readTestIdValue(nodes, "live-context-freshness"), "NOT_FETCHED");
+    const allText = texts(nodes);
+    assert.equal(allText.some((text) => /LIVE READY|READY TO|FULL LIVE/i.test(text)), false);
+});
+
+test("UNAVAILABLE account reason fails closed instead of fabricating a balance", async () => {
+    const { AccountStatusView } = await loadModule();
+    const unavailableStatus = {
+        ...PAPER_BOT_STATUS,
+        accountRuntime: {
+            ...PAPER_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...PAPER_BOT_STATUS.accountRuntime.realAccount,
+                accountReason: "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE",
+                balanceReason: "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE",
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: unavailableStatus }));
+    assert.equal(readTestIdValue(nodes, "real-balance"), "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "real-equity"), "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE");
+    // no numeric balance is fabricated for an unavailable account
+    assert.notEqual(readTestIdValue(nodes, "real-balance"), "0.00");
+    assert.equal(readTestIdValue(nodes, "live-context-freshness"), "NOT_FETCHED");
+});
+
 test("Paper metrics and Set Paper Capital control render", async () => {
     const { AccountStatusView } = await loadModule();
     const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
