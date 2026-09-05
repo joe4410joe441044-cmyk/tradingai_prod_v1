@@ -255,6 +255,29 @@ class D9BAdvisorTraceWiringTest(unittest.TestCase):
         # The request path produced evidence via the D-5 assembler.
         self.assertEqual(len(recording.service_input.contextInput.traceEvidence.traces), 1)
 
+    def test_context_envelope_and_context_input_trace_evidence_consistent(self):
+        # CASE 4 invariant: the SAME trace evidence value must be represented in
+        # BOTH the rebuilt contextInput and the request contextEnvelope, else the
+        # AdvisorService reconstruction would fail with ADVISOR_CONTEXT_INVALID.
+        evidence = build_advisor_trace_evidence(
+            (_unified_trace(*_executed_events()),)
+        )
+        client, recording = _gateway(
+            trace_evidence_source=lambda: evidence,
+            runtime_source=runtime,
+            specs=(_spec(),),
+        )
+        response = _post(client)
+        self.assertEqual(response.status_code, 200)
+        context_input = recording.service_input.contextInput
+        envelope = recording.service_input.request.contextEnvelope
+        self.assertEqual(context_input.traceEvidence, envelope.traceEvidence)
+        self.assertEqual(
+            context_input.traceEvidence, evidence
+        )
+        self.assertIsInstance(envelope.traceEvidence, AdvisorTraceEvidence)
+        self.assertEqual(envelope.traceEvidence, evidence)
+
     def test_no_trace_is_safe_not_available(self):
         # CASE 3: no trace produces a safe NOT_AVAILABLE block, Advisor still works.
         client, recording = _gateway(
