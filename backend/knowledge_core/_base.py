@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import fields, is_dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
 
@@ -35,6 +36,8 @@ def to_plain(value: Any) -> Any:
     """
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, datetime):
+        return to_plain_datetime(value)
     if value is _UNSET:
         return None
     if is_dataclass(value):
@@ -49,6 +52,18 @@ def to_plain(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [to_plain(item) for item in value]
     return value
+
+
+def to_plain_datetime(value: datetime) -> str:
+    """UTF-8 deterministic serialization of a datetime in UTC.
+
+    Naive datetimes are rejected (never silently interpreted with a local
+    timezone); aware datetimes are normalized to UTC and rendered with a ``Z``
+    suffix so separate constructions serialize identically.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("datetime must be timezone-aware")
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def stable_json(value: Any) -> str:
