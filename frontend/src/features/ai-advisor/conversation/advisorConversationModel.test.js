@@ -6,6 +6,7 @@ import {
     clearAdvisorConversation,
     completeAdvisorRequest,
     failAdvisorRequest,
+    hydrateConversationFromHistory,
     initialAdvisorConversationState,
     MAX_ADVISOR_PROMPT_BYTES,
     validateAdvisorPrompt,
@@ -155,4 +156,41 @@ test("archived answers preserve human-actionable UNKNOWN details", () => {
         second.archivedExchanges[0].assistantMessage.groundedResponse,
         groundedResponse,
     );
+});
+
+const serverHistory = () => ([
+    {
+        messageId: "m1", role: "USER", content: "Q1",
+        createdAt: "2026-01-01T00:00:00Z", requestId: "r1", responseStatus: null,
+    },
+    {
+        messageId: "m2", role: "ADVISOR", content: "A1",
+        createdAt: "2026-01-01T00:00:01Z", requestId: "r1", responseStatus: "VALID",
+    },
+    {
+        messageId: "m3", role: "USER", content: "Q2",
+        createdAt: "2026-01-02T00:00:00Z", requestId: "r2", responseStatus: null,
+    },
+    {
+        messageId: "m4", role: "ADVISOR", content: "A2",
+        createdAt: "2026-01-02T00:00:01Z", requestId: "r2", responseStatus: "VALID",
+    },
+]);
+
+test("hydrateConversationFromHistory maps server roles and newest-first history", () => {
+    const state = hydrateConversationFromHistory(serverHistory());
+    assert.deepEqual(state.messages.map((message) => message.content), ["Q2", "A2"]);
+    assert.equal(state.messages[0].role, "USER");
+    assert.equal(state.messages[1].role, "ASSISTANT");
+    assert.equal(state.messages[1].requestId, "r2");
+    assert.equal(state.archivedExchanges.length, 1);
+    assert.equal(state.archivedExchanges[0].userMessage.content, "Q1");
+    assert.equal(state.archivedExchanges[0].assistantMessage.content, "A1");
+    assert.equal(state.archivedExchanges[0].status, "SUCCEEDED");
+    assert.equal(state.activeRequestId, null);
+    assert.ok(Object.isFrozen(state));
+});
+
+test("hydrateConversationFromHistory returns initial state for empty history", () => {
+    assert.strictEqual(hydrateConversationFromHistory([]), initialAdvisorConversationState);
 });

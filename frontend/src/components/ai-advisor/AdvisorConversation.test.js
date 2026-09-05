@@ -71,9 +71,12 @@ test("logout or session-expiry invalidates advisor availability immediately", as
     assert.match(source, /const sendDisabled = !authReady \|\| !validation\.valid \|\| sending/);
 });
 
-test("prompt Clear preserves current and archived exchanges", async () => {
+test("Clear resets the authorized current conversation after server clear", async () => {
     const source = await conversationSource();
-    assert.match(source, /const clear = useCallback\(\(\) => \{\s*if \(!sending\) setPrompt\(""\);/s);
+    assert.match(source, /const clear = useCallback\(\(\) => \{\s*if \(sending\) return;/s);
+    assert.match(source, /setPrompt\(""\)/);
+    assert.match(source, /client\.clearCurrentConversation\(\)/);
+    assert.match(source, /initialAdvisorConversationState/);
     assert.doesNotMatch(source, /clearAdvisorConversation/);
     assert.match(source, /onHistoryChange\?\.\(conversation\.archivedExchanges\)/);
 });

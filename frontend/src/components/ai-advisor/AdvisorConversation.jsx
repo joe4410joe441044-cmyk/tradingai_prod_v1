@@ -12,6 +12,7 @@ import {
     beginAdvisorRequest,
     completeAdvisorRequest,
     failAdvisorRequest,
+    hydrateConversationFromHistory,
     initialAdvisorConversationState,
     MAX_ADVISOR_PROMPT_BYTES,
     utf8ByteLength,
@@ -41,6 +42,7 @@ export default function AdvisorConversation({
     const [operatorStatus, setOperatorStatus] = useState(() => getOperatorAuthStatus());
     const controllerRef = useRef(null);
     const mountedRef = useRef(true);
+    const historyLoadedRef = useRef(false);
     const client = useMemo(
         () => gatewayClient || createAdvisorBrowserGatewayClient(),
         [gatewayClient],
@@ -82,6 +84,7 @@ export default function AdvisorConversation({
             controllerRef.current = null;
             setPrompt("");
             setConversation(initialAdvisorConversationState);
+            historyLoadedRef.current = false;
             return () => {
                 cancelled = true;
                 controller.abort();
@@ -105,6 +108,25 @@ export default function AdvisorConversation({
             controller.abort();
         };
     }, [client, operatorStatus]);
+
+    useEffect(() => {
+        if (availability !== "AVAILABLE" || historyLoadedRef.current) return;
+        historyLoadedRef.current = true;
+        let cancelled = false;
+        client.loadConversation()
+            .then(({ messages }) => {
+                if (cancelled || !Array.isArray(messages) || messages.length === 0) return;
+                setConversation(hydrateConversationFromHistory(messages));
+            })
+            .catch(() => {
+                if (cancelled) return;
+                // Server-side memory failure is a read-only degradation: the
+                // advisor stays available with an empty (fresh) conversation.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [client, availability]);
 
     const send = useCallback(async () => {
         if (sendDisabled || controllerRef.current !== null) return;
@@ -159,8 +181,20 @@ export default function AdvisorConversation({
         controllerRef.current?.abort();
     }, []);
     const clear = useCallback(() => {
-        if (!sending) setPrompt("");
-    }, [sending]);
+        if (sending) return;
+        setPrompt("");
+        client.clearCurrentConversation()
+            .then(() => {
+                if (mountedRef.current) {
+                    setConversation(initialAdvisorConversationState);
+                }
+            })
+            .catch(() => {
+                if (mountedRef.current) {
+                    setConversation(initialAdvisorConversationState);
+                }
+            });
+    }, [sending, client]);
 
     return (
         <section aria-label="AI Advisor conversation" className="advisor-conversation">

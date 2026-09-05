@@ -1,7 +1,15 @@
 export const ADVISOR_CONVERSATION_PATH = "/api/ai-advisor/conversation";
 export const ADVISOR_CONVERSATION_STATUS_PATH =
     "/api/ai-advisor/conversation/status";
+export const ADVISOR_CONVERSATION_HISTORY_PATH =
+    "/api/ai-advisor/conversation/history";
+export const ADVISOR_CONVERSATION_CLEAR_PATH =
+    "/api/ai-advisor/conversation/clear";
 export const ADVISOR_BROWSER_TIMEOUT_MS = 36_000;
+export const ADVISOR_CONVERSATION_STORAGE_KEY =
+    "tradingai_advisor_conversation";
+
+const SERVER_ROLE_SET = Object.freeze(new Set(["USER", "ADVISOR"]));
 
 export class AdvisorBrowserGatewayError extends Error {
     constructor(code, message, { retryable = false, httpStatus = null } = {}) {
@@ -138,7 +146,41 @@ function validateResponse(body) {
             }
         }
     }
-    return Object.freeze({ ...envelope });
+    return Object.freeze({ conversationId: body?.conversationId, ...envelope });
+}
+
+function readStoredConversationId() {
+    try {
+        if (typeof localStorage !== "undefined") {
+            const value = localStorage.getItem(ADVISOR_CONVERSATION_STORAGE_KEY);
+            if (typeof value === "string" && value.length > 0) return value;
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
+function writeStoredConversationId(value) {
+    try {
+        if (typeof localStorage !== "undefined") {
+            if (typeof value === "string" && value.length > 0) {
+                localStorage.setItem(ADVISOR_CONVERSATION_STORAGE_KEY, value);
+            } else {
+                localStorage.removeItem(ADVISOR_CONVERSATION_STORAGE_KEY);
+            }
+        }
+    } catch {
+        // Storage failures must never break the advisor request path.
+    }
+}
+
+function isStoredMessage(value) {
+    return isRecord(value)
+        && typeof value.messageId === "string"
+        && typeof value.content === "string"
+        && typeof value.createdAt === "string"
+        && SERVER_ROLE_SET.has(value.role);
 }
 
 export function createAdvisorBrowserGatewayClient({
@@ -149,6 +191,7 @@ export function createAdvisorBrowserGatewayClient({
 } = {}) {
     const CSRF_TOKEN_COOKIE = "tradingai_csrf";
     const CSRF_TOKEN_HEADER = "X-TradingAI-CSRF";
+    let currentConversationId = readStoredConversationId();
 
     function readCsrfToken() {
         if (typeof document === "undefined") return null;
@@ -211,6 +254,35 @@ export function createAdvisorBrowserGatewayClient({
         }
     }
 
+    async function getConversationHistory(conversationId, { signal } = {}) {
+        if (typeof conversationId !== "string"
+            || conversationId.length === 0) {
+            return Object.freeze({ conversationId: null, messages: Object.freeze([]) });
+        }
+        const response = await request(
+            `${ADVISOR_CONVERSATION_HISTORY_PATH}?conversationId=${encodeURIComponent(conversationId)}`,
+            { method: "GET" },
+            signal,
+        );
+        const body = await parseJson(response);
+        if (!response.ok) throw safeError(body, response.status);
+        if (!isRecord(body)
+            || body.status !== "SUCCEEDED"
+            || !Array.isArray(body.messages)
+            || !body.messages.every(isStoredMessage)) {
+            throw new AdvisorBrowserGatewayError(
+                "INVALID_PROVIDER_RESPONSE",
+                "The advisor history was invalid.",
+            );
+        }
+        return Object.freeze({
+            conversationId: body.conversationId,
+            messages: Object.freeze(body.messages.map((message) => (
+                Object.freeze({ ...message })
+            ))),
+        });
+    }
+
     return Object.freeze({
         async getStatus({ signal } = {}) {
             const response = await request(
@@ -235,18 +307,61 @@ export function createAdvisorBrowserGatewayClient({
                     "The request is invalid.",
                 );
             }
+            const body = { prompt };
+            if (typeof currentConversationId === "string"
+                && currentConversationId.length > 0) {
+                body.conversationId = currentConversationId;
+            }
             const response = await request(
                 ADVISOR_CONVERSATION_PATH,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt }),
+                    body: JSON.stringify(body),
+                },
+                signal,
+            );
+            const parsed = await parseJson(response);
+            if (!response.ok) throw safeError(parsed, response.status);
+            const result = validateResponse(parsed);
+            if (typeof parsed?.conversationId === "string"
+                && parsed.conversationId.length > 0) {
+                currentConversationId = parsed.conversationId;
+                writeStoredConversationId(parsed.conversationId);
+            }
+            return result;
+        },
+        getConversationHistory,
+        async loadConversation({ signal } = {}) {
+            if (typeof currentConversationId !== "string"
+                || currentConversationId.length === 0) {
+                return Object.freeze({ conversationId: null, messages: Object.freeze([]) });
+            }
+            return getConversationHistory(currentConversationId, { signal });
+        },
+        async clearCurrentConversation({ signal } = {}) {
+            if (typeof currentConversationId !== "string"
+                || currentConversationId.length === 0) {
+                return Object.freeze({ cleared: true, conversationId: null });
+            }
+            const conversationId = currentConversationId;
+            const response = await request(
+                ADVISOR_CONVERSATION_CLEAR_PATH,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ conversationId }),
                 },
                 signal,
             );
             const body = await parseJson(response);
             if (!response.ok) throw safeError(body, response.status);
-            return validateResponse(body);
+            currentConversationId = null;
+            writeStoredConversationId(null);
+            return Object.freeze({
+                cleared: body?.cleared === true,
+                conversationId,
+            });
         },
     });
 }

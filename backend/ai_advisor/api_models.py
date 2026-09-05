@@ -72,6 +72,9 @@ class AdvisorHTTPError(AdvisorProviderContractModel):
         "ENDPOINT_TIMEOUT",
         "ADVISOR_UNAVAILABLE",
         "INTERNAL_ERROR",
+        "MEMORY_PERSISTENCE_ERROR",
+        "MEMORY_DISABLED",
+        "CONVERSATION_NOT_FOUND",
     ]
     safeMessage: str = Field(min_length=1, max_length=128)
     retryable: bool

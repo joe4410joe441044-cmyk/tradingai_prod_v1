@@ -69,6 +69,9 @@ from backend.ai_advisor.browser_gateway import (
     create_browser_gateway_router,
     load_browser_gateway_config,
 )
+from backend.ai_advisor.conversation_store import (
+    AdvisorConversationStore,
+)
 from backend.auth.auth_config import load_operator_auth_config
 from backend.auth.operator_session import OperatorSessionManager
 from backend.auth.operator_auth import OperatorAuthenticator, hash_operator_credential
@@ -650,6 +653,7 @@ if _auth_configured:
     _csrf_protected = frozenset({
         "/api/auth/logout",
         "/api/ai-advisor/conversation",
+        "/api/ai-advisor/conversation/clear",
         "/api/bot/start",
         "/api/bot/stop",
         "/api/bot/loop/start",
@@ -784,6 +788,13 @@ app.include_router(
 )
 
 _ai_advisor_browser_config = load_browser_gateway_config()
+try:
+    _ai_advisor_conversation_store = AdvisorConversationStore()
+except Exception:
+    # Conversation memory must never break core TradingAI startup.  A storage
+    # failure degrades the Advisor to an empty (fresh) conversation instead of
+    # affecting BOT / Loop / Execution / MM / Governance / Emergency.
+    _ai_advisor_conversation_store = None
 app.include_router(
     create_browser_gateway_router(
         AdvisorBrowserGatewayComposition(
@@ -813,6 +824,7 @@ app.include_router(
             ),
             approvedSpecifications=load_authoritative_specifications(),
             runtimeSource=lambda: build_authoritative_runtime(app),
+            conversationStore=_ai_advisor_conversation_store,
         )
     )
 )

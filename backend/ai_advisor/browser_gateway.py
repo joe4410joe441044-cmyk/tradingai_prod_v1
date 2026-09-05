@@ -39,6 +39,14 @@ from backend.ai_advisor.conversation_models import (
     AuthenticationState,
     AuthorizationState,
 )
+from backend.ai_advisor.conversation_store import (
+    MAX_PROMPT_HISTORY_CHARACTERS,
+    MAX_PROMPT_HISTORY_MESSAGES,
+    AdvisorConversationStore,
+    AdvisorConversationStoreError,
+    AdvisorConversationStoreErrorCode,
+    AdvisorPersistedMessage,
+)
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
     AdvisorServiceFailureCode,
@@ -82,6 +90,7 @@ _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
 
 class AdvisorBrowserRequest(AdvisorContractModel):
     prompt: str = Field(min_length=1, max_length=12_000)
+    conversationId: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class AdvisorBrowserGatewayConfig(AdvisorContractModel):
@@ -121,10 +130,21 @@ class AdvisorBrowserGatewayComposition:
     approvedSpecifications: Tuple[SpecificationSourceInput, ...] = ()
     requestIdFactory: Callable[[], str] = lambda: str(uuid4())
     runtimeSource: Optional[Callable[[], AdvisorRuntimeResponse]] = None
+    conversationStore: Optional[AdvisorConversationStore] = None
 
 
 class BrowserGatewayAuthenticationError(Exception):
     pass
+
+
+def _is_conversation_path(path: object) -> bool:
+    return (
+        isinstance(path, str)
+        and (
+            path == "/api/ai-advisor/conversation"
+            or path.startswith("/api/ai-advisor/conversation/")
+        )
+    )
 
 
 class AdvisorGatewayPreflightDenyMiddleware:
@@ -134,11 +154,10 @@ class AdvisorGatewayPreflightDenyMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        gateway_path = scope.get("type") == "http" and scope.get("path") in {
-            "/api/ai-advisor/conversation",
-            "/api/ai-advisor/conversation/status",
-            "/api/ai-advisor/conversation/runtime",
-        }
+        gateway_path = (
+            scope.get("type") == "http"
+            and _is_conversation_path(scope.get("path"))
+        )
         if gateway_path and scope.get("method") == "OPTIONS":
             response = _error(403, "AUTHORIZATION_DENIED")
             await response(scope, receive, send)
@@ -342,6 +361,7 @@ def assemble_browser_service_input(
     request_id: Optional[str] = None,
     approved_specifications: Tuple[SpecificationSourceInput, ...] = (),
     runtime: Optional[AdvisorRuntimeResponse] = None,
+    conversation_history: Tuple[AdvisorConversationMessage, ...] = (),
 ) -> AdvisorServiceInput:
     """Construct the complete trusted input without client runtime authority."""
 
@@ -378,6 +398,7 @@ def assemble_browser_service_input(
         permission_context=permission,
         runtime=runtime,
         specifications=approved_specifications,
+        conversation_history=conversation_history,
         current_message=current_message,
     )
     request = AdvisorRequest(
@@ -403,7 +424,7 @@ def assemble_browser_service_input(
             generatedAt=now,
             runtime=runtime,
             specifications=approved_specifications,
-            conversationHistory=(),
+            conversationHistory=conversation_history,
             currentMessage=current_message,
         ),
         providerRequestId=request_id,
@@ -423,7 +444,82 @@ _SAFE_MESSAGES = {
     "ENDPOINT_TIMEOUT": "Advisor request timed out.",
     "ADVISOR_UNAVAILABLE": "Advisor service is unavailable.",
     "INTERNAL_ERROR": "Advisor request failed.",
+    "MEMORY_PERSISTENCE_ERROR": "Advisor conversation history is unavailable.",
+    "MEMORY_DISABLED": "Advisor conversation memory is unavailable.",
+    "CONVERSATION_NOT_FOUND": "Advisor conversation is not available.",
 }
+
+
+def _memory_error(code: str = "MEMORY_PERSISTENCE_ERROR"):
+    return _error(503, code)
+
+
+def _records_to_history(
+    records: Tuple[AdvisorPersistedMessage, ...],
+) -> Tuple[AdvisorConversationMessage, ...]:
+    """Project stored records onto the trusted conversation-message contract."""
+    return tuple(
+        AdvisorConversationMessage(
+            messageId=record.messageId,
+            role=record.role,
+            content=record.content,
+            createdAt=record.createdAt,
+            sourceReferences=(),
+        )
+        for record in records
+    )
+
+
+def _bounded_history(store: AdvisorConversationStore, operator: str, conversation_id: str):
+    """Load and bound a conversation's recent history for the Advisor prompt."""
+    records = store.read_messages(operator, conversation_id)
+    bounded = store.bounded_history(
+        records,
+        max_messages=MAX_PROMPT_HISTORY_MESSAGES,
+        max_characters=MAX_PROMPT_HISTORY_CHARACTERS,
+    )
+    return _records_to_history(bounded)
+
+
+def _user_record(
+    message_id: str,
+    conversation_id: str,
+    operator: str,
+    prompt: str,
+    now: datetime,
+    request_id: str,
+) -> AdvisorPersistedMessage:
+    return AdvisorPersistedMessage(
+        messageId=message_id,
+        conversationId=conversation_id,
+        operatorId=operator,
+        role=AdvisorRole.USER,
+        content=prompt,
+        createdAt=now,
+        requestId=request_id,
+    )
+
+
+def _assistant_record(
+    conversation_id: str,
+    operator: str,
+    response,
+    now: datetime,
+    request_id: str,
+) -> AdvisorPersistedMessage:
+    return AdvisorPersistedMessage(
+        messageId=str(uuid4()),
+        conversationId=conversation_id,
+        operatorId=operator,
+        role=AdvisorRole.ADVISOR,
+        content=response.summary,
+        createdAt=now,
+        requestId=request_id,
+        responseStatus=getattr(response, "status", None).value
+        if getattr(response, "status", None) is not None
+        else None,
+        providerModel=None,
+    )
 
 
 def _error(status: int, code: str, retryable: bool = False):
@@ -589,6 +685,112 @@ def create_browser_gateway_router(
     async def reject_preflight():
         return _error(403, "AUTHORIZATION_DENIED")
 
+    @router.get("")
+    async def browser_list_conversations(request: Request):
+        identity, failure = authorize(request)
+        if failure is not None:
+            return failure
+        if composition.conversationStore is None:
+            return _memory_error("MEMORY_DISABLED")
+        try:
+            conversations = composition.conversationStore.list_conversations(identity)
+        except AdvisorConversationStoreError:
+            return _memory_error()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "SUCCEEDED",
+                "conversations": [
+                    {
+                        "conversationId": item.conversationId,
+                        "createdAt": item.createdAt.isoformat().replace("+00:00", "Z"),
+                        "updatedAt": item.updatedAt.isoformat().replace("+00:00", "Z"),
+                        "messageCount": item.messageCount,
+                    }
+                    for item in conversations
+                ],
+            },
+        )
+
+    @router.get("/history")
+    async def browser_conversation_history(request: Request):
+        identity, failure = authorize(request)
+        if failure is not None:
+            return failure
+        if composition.conversationStore is None:
+            return _memory_error("MEMORY_DISABLED")
+        conversation_id = request.query_params.get("conversationId")
+        if not isinstance(conversation_id, str) or not conversation_id.strip():
+            return _error(422, "REQUEST_INVALID")
+        try:
+            records = composition.conversationStore.read_messages(
+                identity, conversation_id
+            )
+        except AdvisorConversationStoreError as error:
+            if error.code is AdvisorConversationStoreErrorCode.CONVERSATION_NOT_FOUND:
+                return _error(404, "CONVERSATION_NOT_FOUND")
+            return _memory_error()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "SUCCEEDED",
+                "conversationId": conversation_id,
+                "messages": [
+                    {
+                        "messageId": record.messageId,
+                        "role": record.role.value,
+                        "content": record.content,
+                        "createdAt": record.createdAt.isoformat().replace(
+                            "+00:00", "Z"
+                        ),
+                        "requestId": record.requestId,
+                        "responseStatus": record.responseStatus,
+                    }
+                    for record in records
+                ],
+            },
+        )
+
+    @router.post("/clear")
+    async def browser_clear_conversation(request: Request):
+        identity, failure = authorize(request)
+        if failure is not None:
+            return failure
+        if composition.conversationStore is None:
+            return _memory_error("MEMORY_DISABLED")
+        media_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+        if media_type.strip() != "application/json":
+            return _error(415, "UNSUPPORTED_MEDIA_TYPE")
+        try:
+            body = await request.body()
+            if len(body) > composition.config.requestSizeLimitBytes:
+                return _error(413, "REQUEST_TOO_LARGE")
+            parsed = _load_json_strict(body)
+            conversation_id = parsed.get("conversationId")
+            if not isinstance(conversation_id, str) or not conversation_id.strip():
+                raise ValueError
+        except (
+            UnicodeError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):
+            return _error(422, "REQUEST_INVALID")
+        try:
+            cleared = composition.conversationStore.delete_conversation(
+                identity, conversation_id
+            )
+        except AdvisorConversationStoreError:
+            return _memory_error()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "SUCCEEDED",
+                "conversationId": conversation_id,
+                "cleared": bool(cleared),
+            },
+        )
+
     @router.post("")
     async def browser_conversation(request: Request):
         identity, failure = authorize(request)
@@ -652,22 +854,61 @@ def create_browser_gateway_router(
             return _error(429, "CONCURRENCY_LIMIT_EXCEEDED", retryable=True)
         task = None
         release_later = False
+        now = None
+        request_id = None
+        conversation_id = None
+        user_message = None
+        history = ()
         try:
             now = composition.clock().astimezone(timezone.utc)
+            request_id = composition.requestIdFactory()
             runtime = None
             if composition.runtimeSource is not None:
                 try:
                     runtime = composition.runtimeSource()
                 except Exception:
                     runtime = None
+            if composition.conversationStore is not None:
+                try:
+                    conversation_id, _created = (
+                        composition.conversationStore.resolve_conversation(
+                            identity, browser_request.conversationId
+                        )
+                    )
+                    history = _bounded_history(
+                        composition.conversationStore, identity, conversation_id
+                    )
+                except AdvisorConversationStoreError as error:
+                    if (
+                        error.code
+                        is AdvisorConversationStoreErrorCode.CONVERSATION_FORBIDDEN
+                    ):
+                        return _error(403, "AUTHORIZATION_DENIED")
+                    return _memory_error()
             service_input = assemble_browser_service_input(
                 prompt=browser_request.prompt,
                 principal_id=identity,
                 now=now,
-                request_id=composition.requestIdFactory(),
+                request_id=request_id,
                 approved_specifications=composition.approvedSpecifications,
                 runtime=runtime,
+                conversation_history=history,
             )
+            if composition.conversationStore is not None:
+                user_message = _user_record(
+                    service_input.request.messageId,
+                    conversation_id,
+                    identity,
+                    browser_request.prompt,
+                    now,
+                    request_id,
+                )
+                try:
+                    composition.conversationStore.append_message(
+                        identity, conversation_id, user_message
+                    )
+                except AdvisorConversationStoreError:
+                    return _memory_error()
             task = asyncio.create_task(
                 asyncio.to_thread(composition.service.generate_response, service_input)
             )
@@ -686,6 +927,17 @@ def create_browser_gateway_router(
                 composition.concurrencyLimiter.release()
 
             task.add_done_callback(release_when_done)
+            if (
+                composition.conversationStore is not None
+                and conversation_id is not None
+                and user_message is not None
+            ):
+                try:
+                    composition.conversationStore.delete_message(
+                        identity, conversation_id, user_message.messageId
+                    )
+                except AdvisorConversationStoreError:
+                    pass
             return _error(504, "ENDPOINT_TIMEOUT")
         except Exception:
             return _error(500, "INTERNAL_ERROR")
@@ -694,14 +946,49 @@ def create_browser_gateway_router(
                 composition.concurrencyLimiter.release()
         if not isinstance(result, AdvisorServiceResult):
             return _error(500, "INTERNAL_ERROR")
-        if result.status is AdvisorServiceStatus.SUCCEEDED:
+        if result.status is AdvisorServiceStatus.SUCCEEDED and result.response is not None:
+            if composition.conversationStore is not None:
+                assistant_record = _assistant_record(
+                    conversation_id,
+                    identity,
+                    result.response,
+                    now,
+                    request_id,
+                )
+                try:
+                    composition.conversationStore.append_message(
+                        identity, conversation_id, assistant_record
+                    )
+                except AdvisorConversationStoreError:
+                    try:
+                        if user_message is not None:
+                            composition.conversationStore.delete_message(
+                                identity, conversation_id, user_message.messageId
+                            )
+                    except AdvisorConversationStoreError:
+                        pass
+                    return _memory_error()
             response = AdvisorHTTPResponse(
                 status=result.status,
                 advisorResponse=result.response,
             )
+            content = response.model_dump(mode="json")
+            if conversation_id is not None:
+                content["conversationId"] = conversation_id
             return JSONResponse(
-                status_code=200, content=response.model_dump(mode="json")
+                status_code=200, content=content
             )
+        if (
+            composition.conversationStore is not None
+            and conversation_id is not None
+            and user_message is not None
+        ):
+            try:
+                composition.conversationStore.delete_message(
+                    identity, conversation_id, user_message.messageId
+                )
+            except AdvisorConversationStoreError:
+                pass
         response = AdvisorHTTPResponse(
             status=result.status,
             failureCode=result.failure.code,

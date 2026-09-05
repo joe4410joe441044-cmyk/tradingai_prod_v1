@@ -2,10 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    ADVISOR_CONVERSATION_CLEAR_PATH,
+    ADVISOR_CONVERSATION_HISTORY_PATH,
     ADVISOR_CONVERSATION_PATH,
     ADVISOR_CONVERSATION_STATUS_PATH,
+    ADVISOR_CONVERSATION_STORAGE_KEY,
     createAdvisorBrowserGatewayClient,
 } from "./advisorBrowserGatewayClient.js";
+
+function withLocalStorage(values = new Map()) {
+    const store = new Map(values);
+    const stub = {
+        getItem: (key) => (store.has(key) ? store.get(key) : null),
+        setItem: (key, value) => store.set(key, value),
+        removeItem: (key) => store.delete(key),
+    };
+    globalThis.localStorage = stub;
+    return store;
+}
 
 const envelope = {
     responseVersion: "1.0",
@@ -225,6 +239,136 @@ test("missing, fake, path, and URL citations fail closed", async () => {
             code: "INVALID_PROVIDER_RESPONSE",
         });
     }
+});
+
+test("requestAdvice sends the stored conversationId and updates it after response", async () => {
+    const calls = [];
+    const store = withLocalStorage([[ADVISOR_CONVERSATION_STORAGE_KEY, "conversation-1"]]);
+    try {
+        const client = createAdvisorBrowserGatewayClient({
+            fetchImpl: async (...args) => {
+                calls.push(args);
+                return response(200, {
+                    status: "SUCCEEDED",
+                    advisorResponse: envelope,
+                    conversationId: "conversation-2",
+                });
+            },
+        });
+        const result = await client.requestAdvice("Hello");
+        assert.equal(result.conversationId, "conversation-2");
+        assert.deepEqual(JSON.parse(calls[0][1].body), {
+            prompt: "Hello",
+            conversationId: "conversation-1",
+        });
+        assert.equal(store.get(ADVISOR_CONVERSATION_STORAGE_KEY), "conversation-2");
+    } finally {
+        delete globalThis.localStorage;
+    }
+});
+
+test("conversation history validates and returns the authorized messages", async () => {
+    const messages = [{
+        messageId: "m1",
+        role: "USER",
+        content: "Q1",
+        createdAt: "2026-01-01T00:00:00Z",
+    }];
+    const client = createAdvisorBrowserGatewayClient({
+        fetchImpl: async (...args) => {
+            assert.equal(
+                args[0],
+                `${ADVISOR_CONVERSATION_HISTORY_PATH}?conversationId=conversation-1`,
+            );
+            assert.equal(args[1].method, "GET");
+            assert.equal(args[1].credentials, "same-origin");
+            return response(200, {
+                status: "SUCCEEDED",
+                conversationId: "conversation-1",
+                messages,
+            });
+        },
+    });
+    const result = await client.getConversationHistory("conversation-1");
+    assert.equal(result.conversationId, "conversation-1");
+    assert.equal(result.messages[0].content, "Q1");
+});
+
+test("loadConversation returns empty without a stored conversation", async () => {
+    const client = createAdvisorBrowserGatewayClient({
+        fetchImpl: async () => {
+            throw new Error("must not issue a fetch");
+        },
+    });
+    const result = await client.loadConversation();
+    assert.equal(result.conversationId, null);
+    assert.deepEqual(result.messages, []);
+});
+
+test("loadConversation loads the stored conversation history", async () => {
+    const store = withLocalStorage([[ADVISOR_CONVERSATION_STORAGE_KEY, "conversation-1"]]);
+    try {
+        const client = createAdvisorBrowserGatewayClient({
+            fetchImpl: async (...args) => {
+                assert.equal(
+                    args[0],
+                    `${ADVISOR_CONVERSATION_HISTORY_PATH}?conversationId=conversation-1`,
+                );
+                return response(200, {
+                    status: "SUCCEEDED",
+                    conversationId: "conversation-1",
+                    messages: [{
+                        messageId: "m1",
+                        role: "USER",
+                        content: "Q1",
+                        createdAt: "2026-01-01T00:00:00Z",
+                    }],
+                });
+            },
+        });
+        const result = await client.loadConversation();
+        assert.equal(result.conversationId, "conversation-1");
+        assert.equal(result.messages[0].content, "Q1");
+    } finally {
+        delete globalThis.localStorage;
+    }
+});
+
+test("clearCurrentConversation posts /clear and resets the stored id", async () => {
+    const calls = [];
+    const store = withLocalStorage([[ADVISOR_CONVERSATION_STORAGE_KEY, "conversation-1"]]);
+    try {
+        const client = createAdvisorBrowserGatewayClient({
+            fetchImpl: async (...args) => {
+                calls.push(args);
+                return response(200, {
+                    status: "SUCCEEDED",
+                    conversationId: "conversation-1",
+                    cleared: true,
+                });
+            },
+        });
+        const result = await client.clearCurrentConversation();
+        assert.equal(result.cleared, true);
+        assert.equal(calls[0][0], ADVISOR_CONVERSATION_CLEAR_PATH);
+        assert.deepEqual(JSON.parse(calls[0][1].body), { conversationId: "conversation-1" });
+        assert.equal(store.has(ADVISOR_CONVERSATION_STORAGE_KEY), false);
+    } finally {
+        delete globalThis.localStorage;
+    }
+});
+
+test("conversation history rejects unsafe stored messages", async () => {
+    const client = createAdvisorBrowserGatewayClient({
+        fetchImpl: async () => response(200, {
+            status: "SUCCEEDED",
+            conversationId: "conversation-1",
+            messages: [{ messageId: "m1", role: "ADVISOR", content: "A1" }],
+        }),
+    });
+    await assert.rejects(client.getConversationHistory("conversation-1"), {
+        code: "INVALID_PROVIDER_RESPONSE",
+    });
 });
 
 test("human-actionable UNKNOWN is validated and retained", async () => {

@@ -189,3 +189,60 @@ export function failAdvisorRequest(state, requestId, failureCode) {
 export function clearAdvisorConversation(state) {
     return state.activeRequestId === null ? initialAdvisorConversationState : state;
 }
+
+export function hydrateConversationFromHistory(history) {
+    const exchanges = groupServerExchanges(history);
+    if (exchanges.length === 0) return initialAdvisorConversationState;
+    const last = exchanges[exchanges.length - 1];
+    const archived = exchanges.slice(0, -1).reverse();
+    const threadMessages = [
+        freezeMessage(last.userMessage),
+        freezeMessage(last.assistantMessage),
+    ];
+    return nextState(threadMessages, null, archived);
+}
+
+const SERVER_ROLE_TO_FRONTEND = Object.freeze({
+    USER: ADVISOR_MESSAGE_ROLE.USER,
+    ADVISOR: ADVISOR_MESSAGE_ROLE.ASSISTANT,
+});
+
+function serverMessageToFrontend(message) {
+    return {
+        id: message.messageId,
+        role: SERVER_ROLE_TO_FRONTEND[message.role] || message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+        requestId: message.requestId || null,
+        status: ADVISOR_MESSAGE_STATUS.SUCCEEDED,
+        failureCode: null,
+    };
+}
+
+function groupServerExchanges(history) {
+    const exchanges = [];
+    let open = null;
+    for (const message of history) {
+        if (!message
+            || typeof message.messageId !== "string"
+            || typeof message.content !== "string") {
+            continue;
+        }
+        const frontendMessage = serverMessageToFrontend(message);
+        if (frontendMessage.role === ADVISOR_MESSAGE_ROLE.USER) {
+            if (open) exchanges.push(open);
+            open = {
+                requestId: message.requestId || null,
+                createdAt: message.createdAt,
+                userMessage: frontendMessage,
+                assistantMessage: null,
+                status: ADVISOR_MESSAGE_STATUS.SUCCEEDED,
+            };
+        } else if (frontendMessage.role === ADVISOR_MESSAGE_ROLE.ASSISTANT && open) {
+            open.assistantMessage = frontendMessage;
+            exchanges.push(open);
+            open = null;
+        }
+    }
+    return exchanges.filter((exchange) => exchange.assistantMessage !== null);
+}
