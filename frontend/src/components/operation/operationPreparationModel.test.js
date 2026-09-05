@@ -348,3 +348,24 @@ test("LIVE DISARMED runtime readiness blocks Loop or Auto intent", () => {
     assert.equal(result.startReady, false);
     assert.equal(result.liveAutomationReadiness, "BLOCKED");
 });
+
+test("CASE 9: RUNNING bot with active execution stays fail-closed (START not made available)", () => {
+    // A RUNNING bot with execution enabled must NOT report START ready; the
+    // pre-start readiness semantics are unchanged by the presentation-only
+    // RUNNING neutralization.
+    const running = deriveOperationReadiness(readyInputs({
+        botRunning: true,
+        executionEnabled: true,
+    }));
+    assert.equal(running.startReady, false);
+    assert.equal(running.startReadiness, "BLOCKED");
+    assert.equal(running.executionReadiness, "BLOCKED");
+
+    // SAFE state (execution disabled, running) keeps the normal gate.
+    const idling = deriveOperationReadiness(readyInputs({
+        botRunning: true,
+        executionEnabled: false,
+        realOrderAllowed: false,
+    }));
+    assert.equal(idling.executionReadiness, "SAFE");
+});

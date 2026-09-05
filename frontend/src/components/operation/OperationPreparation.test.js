@@ -205,6 +205,10 @@ const loadComponent = async () => {
             .replace(
                 'from "./operationPreparationModel";',
                 `from "${moduleUrl(modelSource)}";`,
+            )
+            .replace(
+                'from "./operationPreparationGuidance";',
+                `from "${new URL("./operationPreparationGuidance.js", sourceUrl).href}";`,
             );
         await writeFile(output, code);
         return (await import(`${pathToFileURL(output).href}?t=${Date.now()}`)).default;
@@ -918,4 +922,79 @@ test("trade/execution fields preserve distinct nondefault values and runtime sum
     assert.ok(legacyChanges.some((change) => change.sl === 0.75));
     assert.ok(legacyChanges.some((change) => change.tp === 5));
     assert.ok(legacyChanges.some((change) => change.timeframe === "1h"));
+});
+
+// =========================
+// WORK-B FINAL UX: CASE 6-9
+// =========================
+
+test("CASE 6: READY start renders no stale block guidance", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        realOrderAllowed: false,
+        executionEntryAllowed: true,
+        recommendedAction: "CONTINUE",
+        riskState: "NORMAL",
+    });
+    const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
+    assert.equal(readyToStart.includes("READY TO START"), true);
+    assert.equal(readyToStart.includes("BLOCKED"), false);
+    assert.equal(findTestId(renderer.root, "block-guidance"), undefined);
+});
+
+test("CASE 7: RUNNING bot renders neutral START readiness and ACTIVE execution, no pre-start fault", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        botRunning: true,
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "READY",
+        pendingOrder: false,
+        position: "FLAT",
+        realOrderAllowed: false,
+        executionEnabled: true,
+        executionEntryAllowed: true,
+        recommendedAction: "CONTINUE",
+        riskState: "NORMAL",
+        loopState: "RUNNING",
+        loopStateTone: true,
+        autoTradeStateText: "AUTO TRADE ON",
+    });
+    const content = normalizedText(descendants(renderer.root));
+    const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
+    assert.equal(content.includes("N/A — BOT ALREADY RUNNING"), true);
+    assert.equal(content.includes("ACTIVE（実行中）"), true);
+    assert.equal(readyToStart.includes("READY TO START"), false);
+    assert.equal(readyToStart.includes("BLOCKED"), false);
+    assert.equal(findTestId(renderer.root, "block-guidance"), undefined);
+});
+
+test("CASE 8: bot returns STOPPED resumes pre-start readiness presentation", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+        emergencyState: "READY",
+        governanceStatus: "BLOCKED",
+        pendingOrder: false,
+        position: "FLAT",
+        realOrderAllowed: false,
+    });
+    // STOPPED + a governing gate blocked -> guidance is shown.
+    assert.ok(findTestId(renderer.root, "block-guidance"));
+    // Re-render as RUNNING -> no pre-start fault.
+    renderer.render({
+        botRunning: true,
+        loopState: "RUNNING",
+        loopStateTone: true,
+        autoTradeStateText: "AUTO TRADE ON",
+    });
+    assert.equal(findTestId(renderer.root, "block-guidance"), undefined);
+    // Back to STOPPED -> guidance resumes.
+    renderer.render({ botRunning: false });
+    assert.ok(findTestId(renderer.root, "block-guidance"));
 });

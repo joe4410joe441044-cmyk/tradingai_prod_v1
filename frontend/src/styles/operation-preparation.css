@@ -554,6 +554,104 @@
     min-height: 32px;
 }
 
+/* WF-2: RUNNING pre-start readiness indicator is neutral (not a fault). */
+.operation-prep-status--running i {
+    background: #56d69a;
+}
+
+.operation-prep-running-indicator {
+    width: 100%;
+    height: 2px;
+    background: rgba(86, 214, 154, .5);
+}
+
+/* WF-1: operator workflow hint above the safety readiness list. */
+.operation-prep-workflow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    border: 1px solid rgba(102, 214, 244, .25);
+    border-radius: 4px;
+    background: rgba(11, 16, 26, .6);
+    color: #8d9bb0;
+    font-size: 8px;
+    line-height: 1.4;
+}
+
+.operation-prep-workflow__title {
+    color: #66e3ff;
+    font-size: 8px;
+    font-weight: 800;
+}
+
+.operation-prep-workflow__arrow {
+    color: #66d6f4;
+    text-align: center;
+}
+
+/* WF-1: START block-reason + corrective guidance. */
+.operation-prep-block-guidance {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(255, 115, 122, .35);
+    border-radius: 4px;
+    background: rgba(30, 8, 8, .5);
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.operation-prep-block-guidance__title {
+    color: #ff7272;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .04em;
+}
+
+.operation-prep-block-guidance ul {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.operation-prep-block-guidance li {
+    display: grid;
+    gap: 3px;
+    padding: 6px 8px;
+    border: 1px solid rgba(36, 49, 73, .55);
+    border-radius: 3px;
+    background: rgba(11, 16, 26, .5);
+    color: #edf6ff;
+    font-size: 9px;
+    line-height: 1.4;
+}
+
+.operation-prep-block-guidance__values,
+.operation-prep-block-guidance__fix {
+    display: grid;
+    gap: 2px;
+    color: #9badc6;
+    font-size: 8px;
+    line-height: 1.45;
+}
+
+.operation-prep-block-guidance__fix span:last-child {
+    color: #66e3ff;
+}
+
+.operation-prep-draft-note {
+    display: block;
+    color: #e8b45f;
+    font-size: 7px;
+    line-height: 1.5;
+    margin: 0;
+}
+
 @media (max-width: 1100px) {
     .operation-prep-summary { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
 }

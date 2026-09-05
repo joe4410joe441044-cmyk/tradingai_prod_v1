@@ -95,6 +95,9 @@ const loadBotControl = async () => {
             operationPreparation.code.replace(
                 'from "./operationPreparationModel";',
                 `from "${operationPreparationModelUrl}";`,
+            ).replace(
+                'from "./operationPreparationGuidance";',
+                `from "${new URL("./operation/operationPreparationGuidance.js", import.meta.url).href}";`,
             ),
         );
 

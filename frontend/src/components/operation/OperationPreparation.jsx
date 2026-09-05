@@ -4,6 +4,7 @@ import {
     deriveOperationReadiness,
     operationPreparationSummary,
 } from "./operationPreparationModel";
+import { deriveOperationBlockGuidance } from "./operationPreparationGuidance";
 
 
 const percentage = (value) => `${Number(value).toFixed(2)}%`;
@@ -97,6 +98,10 @@ const Section = ({ bodyClassName = "", children, number, title, testId }) => (
         <div className={`operation-prep-section__body ${bodyClassName}`.trim()}>{children}</div>
     </section>
 );
+
+// WF-1: block-reason + corrective guidance mapped externally in
+// ./operationPreparationGuidance (presentation-only). The authoritative
+// readiness values come from deriveOperationReadiness (the model).
 
 export default function OperationPreparation({
     botRunning = false,
@@ -303,10 +308,24 @@ export default function OperationPreparation({
         leverageAuthority?.effectiveLeverage,
     );
     const leverageReason = String(leverageAuthority?.reason || "").trim();
-    const effectiveLeverageDisplay = effectiveLeverage === "UNAVAILABLE"
-        && leverageReason === "MAXIMUM_LEVERAGE"
-        ? "— · MAXIMUM_LEVERAGE"
-        : effectiveLeverage;
+    // WF-6: while STOPPED the Effective Leverage row reflects the last
+    // completed start. If the operator has since requested an over-limit
+    // leverage (front-end leverage authority BLOCKED) or the backend
+    // authority reports the request not allowed, the stale prior-runtime
+    // effective value is misleading and is suppressed. The fail-closed gate
+    // remains authoritative. Presentation only.
+    const leverageRequestBlocked = leverageReadiness === "BLOCKED"
+        || leverageAuthority?.allowed === false;
+    const effectiveLeverageDisplay = leverageRequestBlocked
+        ? (
+            leverageReason === "MAXIMUM_LEVERAGE"
+                ? "— · MAXIMUM_LEVERAGE"
+                : "— · leverage over MM limit"
+        )
+        : effectiveLeverage === "UNAVAILABLE"
+            && leverageReason === "MAXIMUM_LEVERAGE"
+            ? "— · MAXIMUM_LEVERAGE"
+            : effectiveLeverage;
     const controlsDisabled = botRunning === true;
 
     const mmAvailable = Boolean(mmDraft);
@@ -372,29 +391,55 @@ export default function OperationPreparation({
         || Boolean(mmConflict)
         || Boolean(mmConfigurationError);
 
-    // WF-1: explicit block-reason + corrective guidance (pre-start only).
-    const blockGuidance = (() => {
-        if (botRunning || startReadiness === "READY") return null;
-        const rules = [
-            ["Emergency（緊急停止）", emergencyReadiness, "must be READY before START"],
-            ["Position（ポジション）", positionState, "must be FLAT before START"],
-            ["Pending Order Authority（保留注文）", orderAuthority, "must be SAFE (no pending order)"],
-            ["Market Selection（市場選択）", selectionReadiness, "select a MANUAL symbol or ensure the AUTO candidate is ready"],
-            ["MM START CONFIG（開始設定）", startMmReadiness, "save a valid MM risk / max-drawdown configuration"],
-            ["Execution（執行）", executionReadiness, "execution / real-order authority must be disabled before START"],
-            ["Leverage Authority（レバレッジ権限）", leverageReadiness, "set requested leverage <= MM maximum leverage"],
-            ["Governance（ガバナンス）", governanceReadiness, "must be READY before START"],
-        ];
-        return rules.filter(
-            ([, value]) => !["READY", "SAFE", "FLAT", "NOT_RELEVANT"].includes(String(value)),
-        );
-    })();
+    // WF-3: Final Preparation must distinguish the UNSAVED MM DRAFT from the
+    // SAVED value that START actually sends. Presentation only.
+    const savedRiskPercent = mmConfiguration
+        ? String(mmConfiguration.riskPerTradePercent)
+        : null;
+    const mmRiskDivergence = mmAvailable
+        && Boolean(mmConfiguration)
+        && String(mmDraft.riskPerTradePercent) !== savedRiskPercent;
 
-    // WF-2: while RUNNING, pre-start readiness gates are N/A, not a fault.
-    const runningStartReadiness = botRunning ? "N/A — BOT RUNNING" : startReadiness;
-    const runningEntryReadiness = botRunning ? "ACTIVE" : entryReadiness;
+    // WF-1: explicit block-reason + corrective guidance (pre-start only).
+    // Derives EVERY actionable blocker from the authoritative readiness
+    // values. On recovery a corrected blocker no longer appears. gated on
+    // reviewReadiness (=== startReadiness) so a READY start shows no stale
+    // guidance and a RUNNING bot never shows a pre-start fault.
+    const hasBlockedStart = (!botRunning && reviewReadiness !== "READY");
+    const blockGuidance = hasBlockedStart
+        ? deriveOperationBlockGuidance({
+            settings,
+            config,
+            emergencyReadiness,
+            positionState,
+            orderAuthority,
+            selectionReadiness,
+            selectionRuntime,
+            selectedRuntimeSymbol,
+            startMmReadiness,
+            mmEntryReadiness,
+            governanceReadiness,
+            executionReadiness,
+            leverageReadiness,
+            emergencyState,
+            position,
+            pendingOrder,
+            governanceStatus,
+            realOrderAllowed,
+            executionEnabled,
+            mmConfiguration,
+            mmDraft,
+        })
+        : null;
+
+    // WF-2: while RUNNING, pre-start readiness gates are N/A / ACTIVE, not
+    // a fault. Presentation only — the underlying start gate is unchanged.
+    const runningStartReadiness = botRunning
+        ? "N/A — BOT ALREADY RUNNING"
+        : startReadiness;
+    const runningEntryReadiness = botRunning ? "ACTIVE（実行中）" : entryReadiness;
     const runningExecutionReadiness = (
-        botRunning && executionEnabled ? "ACTIVE" : executionReadiness
+        botRunning && executionEnabled ? "ACTIVE（実行中）" : executionReadiness
     );
 
     {botRunning && <div className="operation-prep-running-indicator" />}
@@ -676,13 +721,25 @@ return (
                     </Section>
 
                     <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS（安全性 / 開始準備）">
+                        {!botRunning && (
+                            <div className="operation-prep-workflow" data-testid="operation-workflow">
+                                <span className="operation-prep-workflow__title">WORKFLOW / 作業手順</span>
+                                <span>①–⑤ CONFIGURE（構成）</span>
+                                <span className="operation-prep-workflow__arrow">↓</span>
+                                <span>⑥ FINAL VALIDATION（最終確認）</span>
+                                <span className="operation-prep-workflow__arrow">↓</span>
+                                <span>Resolve BLOCKED / WAITING items（BLOCKED/WAITINGの解消）</span>
+                                <span className="operation-prep-workflow__arrow">↓</span>
+                                <span>START when READY（READY時に開始）</span>
+                            </div>
+                        )}
                         <div className="operation-prep-derived-list operation-prep-derived-list--safety">
                             <DerivedRow label="Emergency（緊急停止）" source="RUNTIME" status value={emergencyReadiness} />
                             <DerivedRow label="Position（ポジション）" source="RUNTIME" status value={positionState} />
                             <DerivedRow label="Pending Order Authority（保留注文権限）" source="RUNTIME" status value={orderAuthority} />
                             <DerivedRow label="Market Selection（市場選択）" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
                             <DerivedRow label="MM START CONFIG（開始設定）" source="MM CONFIG" status value={startMmReadiness} />
-                            <DerivedRow label="ENTRY PERMISSION（エントリー権限）" source={mmReadinessSource} status value={entryReadiness} />
+                            <DerivedRow label="ENTRY PERMISSION（エントリー権限）" source={mmReadinessSource} status value={runningEntryReadiness} />
                             <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
                             <DerivedRow label="Execution（執行）" source="RUNTIME" status value={runningExecutionReadiness} />
                             <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
@@ -698,7 +755,7 @@ return (
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
                             <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
                             <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
-                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={summary.riskPerTrade} />
+                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} />
                             <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
                             <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} />
                             <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} />
@@ -712,22 +769,38 @@ return (
                         </div>
                         <div className="operation-prep-start" data-testid="ready-to-start">
                             {botRunning ? (
-                                <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>BOT RUNNING — START READINESS N/A</strong></div>
+                                <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
                             ) : null}
                             {!botRunning && (
                                 <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
                             )}
-                            {!botRunning && blockGuidance && (
+                            {blockGuidance && (
                                 <div className="operation-prep-block-guidance" data-testid="block-guidance">
-                                    <span className="operation-prep-block-guidance__title">START BLOCKED — resolve the following:</span>
+                                    <span className="operation-prep-block-guidance__title">START NOT READY — resolve the following（開始不可 — 以下を解消）:</span>
                                     <ul>
-                                        {blockGuidance.map(([label, value, hint]) => (
-                                            <li key={label}><strong>{label}</strong>: {String(value)} — {hint}</li>
+                                        {blockGuidance.map((item) => (
+                                            <li key={item.id} data-testid={`block-guidance-${item.id}`}>
+                                                <strong>{item.label}</strong> — {item.status}
+                                                <div className="operation-prep-block-guidance__values">
+                                                    <span>current / 現在値: {item.current}</span>
+                                                    <span>required / 必要値: {item.required}</span>
+                                                </div>
+                                                <div className="operation-prep-block-guidance__fix">
+                                                    <span>{item.en}</span>
+                                                    <span>{item.ja}</span>
+                                                    <span>Fix / 修正: {item.fix}</span>
+                                                </div>
+                                            </li>
                                         ))}
                                     </ul>
                                 </div>
                             )}
                         </div>
+                        {mmRiskDivergence && (
+                            <small className="operation-prep-draft-note" data-testid="mm-risk-draft-note">
+                                RISK shown is the UNSAVED MM DRAFT; START sends the SAVED value（表示は未保存ドラフト。STARTには保存済み値を送信します）. Press Save MM to apply the draft.
+                            </small>
+                        )}
                         {botRunning ? null : (
                             <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
                         )}
