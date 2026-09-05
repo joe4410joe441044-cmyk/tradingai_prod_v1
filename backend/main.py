@@ -104,6 +104,7 @@ from backend.api.recorder_proxy import (
 )
 from backend.api.trading_trace import router as trading_trace_router
 from backend.api.supervisor import router as supervisor_router
+from backend.api.knowledge import router as knowledge_router
 
 # ============================================================
 # GOVERNANCE ROUTER
@@ -754,6 +755,8 @@ app.include_router(
 app.include_router(trading_trace_router)
 
 app.include_router(supervisor_router)
+
+app.include_router(knowledge_router)
 
 _ai_advisor_production = build_ai_advisor_production_composition(
     provider_interaction_policy=ProviderInteractionPolicy.INTERACTIVE,

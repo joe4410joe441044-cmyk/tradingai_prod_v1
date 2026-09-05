@@ -57,6 +57,7 @@ from backend.knowledge_core.drift import (
     fingerprint_structured,
 )
 from backend.knowledge_core.provenance import ProvenanceRecord
+from backend.knowledge_evolution.authority import KNOWLEDGE_PROMOTION_AUTHORITY
 from backend.knowledge_evolution._base import (
     MAX_D8_COUNTEREVIDENCE_IDS,
     MAX_D8_EVIDENCE_IDS,
@@ -867,6 +868,30 @@ class KnowledgeEvolutionStore:
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "investigation payload corrupt")
 
+    def list_investigations(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> tuple[InvestigationRequest, ...]:
+        """Bounded, deterministic list of Investigation definitions.
+
+        Ordering is stable: ``created_at ASC`` then ``investigation_id ASC`` so
+        SQLite's undefined row order can never affect the result.
+        """
+        limit = self._bounded_limit(limit)
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT payload FROM investigations "
+                    "ORDER BY created_at ASC, investigation_id ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_decode_investigation(_load_json(row[0])) for row in rows)
+        except KnowledgeStoreError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "investigation list corrupt")
+
     # -- Pattern ------------------------------------------------------------
 
     def save_pattern(self, pattern: Pattern) -> str:
@@ -930,6 +955,29 @@ class KnowledgeEvolutionStore:
             raise
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "pattern payload corrupt")
+
+    def list_patterns(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> tuple[Pattern, ...]:
+        """Bounded, deterministic list of persisted Pattern observations.
+
+        Ordering is stable: ``created_at ASC`` then ``pattern_id ASC``.
+        """
+        limit = self._bounded_limit(limit)
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT payload FROM patterns "
+                    "ORDER BY created_at ASC, pattern_id ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_normalize_pattern(_decode_pattern(_load_json(row[0]))) for row in rows)
+        except KnowledgeStoreError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "pattern list corrupt")
 
     # -- Finding ------------------------------------------------------------
 
@@ -1002,6 +1050,32 @@ class KnowledgeEvolutionStore:
             raise
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "finding payload corrupt")
+
+    def list_findings(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> tuple[Finding, ...]:
+        """Bounded, deterministic list of persisted Findings.
+
+        Ordering is stable: ``created_at ASC`` then ``finding_id ASC``.
+        """
+        limit = self._bounded_limit(limit)
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT payload FROM findings "
+                    "ORDER BY created_at ASC, finding_id ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            findings = tuple(_decode_finding(_load_json(row[0])) for row in rows)
+            for finding in findings:
+                self._assert_finding_investigation_exists(finding)
+            return findings
+        except KnowledgeStoreError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "finding list corrupt")
 
     def _assert_finding_investigation_exists(self, finding: Finding) -> None:
         try:
@@ -1088,6 +1162,29 @@ class KnowledgeEvolutionStore:
             raise
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "hypothesis payload corrupt")
+
+    def list_hypotheses(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> tuple[Hypothesis, ...]:
+        """Bounded, deterministic list of persisted Hypotheses.
+
+        Ordering is stable: ``created_at ASC`` then ``hypothesis_id ASC``.
+        """
+        limit = self._bounded_limit(limit)
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT payload FROM hypotheses "
+                    "ORDER BY created_at ASC, hypothesis_id ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_decode_hypothesis(_load_json(row[0])) for row in rows)
+        except KnowledgeStoreError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "hypothesis list corrupt")
 
     def transition_hypothesis(
         self,
@@ -1243,6 +1340,29 @@ class KnowledgeEvolutionStore:
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "validation payload corrupt")
 
+    def list_validations(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> tuple[Validation, ...]:
+        """Bounded, deterministic list of persisted Validations.
+
+        Ordering is stable: ``created_at ASC`` then ``validation_id ASC``.
+        """
+        limit = self._bounded_limit(limit)
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT payload FROM validations "
+                    "ORDER BY created_at ASC, validation_id ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_decode_validation(_load_json(row[0])) for row in rows)
+        except KnowledgeStoreError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "validation list corrupt")
+
     # -- Human Review (APPEND-ONLY) -----------------------------------------
 
     def append_human_review(
@@ -1354,6 +1474,32 @@ class KnowledgeEvolutionStore:
             raise
         except (sqlite3.Error, OSError, ValueError, KeyError) as error:
             _raise(KnowledgeStoreErrorCode.CORRUPT_RECORD, "human review payload corrupt")
+
+    def get_human_review_projection(self, review_id: str) -> Optional[dict[str, Any]]:
+        """Bounded projection of one Human Review including its validation pin
+        and the server-derived subject fingerprint.
+
+        The fingerprint is read from the durable column - it is never recomputed
+        from (or trusted from) a client-supplied value.
+        """
+        metadata = self._review_metadata(review_id)
+        if metadata is None:
+            return None
+        review = self.get_human_review(review_id)
+        if review is None:
+            return None
+        return {
+            "reviewId": review_id,
+            "hypothesisId": metadata["hypothesis_id"],
+            "validationId": metadata["validation_id"],
+            "decision": metadata["decision"],
+            "reviewer": metadata["reviewer"],
+            "reviewedAt": review.reviewed_at,
+            "subjectFingerprint": metadata["subject_fingerprint"],
+            "notes": review.notes,
+            "operationalAuthority": "NONE",
+            "knowledgePromotionAuthority": KNOWLEDGE_PROMOTION_AUTHORITY.value,
+        }
 
     def _review_metadata(self, review_id: str) -> Optional[dict[str, Any]]:
         review_id = _safe_identifier(review_id, "reviewId")
