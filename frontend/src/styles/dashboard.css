@@ -5654,3 +5654,162 @@ RESPONSIVE DESIGN
         font-size: 10px;
     }
 }
+
+/* =========================================================
+ACCOUNT STATUS PAGE
+Asymmetric live-first hierarchy. Reuses the semantic-card
+tokens from account-runtime-overview. New rules are scoped
+to .account-status-page so Operation / MM / Market
+Intelligence are unaffected.
+========================================================= */
+
+.account-status-page {
+    --as-gap: 10px;
+    gap: 10px;
+}
+
+.account-status-page .as-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--semantic-card-border);
+    border-radius: 8px;
+    background: var(--semantic-card-bg);
+    color: #e7edf7;
+}
+
+.account-status-page .as-page-kicker {
+    display: block;
+    margin-bottom: 2px;
+    color: #93a2b8;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.account-status-page .as-page-header h1 {
+    margin: 0;
+    font-size: 15px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.account-status-page .as-page-badge {
+    flex: 0 0 auto;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid rgba(101, 201, 135, 0.45);
+    border-radius: 999px;
+    background: rgba(101, 201, 135, 0.08);
+    color: var(--semantic-success);
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Real / Live Account is primary: full width, dominant */
+.account-status-page .as-primary-card {
+    width: 100%;
+}
+
+/* account-runtime-overview default grid lines clip the
+   last column / row; override for the primary card so the
+   full-bleed metric grid looks intentional. */
+.account-status-page .as-primary-metrics,
+.account-status-page .as-primary-details,
+.account-status-page .as-paper-metrics {
+    display: grid;
+}
+
+.account-status-page .as-primary-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.account-status-page .as-primary-details {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.account-status-page .as-secondary-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--as-gap);
+}
+
+.account-status-page .as-primary-metrics .semantic-metric,
+.account-status-page .as-primary-details .semantic-metric,
+.account-status-page .as-paper-metrics .semantic-metric {
+    padding: 10px 12px;
+}
+
+.account-status-page .as-card,
+.account-status-page .as-paper-card {
+    min-width: 0;
+}
+
+/* Grid line corrections for asymmetric columns */
+.account-status-page .as-primary-metrics .semantic-metric:nth-child(4n),
+.account-status-page .as-primary-details .semantic-metric:nth-child(4n),
+.account-status-page .as-authority-grid .semantic-metric:nth-child(4n) {
+    border-right: 0;
+}
+
+.account-status-page .as-primary-metrics .semantic-metric:nth-last-child(-n + 4),
+.account-status-page .as-primary-details .semantic-metric:nth-last-child(-n + 4),
+.account-status-page .as-authority-grid .semantic-metric {
+    border-bottom: 0;
+}
+
+.account-status-page .as-paper-metrics .semantic-metric:nth-child(6n) {
+    border-right: 0;
+}
+
+.account-status-page .as-paper-metrics .semantic-metric:nth-last-child(-n + 6) {
+    border-bottom: 0;
+}
+
+/* Execution authority grid (read-only) */
+.account-status-page .as-authority-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid var(--semantic-grid-line);
+}
+
+.account-status-page .as-authority-grid .semantic-metric {
+    min-height: 51px;
+}
+
+/* Paper / Simulation is secondary: compact, smaller weight */
+.account-status-page .as-paper-metrics {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+    .account-status-page .as-secondary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .account-status-page .as-primary-metrics,
+    .account-status-page .as-primary-details,
+    .account-status-page .as-paper-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .account-status-page .as-primary-metrics,
+    .account-status-page .as-primary-details,
+    .account-status-page .as-paper-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .account-status-page .as-authority-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

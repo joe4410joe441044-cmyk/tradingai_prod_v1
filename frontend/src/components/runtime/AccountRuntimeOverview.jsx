@@ -1,426 +1,71 @@
-import { useEffect, useState } from "react";
-import { API } from "../../api";
 import {
-    authenticatedControlRequest,
-    authErrorMessage,
-    isAuthErrorStatus,
-} from "../../features/auth/operatorAuth";
+    deriveAccountRuntime,
+    displayRuntimeValue,
+    displayValue,
+    formatAmount,
+    formatLastUpdate,
+    formatPnl,
+    formatPositionValue,
+} from "./accountRuntimeModel";
+import StatusMetric from "./StatusMetric";
+import PaperCapitalControl from "./PaperCapitalControl";
 
-const EMPTY_VALUES = new Set([
-    "UNKNOWN",
-    "NO DATA",
-    "NONE",
-    "UNDEFINED",
-    "NAN",
-]);
+export default function AccountRuntimeOverview(props) {
+    const {
+        variant = "summary",
+        exchange,
+        executionMode,
+        realOrderAllowed,
+        allowLive,
+        tradeMode,
+        dryRun,
+        accountSource,
+        balanceSource,
+        positionSource,
+        accountSourceReason,
+        balanceSourceReason,
+        positionSourceReason,
+        lastUpdate,
+        onPaperCapitalApplied,
+    } = props;
 
-const isAvailable = (value) => {
-    if (value === null || value === undefined || value === "") {
-        return false;
-    }
-
-    if (typeof value === "number" && !Number.isFinite(value)) {
-        return false;
-    }
-
-    return !EMPTY_VALUES.has(String(value).trim().toUpperCase());
-};
-
-const displayValue = (value, formatter) => {
-    if (!isAvailable(value)) {
-        return "--";
-    }
-
-    return formatter ? formatter(value) : String(value);
-};
-
-const displayRuntimeValue = (
-    value,
-    {
-        formatter,
-        loading = false,
-        stale = false,
-        emptyLabel = "NOT FETCHED",
-    } = {},
-) => {
-    if (loading) {
-        return "REFRESHING";
-    }
-
-    if (stale) {
-        return "STALE";
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-        return "NO OPEN POSITION";
-    }
-
-    if (!isAvailable(value)) {
-        return emptyLabel;
-    }
-
-    return formatter ? formatter(value) : String(value);
-};
-
-const formatAmount = (value) => {
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
-        return "--";
-    }
-
-    return numericValue.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
-
-const formatPnl = (value) => {
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
-        return "--";
-    }
-
-    return `${numericValue > 0 ? "+" : ""}${numericValue.toFixed(2)}`;
-};
-
-const formatLastUpdate = (value) => {
-    const numericValue = Number(value);
-    const date = new Date(
-        Number.isFinite(numericValue) && numericValue < 1000000000000
-            ? numericValue * 1000
-            : value,
-    );
-
-    if (Number.isNaN(date.getTime())) {
-        return "--";
-    }
-
-    return date.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-    });
-};
-
-const formatPositionValue = (
-    value,
-    state,
-    {
-        loading = false,
-        stale = false,
-        emptyLabel = "NOT FETCHED",
-    } = {},
-) => {
-    if (loading) {
-        return "REFRESHING";
-    }
-
-    if (stale) {
-        return "STALE";
-    }
-
-    if (Array.isArray(value)) {
-        if (value.length === 0) {
-            return "FLAT";
-        }
-
-        return formatPositionValue(value[0], state);
-    }
-
-    if (value && typeof value === "object") {
-        const symbol = value.symbol ?? value.pair ?? "--";
-        const side = value.side ?? value.position_side ?? value.state ?? "--";
-        const qty = value.qty ?? value.size ?? value.coin_qty;
-
-        return qty !== null && qty !== undefined && qty !== ""
-            ? `${symbol} ${side} ${qty}`
-            : `${symbol} ${side}`;
-    }
-
-    if (isAvailable(value)) {
-        return String(value);
-    }
-
-    if (state === "NO_OPEN_POSITION" || state === "FLAT") {
-        return "FLAT";
-    }
-
-    return displayRuntimeValue(state, { emptyLabel });
-};
-
-function StatusMetric({
-    label,
-    value,
-    testId,
-    tone = "neutral",
-}) {
-    return (
-        <div className="semantic-metric">
-            <span className="semantic-metric-label">{label}</span>
-            <span
-                className={`semantic-metric-value tone-${tone}`}
-                data-testid={testId}
-            >
-                {value}
-            </span>
-        </div>
-    );
-}
-
-export default function AccountRuntimeOverview({
-    variant = "summary",
-    accountRuntime,
-    exchange,
-    selectedMode,
-    executionMode,
-    realOrderAllowed,
-    dryRun,
-    safetyReason,
-    allowLive,
-    tradeMode,
-    accountSource,
-    balanceSource,
-    positionSource,
-    exchangeAuth,
-    exchangeConnection,
-    apiKeyStatus,
-    permission,
-    accountType,
-    exchangeAuthReason,
-    exchangeConnectionReason,
-    accountReason,
-    balanceReason,
-    positionReason,
-    accountSourceReason,
-    balanceSourceReason,
-    positionSourceReason,
-    realAccountConnected,
-    realBalance,
-    realEquity,
-    realAvailableBalance,
-    realPosition,
-    realPositionState,
-    realAccountLastSync,
-    realLastSync,
-    balance,
-    equity,
-    availableBalance,
-    position,
-    pnl,
-    lastUpdate,
-    onPaperCapitalApplied,
-}) {
     const isSummary = variant !== "diagnostics";
     const isDiagnostics = variant === "diagnostics";
-    const runtime = accountRuntime && typeof accountRuntime === "object"
-        ? accountRuntime
-        : {};
-    const paperAccount = runtime.paperAccount || {};
-    const realAccount = runtime.realAccount || {};
-    const connection = runtime.connection || {};
-    const hasAccountRuntime = Boolean(runtime.paperAccount || runtime.realAccount);
-    const paperAvailable = hasAccountRuntime
-        ? paperAccount.available !== false
-        : true;
-    const paperBalance = paperAvailable
-        ? paperAccount.balance ?? balance
-        : null;
-    const paperEquity = paperAvailable
-        ? paperAccount.equity ?? equity
-        : null;
-    const paperAvailableBalance = paperAvailable
-        ? paperAccount.availableBalance ?? availableBalance
-        : null;
-    const paperPosition = paperAvailable
-        ? paperAccount.positions ?? paperAccount.position ?? position
-        : null;
-    const paperPnl = paperAvailable
-        ? paperAccount.totalPnl ?? pnl
-        : null;
-    const [capitalExpanded, setCapitalExpanded] = useState(false);
-    const [capitalInput, setCapitalInput] = useState("");
-    const [capitalSource, setCapitalSource] = useState("DASHBOARD_MANUAL");
-    const [capitalConfirming, setCapitalConfirming] = useState(false);
-    const [capitalSubmitting, setCapitalSubmitting] = useState(false);
-    const [capitalMessage, setCapitalMessage] = useState(null);
-    const [capitalDirty, setCapitalDirty] = useState(false);
-    useEffect(() => {
-        if (!capitalDirty && isAvailable(paperBalance)) {
-            setCapitalInput(String(paperBalance));
-        }
-    }, [capitalDirty, paperBalance]);
 
-    const capitalNumber = Number(capitalInput);
-    const capitalError = !capitalInput.trim()
-        ? "Simulation capital is required."
-        : !/^\d+(?:\.\d{1,2})?$/.test(capitalInput.trim())
-            ? "Enter a valid amount with up to 2 decimal places."
-            : !Number.isFinite(capitalNumber) || capitalNumber < 0.01
-                ? "Simulation capital must be at least 0.01 USDT."
-                : capitalNumber > 1_000_000_000
-                    ? "Simulation capital must not exceed 1,000,000,000.00 USDT."
-                    : null;
-
-    const chooseCapital = (value, source = "DASHBOARD_MANUAL") => {
-        setCapitalInput(String(value));
-        setCapitalSource(source);
-        setCapitalDirty(true);
-        setCapitalConfirming(false);
-        setCapitalMessage(null);
-    };
-
-    const submitPaperCapital = async () => {
-        if (capitalSubmitting || capitalError) return;
-        setCapitalSubmitting(true);
-        setCapitalMessage(null);
-        try {
-            const response = await authenticatedControlRequest(API.paperAccountCapital(), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    capital: capitalInput.trim(),
-                    source: capitalSource,
-                }),
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                if (isAuthErrorStatus(response.status)) {
-                    throw new Error(authErrorMessage(response.status));
-                }
-                throw new Error(payload.detail || "Unable to reset paper capital.");
-            }
-            if (onPaperCapitalApplied) await onPaperCapitalApplied();
-            setCapitalDirty(false);
-            setCapitalConfirming(false);
-            setCapitalMessage({
-                type: "success",
-                text: `Paper simulation capital reset to ${formatAmount(payload.paperBalance)} USDT.`,
-            });
-        } catch (error) {
-            setCapitalMessage({
-                type: "error",
-                text: `Unable to reset paper capital. Reason: ${error.message}`,
-            });
-        } finally {
-            setCapitalSubmitting(false);
-        }
-    };
-    const selectedExchange = String(exchange ?? "").trim().toUpperCase();
-    const realExchange = String(realAccount.exchange ?? "").trim().toUpperCase();
-    const realExchangeMatches = !realExchange || realExchange === selectedExchange;
-    const realLoading = realExchangeMatches && realAccount.loading === true;
-    const realStale = realExchangeMatches && realAccount.stale === true;
-    const realAuthenticated = realExchangeMatches
-        && (
-            realAccount.authenticated === true
-            || Boolean(realAccount.balanceSource)
-            || Boolean(realAccount.positionSource)
-        );
-    const resolvedExchangeAuth = realAuthenticated
-        ? "VERIFIED"
-        : exchangeAuth;
-    const resolvedExchangeConnection = realExchangeMatches
-        ? connection.apiKeyStatus
-            ? realAccount.connected === true
-                ? "CONNECTED"
-                : "NOT_CONNECTED"
-            : exchangeConnection
-        : "NOT_CONNECTED";
-    const resolvedApiKeyStatus = connection.apiKeyStatus || apiKeyStatus;
-    const resolvedPermission = realAccount.permission || permission;
-    const resolvedAccountType = realAccount.accountType || accountType;
-    const resolvedAuthReason = realAccount.authReason || exchangeAuthReason;
-    const resolvedConnectionReason = realExchangeMatches
-        ? realAccount.connectionReason || exchangeConnectionReason
-        : "ACCOUNT_EXCHANGE_MISMATCH";
-    const resolvedAccountReason = realExchangeMatches
-        ? realAccount.accountReason || accountReason
-        : "ACCOUNT_EXCHANGE_MISMATCH";
-    const resolvedBalanceReason = realExchangeMatches
-        ? realAccount.balanceReason || balanceReason
-        : "ACCOUNT_EXCHANGE_MISMATCH";
-    const resolvedPositionReason = realExchangeMatches
-        ? realAccount.positionReason || positionReason
-        : "ACCOUNT_EXCHANGE_MISMATCH";
-    const realPositions = realExchangeMatches
-        ? realAccount.positions ?? realPosition
-        : null;
-    const realBalanceRaw = realExchangeMatches
-        ? realAccount.balance ?? realBalance
-        : null;
-    const realEquityRaw = realExchangeMatches
-        ? realAccount.equity ?? realEquity
-        : null;
-    const realAvailableRaw = realExchangeMatches
-        ? realAccount.availableBalance ?? realAvailableBalance
-        : null;
-    const realPositionSummary = realExchangeMatches
-        ? realAccount.positionSummary ?? realPositionState
-        : "ACCOUNT_EXCHANGE_MISMATCH";
-    const realConnected = realExchangeMatches
-        && (
-            realAccountConnected
-            || realAuthenticated
-            || realAccount.connected === true
-        );
-    const realAvailablePresetEnabled = realConnected
-        && !realLoading
-        && !realStale
-        && Number.isFinite(Number(realAvailableRaw));
-    const normalizedSelectedMode = String(selectedMode ?? "PAPER").toUpperCase();
-    const paperMode = normalizedSelectedMode === "PAPER";
-    const realSyncStatus = realLoading
-        ? "REFRESHING"
-        : realStale
-            ? "STALE"
-            : realConnected
-                ? "CONNECTED"
-                : "NOT_CONNECTED";
-    const normalizedAuth = String(resolvedExchangeAuth ?? "NOT_VERIFIED").toUpperCase();
-    const authVerified = normalizedAuth === "VERIFIED";
-    const displayedReason = normalizedSelectedMode === "LIVE" && !realOrderAllowed
-        && !String(safetyReason ?? "").includes("LIVE_NOT_ENABLED")
-        ? "LIVE_NOT_ENABLED / DRY_RUN_ACTIVE"
-        : displayValue(safetyReason);
-    const accountLastSync = realAccount.lastSync
-        ?? realLastSync
-        ?? realAccountLastSync
-        ?? lastUpdate;
-    const realUnavailable = displayValue(
-        resolvedAccountReason
-        || resolvedBalanceReason
-        || "NOT_CONNECTED",
-    );
-    const realBalanceValue = realConnected || realLoading || realStale
-        ? displayRuntimeValue(realBalanceRaw, {
-            formatter: formatAmount,
-            loading: realLoading,
-            stale: realStale,
-        })
-        : realUnavailable;
-    const realEquityValue = realConnected || realLoading || realStale
-        ? displayRuntimeValue(realEquityRaw, {
-            formatter: formatAmount,
-            loading: realLoading,
-            stale: realStale,
-        })
-        : realUnavailable;
-    const realAvailableValue = realConnected || realLoading || realStale
-        ? displayRuntimeValue(realAvailableRaw, {
-            formatter: formatAmount,
-            loading: realLoading,
-            stale: realStale,
-        })
-        : realUnavailable;
-    const realPositionValue = realConnected || realLoading || realStale
-        ? formatPositionValue(realPositions, realPositionSummary, {
-            loading: realLoading,
-            stale: realStale,
-        })
-        : displayValue(resolvedPositionReason || resolvedAccountReason || "NOT_CONNECTED");
+    const derived = deriveAccountRuntime(props);
+    const {
+        paperAccount,
+        paperAvailable,
+        paperBalance,
+        paperEquity,
+        paperAvailableBalance,
+        paperPosition,
+        paperPnl,
+        realConnected,
+        realLoading,
+        realStale,
+        realSyncStatus,
+        resolvedExchangeAuth,
+        resolvedExchangeConnection,
+        resolvedApiKeyStatus,
+        resolvedPermission,
+        resolvedAccountType,
+        resolvedAuthReason,
+        resolvedConnectionReason,
+        resolvedAccountReason,
+        resolvedBalanceReason,
+        resolvedPositionReason,
+        realAvailableRaw,
+        normalizedSelectedMode,
+        paperMode,
+        authVerified,
+        accountLastSync,
+        realBalanceValue,
+        realEquityValue,
+        realAvailableValue,
+        realPositionValue,
+        displayedReason,
+    } = derived;
 
     return (
         <section
@@ -563,73 +208,14 @@ export default function AccountRuntimeOverview({
                         />
                     </div>
 
-                    <div className="paper-capital-control">
-                        <button
-                            type="button"
-                            className="paper-capital-toggle"
-                            aria-expanded={capitalExpanded}
-                            onClick={() => setCapitalExpanded((value) => !value)}
-                        >
-                            {capitalExpanded ? "▼" : "▶"} Set Paper Capital
-                        </button>
-                        {capitalExpanded && (
-                            <div className="paper-capital-panel">
-                                <label htmlFor="simulation-capital-input">Simulation Capital (USDT)</label>
-                                <input
-                                    id="simulation-capital-input"
-                                    inputMode="decimal"
-                                    value={capitalInput}
-                                    aria-invalid={Boolean(capitalError)}
-                                    onChange={(event) => chooseCapital(event.target.value)}
-                                />
-                                <div className="paper-capital-presets">
-                                    <button
-                                        type="button"
-                                        disabled={!realAvailablePresetEnabled}
-                                        title={realAvailablePresetEnabled ? "Copy current real available balance" : "REAL_ACCOUNT_NOT_SYNCED"}
-                                        onClick={() => chooseCapital(realAvailableRaw, "REAL_AVAILABLE_PRESET")}
-                                    >
-                                        Real Available
-                                    </button>
-                                    {["100", "1000", "10000"].map((preset) => (
-                                        <button type="button" key={preset} onClick={() => chooseCapital(preset)}>
-                                            {formatAmount(preset)}
-                                        </button>
-                                    ))}
-                                </div>
-                                {capitalError && capitalDirty && (
-                                    <p className="paper-capital-feedback error">{capitalError}</p>
-                                )}
-                                {!capitalConfirming ? (
-                                    <button
-                                        type="button"
-                                        className="paper-capital-apply"
-                                        disabled={Boolean(capitalError) || capitalSubmitting}
-                                        onClick={() => setCapitalConfirming(true)}
-                                    >
-                                        Apply Paper Capital
-                                    </button>
-                                ) : (
-                                    <div className="paper-capital-confirm" role="alertdialog" aria-labelledby="paper-capital-confirm-title">
-                                        <strong id="paper-capital-confirm-title">Reset Paper Account?</strong>
-                                        <span>New Simulation Capital: {formatAmount(capitalNumber)} USDT</span>
-                                        <span>Balance, equity, PnL and paper positions will reset. Real funds are not affected.</span>
-                                        <div>
-                                            <button type="button" disabled={capitalSubmitting} onClick={() => setCapitalConfirming(false)}>Cancel</button>
-                                            <button type="button" disabled={capitalSubmitting} onClick={submitPaperCapital}>
-                                                {capitalSubmitting ? "Applying…" : "Reset Paper Account"}
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                <div className="paper-capital-live" aria-live="polite">
-                                    {capitalMessage && (
-                                        <p className={`paper-capital-feedback ${capitalMessage.type}`}>{capitalMessage.text}</p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <PaperCapitalControl
+                        paperBalance={paperBalance}
+                        realAvailableRaw={realAvailableRaw}
+                        realConnected={realConnected}
+                        realLoading={realLoading}
+                        realStale={realStale}
+                        onPaperCapitalApplied={onPaperCapitalApplied}
+                    />
 
                     <p className="semantic-card-note">
                         Simulation-only account. No real funds are used.

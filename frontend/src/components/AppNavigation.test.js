@@ -75,7 +75,7 @@ test("navigation switches all pages, exposes active state, and calls no trading 
 
     nodes = descendants(AppNavigation({ currentPath: "/ai-advisor", onPathChange: (path) => paths.push(path) }));
     buttons = nodes.filter(({ type }) => type === "button");
-    assert.equal(buttons.length, 6);
+    assert.equal(buttons.length, 7);
     assert.equal(buttons[0].props["aria-current"], undefined);
     assert.equal(buttons[1].props["aria-current"], undefined);
     assert.equal(buttons[2].props["aria-current"], "page");
@@ -107,6 +107,13 @@ test("navigation switches all pages, exposes active state, and calls no trading 
     buttons = nodes.filter(({ type }) => type === "button");
     assert.equal(buttons[5].props["aria-current"], "page");
     assert.match(buttons[5].props.className, /--active/);
+    buttons[6].props.onClick();
+    assert.equal(paths.at(-1), "/account-status");
+
+    nodes = descendants(AppNavigation({ currentPath: "/account-status", onPathChange: (path) => paths.push(path) }));
+    buttons = nodes.filter(({ type }) => type === "button");
+    assert.equal(buttons[6].props["aria-current"], "page");
+    assert.match(buttons[6].props.className, /--active/);
 
     globalThis.window.location.pathname = "/ai-advisor";
     listeners.get("popstate")();
@@ -144,10 +151,13 @@ test("navigation labels and paths remain unique and preserve existing items", as
     assert.deepEqual(labels, [
         "DASHBOARD", "MARKET INTELLIGENCE", "AI ADVISOR",
         "MONEY MANAGEMENT", "MARKET RECORDER", "SUPERVISOR",
+        "ACCOUNT STATUS",
     ]);
     assert.equal(new Set(labels).size, labels.length);
     assert.equal(new Set(paths).size, paths.length);
-    assert.equal(paths.at(-1), "/supervisor");
+    assert.equal(new Set(labels).has("ACCOUNT STATUS"), true);
+    assert.equal(new Set(paths).has("/account-status"), true);
+    assert.equal(paths.at(-1), "/account-status");
 });
 
 test("tabs reorder left and right without changing identity or routes", async () => {
@@ -264,6 +274,7 @@ test("drag handlers suppress navigation and automatically persist path order", a
         JSON.stringify([
             "/", "/money-management", "/market-intelligence",
             "/ai-advisor", "/market-recorder", "/supervisor",
+            "/account-status",
         ]),
     ]]);
     buttons[1].props.onDrop({ preventDefault() {} });
@@ -304,6 +315,7 @@ test("saved order restores canonical tabs, routes, and active identity", async (
     assert.deepEqual(buttons.map(({ props }) => props.children), [
         "DASHBOARD", "MONEY MANAGEMENT", "MARKET INTELLIGENCE",
         "AI ADVISOR", "MARKET RECORDER", "SUPERVISOR",
+        "ACCOUNT STATUS",
     ]);
     assert.equal(buttons[1].props["aria-current"], "page");
     buttons[1].props.onClick();

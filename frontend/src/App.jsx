@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import "./App.css";
 
 import AppNavigation from "./components/AppNavigation";
+import AccountStatusPage from "./pages/AccountStatusPage";
 import AIAdvisorPage from "./pages/AIAdvisorPage";
 import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
@@ -20,6 +21,7 @@ const AI_ADVISOR_PATH = "/ai-advisor";
 const MONEY_MANAGEMENT_PATH = "/money-management";
 const MARKET_RECORDER_PATH = "/market-recorder";
 const SUPERVISOR_PATH = "/supervisor";
+const ACCOUNT_STATUS_PATH = "/account-status";
 
 const resolveAppPath = (pathname) => {
     if (pathname === MARKET_INTELLIGENCE_PATH) {
@@ -37,6 +39,9 @@ const resolveAppPath = (pathname) => {
     if (pathname === SUPERVISOR_PATH) {
         return SUPERVISOR_PATH;
     }
+    if (pathname === ACCOUNT_STATUS_PATH) {
+        return ACCOUNT_STATUS_PATH;
+    }
     return "/";
 };
 
@@ -49,17 +54,19 @@ export default function App() {
         resolveAppPath(window.location.pathname)
     ));
 
-    const CurrentPage = currentPath === MARKET_INTELLIGENCE_PATH
-        ? MarketIntelligencePage
-        : currentPath === AI_ADVISOR_PATH
-            ? AIAdvisorPage
-            : currentPath === MONEY_MANAGEMENT_PATH
-                ? MoneyManagementPage
-                : currentPath === MARKET_RECORDER_PATH
-                    ? MarketRecorderPage
-                    : currentPath === SUPERVISOR_PATH
-                        ? SupervisorPage
-                        : Dashboard;
+    const CurrentPage = currentPath === ACCOUNT_STATUS_PATH
+        ? AccountStatusPage
+        : currentPath === MARKET_INTELLIGENCE_PATH
+            ? MarketIntelligencePage
+            : currentPath === AI_ADVISOR_PATH
+                ? AIAdvisorPage
+                : currentPath === MONEY_MANAGEMENT_PATH
+                    ? MoneyManagementPage
+                    : currentPath === MARKET_RECORDER_PATH
+                        ? MarketRecorderPage
+                        : currentPath === SUPERVISOR_PATH
+                            ? SupervisorPage
+                            : Dashboard;
     const advisorActive = currentPath === AI_ADVISOR_PATH;
 
     useEffect(() => {

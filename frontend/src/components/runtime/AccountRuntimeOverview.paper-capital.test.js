@@ -2,32 +2,41 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(
+const overviewSource = await readFile(
     new URL("./AccountRuntimeOverview.jsx", import.meta.url),
+    "utf8",
+);
+const controlSource = await readFile(
+    new URL("./PaperCapitalControl.jsx", import.meta.url),
     "utf8",
 );
 const apiSource = await readFile(new URL("../../api/index.js", import.meta.url), "utf8");
 
 test("Paper card exposes an explicit confirmed capital reset workflow", () => {
-    assert.match(source, /Set Paper Capital/);
-    assert.match(source, /Simulation Capital \(USDT\)/);
-    assert.match(source, /Apply Paper Capital/);
-    assert.match(source, /Reset Paper Account\?/);
-    assert.match(source, /Real funds are not affected/);
-    assert.match(source, /aria-live="polite"/);
+    assert.match(controlSource, /Set Paper Capital/);
+    assert.match(controlSource, /Simulation Capital \(USDT\)/);
+    assert.match(controlSource, /Apply Paper Capital/);
+    assert.match(controlSource, /Reset Paper Account\?/);
+    assert.match(controlSource, /Real funds are not affected/);
+    assert.match(controlSource, /aria-live="polite"/);
 });
 
 test("presets only populate input and real available uses an explicit source", () => {
-    assert.match(source, /\["100", "1000", "10000"\]/);
-    assert.match(source, /REAL_AVAILABLE_PRESET/);
-    assert.match(source, /disabled=\{!realAvailablePresetEnabled\}/);
-    assert.match(source, /REAL_ACCOUNT_NOT_SYNCED/);
-    assert.equal((source.match(/fetch\(API\.paperAccountCapital\(\)/g) || []).length, 0);
-    assert.equal((source.match(/authenticatedControlRequest\(API\.paperAccountCapital\(\)/g) || []).length, 1);
+    assert.match(controlSource, /\["100", "1000", "10000"\]/);
+    assert.match(controlSource, /REAL_AVAILABLE_PRESET/);
+    assert.match(controlSource, /disabled=\{!realAvailablePresetEnabled\}/);
+    assert.match(controlSource, /REAL_ACCOUNT_NOT_SYNCED/);
+    assert.equal((controlSource.match(/fetch\(API\.paperAccountCapital\(\)/g) || []).length, 0);
+    assert.equal((controlSource.match(/authenticatedControlRequest\(API\.paperAccountCapital\(\)/g) || []).length, 1);
 });
 
 test("paper reset uses the same-origin backend API and refreshes authority", () => {
     assert.match(apiSource, /paperAccountCapital:[\s\S]*join\("\/bot\/paper-account\/capital"\)/);
-    assert.match(source, /if \(onPaperCapitalApplied\) await onPaperCapitalApplied\(\)/);
-    assert.doesNotMatch(source, /localStorage|sessionStorage|window\.confirm/);
+    assert.match(controlSource, /if \(onPaperCapitalApplied\) await onPaperCapitalApplied\(\)/);
+    assert.doesNotMatch(controlSource, /localStorage|sessionStorage|window\.confirm/);
+});
+
+test("Account Runtime Overview reuses the single shared Paper Capital control", () => {
+    assert.match(overviewSource, /import PaperCapitalControl from "\.\/PaperCapitalControl";/);
+    assert.match(overviewSource, /<PaperCapitalControl/);
 });

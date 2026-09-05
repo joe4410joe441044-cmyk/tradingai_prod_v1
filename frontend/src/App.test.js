@@ -15,6 +15,7 @@ const loadApp = async () => {
     const output = join(temporary, "App.mjs");
     const reactStub = moduleUrl("export const useEffect=(callback)=>callback();export const useState=(initializer)=>{if(globalThis.__appState===undefined)globalThis.__appState=typeof initializer==='function'?initializer():initializer;return[globalThis.__appState,(value)=>{globalThis.__appState=typeof value==='function'?value(globalThis.__appState):value}]}");
     const navigationStub = moduleUrl("export default (props)=>({type:'nav',props:{...props,children:'NAVIGATION'}})");
+    const accountStatusStub = moduleUrl("export default()=>({type:'main',props:{children:'ACCOUNT STATUS PAGE'}})");
     const advisorStub = moduleUrl("export default()=>({type:'main',props:{children:'AI ADVISOR PAGE'}})");
     const dashboardStub = moduleUrl("export default()=>({type:'main',props:{children:'DASHBOARD PAGE'}})");
     const marketStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET INTELLIGENCE PAGE'}})");
@@ -30,6 +31,7 @@ const loadApp = async () => {
     );
     const code = transformed.code.replace('from "react";', `from "${reactStub}";`)
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
+        .replace('from "./pages/AccountStatusPage";', `from "${accountStatusStub}";`)
         .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
         .replace('from "./pages/MarketIntelligencePage";', `from "${marketStub}";`)
@@ -90,6 +92,12 @@ test("App selects each primary page and preserves unknown-path fallback", async 
     module = await loadApp();
     text = textOf(module.default());
     assert.match(text, /SUPERVISOR PAGE/);
+
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/account-status" } };
+    module = await loadApp();
+    text = textOf(module.default());
+    assert.match(text, /ACCOUNT STATUS PAGE/);
 
     globalThis.__appState = undefined;
     globalThis.window = { location: { pathname: "/unknown" } };

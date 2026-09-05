@@ -11,6 +11,7 @@ const AI_ADVISOR_PATH = "/ai-advisor";
 const MONEY_MANAGEMENT_PATH = "/money-management";
 const MARKET_RECORDER_PATH = "/market-recorder";
 const SUPERVISOR_PATH = "/supervisor";
+const ACCOUNT_STATUS_PATH = "/account-status";
 
 const APP_PATHS = new Set([
     DASHBOARD_PATH,
@@ -19,6 +20,7 @@ const APP_PATHS = new Set([
     MONEY_MANAGEMENT_PATH,
     MARKET_RECORDER_PATH,
     SUPERVISOR_PATH,
+    ACCOUNT_STATUS_PATH,
 ]);
 
 const resolveAppPath = (pathname) => (
@@ -32,6 +34,7 @@ const NAVIGATION_ITEMS = [
     { label: "MONEY MANAGEMENT", path: MONEY_MANAGEMENT_PATH },
     { label: "MARKET RECORDER", path: MARKET_RECORDER_PATH },
     { label: "SUPERVISOR", path: SUPERVISOR_PATH },
+    { label: "ACCOUNT STATUS", path: ACCOUNT_STATUS_PATH },
 ];
 
 export function NavigationTabs({
