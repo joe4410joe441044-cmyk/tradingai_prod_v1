@@ -2899,7 +2899,7 @@ replace the legacy scaled three-column layout.
 
 .dashboard-layout > .center-column .center-terminal-panel {
     height: auto;
-    min-height: 280px;
+    min-height: 0;
 }
 
 .account-runtime-overview {
@@ -4344,7 +4344,7 @@ PHASE5 C5 - DASHBOARD VISUAL POLISH
 
     .center-terminal-panel {
         height: auto;
-        min-height: 280px;
+        min-height: 0;
         overflow-x: hidden;
         overflow-y: visible;
     }

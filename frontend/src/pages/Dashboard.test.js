@@ -7,6 +7,11 @@ const dashboardSource = await readFile(
     "utf8",
 );
 
+const dashboardCss = await readFile(
+    new URL("../styles/dashboard.css", import.meta.url),
+    "utf8",
+);
+
 test("Dashboard no longer renders the detailed Account Status block", () => {
     assert.doesNotMatch(dashboardSource, /import AccountRuntimeOverview/);
     assert.doesNotMatch(dashboardSource, /variant="summary"/);
@@ -21,4 +26,15 @@ test("Dashboard preserves the runtime strip, operation, and runtime activity", (
     assert.match(dashboardSource, /<TradingDecisionCard/);
     assert.match(dashboardSource, /last-execution-activity/);
     assert.match(dashboardSource, /firstAvailable/);
+});
+
+test("Dashboard no longer reserves the removed Account Status height", () => {
+    assert.doesNotMatch(
+        dashboardCss,
+        /center-terminal-panel[^{;]*\{[^}]*min-height:\s*280px/,
+    );
+    assert.match(
+        dashboardCss,
+        /center-terminal-panel[^{;]*\{[^}]*min-height:\s*0/,
+    );
 });
