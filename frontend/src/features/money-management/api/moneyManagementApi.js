@@ -1,6 +1,11 @@
 import { API } from "../../../api/index.js";
 
 import {
+  CSRF_TOKEN_HEADER,
+  readCsrfToken,
+} from "../../auth/operatorAuth.js";
+
+import {
   MONEY_MANAGEMENT_ERROR_CODE,
   MoneyManagementDataError,
   fromHttpError,
@@ -8,6 +13,8 @@ import {
 } from "../utils/moneyManagementErrors.js";
 
 const DEFAULT_TIMEOUT_MS = 10000;
+
+const SAFE_METHODS = Object.freeze(new Set(["GET", "HEAD", "OPTIONS"]));
 
 function safeBackendErrorBody(text) {
   if (typeof text !== "string" || text.length === 0 || text.length > 8192) {
@@ -75,11 +82,13 @@ async function requestJson(url, {
   }
   const requestSignal = createRequestSignal(signal, timeoutMs);
   try {
+    const csrfToken = SAFE_METHODS.has(method) ? null : readCsrfToken();
     const response = await fetchImpl(url, {
       method,
       headers: {
         Accept: "application/json",
         ...(payload === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(csrfToken ? { [CSRF_TOKEN_HEADER]: csrfToken } : {}),
       },
       body: payload === undefined ? undefined : JSON.stringify(payload),
       signal: requestSignal.signal,

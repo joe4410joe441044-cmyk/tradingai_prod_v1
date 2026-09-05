@@ -2,8 +2,10 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+
+from backend.auth.dependencies import require_operator_session
 
 from backend.money_management.loss_http_api import (
     APPLICATION_STATE_ATTRIBUTE,
@@ -131,7 +133,10 @@ def get_money_management_configuration(request: Request):
 
 
 @router.put("/configuration")
-async def update_money_management_configuration(request: Request):
+async def update_money_management_configuration(
+    request: Request,
+    _operator: str = Depends(require_operator_session),
+):
     boundary = _boundary(request)
     if boundary is None:
         return _safe_error(

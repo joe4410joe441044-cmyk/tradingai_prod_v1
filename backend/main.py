@@ -654,6 +654,7 @@ if _auth_configured:
         "/api/bot/live-auto/start",
         "/api/bot/live-auto/stop",
         "/api/bot/paper-account/capital",
+        "/api/money-management/configuration",
         "/api/governance/mode",
         "/api/governance/execution",
         "/api/governance/risk-profile",

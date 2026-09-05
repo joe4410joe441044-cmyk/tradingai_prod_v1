@@ -184,3 +184,26 @@ test("network, timeout, and caller abort are distinct", async () => {
   controller.abort();
   await assert.rejects(pending, { code: "ABORTED" });
 });
+
+test("mutation requests attach the operator CSRF header; safe methods omit it", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push(options);
+    if (options.method === "PUT") return response(validUpdateResponse());
+    return response(validConfiguration());
+  };
+  globalThis.document = { cookie: "tradingai_csrf=csrf-abc123; other=x" };
+  try {
+    await updateMoneyManagementConfiguration(
+      { enabled: true, expectedRevision: 1 },
+      { fetchImpl, timeoutMs: null },
+    );
+    await requestMoneyManagementRecovery({ fetchImpl, timeoutMs: null });
+    await getMoneyManagementConfiguration({ fetchImpl, timeoutMs: null });
+    assert.equal(calls[0].headers["X-TradingAI-CSRF"], "csrf-abc123");
+    assert.equal(calls[1].headers["X-TradingAI-CSRF"], "csrf-abc123");
+    assert.equal(calls[2].headers["X-TradingAI-CSRF"], undefined);
+  } finally {
+    delete globalThis.document;
+  }
+});
