@@ -6,6 +6,7 @@ from typing import Iterable, Tuple
 from pydantic import ValidationError
 
 from backend.ai_advisor.context_builder import sanitize_text
+from backend.ai_advisor.historical_trace_evidence import historical_trace_lines
 from backend.ai_advisor.conversation_models import (
     AdvisorContextEnvelope,
     AdvisorFreshnessState,
@@ -40,6 +41,7 @@ _SECTION_ORDER = (
     AdvisorPromptSectionType.SOURCE_POLICY,
     AdvisorPromptSectionType.RUNTIME_CONTEXT,
     AdvisorPromptSectionType.SPECIFICATION_REFERENCE,
+    AdvisorPromptSectionType.HISTORICAL_EVIDENCE,
     AdvisorPromptSectionType.CONVERSATION_CONTEXT,
     AdvisorPromptSectionType.CURRENT_REQUEST,
 )
@@ -293,6 +295,31 @@ def _conversation_section(
     )
 
 
+def _history_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
+    """Render bounded HISTORICAL EVIDENCE distinctly from CURRENT RUNTIME.
+
+    Historical trace evidence is reference-only.  It is labelled explicitly so
+    it can never be mistaken for current runtime state.
+    """
+    evidence = context.traceEvidence
+    if evidence is None or evidence.is_empty:
+        return _section(
+            AdvisorPromptSectionType.HISTORICAL_EVIDENCE,
+            "Historical Trace Evidence (reference-only, not current state)",
+            "classification=HISTORICAL EVIDENCE\nstatus=NOT_AVAILABLE",
+            authority=AdvisorSourceAuthority.APPROVED_DERIVED,
+            freshness=AdvisorFreshnessState.LAST_GOOD,
+        )
+    content = _lines(historical_trace_lines(evidence))
+    return _section(
+        AdvisorPromptSectionType.HISTORICAL_EVIDENCE,
+        "Historical Trace Evidence (reference-only, not current state)",
+        content,
+        authority=AdvisorSourceAuthority.APPROVED_DERIVED,
+        freshness=AdvisorFreshnessState.LAST_GOOD,
+    )
+
+
 def build_advisor_prompt(
     *,
     request: AdvisorRequest,
@@ -345,6 +372,7 @@ def build_advisor_prompt(
         ),
         _runtime_section(context),
         _specification_section(context),
+        _history_section(context),
         _conversation_section(context, request.messageId),
         _section(
             AdvisorPromptSectionType.CURRENT_REQUEST,

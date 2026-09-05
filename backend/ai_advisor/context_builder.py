@@ -6,6 +6,8 @@ from typing import Annotated, Literal, Optional, Tuple
 
 from pydantic import ConfigDict, Field
 
+from backend.ai_advisor.historical_trace_evidence import AdvisorTraceEvidence
+
 from backend.ai_advisor.conversation_models import (
     AdvisorAuthorityContext,
     AdvisorCapability,
@@ -439,6 +441,7 @@ def build_advisor_context(
     money_management_sources: Tuple[SummarySourceInput, ...] = (),
     conversation_history: Tuple[AdvisorConversationMessage, ...] = (),
     current_message: Optional[AdvisorConversationMessage] = None,
+    trace_evidence: Optional[AdvisorTraceEvidence] = None,
 ) -> AdvisorContextEnvelope:
     """Build one validated envelope without accessing any external system."""
 
@@ -519,6 +522,7 @@ def build_advisor_context(
             sorted(knowledge_excerpts, key=lambda item: item.sourceId)
         ),
         conversationHistory=list(conversation),
+        traceEvidence=trace_evidence,
         warnings=sorted(set(warnings), key=lambda item: item.value),
         sensitivity=SensitiveClassification.INTERNAL,
     )

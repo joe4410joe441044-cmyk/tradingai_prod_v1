@@ -149,6 +149,7 @@ class AdvisorService:
                 money_management_sources=context_input.moneyManagementSources,
                 conversation_history=context_input.conversationHistory,
                 current_message=context_input.currentMessage,
+                trace_evidence=context_input.traceEvidence,
             )
             if context != request.contextEnvelope:
                 raise ValueError

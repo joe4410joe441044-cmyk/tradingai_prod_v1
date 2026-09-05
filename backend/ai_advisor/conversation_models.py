@@ -16,6 +16,10 @@ from pydantic import (
 )
 
 from backend.ai_advisor.models import AdvisorErrorDetail, AdvisorExecutionEntryState
+from backend.ai_advisor.historical_trace_evidence import (
+    AdvisorTraceEvidence,
+    MAX_TRACE_EVIDENCE_TRACES,
+)
 
 SCHEMA_VERSION = "1.0"
 MAX_USER_MESSAGE_LENGTH = 8_000
@@ -640,6 +644,7 @@ class AdvisorContextEnvelope(AdvisorContractModel):
             strict=False,
         ),
     ]
+    traceEvidence: Optional[AdvisorTraceEvidence] = None
     warnings: Annotated[
         Tuple[AdvisorWarningCode, ...],
         Field(default_factory=tuple, max_length=MAX_WARNINGS, strict=False),
@@ -699,6 +704,11 @@ class AdvisorContextEnvelope(AdvisorContractModel):
             and self.runtimeContext.sourceId not in known_sources
         ):
             raise ValueError("runtimeContext has unknown source reference")
+        if (
+            self.traceEvidence is not None
+            and len(self.traceEvidence.traces) > MAX_TRACE_EVIDENCE_TRACES
+        ):
+            raise ValueError("trace evidence exceeds trace budget")
         return self
 
 
