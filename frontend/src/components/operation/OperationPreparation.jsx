@@ -372,6 +372,31 @@ export default function OperationPreparation({
         || Boolean(mmConflict)
         || Boolean(mmConfigurationError);
 
+    // WF-1: explicit block-reason + corrective guidance (pre-start only).
+    const blockGuidance = (() => {
+        if (botRunning || startReadiness === "READY") return null;
+        const rules = [
+            ["Emergency（緊急停止）", emergencyReadiness, "must be READY before START"],
+            ["Position（ポジション）", positionState, "must be FLAT before START"],
+            ["Pending Order Authority（保留注文）", orderAuthority, "must be SAFE (no pending order)"],
+            ["Market Selection（市場選択）", selectionReadiness, "select a MANUAL symbol or ensure the AUTO candidate is ready"],
+            ["MM START CONFIG（開始設定）", startMmReadiness, "save a valid MM risk / max-drawdown configuration"],
+            ["Execution（執行）", executionReadiness, "execution / real-order authority must be disabled before START"],
+            ["Leverage Authority（レバレッジ権限）", leverageReadiness, "set requested leverage <= MM maximum leverage"],
+            ["Governance（ガバナンス）", governanceReadiness, "must be READY before START"],
+        ];
+        return rules.filter(
+            ([, value]) => !["READY", "SAFE", "FLAT", "NOT_RELEVANT"].includes(String(value)),
+        );
+    })();
+
+    // WF-2: while RUNNING, pre-start readiness gates are N/A, not a fault.
+    const runningStartReadiness = botRunning ? "N/A — BOT RUNNING" : startReadiness;
+    const runningEntryReadiness = botRunning ? "ACTIVE" : entryReadiness;
+    const runningExecutionReadiness = (
+        botRunning && executionEnabled ? "ACTIVE" : executionReadiness
+    );
+
     {botRunning && <div className="operation-prep-running-indicator" />}
 
     const loopValue = loopState ? String(loopState) : summary.loop;
@@ -659,7 +684,7 @@ return (
                             <DerivedRow label="MM START CONFIG（開始設定）" source="MM CONFIG" status value={startMmReadiness} />
                             <DerivedRow label="ENTRY PERMISSION（エントリー権限）" source={mmReadinessSource} status value={entryReadiness} />
                             <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
-                            <DerivedRow label="Execution（執行）" source="RUNTIME" status value={executionReadiness} />
+                            <DerivedRow label="Execution（執行）" source="RUNTIME" status value={runningExecutionReadiness} />
                             <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
                         </div>
                     </Section>
@@ -682,12 +707,25 @@ return (
                             <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} />
                             <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
                             <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="START READINESS" source="UI REVIEW" status value={startReadiness} />
-                            <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={entryReadiness} />
+                            <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
+                            <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
                         </div>
                         <div className="operation-prep-start" data-testid="ready-to-start">
-                            {botRunning ? null : (
+                            {botRunning ? (
+                                <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>BOT RUNNING — START READINESS N/A</strong></div>
+                            ) : null}
+                            {!botRunning && (
                                 <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
+                            )}
+                            {!botRunning && blockGuidance && (
+                                <div className="operation-prep-block-guidance" data-testid="block-guidance">
+                                    <span className="operation-prep-block-guidance__title">START BLOCKED — resolve the following:</span>
+                                    <ul>
+                                        {blockGuidance.map(([label, value, hint]) => (
+                                            <li key={label}><strong>{label}</strong>: {String(value)} — {hint}</li>
+                                        ))}
+                                    </ul>
+                                </div>
                             )}
                         </div>
                         {botRunning ? null : (
