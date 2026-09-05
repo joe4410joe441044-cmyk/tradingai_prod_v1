@@ -7,9 +7,11 @@
     justify-content: flex-start;
 }
 
-/* 顶部控制带: OPERATION | FINAL PREPARATION | EMERGENCY */
+/* 顶部控制带: FINAL PREPARATION | EMERGENCY */
 .operation-top-band {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "final emergency";
     align-items: stretch;
     gap: 16px;
     padding: 8px 0;
@@ -18,18 +20,9 @@
     min-width: 0;
 }
 
-.operation-title {
-    flex: 0 0 auto;
-    align-self: center;
-    min-width: 96px;
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: #66e3ff;
-}
-
 /* 紧急操作控件 */
 .operation-emergency-controls {
+    grid-area: emergency;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -404,12 +397,11 @@
     .operation-main-grid { grid-template-columns: 1fr; }
 }
 
-/* 顶部控制带响应式: 窄viewport时OPERATION/EMERGENCY单行, FINAL PREPARATION独占整行 */
+/* 顶部控制带响应式: 窄viewport时EMERGENCY单行, FINAL PREPARATION独占整行 */
 @media (max-width: 1199px) {
-    .operation-top-band { flex-wrap: wrap; }
-    .operation-top-band > .operation-title { flex: 1 1 auto; min-width: 0; }
-    .operation-top-band > .operation-prep-final--top { order: 3; flex: 1 1 100%; }
-    .operation-top-band > .operation-emergency-controls { justify-content: flex-end; }
+    .operation-top-band { grid-template-columns: 1fr; grid-template-areas: "emergency" "final"; }
+    .operation-top-band > .operation-emergency-controls { grid-area: emergency; justify-content: flex-end; }
+    .operation-top-band > .operation-prep-final--top { grid-area: final; }
 }
 
 /* =====================================================
@@ -436,6 +428,7 @@
 
 /* 顶部控制带内的FINAL PREPARATION: 横长compact(低背) */
 .operation-prep-final--top {
+    grid-area: final;
     flex: 1 1 auto;
     min-width: 0;
     margin-top: 0;
@@ -532,6 +525,131 @@
     width: 100%;
     height: 2px;
     background: rgba(86, 214, 154, .5);
+}
+
+/* START GUARDS: presentation-only aggregate over authoritative readiness. */
+.operation-prep-start-guards {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 6px;
+    border-top: 1px solid rgba(63, 212, 139, .2);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.operation-prep-start-guards__label {
+    color: #8d9bb0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+}
+
+.operation-prep-start-guards strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    letter-spacing: .04em;
+}
+
+.operation-prep-start-guards strong.operation-prep-status--ready,
+.operation-prep-start-guards strong.operation-prep-status--safe { color: #56d69a; }
+.operation-prep-start-guards strong.operation-prep-status--waiting,
+.operation-prep-start-guards strong.operation-prep-status--unknown { color: #e8b45f; }
+.operation-prep-start-guards strong.operation-prep-status--blocked,
+.operation-prep-start-guards strong.operation-prep-status--error { color: #ff7272; }
+.operation-prep-start-guards strong.operation-prep-status--na { color: #9badc6; }
+
+.operation-prep-start-guards__count {
+    color: #9badc6;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+/* Abnormal guidance: compact lines always visible outside collapsed details. */
+.operation-prep-abnormal {
+    display: grid;
+    gap: 3px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 115, 122, .3);
+    border-radius: 4px;
+    background: rgba(30, 8, 8, .45);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.operation-prep-abnormal__title {
+    color: #ff7272;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .05em;
+}
+
+.operation-prep-abnormal__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 9px;
+    line-height: 1.4;
+}
+
+.operation-prep-abnormal__row > span {
+    color: #9badc6;
+}
+
+.operation-prep-abnormal__row > strong {
+    color: #ff7272;
+}
+
+/* Collapsible SAFETY / READINESS DETAILS. */
+.operation-prep-details {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+
+.operation-prep-details__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    justify-self: start;
+    padding: 4px 8px;
+    border: 1px solid rgba(63, 212, 139, .35);
+    border-radius: 4px;
+    background: rgba(10, 28, 28, .5);
+    color: #66e3ff;
+    font: 800 10px "Consolas", monospace;
+    letter-spacing: .05em;
+    cursor: pointer;
+}
+
+.operation-prep-details__toggle:hover {
+    border-color: rgba(102, 227, 255, .6);
+}
+
+.operation-prep-details__toggle > span {
+    font-size: 9px;
+}
+
+.operation-prep-details__body {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid rgba(36, 49, 73, .55);
+    border-radius: 4px;
+    background: rgba(8, 14, 24, .5);
+    min-width: 0;
+}
+
+.operation-prep-details__body .operation-prep-derived-list--safety {
+    grid-template-columns: repeat(2, minmax(auto, 1fr));
+}
+
+.operation-prep-details__body .operation-prep-workflow {
+    margin-bottom: 0;
 }
 
 /* WF-1: operator workflow hint above the safety readiness list. */
@@ -656,6 +774,9 @@
     .operation-prep-derived-list {
         grid-template-columns: 1fr;
         gap: 0 8px;
+    }
+    .operation-prep-details__body .operation-prep-derived-list--safety {
+        grid-template-columns: 1fr;
     }
     .operation-prep-derived-row {
         grid-template-columns: minmax(0, 1fr) auto;

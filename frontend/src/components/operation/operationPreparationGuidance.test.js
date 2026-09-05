@@ -125,7 +125,7 @@ test("WF-1 coverage: each readiness dimension maps to the correct section", () =
         const guidance = deriveOperationBlockGuidance(readyContext(overrides));
         const item = guidance.find((entry) => entry.id === id);
         assert.ok(item, `${id} guidance present`);
-        assert.ok(item.section.startsWith("⑥"), `${id} uses safety section`);
+        assert.equal(item.section, "FINAL PREPARATION", `${id} consolidates into FINAL PREPARATION`);
         assert.ok(item.en.length > 0 && item.ja.length > 0 && item.fix.length > 0);
     }
 });

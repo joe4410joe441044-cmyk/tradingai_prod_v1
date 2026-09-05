@@ -59,10 +59,10 @@ export const deriveOperationBlockGuidance = ({
             status: emergencyReadiness,
             current: emergencyState,
             required: "READY",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Emergency stop authority must be READY before START.",
             ja: "緊急停止がREADYになるまでSTARTできません。",
-            fix: "⑥ Emergency を READY に戻す / Restore Emergency to READY",
+            fix: "FINAL PREPARATION で Emergency を READY に戻す / Restore Emergency to READY",
         });
     }
     if (!notBlocking(positionState)) {
@@ -72,10 +72,10 @@ export const deriveOperationBlockGuidance = ({
             status: positionState,
             current: position,
             required: "FLAT (no open position)",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Position must be FLAT before START.",
             ja: "ポジションはFLATである必要があります。",
-            fix: "⑥ ポジションをFLATにしてからSTART / Flatten the position before START",
+            fix: "FINAL PREPARATION で ポジションをFLATにしてからSTART / Flatten the position before START",
         });
     }
     if (!notBlocking(orderAuthority)) {
@@ -85,10 +85,10 @@ export const deriveOperationBlockGuidance = ({
             status: orderAuthority,
             current: pendingOrder,
             required: "SAFE (no pending order)",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Pending order authority must be SAFE (no pending order) before START.",
             ja: "保留注文がない状態(SAFE)である必要があります。",
-            fix: "⑥ 保留注文が解消されるまで待つ / Wait for pending orders to settle",
+            fix: "FINAL PREPARATION で 保留注文が解消されるまで待つ / Wait for pending orders to settle",
         });
     }
     if (!notBlocking(selectionReadiness)) {
@@ -146,10 +146,10 @@ export const deriveOperationBlockGuidance = ({
             status: mmEntryReadiness?.state,
             current: current(mmEntryReadiness?.label),
             required: "READY / ENTRY ALLOWED",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Entry permission is not allowed (runtime MM guard). Resolve the MM recovery/hold before START.",
             ja: "エントリー権限がありません。MMガードを解除してください。",
-            fix: "③/⑥ MM の hold/recovery を解消 / resolve MM recovery or hold",
+            fix: "③ MM の hold/recovery を解消 / resolve MM recovery or hold",
         });
     }
     if (!notBlocking(governanceReadiness)) {
@@ -159,10 +159,10 @@ export const deriveOperationBlockGuidance = ({
             status: governanceReadiness,
             current: governanceStatus,
             required: "READY / OK / ALLOWED",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Governance must be READY before START.",
             ja: "ガバナンスがREADYになるまでSTARTできません。",
-            fix: "⑥ Governance を READY にする / wait for Governance to be ready",
+            fix: "FINAL PREPARATION で Governance を READY にする / wait for Governance to be ready",
         });
     }
     if (!notBlocking(executionReadiness)) {
@@ -172,10 +172,10 @@ export const deriveOperationBlockGuidance = ({
             status: executionReadiness,
             current: `realOrder=${realOrderAllowed ? "ALLOWED" : "DISABLED"} execution=${executionEnabled ? "ENABLED" : "DISABLED"}`,
             required: "SAFE / DISABLED",
-            section: "⑥ SAFETY / START READINESS",
+            section: "FINAL PREPARATION",
             en: "Execution / real-order authority must be disabled before a fresh START.",
             ja: "実行/実注文権限が無効である必要があります。",
-            fix: "⑥ 実行権限を無効にしてからSTART / disable execution before START",
+            fix: "FINAL PREPARATION で 実行権限を無効にしてからSTART / disable execution before START",
         });
     }
     if (!notBlocking(leverageReadiness)) {

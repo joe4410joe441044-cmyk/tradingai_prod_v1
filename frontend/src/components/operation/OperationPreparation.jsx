@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
     OPERATION_PREPARATION_OPTIONS,
     createOperationPreparationSettings,
@@ -165,6 +167,7 @@ export default function OperationPreparation({
     handleReturnToNormal,
 }) {
     const settings = createOperationPreparationSettings(config);
+    const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
      const changeSetting = (key, value) => {
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
@@ -262,6 +265,7 @@ export default function OperationPreparation({
         reviewReadiness,
         startReadiness,
         entryReadiness,
+        readinessValues,
         selectionRuntime,
         selectedRuntimeSymbol,
         selectionReadiness,
@@ -449,12 +453,42 @@ export default function OperationPreparation({
     const autoTradeValue = botRunning ? autoTradeStateText : summary.autoTrade;
     const autoTradeStatus = botRunning ? autoTradeStateText.includes("ON") : false;
 
+    // START GUARDS: presentation-only aggregate over the authoritative
+    // readiness values. Never re-derives or overrides the fail-closed START
+    // gate — it only summarizes the existing model states.
+    const startGuardsCounts = (() => {
+        const states = readinessValues || [];
+        const ready = states.filter((value) => ["READY", "SAFE", "FLAT", "ACTIVE", "NOT_RELEVANT"].includes(value)).length;
+        const waiting = states.filter((value) => ["WAITING", "PENDING", "PROCESSING", "STARTING", "ON HOLD"].includes(value)).length;
+        const blocked = states.filter((value) => ["BLOCKED", "ERROR", "FAILED", "LOCKED", "UNAVAILABLE", "UNKNOWN"].includes(value)).length;
+        return { ready, waiting, blocked, total: states.length };
+    })();
+    const startGuardsState = reviewReadiness;
+    const startGuardsLabel = botRunning
+        ? "N/A — RUNNING"
+        : startGuardsState === "READY"
+            ? "READY"
+            : startGuardsState === "BLOCKED"
+                ? "BLOCKED"
+                : "WAITING";
+    const startGuardsTone = botRunning ? "na" : startGuardsLabel.toLowerCase();
+
+    const safetyDetailRows = [
+        { label: "Emergency（緊急停止）", source: "RUNTIME", value: emergencyReadiness },
+        { label: "Position（ポジション）", source: "RUNTIME", value: positionState },
+        { label: "Pending Order Authority（保留注文権限）", source: "RUNTIME", value: orderAuthority },
+        { label: "Market Selection（市場選択）", source: settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME", value: selectionReadiness },
+        { label: "MM START CONFIG（開始設定）", source: "MM CONFIG", value: startMmReadiness },
+        { label: "ENTRY PERMISSION（エントリー権限）", source: mmReadinessSource, value: runningEntryReadiness },
+        { label: "Governance（ガバナンス）", source: "RUNTIME", value: governanceReadiness },
+        { label: "Execution（執行）", source: "RUNTIME", value: runningExecutionReadiness },
+        { label: "Leverage Authority（レバレッジ権限）", source: "MM CONFIG", value: leverageReadiness },
+    ];
+
 return (
         <div className="operation-preparation" data-testid="operation-preparation">
-            {/* 顶部控制带：OPERATION | FINAL PREPARATION | EMERGENCY */}
+            {/* 顶部控制带：FINAL PREPARATION | EMERGENCY */}
             <div className="operation-top-band">
-                <div className="operation-title">OPERATION</div>
-
                 <section className="operation-prep-final operation-prep-final--top" data-testid="operation-preparation-summary">
                     <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
                     <div className="operation-prep-summary">
@@ -472,6 +506,62 @@ return (
                         <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
                         <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
                         <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
+                    </div>
+                    <div className="operation-prep-start-guards" data-testid="start-guards">
+                        <span className="operation-prep-start-guards__label">START GUARDS</span>
+                        <strong className={`operation-prep-status operation-prep-status--${startGuardsTone}`} data-testid="start-guards-state">
+                            <i aria-hidden="true" />
+                            {startGuardsLabel}
+                        </strong>
+                        {!botRunning && startGuardsLabel !== "READY" && (
+                            <span className="operation-prep-start-guards__count" data-testid="start-guards-count">
+                                {startGuardsCounts.ready} READY / {startGuardsCounts.waiting} WAITING / {startGuardsCounts.blocked} BLOCKED
+                            </span>
+                        )}
+                    </div>
+                    {blockGuidance && (
+                        <div className="operation-prep-abnormal" data-testid="abnormal-guidance">
+                            <span className="operation-prep-abnormal__title">START not ready（開始不可）</span>
+                            {blockGuidance.map((item) => (
+                                <div className="operation-prep-abnormal__row" data-testid={`abnormal-${item.id}`} key={item.id}>
+                                    <span>{item.label}</span>
+                                    <strong>{item.status}</strong>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="operation-prep-details" data-testid="safety-readiness-details">
+                        <button
+                            aria-expanded={safetyDetailsOpen}
+                            className="operation-prep-details__toggle"
+                            data-testid="safety-details-toggle"
+                            onClick={() => setSafetyDetailsOpen((open) => !open)}
+                            type="button"
+                        >
+                            <span aria-hidden="true">{safetyDetailsOpen ? "▲" : "▼"}</span>
+                            SAFETY / READINESS DETAILS
+                        </button>
+                        {safetyDetailsOpen && (
+                            <div className="operation-prep-details__body" data-testid="safety-readiness-details-body">
+                                <div className="operation-prep-derived-list operation-prep-derived-list--safety">
+                                    {safetyDetailRows.map((row) => (
+                                        <DerivedRow key={row.label} label={row.label} source={row.source} status value={row.value} />
+                                    ))}
+                                </div>
+                                {!botRunning && (
+                                    <div className="operation-prep-workflow" data-testid="operation-workflow">
+                                        <span className="operation-prep-workflow__title">WORKFLOW / 作業手順</span>
+                                        <span>①–⑤ CONFIGURE（構成）</span>
+                                        <span className="operation-prep-workflow__arrow">↓</span>
+                                        <span>FINAL PREPARATION VALIDATION（最終確認）</span>
+                                        <span className="operation-prep-workflow__arrow">↓</span>
+                                        <span>Resolve BLOCKED / WAITING items（BLOCKED/WAITINGの解消）</span>
+                                        <span className="operation-prep-workflow__arrow">↓</span>
+                                        <span>START when READY（READY時に開始）</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <div className="operation-prep-start" data-testid="ready-to-start">
                         {botRunning ? (
@@ -747,7 +837,7 @@ return (
                     </Section>
                 </div>
 
-                {/* 中列 */}
+                {/* 右列 */}
                 <div className="operation-column-center">
                     <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
                         <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
@@ -777,32 +867,6 @@ return (
                             </div>
                         )}
                         <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
-                    </Section>
-
-                    <Section number="6" testId="safety-readiness-section" title="SAFETY / START READINESS（安全性 / 開始準備）">
-                        {!botRunning && (
-                            <div className="operation-prep-workflow" data-testid="operation-workflow">
-                                <span className="operation-prep-workflow__title">WORKFLOW / 作業手順</span>
-                                <span>①–⑤ CONFIGURE（構成）</span>
-                                <span className="operation-prep-workflow__arrow">↓</span>
-                                <span>⑥ FINAL VALIDATION（最終確認）</span>
-                                <span className="operation-prep-workflow__arrow">↓</span>
-                                <span>Resolve BLOCKED / WAITING items（BLOCKED/WAITINGの解消）</span>
-                                <span className="operation-prep-workflow__arrow">↓</span>
-                                <span>START when READY（READY時に開始）</span>
-                            </div>
-                        )}
-                        <div className="operation-prep-derived-list operation-prep-derived-list--safety">
-                            <DerivedRow label="Emergency（緊急停止）" source="RUNTIME" status value={emergencyReadiness} />
-                            <DerivedRow label="Position（ポジション）" source="RUNTIME" status value={positionState} />
-                            <DerivedRow label="Pending Order Authority（保留注文権限）" source="RUNTIME" status value={orderAuthority} />
-                            <DerivedRow label="Market Selection（市場選択）" source={settings.selectionMode === "MANUAL" ? "OPERATOR" : "RUNTIME"} status value={selectionReadiness} />
-                            <DerivedRow label="MM START CONFIG（開始設定）" source="MM CONFIG" status value={startMmReadiness} />
-                            <DerivedRow label="ENTRY PERMISSION（エントリー権限）" source={mmReadinessSource} status value={runningEntryReadiness} />
-                            <DerivedRow label="Governance（ガバナンス）" source="RUNTIME" status value={governanceReadiness} />
-                            <DerivedRow label="Execution（執行）" source="RUNTIME" status value={runningExecutionReadiness} />
-                            <DerivedRow label="Leverage Authority（レバレッジ権限）" source="MM CONFIG" status value={leverageReadiness} />
-                        </div>
                     </Section>
                 </div>
             </div>

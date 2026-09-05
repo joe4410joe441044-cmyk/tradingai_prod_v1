@@ -268,6 +268,13 @@ const findTestId = (root, testId) => descendants(root).find(
     (node) => node.props?.["data-testid"] === testId,
 );
 
+const expandSafetyDetails = (renderer) => {
+    const toggle = findTestId(renderer.root, "safety-details-toggle");
+    assert.ok(toggle, "SAFETY / READINESS DETAILS toggle exists");
+    toggle.props.onClick();
+    renderer.render();
+};
+
 const mmDraft = (overrides = {}) => ({
     enabled: true,
     dailyWarningPercent: "1.00",
@@ -294,7 +301,7 @@ const mmConfig = (overrides = {}) => ({
     ...overrides,
 });
 
-test("renders all six preparation sections, controls, derived fields, and existing start slot", async () => {
+test("renders the five preparation sections, controls, derived fields, collapsible safety details, and existing start slot", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO", autoMarketState: "READY" },
@@ -312,10 +319,11 @@ test("renders all six preparation sections, controls, derived fields, and existi
         riskState: "NORMAL",
         children: { type: "button", props: { children: "START BOT" } },
     });
+    expandSafetyDetails(renderer);
     const content = normalizedText(descendants(renderer.root));
     [
         "TRADING MODE", "MARKET SELECTION", "MONEY MANAGEMENT",
-        "TRADE / EXECUTION", "AUTOMATION", "SAFETY / START READINESS",
+        "TRADE / EXECUTION", "AUTOMATION", "SAFETY / READINESS DETAILS",
         "START BOT",
     ].forEach((label) => assert.equal(content.includes(label), true, label));
     // Readiness is fail-closed: AUTO mode without a runtime-selected symbol
@@ -356,7 +364,6 @@ test("renders the approved sequential flow with Start Bot as the final preparati
         "money-management-section",
         "trade-execution-section",
         "automation-section",
-        "safety-readiness-section",
     ];
     const indexes = orderedTestIds.map((testId) => nodes.findIndex(
         (node) => node.props?.["data-testid"] === testId,
@@ -373,7 +380,7 @@ test("renders the approved sequential flow with Start Bot as the final preparati
     assert.equal(findTestId(renderer.root, "money-management-section").props.children != null, true);
 });
 
-test("DOM: FINAL PREPARATION sits between OPERATION and EMERGENCY in the top band and never in the lower grid", async () => {
+test("DOM: FINAL PREPARATION and EMERGENCY occupy the top band with no OPERATION label; lower grid keeps ①–⑤ and drops ⑥", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
@@ -395,24 +402,24 @@ test("DOM: FINAL PREPARATION sits between OPERATION and EMERGENCY in the top ban
     ].join(".");
 
     const topBand = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-top-band"));
-    assert.ok(topBand, "operation-top-band wraps the three top zones");
+    assert.ok(topBand, "operation-top-band wraps the top zones");
     const bandClasses = childrenOf(topBand).map((node) => descriptor(node).split(".")[1]);
-    assert.equal(bandClasses.length, 3, "top band has three zones: OPERATION | FINAL PREPARATION | EMERGENCY");
-    assert.equal(bandClasses.some((cls) => cls.includes("operation-title")), true, "top band contains OPERATION label");
+    assert.equal(bandClasses.length, 2, "top band has two zones: FINAL PREPARATION | EMERGENCY");
+    assert.equal(bandClasses.some((cls) => cls.includes("operation-title")), false, "top band must NOT contain the OPERATION label");
     assert.equal(bandClasses.some((cls) => cls.includes("operation-prep-final")), true, "top band contains FINAL PREPARATION");
     assert.equal(bandClasses.some((cls) => cls.includes("operation-emergency-controls")), true, "top band contains EMERGENCY controls");
-    const titleIdx = bandClasses.findIndex((cls) => cls.includes("operation-title"));
     const finalIdx = bandClasses.findIndex((cls) => cls.includes("operation-prep-final"));
     const emergIdx = bandClasses.findIndex((cls) => cls.includes("operation-emergency-controls"));
-    assert.ok(titleIdx >= 0 && finalIdx > titleIdx && emergIdx > finalIdx, "top band order = OPERATION | FINAL PREPARATION | EMERGENCY");
+    assert.ok(finalIdx >= 0 && emergIdx > finalIdx, "top band order = FINAL PREPARATION | EMERGENCY");
 
     const lowerColumns = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-main-grid"));
-    assert.ok(lowerColumns, "operation-main-grid wraps the ① – ⑥ lower sections");
+    assert.ok(lowerColumns, "operation-main-grid wraps the ① – ⑤ lower sections");
     const gridClasses = childrenOf(lowerColumns).map((node) => descriptor(node).split(".")[1]);
-    assert.equal(gridClasses.length, 2, "lower grid has exactly two columns (LEFT ①②③ + RIGHT ④⑤⑥)");
+    assert.equal(gridClasses.length, 2, "lower grid has exactly two columns (LEFT ①②③ + RIGHT ④⑤)");
     assert.equal(gridClasses.some((cls) => cls.includes("operation-column-left")), true, "lower grid LEFT column (① ② ③) present");
-    assert.equal(gridClasses.some((cls) => cls.includes("operation-column-center")), true, "lower grid RIGHT column (④ ⑤ ⑥) present");
+    assert.equal(gridClasses.some((cls) => cls.includes("operation-column-center")), true, "lower grid RIGHT column (④ ⑤) present");
     assert.equal(gridClasses.some((cls) => cls.includes("operation-prep-final")), false, "lower grid must NOT contain FINAL PREPARATION");
+    assert.equal(findTestId(renderer.root, "safety-readiness-section"), undefined, "independent ⑥ SAFETY / START READINESS card is removed");
     assert.equal(gridClasses.some((cls) => cls.includes("operation-column-right")), false, "lower grid must NOT contain an empty third / right column");
     assert.equal(descendants(lowerColumns).some((node) => String(node?.props?.className || "").includes("operation-prep-final")), false, "FINAL PREPARATION is not a descendant of the lower grid");
 });
@@ -491,7 +498,7 @@ assert.equal(descendants(renderer.root).some(
     ), true);
 });
 
-test("MM lifecycle RUNNING with entry not allowed stays non-ready in Section 6 and Final", async () => {
+test("MM lifecycle RUNNING with entry not allowed stays non-ready in details and Final", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "MANUAL" },
@@ -507,13 +514,14 @@ test("MM lifecycle RUNNING with entry not allowed stays non-ready in Section 6 a
         realOrderAllowed: false,
         children: { type: "button", props: { children: "START BOT" } },
     });
+    expandSafetyDetails(renderer);
     const section3 = normalizedText(descendants(findTestId(renderer.root, "money-management-section")));
-    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    const details = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-details")));
     const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
     assert.equal(section3.includes("MM RUNTIME"), true);
     assert.equal(section3.includes("RUNNING"), true);
     assert.equal(section3.includes("WAITING"), true);
-    assert.equal(section6.includes("ENTRY PERMISSION"), true);
+    assert.equal(details.includes("ENTRY PERMISSION"), true);
     assert.equal(readyToStart.includes("READY TO START"), false);
 });
 
@@ -533,13 +541,14 @@ test("MM entry allowed with all safety inputs ready renders READY TO START", asy
         realOrderAllowed: false,
         children: { type: "button", props: { children: "START BOT" } },
     });
-    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    expandSafetyDetails(renderer);
+    const details = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-details")));
     const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
-    assert.equal(section6.includes("READY"), true);
+    assert.equal(details.includes("READY"), true);
     assert.equal(readyToStart.includes("READY TO START"), true);
 });
 
-test("MM unavailable renders non-ready Section 6 and Final", async () => {
+test("MM unavailable renders non-ready details and Final", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "MANUAL" },
@@ -550,9 +559,10 @@ test("MM unavailable renders non-ready Section 6 and Final", async () => {
         realOrderAllowed: false,
         children: { type: "button", props: { children: "START BOT" } },
     });
-    const section6 = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-section")));
+    expandSafetyDetails(renderer);
+    const details = normalizedText(descendants(findTestId(renderer.root, "safety-readiness-details")));
     const readyToStart = normalizedText(findTestId(renderer.root, "ready-to-start"));
-    assert.equal(section6.includes("MM START CONFIG"), true);
+    assert.equal(details.includes("MM START CONFIG"), true);
     assert.equal(readyToStart.includes("READY TO START"), false);
 });
 
@@ -1041,4 +1051,128 @@ test("CASE 8: bot returns STOPPED resumes pre-start readiness presentation", asy
     // Back to STOPPED -> guidance resumes.
     renderer.render({ botRunning: false });
     assert.ok(findTestId(renderer.root, "block-guidance"));
+});
+
+// =========================
+// FINAL PREPARATION CONSOLIDATION
+// =========================
+
+const readyProps = (overrides = {}) => ({
+    config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+    emergencyState: "READY",
+    governanceStatus: "READY",
+    pendingOrder: false,
+    position: "FLAT",
+    realOrderAllowed: false,
+    executionEntryAllowed: true,
+    recommendedAction: "CONTINUE",
+    riskState: "NORMAL",
+    children: { type: "button", props: { children: "START BOT" } },
+    ...overrides,
+});
+
+test("OPERATION label is not rendered in the top band", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(findTestId(renderer.root, "operation-title"), undefined);
+    assert.equal(content.trim().startsWith("OPERATION"), false);
+    assert.equal(descendants(renderer.root).some(
+        (node) => String(node?.props?.className || "").includes("operation-title"),
+    ), false);
+});
+
+test("START GUARDS summary derives from authoritative readiness", async () => {
+    const Component = await loadComponent();
+    const readyRenderer = createRenderer(Component, readyProps());
+    const readyState = normalizedText(findTestId(readyRenderer.root, "start-guards"));
+    assert.equal(readyState.includes("START GUARDS"), true);
+    assert.equal(readyState.includes("READY"), true);
+    assert.equal(findTestId(readyRenderer.root, "start-guards-count"), undefined, "README state omits the count breakdown");
+
+    const blockedRenderer = createRenderer(Component, readyProps({
+        pendingOrder: true,
+        position: "LONG",
+        governanceStatus: "BLOCKED",
+    }));
+    const blockedState = normalizedText(findTestId(blockedRenderer.root, "start-guards"));
+    assert.equal(blockedState.includes("START GUARDS"), true);
+    assert.equal(blockedState.includes("BLOCKED"), true);
+    assert.ok(findTestId(blockedRenderer.root, "start-guards-count"));
+
+    // While RUNNING, START guards are not evaluated as a pre-start fault and
+    // render a neutral N/A (mirrors START READINESS).
+    const runningRenderer = createRenderer(Component, readyProps({
+        botRunning: true,
+        loopState: "RUNNING",
+        loopStateTone: true,
+        autoTradeStateText: "AUTO TRADE ON",
+    }));
+    const runningState = normalizedText(findTestId(runningRenderer.root, "start-guards"));
+    assert.equal(runningState.includes("N/A — RUNNING"), true);
+    assert.equal(findTestId(runningRenderer.root, "start-guards-count"), undefined);
+});
+
+test("SAFETY / READINESS DETAILS is collapsed by default and expands on toggle", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const toggle = findTestId(renderer.root, "safety-details-toggle");
+    assert.ok(toggle, "details toggle present");
+    assert.equal(toggle.props["aria-expanded"], false, "initial aria-expanded is false");
+    assert.equal(findTestId(renderer.root, "safety-readiness-details-body"), undefined, "details body not rendered while collapsed");
+    // Expanded body content (e.g. Enforcement) must not be in the collapsed DOM.
+    const collapsedContent = normalizedText(descendants(renderer.root));
+    assert.equal(collapsedContent.includes("Pending Order Authority（保留注文権限）"), false);
+
+    expandSafetyDetails(renderer);
+    assert.equal(findTestId(renderer.root, "safety-details-toggle").props["aria-expanded"], true, "toggled aria-expanded is true");
+    assert.ok(findTestId(renderer.root, "safety-readiness-details-body"), "details body rendered when expanded");
+    const expandedContent = normalizedText(descendants(renderer.root));
+    for (const label of [
+        "Emergency（緊急停止）",
+        "Position（ポジション）",
+        "Pending Order Authority（保留注文権限）",
+        "Market Selection（市場選択）",
+        "MM START CONFIG（開始設定）",
+        "ENTRY PERMISSION（エントリー権限）",
+        "Governance（ガバナンス）",
+        "Execution（執行）",
+        "Leverage Authority（レバレッジ権限）",
+    ]) {
+        assert.equal(expandedContent.includes(label), true, label);
+    }
+});
+
+test("critical BLOCKED / WAITING guidance stays visible while details are collapsed", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        pendingOrder: true,
+        position: "LONG",
+        governanceStatus: "BLOCKED",
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+    }));
+    // Details remain collapsed.
+    assert.equal(findTestId(renderer.root, "safety-details-toggle").props["aria-expanded"], false);
+    assert.ok(findTestId(renderer.root, "abnormal-guidance"), "abnormal guidance visible while collapsed");
+    const abnormal = normalizedText(findTestId(renderer.root, "abnormal-guidance"));
+    assert.equal(abnormal.includes("Pending Order Authority（保留注文権限）"), true, "Pending Order Authority non-ready exposed");
+    assert.equal(abnormal.includes("Governance（ガバナンス）"), true, "Governance blocked exposed");
+    assert.equal(abnormal.includes("Position（ポジション）"), true, "Position blocked exposed");
+    assert.equal(abnormal.includes("BLOCKED"), true, "BLOCKED status surfaced");
+});
+
+test("collapse state is presentation-only and does not affect the START slot or handlers", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    // START BOT is the children slot and remains rendered regardless of collapse.
+    assert.ok(findButton(renderer.root, "START BOT"), "START BOT present while collapsed");
+    expandSafetyDetails(renderer);
+    assert.ok(findButton(renderer.root, "START BOT"), "START BOT still present when expanded");
+    // The collapse state is local UI state and never appears in children props.
+    const startPair = descendants(renderer.root).find(
+        (node) => node.type === "button" && normalizedText(node) === "START BOT",
+    );
+    assert.ok(startPair);
 });
