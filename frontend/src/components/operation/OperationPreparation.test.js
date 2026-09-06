@@ -412,7 +412,16 @@ test("DOM: FINAL PREPARATION and EMERGENCY occupy the top band with no OPERATION
     const emergIdx = bandClasses.findIndex((cls) => cls.includes("operation-emergency-controls"));
     assert.ok(finalIdx >= 0 && emergIdx > finalIdx, "top band order = FINAL PREPARATION | EMERGENCY");
 
-    const lowerColumns = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-main-grid"));
+    const tradeSettings = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-trade-settings"));
+    assert.ok(tradeSettings, "TRADE SETTINGS disclosure wraps the ① – ⑤ lower sections");
+    assert.ok(findTestId(renderer.root, "trade-settings-toggle"), "TRADE SETTINGS toggle present");
+    assert.equal(findTestId(renderer.root, "trade-settings-toggle").props["aria-expanded"], false, "TRADE SETTINGS default collapsed");
+    assert.equal(
+        String(findTestId(renderer.root, "trade-settings-body")?.props?.className || "").includes("operation-trade-settings__body--collapsed"),
+        true,
+        "TRADE SETTINGS body class signals collapsed by default",
+    );
+    const lowerColumns = descendants(tradeSettings).find((node) => descriptor(node).includes("operation-main-grid"));
     assert.ok(lowerColumns, "operation-main-grid wraps the ① – ⑤ lower sections");
     const gridClasses = childrenOf(lowerColumns).map((node) => descriptor(node).split(".")[1]);
     assert.equal(gridClasses.length, 2, "lower grid has exactly two columns (LEFT ①②③ + RIGHT ④⑤)");
@@ -1269,4 +1278,124 @@ test("EMERGENCY stop button and LOCK state share the emergency block in button-f
     assert.notEqual(buttonNode.props.onClick, undefined);
     buttonNode.props.onClick();
     assert.equal(confirmed, 1);
+});
+
+/* =================================================
+   TRADE SETTINGS — collapsible disclosure (①–⑤)
+   Presentation-only wrapper around the detail cards.
+================================================= */
+
+const TRADE_SETTINGS_SECTIONS = [
+    "trading-mode-section",
+    "market-selection-section",
+    "money-management-section",
+    "trade-execution-section",
+    "automation-section",
+];
+
+test("TRADE SETTINGS header is present, labelled, and collapsed by default", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const toggle = findTestId(renderer.root, "trade-settings-toggle");
+    assert.ok(toggle, "TRADE SETTINGS toggle present");
+    assert.equal(toggle.type, "button", "TRADE SETTINGS header uses button semantics");
+    assert.equal(toggle.props["type"], "button", "TRADE SETTINGS header type=button");
+    assert.equal(toggle.props["aria-expanded"], false, "default aria-expanded is false");
+    assert.equal(toggle.props["aria-controls"], "trade-settings-body", "aria-controls targets the body");
+    const headerText = normalizedText(toggle);
+    assert.equal(headerText.includes("TRADE SETTINGS（取引設定）"), true, "header label TRADE SETTINGS（取引設定） present");
+    const body = findTestId(renderer.root, "trade-settings-body");
+    assert.ok(body, "TRADE SETTINGS body element present");
+    assert.equal(
+        String(body?.props?.className || "").includes("operation-trade-settings__body--collapsed"),
+        true,
+        "body carries the collapsed class by default",
+    );
+    // All five cards stay mounted even while collapsed (no unmount -> no reset).
+    for (const testId of TRADE_SETTINGS_SECTIONS) {
+        assert.ok(findTestId(renderer.root, testId), `${testId} stays mounted while collapsed`);
+    }
+    // FINAL PREPARATION summary remains visible alongside the collapsed header.
+    assert.ok(findTestId(renderer.root, "operation-preparation-summary"), "FINAL PREPARATION visible while collapsed");
+    assert.ok(findButton(renderer.root, "START BOT"), "START BOT visible while collapsed");
+});
+
+test("TRADE SETTINGS expands and re-collapses on header click", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const toggle = () => findTestId(renderer.root, "trade-settings-toggle");
+    const body = () => findTestId(renderer.root, "trade-settings-body");
+    const collapsed = () => String(body().props?.className || "").includes("operation-trade-settings__body--collapsed");
+
+    assert.equal(collapsed(), true, "starts collapsed");
+    toggle().props.onClick();
+    renderer.render();
+    assert.equal(toggle().props["aria-expanded"], true, "aria-expanded true after click");
+    assert.equal(collapsed(), false, "collapsed class removed when expanded");
+    assert.equal(normalizedText(toggle()).includes("▲"), true, "expanded indicator is ▲");
+    for (const testId of TRADE_SETTINGS_SECTIONS) {
+        assert.ok(findTestId(renderer.root, testId), `${testId} visible when expanded`);
+    }
+
+    toggle().props.onClick();
+    renderer.render();
+    assert.equal(toggle().props["aria-expanded"], false, "aria-expanded false after second click");
+    assert.equal(collapsed(), true, "collapsed class re-applied when re-collapsed");
+    assert.equal(normalizedText(toggle()).includes("▼"), true, "collapsed indicator is ▼");
+    // Cards remain mounted after re-collapse.
+    for (const testId of TRADE_SETTINGS_SECTIONS) {
+        assert.ok(findTestId(renderer.root, testId), `${testId} stays mounted after re-collapse`);
+    }
+});
+
+test("collapse/expand preserves a changed setting without resetting it", async () => {
+    const Component = await loadComponent();
+    const initial = readyProps();
+    const renderer = createRenderer(Component, initial);
+    const toggle = () => findTestId(renderer.root, "trade-settings-toggle");
+
+    // Expand, then change trading mode to LIVE.
+    toggle().props.onClick();
+    renderer.render();
+    const live = findButton(renderer.root, "LIVE");
+    assert.ok(live, "LIVE control present when expanded");
+    live.props.onClick();
+    renderer.render({ config: { ...initial.config, mode: "LIVE" } });
+    assert.equal(findButton(renderer.root, "LIVE").props["aria-pressed"], true, "LIVE selected after user change");
+
+    // Collapse, then reopen the TRADE SETTINGS disclosure.
+    toggle().props.onClick();
+    renderer.render();
+    assert.equal(toggle().props["aria-expanded"], false, "collapsed after close");
+    toggle().props.onClick();
+    renderer.render();
+    assert.equal(toggle().props["aria-expanded"], true, "reopened after collapse");
+
+    // The changed value survives the collapse toggle (cards were never unmounted).
+    assert.equal(findButton(renderer.root, "LIVE").props["aria-pressed"], true, "LIVE selection preserved after collapse toggle");
+});
+
+test("collapse/expand triggers no operational side effects", async () => {
+    const Component = await loadComponent();
+    const calls = { legacy: 0, save: 0, reset: 0, draft: 0 };
+    const renderer = createRenderer(Component, readyProps({
+        onLegacyConfigChange: () => { calls.legacy += 1; },
+        onMmSave: () => { calls.save += 1; },
+        onMmReset: () => { calls.reset += 1; },
+        onMmDraftChange: () => { calls.draft += 1; },
+    }));
+    const toggle = () => findTestId(renderer.root, "trade-settings-toggle");
+
+    toggle().props.onClick();
+    renderer.render();
+    toggle().props.onClick();
+    renderer.render();
+    toggle().props.onClick();
+    renderer.render();
+    toggle().props.onClick();
+    renderer.render();
+
+    assert.deepEqual(calls, { legacy: 0, save: 0, reset: 0, draft: 0 }, "collapse/expand must not call settings/save/reset handlers");
+    assert.ok(findButton(renderer.root, "START BOT"), "START BOT slot unaffected by collapse/expand");
+    assert.ok(findTestId(renderer.root, "operation-preparation-summary"), "FINAL PREPARATION unaffected by collapse/expand");
 });

@@ -7,6 +7,62 @@
     justify-content: flex-start;
 }
 
+/* TRADE SETTINGS — parent collapsible disclosure wrapping the ①–⑤ detail cards.
+   Presentation-only: collapse toggles a single title row; the body (and therefore
+   every mounted input) is kept in the DOM, so no setting value is ever reset. */
+.operation-trade-settings {
+    width: 100%;
+    min-width: 0;
+}
+
+.operation-trade-settings__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 8px 12px;
+    border: 1px solid #2d405e;
+    border-radius: 6px;
+    background: #0b101a;
+    color: #dfe6f0;
+    font: 700 12px "Consolas", monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.operation-trade-settings__toggle:hover {
+    border-color: #3b4657;
+    color: #ffffff;
+}
+
+.operation-trade-settings__title {
+    color: #edf6ff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.operation-trade-settings__indicator {
+    color: #57b8ff;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.operation-trade-settings__body {
+    padding: 10px 0 2px;
+    min-width: 0;
+}
+
+.operation-trade-settings__body--collapsed {
+    display: none;
+}
+
 /* 顶部控制带: FINAL PREPARATION | EMERGENCY */
 .operation-top-band {
     display: grid;

@@ -167,6 +167,7 @@ export default function OperationPreparation({
     handleReturnToNormal,
 }) {
     const settings = createOperationPreparationSettings(config);
+    const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
      const changeSetting = (key, value) => {
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
@@ -764,8 +765,31 @@ return (
                 </div>
             )}
 
-            {/* 三列布局 */}
-            <div className="operation-main-grid">
+            {/* TRADE SETTINGS（取引設定）— collapsible disclosure wrapping the ①–⑤ detail cards.
+                Presentation-only: collapse/expand never resets or mutates any setting value. */}
+            <section className="operation-trade-settings" data-testid="trade-settings-disclosure">
+                <button
+                    aria-controls="trade-settings-body"
+                    aria-expanded={tradeSettingsOpen}
+                    className="operation-trade-settings__toggle"
+                    data-testid="trade-settings-toggle"
+                    onClick={() => setTradeSettingsOpen((open) => !open)}
+                    type="button"
+                >
+                    <span className="operation-trade-settings__title">TRADE SETTINGS（取引設定）</span>
+                    <span aria-hidden="true" className="operation-trade-settings__indicator">
+                        {tradeSettingsOpen ? "▲" : "▼"}
+                    </span>
+                </button>
+                <div
+                    className={
+                        "operation-trade-settings__body"
+                        + (tradeSettingsOpen ? "" : " operation-trade-settings__body--collapsed")
+                    }
+                    data-testid="trade-settings-body"
+                    id="trade-settings-body"
+                >
+                <div className="operation-main-grid">
                 {/* 左列 */}
                 <div className="operation-column-left">
                     <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
@@ -874,6 +898,8 @@ return (
                     </Section>
                 </div>
             </div>
+                </div>
+            </section>
         </div>
     );
 }
