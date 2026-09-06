@@ -2009,3 +2009,71 @@
     .market-intelligence .mi-toolbar__field select { font-size: 9px; }
     .market-intelligence .mi-toolbar__field > span { font-size: 8px; }
 }
+
+/* A1-MI-UIP-1 priority reorganization: AUTO MARKET SELECTION moves to primary-right,
+   AI INTELLIGENCE moves to secondary, and replay features collapse under REPLAY / INVESTIGATION. */
+.market-intelligence .mi-workspace__secondary,
+.market-intelligence .mi-workspace__investigation {
+    min-width: 0;
+}
+
+.market-intelligence .mi-workspace__investigation {
+    margin-top: 0;
+}
+
+.market-intelligence .mi-workspace__right .ams-card {
+    margin-top: 0;
+}
+
+.market-intelligence .mi-replay-investigation {
+    min-width: 0;
+    border: 1px solid var(--mi-border);
+    border-radius: 8px;
+    background: var(--mi-surface);
+}
+
+.market-intelligence .mi-replay-investigation__header,
+.market-intelligence .mi-replay-investigation__toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.market-intelligence .mi-replay-investigation__header {
+    padding: 8px 10px;
+}
+
+.market-intelligence .mi-replay-investigation__toggle {
+    width: 100%;
+    min-height: 34px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--mi-text);
+    text-align: left;
+    cursor: pointer;
+    font: 500 10px/1 var(--mi-font-ui);
+}
+
+.market-intelligence .mi-replay-investigation__toggle:focus-visible {
+    outline: 2px solid var(--mi-focus);
+    outline-offset: 2px;
+}
+
+.market-intelligence .mi-replay-investigation__disclosure-icon {
+    color: var(--mi-accent);
+    font-size: 12px;
+}
+
+.market-intelligence .mi-replay-investigation__title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+}
+
+.market-intelligence .mi-replay-investigation__content {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--mi-border);
+}
