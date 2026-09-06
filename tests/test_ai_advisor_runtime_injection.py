@@ -42,6 +42,12 @@ from backend.ai_advisor.runtime_reader import (
     read_runtime_scalars,
 )
 from backend.ai_advisor.service import build_runtime_response
+from backend.money_management.capital_eligibility import CapitalEligibilityContract
+from backend.money_management.loss_http_api import (
+    MoneyManagementConfigurationResponse,
+    MoneyManagementMetricsResponse,
+    MoneyManagementStatusResponse,
+)
 
 NOW = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
 NOW_EPOCH = NOW.timestamp()
@@ -365,35 +371,129 @@ class ReadOnlyAssemblyTest(unittest.TestCase):
         manager.stop.assert_not_called()
 
 
+def real_config_response():
+    return MoneyManagementConfigurationResponse(
+        available=True,
+        enabled=True,
+        daily_warning_percent=Decimal("0"),
+        daily_block_percent=Decimal("0"),
+        weekly_warning_percent=Decimal("0"),
+        weekly_block_percent=Decimal("0"),
+        monthly_warning_percent=Decimal("0"),
+        monthly_block_percent=Decimal("0"),
+        maximum_drawdown_percent=Decimal("0"),
+        total_exposure_percent=Decimal("20"),
+        risk_per_trade_percent=Decimal("1"),
+        maximum_position_notional=Decimal("1.583673932"),
+        single_symbol_exposure_percent=Decimal("20"),
+        maximum_leverage=Decimal("1"),
+        compounding_enabled=False,
+        revision=1,
+        source="test",
+        updated_at=NOW,
+    )
+
+
+def real_authoritative_capital():
+    """Authoritative current-main ``CapitalEligibilityContract`` (Production-like)."""
+    return CapitalEligibilityContract(
+        capital_authority="MONEY_MANAGEMENT",
+        equity=Decimal("7.91836966"),
+        available_capital=Decimal("7.91836966"),
+        mm_mode="MANUAL",
+        mm_regime="CAPITAL_PROTECTION_STANDARD",
+        risk_budget=Decimal("5.00"),
+        max_position_notional=Decimal("1.583673932"),
+        total_exposure_percent=Decimal("20"),
+        max_total_exposure=Decimal("1.583673932"),
+        remaining_exposure=Decimal("1.583673932"),
+        theoretical_max_concurrent_positions=1,
+        executable_max_concurrent_positions=1,
+        remaining_position_capacity=1,
+        ruin_guard_status="UNAVAILABLE",
+        compounding_enabled=False,
+        policy_version="v1",
+        evaluated_at=NOW,
+        authority_fresh=True,
+        execution_entry_allowed=True,
+        capital_source="REAL_LIVE_ACCOUNT",
+        input_authority="REAL_LIVE_ACCOUNT",
+    )
+
+
+def real_stale_paper_metrics():
+    """Stale fallback metrics that must NEVER override authoritative capital."""
+    return MoneyManagementMetricsResponse(
+        status="AVAILABLE",
+        equity=Decimal("100.0"),
+        available_capital=Decimal("100.0"),
+        peak_equity=None,
+        drawdown_amount=None,
+        drawdown_percent=None,
+        daily_pnl=None,
+        weekly_pnl=None,
+        monthly_pnl=None,
+        daily_trade_count=None,
+        weekly_trade_count=None,
+        monthly_trade_count=None,
+        open_exposure=Decimal("99.0"),
+        exposure_limit=None,
+        total_exposure_percent=None,
+        max_total_exposure_amount=None,
+        remaining_exposure_amount=None,
+        exposure_utilization=None,
+        open_position_state="UNKNOWN",
+        risk_utilization=None,
+        risk_limit_amount=None,
+        current_risk_amount=None,
+        reserved_risk_amount=None,
+        risk_budget_remaining=Decimal("0.5"),
+        recommended_position_notional=None,
+        recommended_position_quantity=None,
+        generated_at=NOW,
+    )
+
+
+def real_mm_projection(*, capital=None, metrics=None):
+    """Construct a REAL ``MoneyManagementStatusResponse`` (no ``.capital``)."""
+    return MoneyManagementStatusResponse(
+        available=True,
+        enabled=True,
+        lifecycle_state="STOPPED",
+        risk_state="CAPITAL_PROTECTION_STANDARD",
+        recommended_action="HOLD",
+        execution_entry_allowed=False,
+        warning_reasons=(),
+        hold_reasons=(),
+        block_reasons=(),
+        diagnostic_reasons=(),
+        metrics_status="AVAILABLE",
+        projection_status="AVAILABLE",
+        recovery_required=False,
+        safe_reason=None,
+        generated_at=NOW,
+        revision=1,
+        sequence=1,
+        configuration_revision=1,
+        metrics=metrics or real_stale_paper_metrics(),
+        configuration=real_config_response(),
+        capital_eligibility=capital or real_authoritative_capital(),
+        cash_flow_authority=None,
+    )
+
+
+def real_mm_boundary(*, capital=None, metrics=None):
+    """A boundary whose ``get_status`` yields the real projection shape."""
+    projection = real_mm_projection(capital=capital, metrics=metrics)
+    return SimpleNamespace(get_status=lambda: projection)
+
+
 class MmSourceProjectionTest(unittest.TestCase):
     def test_reads_mm_facts_from_existing_projection_without_recalculating(self):
-        capital = SimpleNamespace(
-            mm_regime="CAPITAL_PROTECTION_STANDARD",
-            equity=Decimal("7.918"),
-            available_capital=Decimal("7.918"),
-            risk_budget=Decimal("7.50"),
-            remaining_exposure=Decimal("1.583"),
-            executable_max_concurrent_positions=1,
-            remaining_position_capacity=1,
-            ruin_guard_status="SIMULATION_MODE",
-            compounding_enabled=False,
-            authority_fresh=True,
-            evaluated_at=NOW,
-        )
-        metrics = SimpleNamespace(
-            equity=Decimal("7.918"),
-            available_capital=Decimal("7.918"),
-            open_exposure=Decimal("0.0"),
-            risk_budget_remaining=Decimal("7.50"),
-            drawdown_percent=None,
-            generated_at=NOW,
-        )
+        capital = real_authoritative_capital()
+        metrics = real_stale_paper_metrics()
         boundary = SimpleNamespace(
-            get_status=lambda: SimpleNamespace(
-                capital=capital,
-                metrics=metrics,
-                generated_at=NOW,
-            )
+            get_status=lambda: real_mm_projection(capital=capital, metrics=metrics)
         )
         manager = SimpleNamespace(
             _running=False,
@@ -420,14 +520,130 @@ class MmSourceProjectionTest(unittest.TestCase):
             snapshot = read_runtime_scalars(mm_boundary_provider=lambda: boundary)
 
         self.assertEqual(snapshot.mm_regime, "CAPITAL_PROTECTION_STANDARD")
-        self.assertEqual(snapshot.mm_equity, 7.918)
-        self.assertEqual(snapshot.mm_available_capital, 7.918)
-        self.assertEqual(snapshot.mm_exposure, 0.0)
-        self.assertEqual(snapshot.mm_remaining_exposure, 1.583)
+        self.assertEqual(snapshot.mm_equity, 7.91836966)
+        self.assertEqual(snapshot.mm_available_capital, 7.91836966)
+        self.assertEqual(snapshot.mm_exposure, 99.0)
+        self.assertEqual(snapshot.mm_remaining_exposure, 1.583673932)
         self.assertEqual(snapshot.mm_position_capacity, 1)
         self.assertEqual(snapshot.mm_remaining_position_capacity, 1)
-        self.assertEqual(snapshot.mm_risk_budget, 7.50)
+        self.assertEqual(snapshot.mm_risk_budget, 5.0)
+        self.assertEqual(snapshot.mm_ruin_guard_status, "UNAVAILABLE")
+        self.assertIs(snapshot.mm_compounding_enabled, False)
+        self.assertIs(snapshot.mm_authority_fresh, True)
         self.assertEqual(snapshot.market_ready, False)
+
+
+class RealMmProjectionRegressionTest(unittest.TestCase):
+    """Proves the Advisor reads the REAL current-main MM projection shape."""
+
+    def test_real_projection_shape_has_no_capital_compatibility_attribute(self):
+        projection = real_mm_projection()
+
+        self.assertFalse(hasattr(projection, "capital"))
+        self.assertTrue(hasattr(projection, "capital_eligibility"))
+        self.assertIsInstance(projection.capital_eligibility, CapitalEligibilityContract)
+        self.assertIsInstance(projection.metrics, MoneyManagementMetricsResponse)
+
+    def test_authoritative_capital_values_win_over_stale_paper_metrics(self):
+        boundary = real_mm_boundary(
+            capital=real_authoritative_capital(),
+            metrics=real_stale_paper_metrics(),
+        )
+        manager = SimpleNamespace(
+            _running=True,
+            lifecycle_state="RUNNING",
+            config={"mode": "paper", "dry_run": True},
+            exchange_name="kucoin",
+            symbol="BTCUSDT",
+            market_ready=True,
+            active_symbol="FTMUSDT",
+            exchange_client_ready=False,
+            exchange_auth_ready=False,
+            balance_check_ok=False,
+            position_check_ok=False,
+            pending_order=False,
+            state=SimpleNamespace(
+                runtime_metrics={"last_bot_update": NOW_EPOCH - 1},
+                position_state="FLAT",
+            ),
+        )
+        with patch(
+            "backend.ai_advisor.runtime_reader.get_existing_bot_manager",
+            return_value=manager,
+        ):
+            snapshot = read_runtime_scalars(mm_boundary_provider=lambda: boundary)
+
+        self.assertEqual(snapshot.mm_equity, 7.91836966)
+        self.assertEqual(snapshot.mm_available_capital, 7.91836966)
+        self.assertEqual(snapshot.mm_risk_budget, 5.0)
+        self.assertEqual(snapshot.mm_remaining_exposure, 1.583673932)
+
+        self.assertNotEqual(snapshot.mm_equity, 100.0)
+        self.assertNotEqual(snapshot.mm_available_capital, 100.0)
+        self.assertNotEqual(snapshot.mm_risk_budget, 0.5)
+
+    def test_exposure_semantics_remain_distinct(self):
+        with patch(
+            "backend.ai_advisor.runtime_reader.get_existing_bot_manager",
+            return_value=SimpleNamespace(
+                _running=False,
+                lifecycle_state="STOPPED",
+                config={"mode": "paper", "dry_run": True},
+                exchange_name="kucoin",
+                symbol="BTCUSDT",
+                market_ready=False,
+                active_symbol="BTCUSDT",
+                exchange_client_ready=False,
+                exchange_auth_ready=False,
+                balance_check_ok=False,
+                position_check_ok=False,
+                pending_order=False,
+                state=SimpleNamespace(
+                    runtime_metrics={"last_bot_update": NOW_EPOCH - 1},
+                    position_state="FLAT",
+                ),
+            ),
+        ):
+            snapshot = read_runtime_scalars(
+                mm_boundary_provider=lambda: real_mm_boundary()
+            )
+
+        self.assertNotEqual(snapshot.mm_exposure, snapshot.mm_remaining_exposure)
+        self.assertEqual(snapshot.mm_exposure, 99.0)
+        self.assertEqual(snapshot.mm_remaining_exposure, 1.583673932)
+
+    def test_mm_authority_does_not_contaminate_market_and_unknown_fails_closed(self):
+        manager = SimpleNamespace(
+            _running=False,
+            lifecycle_state="STOPPED",
+            config={"mode": "paper", "dry_run": True},
+            exchange_name="kucoin",
+            symbol="BTCUSDT",
+            market_ready=True,
+            active_symbol="FTMUSDT",
+            exchange_client_ready=False,
+            exchange_auth_ready=False,
+            balance_check_ok=False,
+            position_check_ok=False,
+            pending_order=False,
+            state=SimpleNamespace(
+                runtime_metrics={"last_bot_update": NOW_EPOCH - 1},
+                position_state="FLAT",
+            ),
+        )
+        with patch(
+            "backend.ai_advisor.runtime_reader.get_existing_bot_manager",
+            return_value=manager,
+        ):
+            snapshot = read_runtime_scalars(
+                mm_boundary_provider=lambda: real_mm_boundary()
+            )
+
+        self.assertEqual(snapshot.mm_regime, "CAPITAL_PROTECTION_STANDARD")
+        self.assertNotEqual(snapshot.mm_regime, "NORMAL")
+        self.assertEqual(snapshot.market_ready, True)
+        self.assertEqual(snapshot.market_symbol, "FTMUSDT")
+        self.assertIsNone(snapshot.mm_drawdown_percent)
 
 
 class SpecificationGroundingTest(unittest.TestCase):

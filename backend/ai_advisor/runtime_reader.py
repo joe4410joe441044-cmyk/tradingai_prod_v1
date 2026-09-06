@@ -227,14 +227,14 @@ def _read_mm_projection(
 def _mm_runtime_facts(projection: Any, warnings: list[str]) -> MmRuntimeFacts:
     """Reuse the existing MM status projection's capital + metrics verbatim.
 
-    ``capital`` is the authoritative ``CapitalEligibilityContract`` and
-    ``metrics`` is the authoritative ``MoneyManagementMetricsResponse`` already
-    produced by the MM boundary. No MM math is performed here.
+    ``capital_eligibility`` is the authoritative ``CapitalEligibilityContract``
+    and ``metrics`` is the authoritative ``MoneyManagementMetricsResponse``
+    already produced by the MM boundary. No MM math is performed here.
     """
     if projection is None:
         return MmRuntimeFacts()
 
-    capital = getattr(projection, "capital", None)
+    capital = getattr(projection, "capital_eligibility", None)
     metrics = getattr(projection, "metrics", None)
 
     capital_exposure = _finite_float(getattr(capital, "open_exposure", None))
