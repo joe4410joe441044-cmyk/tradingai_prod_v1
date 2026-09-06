@@ -51,6 +51,10 @@ from backend.ai_advisor.provider_failure_observation import (
     NoOpProviderFailureObservationSink,
     ProviderFailureObservationSink,
 )
+from backend.ai_advisor.semantic_validation_observation import (
+    NoOpSemanticValidationObservationSink,
+    SemanticValidationObservationSink,
+)
 from backend.ai_advisor.provider_models import (
     MAX_PROVIDER_OUTPUT_CHARACTERS,
     PROVIDER_CONFIG_VERSION,
@@ -170,6 +174,7 @@ def _provider_service(
     failure_observation_sink: ProviderFailureObservationSink,
     provider_interaction_policy: ProviderInteractionPolicy,
     response_safety_observation_sink: ResponseSafetyRejectionObservationSink,
+    semantic_validation_observation_sink: SemanticValidationObservationSink,
 ):
     connection = ProviderConnectionConfig(
         configVersion=PROVIDER_CONNECTION_CONFIG_VERSION,
@@ -268,6 +273,7 @@ def _provider_service(
             supportsFiles=False,
         ),
         failureObservationSink=failure_observation_sink,
+        semanticValidationObservationSink=semantic_validation_observation_sink,
         responseSafetyObservationSink=response_safety_observation_sink,
     )
 
@@ -290,6 +296,9 @@ def build_ai_advisor_production_composition(
     ),
     response_safety_observation_sink: ResponseSafetyRejectionObservationSink = (
         NoOpResponseSafetyRejectionObservationSink()
+    ),
+    semantic_validation_observation_sink: SemanticValidationObservationSink = (
+        NoOpSemanticValidationObservationSink()
     ),
     clock: Callable[[], float] = time.monotonic,
 ) -> ProductionCompositionResult:
@@ -375,6 +384,9 @@ def build_ai_advisor_production_composition(
                 provider_interaction_policy=provider_interaction_policy,
                 response_safety_observation_sink=(
                     response_safety_observation_sink
+                ),
+                semantic_validation_observation_sink=(
+                    semantic_validation_observation_sink
                 ),
             )
         except Exception:

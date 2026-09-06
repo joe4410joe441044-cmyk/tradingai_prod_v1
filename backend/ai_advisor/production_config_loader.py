@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
 from backend.ai_advisor.production_config_models import (
+    DEFAULT_LIVE_MAX_INPUT_BYTES,
+    DEFAULT_LIVE_MAX_INPUT_TOKENS,
     PRODUCTION_CONFIG_VERSION,
     AIAdvisorProductionConfig,
     ProductionConfigFailureCode,
@@ -149,10 +151,10 @@ def _build(
                 default=True,
             ),
             liveMaximumInputBytes=_optional_int(
-                values.get("liveMaximumInputBytes"), 16_384
+                values.get("liveMaximumInputBytes"), DEFAULT_LIVE_MAX_INPUT_BYTES
             ),
             liveMaximumInputTokens=_optional_int(
-                values.get("liveMaximumInputTokens"), 16_384
+                values.get("liveMaximumInputTokens"), DEFAULT_LIVE_MAX_INPUT_TOKENS
             ),
             liveMaximumOutputTokens=_optional_int(
                 values.get("liveMaximumOutputTokens"), 4096

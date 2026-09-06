@@ -37,6 +37,13 @@ from backend.ai_advisor.response_models import (
     AdvisorSafetyDisclosure,
 )
 from backend.ai_advisor.response_parser import parse_advisor_response
+from backend.ai_advisor.semantic_validation_observation import (
+    NoOpSemanticValidationObservationSink,
+    SemanticValidationObservationSink,
+    SemanticValidationPhase,
+    project_semantic_validation_exception,
+    safe_rule_identifier,
+)
 
 FORBIDDEN_CLAIM_PRIORITY = (
     AdvisorForbiddenClaim.SECRET_DISCLOSURE_CLAIM,
@@ -474,8 +481,18 @@ def validate_advisor_response_with_diagnostic(
     request: AdvisorRequest,
     context: AdvisorContextEnvelope,
     prompt_envelope: AdvisorPromptEnvelope,
+    semantic_validation_observation_sink: SemanticValidationObservationSink = (
+        NoOpSemanticValidationObservationSink()
+    ),
 ) -> AdvisorResponseValidationOutcome:
-    """Parse, compare, classify, and return a deterministic safe envelope."""
+    """Parse, compare, classify, and return a deterministic safe envelope.
+
+    Total, deterministic contract: for any syntactically valid
+    AdvisorResponseCandidate this returns either VALID, VALID_WITH_WARNINGS or
+    REJECTED. An unexpected exception in the semantic path is degraded to a
+    controlled REJECTED result and recorded on the observation sink rather than
+    leaking out as an unhandled exception.
+    """
 
     if not isinstance(raw_response, AdvisorRawResponse):
         raise TypeError("typed AdvisorRawResponse required")
@@ -509,177 +526,209 @@ def validate_advisor_response_with_diagnostic(
                 AdvisorResponseIntegrityField.RESPONSE_TEXT,
             ),
         )
-    claims = _detect_claims(candidate)
-    if _has_ungrounded_current_market_claim(candidate, context):
-        claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,)
-    if _has_ungrounded_current_runtime_claim(candidate, context):
-        claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
-    integrity_diagnostic = _first_integrity_violation(
-        raw_response=raw_response,
-        request=request,
-        context=context,
-        prompt_envelope=prompt_envelope,
-        candidate=candidate,
-    )
-    if integrity_diagnostic is not None:
-        claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
-    if claims:
-        return AdvisorResponseValidationOutcome(
-            response=_fallback(
-                raw_response,
-                tuple(set(claims)),
-                request_id=request.requestId,
-                prompt_version=prompt_envelope.promptVersion,
-            ),
-            integrityDiagnostic=integrity_diagnostic,
+    stage = SemanticValidationPhase.CLAIM_DETECTION
+    try:
+        claims = _detect_claims(candidate)
+        stage = SemanticValidationPhase.GROUNDING
+        if _has_ungrounded_current_market_claim(candidate, context):
+            claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,)
+        if _has_ungrounded_current_runtime_claim(candidate, context):
+            claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
+        stage = SemanticValidationPhase.INTEGRITY
+        integrity_diagnostic = _first_integrity_violation(
+            raw_response=raw_response,
+            request=request,
+            context=context,
+            prompt_envelope=prompt_envelope,
+            candidate=candidate,
         )
-    known_sources = {source.sourceId: source for source in context.sources}
-    referenced = tuple(candidate.sourceReferences)
-    facts = tuple(sorted(candidate.facts, key=lambda item: item.factId))
-    inferences = tuple(sorted(candidate.inferences, key=lambda item: item.inferenceId))
-    unknowns = tuple(sorted(candidate.unknowns, key=lambda item: item.unknownId))
-    warnings = tuple(
-        sorted(
-            {
-                (item.code.value, item.message or ""): item
-                for item in candidate.warnings
-            }.values(),
-            key=lambda item: (item.code.value, item.message or ""),
-        )
-    )
-    references = tuple(sorted(referenced))
-    freshness = tuple(
-        sorted(candidate.freshnessDisclosures, key=lambda item: item.sourceId)
-    )
-    safety = tuple(
-        item
-        for item in AdvisorSafetyDisclosure
-        if item in set(candidate.safetyDisclosures) | set(REQUIRED_SAFETY_DISCLOSURES)
-    )
-    validation_warnings = set()
-    if inferences:
-        validation_warnings.add(AdvisorResponseWarningCode.INFERENCE_PRESENT)
-    status = (
-        AdvisorResponseStatus.VALID_WITH_WARNINGS
-        if warnings or unknowns or validation_warnings
-        else AdvisorResponseStatus.VALID
-    )
-    grounded_claims = (
-        tuple(
-            AdvisorGroundedClaim(
-                claimId=item.factId,
-                claimType=(
-                    "INTERPRETATION"
-                    if item.freshness
-                    in {
-                        AdvisorFreshnessState.STALE,
-                        AdvisorFreshnessState.UNKNOWN,
-                        AdvisorFreshnessState.LAST_GOOD,
-                    }
-                    else "FACT"
+        if integrity_diagnostic is not None:
+            claims += (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,)
+        if claims:
+            return AdvisorResponseValidationOutcome(
+                response=_fallback(
+                    raw_response,
+                    tuple(set(claims)),
+                    request_id=request.requestId,
+                    prompt_version=prompt_envelope.promptVersion,
                 ),
-                text=item.statement,
-                citationSourceIds=item.sourceIds,
-                uncertainty=(
-                    AdvisorUncertainty.HIGH
-                    if item.freshness
-                    in {
-                        AdvisorFreshnessState.STALE,
-                        AdvisorFreshnessState.UNKNOWN,
-                        AdvisorFreshnessState.LAST_GOOD,
-                    }
-                    else AdvisorUncertainty.LOW
-                ),
-                freshness=item.freshness,
+                integrityDiagnostic=integrity_diagnostic,
             )
-            for item in facts
+        stage = SemanticValidationPhase.ENVELOPE_CONSTRUCTION
+        known_sources = {source.sourceId: source for source in context.sources}
+        referenced = tuple(candidate.sourceReferences)
+        facts = tuple(sorted(candidate.facts, key=lambda item: item.factId))
+        inferences = tuple(
+            sorted(candidate.inferences, key=lambda item: item.inferenceId)
         )
-        + tuple(
-            AdvisorGroundedClaim(
-                claimId=item.inferenceId,
-                claimType="INFERENCE",
-                text=item.statement,
-                citationSourceIds=item.basedOnSourceIds,
-                uncertainty=item.uncertainty,
-                freshness=AdvisorFreshnessState.NOT_APPLICABLE,
+        unknowns = tuple(sorted(candidate.unknowns, key=lambda item: item.unknownId))
+        warnings = tuple(
+            sorted(
+                {
+                    (item.code.value, item.message or ""): item
+                    for item in candidate.warnings
+                }.values(),
+                key=lambda item: (item.code.value, item.message or ""),
             )
-            for item in inferences
         )
-        + tuple(
-            AdvisorGroundedClaim(
-                claimId=item.unknownId,
-                claimType="UNKNOWN",
-                text=item.topic,
-                citationSourceIds=(),
-                uncertainty=AdvisorUncertainty.HIGH,
-                freshness=AdvisorFreshnessState.UNKNOWN,
-            )
-            for item in unknowns
+        references = tuple(sorted(referenced))
+        freshness = tuple(
+            sorted(candidate.freshnessDisclosures, key=lambda item: item.sourceId)
         )
-    )
-    claim_sources = {
-        claim.claimId: set(claim.citationSourceIds) for claim in grounded_claims
-    }
-    citations = tuple(
-        AdvisorCitation(
-            sourceId=source_id,
-            sourceType=known_sources[source_id].sourceType,
-            displayTitle=known_sources[source_id].displayLabel,
-            version=known_sources[source_id].sourceVersion,
-            claimIds=tuple(
-                claim_id
-                for claim_id, source_ids in claim_sources.items()
-                if source_id in source_ids
-            ),
-            freshness=known_sources[source_id].freshness.state,
+        safety = tuple(
+            item
+            for item in AdvisorSafetyDisclosure
+            if item
+            in set(candidate.safetyDisclosures) | set(REQUIRED_SAFETY_DISCLOSURES)
         )
-        for source_id in references
-    )
-    result = AdvisorResponseEnvelope(
-        responseVersion="1.0",
-        requestId=request.requestId,
-        promptVersion=prompt_envelope.promptVersion,
-        receivedAt=raw_response.receivedAt,
-        status=status,
-        summary=candidate.summary,
-        facts=facts,
-        inferences=inferences,
-        unknowns=unknowns,
-        warnings=warnings,
-        sourceReferences=references,
-        freshnessDisclosures=freshness,
-        safetyDisclosures=safety,
-        forbiddenClaims=(),
-        validationWarnings=tuple(
-            sorted(validation_warnings, key=lambda item: item.value)
-        ),
-        primaryRejectionReason=None,
-        responseCategory=(
-            "INSUFFICIENT_DATA"
-            if unknowns and not facts and not inferences
-            else (
-                "SPECIFICATION_LOOKUP"
-                if any(
-                    known_sources[source_id].sourceType
-                    is AdvisorSourceType.SPECIFICATION
-                    for source_id in references
+        validation_warnings = set()
+        if inferences:
+            validation_warnings.add(AdvisorResponseWarningCode.INFERENCE_PRESENT)
+        status = (
+            AdvisorResponseStatus.VALID_WITH_WARNINGS
+            if warnings or unknowns or validation_warnings
+            else AdvisorResponseStatus.VALID
+        )
+        grounded_claims = (
+            tuple(
+                AdvisorGroundedClaim(
+                    claimId=item.factId,
+                    claimType=(
+                        "INTERPRETATION"
+                        if item.freshness
+                        in {
+                            AdvisorFreshnessState.STALE,
+                            AdvisorFreshnessState.UNKNOWN,
+                            AdvisorFreshnessState.LAST_GOOD,
+                        }
+                        else "FACT"
+                    ),
+                    text=item.statement,
+                    citationSourceIds=item.sourceIds,
+                    uncertainty=(
+                        AdvisorUncertainty.HIGH
+                        if item.freshness
+                        in {
+                            AdvisorFreshnessState.STALE,
+                            AdvisorFreshnessState.UNKNOWN,
+                            AdvisorFreshnessState.LAST_GOOD,
+                        }
+                        else AdvisorUncertainty.LOW
+                    ),
+                    freshness=item.freshness,
                 )
-                else "SYSTEM_GUIDANCE"
+                for item in facts
             )
-        ),
-        conclusion=candidate.summary,
-        groundedClaims=grounded_claims,
-        actionableUnknowns=tuple(
-            project_actionable_unknown(item) for item in unknowns
-        ),
-        citations=citations,
-        limitations=(
-            "Read-only explanation; no order execution or configuration changes.",
-        ),
-        safeAlternative=None,
-        refusalCategory=None,
-    )
-    if len(result.model_dump_json()) > MAX_SERIALIZED_RESPONSE_CHARACTERS:
+            + tuple(
+                AdvisorGroundedClaim(
+                    claimId=item.inferenceId,
+                    claimType="INFERENCE",
+                    text=item.statement,
+                    citationSourceIds=item.basedOnSourceIds,
+                    uncertainty=item.uncertainty,
+                    freshness=AdvisorFreshnessState.NOT_APPLICABLE,
+                )
+                for item in inferences
+            )
+            + tuple(
+                AdvisorGroundedClaim(
+                    claimId=item.unknownId,
+                    claimType="UNKNOWN",
+                    text=item.topic,
+                    citationSourceIds=(),
+                    uncertainty=AdvisorUncertainty.HIGH,
+                    freshness=AdvisorFreshnessState.UNKNOWN,
+                )
+                for item in unknowns
+            )
+        )
+        claim_sources = {
+            claim.claimId: set(claim.citationSourceIds) for claim in grounded_claims
+        }
+        citations = tuple(
+            AdvisorCitation(
+                sourceId=source_id,
+                sourceType=known_sources[source_id].sourceType,
+                displayTitle=known_sources[source_id].displayLabel,
+                version=known_sources[source_id].sourceVersion,
+                claimIds=tuple(
+                    claim_id
+                    for claim_id, source_ids in claim_sources.items()
+                    if source_id in source_ids
+                ),
+                freshness=known_sources[source_id].freshness.state,
+            )
+            for source_id in references
+        )
+        result = AdvisorResponseEnvelope(
+            responseVersion="1.0",
+            requestId=request.requestId,
+            promptVersion=prompt_envelope.promptVersion,
+            receivedAt=raw_response.receivedAt,
+            status=status,
+            summary=candidate.summary,
+            facts=facts,
+            inferences=inferences,
+            unknowns=unknowns,
+            warnings=warnings,
+            sourceReferences=references,
+            freshnessDisclosures=freshness,
+            safetyDisclosures=safety,
+            forbiddenClaims=(),
+            validationWarnings=tuple(
+                sorted(validation_warnings, key=lambda item: item.value)
+            ),
+            primaryRejectionReason=None,
+            responseCategory=(
+                "INSUFFICIENT_DATA"
+                if unknowns and not facts and not inferences
+                else (
+                    "SPECIFICATION_LOOKUP"
+                    if any(
+                        known_sources[source_id].sourceType
+                        is AdvisorSourceType.SPECIFICATION
+                        for source_id in references
+                    )
+                    else "SYSTEM_GUIDANCE"
+                )
+            ),
+            conclusion=candidate.summary,
+            groundedClaims=grounded_claims,
+            actionableUnknowns=tuple(
+                project_actionable_unknown(item) for item in unknowns
+            ),
+            citations=citations,
+            limitations=(
+                "Read-only explanation; no order execution or configuration changes.",
+            ),
+            safeAlternative=None,
+            refusalCategory=None,
+        )
+        stage = SemanticValidationPhase.SERIALIZATION
+        if len(result.model_dump_json()) > MAX_SERIALIZED_RESPONSE_CHARACTERS:
+            return AdvisorResponseValidationOutcome(
+                response=_fallback(
+                    raw_response,
+                    (AdvisorForbiddenClaim.RESPONSE_CONTRACT_INVALID,),
+                    request_id=request.requestId,
+                    prompt_version=prompt_envelope.promptVersion,
+                ),
+                integrityDiagnostic=_diagnostic(
+                    AdvisorResponseIntegrityViolationCode.SERIALIZED_RESPONSE_TOO_LARGE,
+                    AdvisorResponseIntegrityField.RESPONSE_ENVELOPE,
+                ),
+            )
+        return AdvisorResponseValidationOutcome(response=result)
+    except Exception as exception:
+        rule_identifier = safe_rule_identifier(exception)
+        semantic_validation_observation_sink.observe(
+            project_semantic_validation_exception(
+                request_id=request.requestId,
+                stage=stage,
+                exception=exception,
+                rule_identifier=rule_identifier,
+            )
+        )
         return AdvisorResponseValidationOutcome(
             response=_fallback(
                 raw_response,
@@ -687,12 +736,8 @@ def validate_advisor_response_with_diagnostic(
                 request_id=request.requestId,
                 prompt_version=prompt_envelope.promptVersion,
             ),
-            integrityDiagnostic=_diagnostic(
-                AdvisorResponseIntegrityViolationCode.SERIALIZED_RESPONSE_TOO_LARGE,
-                AdvisorResponseIntegrityField.RESPONSE_ENVELOPE,
-            ),
+            integrityDiagnostic=None,
         )
-    return AdvisorResponseValidationOutcome(response=result)
 
 
 def validate_advisor_response(

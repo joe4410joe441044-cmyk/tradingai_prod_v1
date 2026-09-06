@@ -49,6 +49,9 @@ from backend.ai_advisor.provider_failure_observation import StructuredLoggingPro
 from backend.ai_advisor.response_safety_observation import (
     StructuredLoggingResponseSafetyRejectionObservationSink,
 )
+from backend.ai_advisor.semantic_validation_observation import (
+    StructuredLoggingSemanticValidationObservationSink,
+)
 from backend.ai_advisor.authoritative_knowledge import (
     load_authoritative_specifications,
 )
@@ -762,6 +765,9 @@ _ai_advisor_production = build_ai_advisor_production_composition(
         "OPENAI_API_KEY",
     ),
     failure_observation_sink=StructuredLoggingProviderFailureObservationSink(),
+    semantic_validation_observation_sink=(
+        StructuredLoggingSemanticValidationObservationSink()
+    ),
     response_safety_observation_sink=(
         StructuredLoggingResponseSafetyRejectionObservationSink()
     ),

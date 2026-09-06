@@ -13,6 +13,23 @@ from backend.ai_advisor.provider_models import AdvisorProviderContractModel
 
 PRODUCTION_CONFIG_VERSION = "ai-advisor-production-config/v1"
 
+# Deliberate production-safe provider live-input budget.
+#
+# The serialized Advisor prompt is dominated by a fixed ~16 KB baseline
+# (instruction boilerplate + runtime scalars + approved-spec metadata), so the
+# historical default of 16_384 bytes left essentially zero headroom: the
+# shortest canonical question (~16_090 B) already used 98% of the budget, and
+# the overall-state question (16_414 B) overflowed it, so the fail-closed
+# input gate rejected it before any network call (Q1 ADVISOR_PROVIDER_FAILURE).
+#
+# 32 KiB is selected as the smallest clean, bounded ceiling that:
+#   - accepts the current canonical questions (~16.4 KB) with ~2x headroom;
+#   - is far below the gpt-4o-mini context window (128K tokens) and the
+#     render/transport character cap (64_000 chars) and HTTP body cap (65_536 B);
+#   - keeps the fail-closed gate bounded (requests above 32 KiB are still rejected).
+DEFAULT_LIVE_MAX_INPUT_BYTES = 32_768
+DEFAULT_LIVE_MAX_INPUT_TOKENS = 32_768
+
 
 class ProductionConfigSource(str, Enum):
     ENVIRONMENT = "ENVIRONMENT"
@@ -52,8 +69,8 @@ class AIAdvisorProductionConfig(AdvisorProviderContractModel):
     advisorAccessAllowed: bool = True
     liveTestExplicitlyAllowed: bool = False
     liveKillSwitchActive: bool = True
-    liveMaximumInputBytes: int = Field(default=16_384, ge=1, le=65_536)
-    liveMaximumInputTokens: int = Field(default=16_384, ge=1, le=65_536)
+    liveMaximumInputBytes: int = Field(default=DEFAULT_LIVE_MAX_INPUT_BYTES, ge=1, le=65_536)
+    liveMaximumInputTokens: int = Field(default=DEFAULT_LIVE_MAX_INPUT_TOKENS, ge=1, le=65_536)
     liveMaximumOutputTokens: int = Field(default=4096, ge=1, le=16_384)
     providerTimeoutSeconds: float = Field(default=30.0, gt=0, le=120)
     endpointTimeoutSeconds: float = Field(default=35.0, gt=0, le=120)

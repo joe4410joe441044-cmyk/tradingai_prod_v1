@@ -36,6 +36,10 @@ from backend.ai_advisor.provider_failure_observation import (
     ResponseTopLevelType,
     ResponseValidationCode,
 )
+from backend.ai_advisor.semantic_validation_observation import (
+    NoOpSemanticValidationObservationSink,
+    SemanticValidationObservationSink,
+)
 from backend.ai_advisor.provider_validation import validate_provider_response
 from backend.ai_advisor.response_models import AdvisorRawResponse
 from backend.ai_advisor.response_parser import (
@@ -82,6 +86,9 @@ class AdvisorService:
     capabilities: AdvisorProviderCapabilities
     failureObservationSink: ProviderFailureObservationSink = (
         NoOpProviderFailureObservationSink()
+    )
+    semanticValidationObservationSink: SemanticValidationObservationSink = (
+        NoOpSemanticValidationObservationSink()
     )
     responseSafetyObservationSink: ResponseSafetyRejectionObservationSink = (
         NoOpResponseSafetyRejectionObservationSink()
@@ -229,6 +236,9 @@ class AdvisorService:
                 request=request,
                 context=context,
                 prompt_envelope=prompt,
+                semantic_validation_observation_sink=(
+                    self.semanticValidationObservationSink
+                ),
             )
             response = validation_outcome.response
         except Exception:
