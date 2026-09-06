@@ -32,6 +32,8 @@ class AdvisorOperationStatus(StrictModel):
         "UNKNOWN",
     ]
     autoTradeEnabled: bool
+    positionState: Optional[Literal["FLAT", "OPEN", "UNKNOWN"]] = None
+    pendingOrderState: Optional[Literal["NONE", "OPEN", "UNKNOWN"]] = None
 
 
 class AdvisorSafetyStatus(StrictModel):
@@ -53,11 +55,39 @@ class AdvisorRuntimeMetadata(StrictModel):
     freshness: Freshness
 
 
+class AdvisorMoneyManagementRuntimeStatus(StrictModel):
+    """Read-only MM-authoritative numeric projection (verbatim, not recalculated)."""
+
+    regime: Optional[str] = None
+    equity: Optional[float] = None
+    availableCapital: Optional[float] = None
+    exposure: Optional[float] = None
+    remainingExposure: Optional[float] = None
+    positionCapacity: Optional[int] = None
+    remainingPositionCapacity: Optional[int] = None
+    riskBudget: Optional[float] = None
+    drawdownPercent: Optional[float] = None
+    ruinGuardStatus: Optional[str] = None
+    compoundingEnabled: Optional[bool] = None
+    authorityFresh: Optional[bool] = None
+    capturedAt: Optional[str] = None
+
+
+class AdvisorMarketRuntimeStatus(StrictModel):
+    """Read-only Market authority projection, kept separate from MM."""
+
+    ready: Optional[bool] = None
+    stale: Optional[bool] = None
+    symbol: Optional[str] = None
+
+
 class AdvisorRuntimeResponse(StrictModel):
     bot: AdvisorBotStatus
     operation: AdvisorOperationStatus
     safety: AdvisorSafetyStatus
     runtime: AdvisorRuntimeMetadata
+    moneyManagement: Optional[AdvisorMoneyManagementRuntimeStatus] = None
+    market: Optional[AdvisorMarketRuntimeStatus] = None
     warnings: List[str]
 
 

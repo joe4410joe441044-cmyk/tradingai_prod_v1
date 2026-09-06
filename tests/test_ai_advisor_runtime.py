@@ -209,7 +209,15 @@ class AdvisorRuntimeServiceTest(unittest.TestCase):
 
         self.assertEqual(
             set(payload),
-            {"bot", "operation", "safety", "runtime", "warnings"},
+            {
+                "bot",
+                "operation",
+                "safety",
+                "runtime",
+                "moneyManagement",
+                "market",
+                "warnings",
+            },
         )
         self.assertEqual(payload["runtime"]["freshness"], "FRESH")
         AdvisorRuntimeResponse.model_validate_json(response.model_dump_json())
@@ -264,21 +272,30 @@ class AdvisorRuntimeServiceTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             AdvisorRuntimeResponse.model_validate(payload)
 
-    def test_allowlist_excludes_secrets_accounts_orders_and_positions(self):
+    def test_allowlist_excludes_raw_account_order_position_records(self):
         payload = build_runtime_response(
             reader=lambda: scalar_snapshot(),
             clock=lambda: NOW,
         ).model_dump_json()
 
+        # Read-only grounding exposes qualitative runtime state (positionState /
+        # pendingOrderState / MM projection) but never raw secrets, credentials,
+        # API keys, account identities, raw order records, or raw position data.
         for forbidden in (
             "secret",
             "credential",
             "apiKey",
-            "account",
-            "order",
-            "position",
+            "accountId",
+            "orderId",
+            "orderQueue",
+            "positionId",
+            "positionQty",
+            "openOrders",
         ):
             self.assertNotIn(forbidden, payload)
+
+        self.assertIn("positionState", payload)
+        self.assertIn("pendingOrderState", payload)
 
 
 class AdvisorRuntimeApiTest(unittest.TestCase):

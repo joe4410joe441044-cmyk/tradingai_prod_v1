@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Literal, Optional, Tuple
+from typing import Any, Callable, Literal, Optional, Tuple
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -24,6 +24,12 @@ from backend.ai_advisor.api_rate_limit import (
 from backend.ai_advisor.context_builder import (
     SpecificationSourceInput,
     build_advisor_context,
+)
+from backend.ai_advisor.runtime_reader import (
+    read_runtime_scalars,
+)
+from backend.ai_advisor.service import (
+    build_runtime_response,
 )
 from backend.ai_advisor.conversation_models import (
     AdvisorCapability,
@@ -119,6 +125,7 @@ class AdvisorBrowserGatewayComposition:
     externalStatus: Literal["AVAILABLE", "OFFLINE", "UNAVAILABLE"] = "OFFLINE"
     observationSink: AdvisorObservationSink = NoOpAdvisorObservationSink()
     approvedSpecifications: Tuple[SpecificationSourceInput, ...] = ()
+    runtimeMmBoundaryProvider: Optional[Callable[[], Any]] = None
     requestIdFactory: Callable[[], str] = lambda: str(uuid4())
 
 
@@ -340,25 +347,37 @@ def assemble_browser_service_input(
     now: datetime,
     request_id: Optional[str] = None,
     approved_specifications: Tuple[SpecificationSourceInput, ...] = (),
+    runtime_response: Optional[AdvisorRuntimeResponse] = None,
 ) -> AdvisorServiceInput:
-    """Construct the complete trusted input without runtime or client authority."""
+    """Construct the complete trusted input without client authority.
+
+    When ``runtime_response`` is provided, the approved read-only runtime
+    summary is injected into the trusted context (Q1/Q2 grounding). The
+    runtime is assembled read-only by the caller; this function never mutates
+    the runtime.
+    """
 
     request_id = request_id or str(uuid4())
     message_id = str(uuid4())
+    capabilities = [
+        AdvisorCapability.SYSTEM_GUIDANCE,
+        AdvisorCapability.SPECIFICATION_EXPLAIN,
+    ]
+    scopes = [
+        AdvisorDataAccessScope.PUBLIC_UI_NAVIGATION,
+        AdvisorDataAccessScope.APPROVED_LOCAL_SPECIFICATIONS,
+    ]
+    if runtime_response is not None:
+        capabilities.append(AdvisorCapability.RUNTIME_STATUS_EXPLAIN)
+        scopes.append(AdvisorDataAccessScope.SANITIZED_RUNTIME_SUMMARY)
     permission = AdvisorPermissionContext(
         principalId=principal_id,
         authenticationState=AuthenticationState.AUTHENTICATED,
         authorizationState=AuthorizationState.AUTHORIZED,
         role="USER",
         permissionLevel="READ_ONLY",
-        allowedCapabilities=(
-            AdvisorCapability.SYSTEM_GUIDANCE,
-            AdvisorCapability.SPECIFICATION_EXPLAIN,
-        ),
-        dataAccessScope=(
-            AdvisorDataAccessScope.PUBLIC_UI_NAVIGATION,
-            AdvisorDataAccessScope.APPROVED_LOCAL_SPECIFICATIONS,
-        ),
+        allowedCapabilities=tuple(capabilities),
+        dataAccessScope=tuple(scopes),
         policyVersion="browser-gateway/v1",
         trustedServerContext=True,
     )
@@ -372,6 +391,7 @@ def assemble_browser_service_input(
     context = build_advisor_context(
         generated_at=now,
         permission_context=permission,
+        runtime=runtime_response,
         specifications=approved_specifications,
         current_message=current_message,
     )
@@ -396,6 +416,7 @@ def assemble_browser_service_input(
         request=request,
         contextInput=AdvisorServiceContextInput(
             generatedAt=now,
+            runtime=runtime_response,
             specifications=approved_specifications,
             conversationHistory=(),
             currentMessage=current_message,
@@ -427,6 +448,27 @@ def _error(status: int, code: str, retryable: bool = False):
         retryable=retryable,
     )
     return JSONResponse(status_code=status, content=value.model_dump(mode="json"))
+
+
+def _read_runtime_response(
+    composition: AdvisorBrowserGatewayComposition,
+    now: datetime,
+) -> Optional[AdvisorRuntimeResponse]:
+    """Read-only assembly of the approved runtime summary for the conversation.
+
+    Never mutates the bot/governance/MM runtime. A failure to read a given
+    authority degrades to UNKNOWN/absent facts rather than fabricating them.
+    """
+    try:
+        snapshot = read_runtime_scalars(
+            mm_boundary_provider=composition.runtimeMmBoundaryProvider,
+        )
+        return build_runtime_response(
+            reader=lambda: snapshot,
+            clock=lambda: now.timestamp(),
+        )
+    except Exception:
+        return None
 
 
 def _failure_status(code: AdvisorServiceFailureCode) -> int:
@@ -643,12 +685,14 @@ def create_browser_gateway_router(
         release_later = False
         try:
             now = composition.clock().astimezone(timezone.utc)
+            runtime_response = _read_runtime_response(composition, now)
             service_input = assemble_browser_service_input(
                 prompt=browser_request.prompt,
                 principal_id=identity,
                 now=now,
                 request_id=composition.requestIdFactory(),
                 approved_specifications=composition.approvedSpecifications,
+                runtime_response=runtime_response,
             )
             task = asyncio.create_task(
                 asyncio.to_thread(composition.service.generate_response, service_input)
