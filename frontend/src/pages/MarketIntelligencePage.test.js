@@ -18,7 +18,8 @@ const loadPage = async () => {
     const autoMarketSelectionStub = componentStub("AUTO MARKET SELECTION COLLAPSIBLE");
     const boundaryStub = moduleUrl("export default ({children})=>children");
     const providerStub = moduleUrl("export const MarketIntelligenceProvider=({children})=>children");
-    const workspaceStub = moduleUrl("export default ({bottomPanel,leftPanel,rightPanel})=>({type:'section',props:{children:[leftPanel,rightPanel,bottomPanel]}})");
+    const workspaceStub = moduleUrl("export default ({primaryLeft,primaryRight,secondary,investigation})=>({type:'section',props:{children:[primaryLeft,primaryRight,secondary,investigation]}})");
+    const investigationStub = moduleUrl("export default ({children})=>({type:'section',props:{children:['REPLAY / INVESTIGATION',children]}})");
     let code = transformed.code.replace('from "../components/market-intelligence/AIIntelligenceWorkspace";',
         `from "${aiWorkspaceStub}";`)
         .replace('from "../components/market-intelligence/AutoMarketSelectionPanel";', `from "${autoMarketSelectionStub}";`);
@@ -26,7 +27,7 @@ const loadPage = async () => {
         ["DecisionRailway", "DECISION RAILWAY", "export const DecisionRailwaySummary=()=>({type:'section',props:{children:'AI FINAL DECISION'}})"], ["MarketIntelligenceHeader", "MI HEADER"],
         ["MarketIntelligenceStatusLayer", "PAGE STATUS"], ["MarketIntelligenceToolbar", "MI TOOLBAR"],
         ["ReplayController", "REPLAY CONTROLLER"], ["ReplayInspector", "REPLAY INSPECTOR"],
-        ["ReplayMarketView", "REPLAY MARKET VIEW MARKER OVERLAY"], ["PositionTimeline", "POSITION TIMELINE"],
+        ["ReplayMarketView", "REPLAY MARKET VIEW"], ["PositionTimeline", "POSITION TIMELINE"],
         ["ReplayTimeline", "REPLAY TIMELINE"],
     ];
     for (const [name, label, named] of replacements) {
@@ -37,6 +38,7 @@ const loadPage = async () => {
     }
     code = code.replace('from "../components/market-intelligence/MarketIntelligenceErrorBoundary";', `from "${boundaryStub}";`)
         .replace('from "../components/market-intelligence/MarketIntelligenceWorkspace";', `from "${workspaceStub}";`)
+        .replace('from "../components/market-intelligence/ReplayInvestigationPanel";', `from "${investigationStub}";`)
         .replace('from "../state/market-intelligence/MarketIntelligenceProvider";', `from "${providerStub}";`);
     try {
         await writeFile(output, code);
@@ -53,18 +55,19 @@ const textOf = (node) => {
     return textOf(node.props?.children);
 };
 
-test("MarketIntelligencePage integrates components in responsive logical order", async () => {
+test("MarketIntelligencePage prioritizes market selection primary, AI secondary, replay investigation collapsed", async () => {
     const { default: Page } = await loadPage();
     const text = textOf(Page());
-    for (const expected of ["MARKET INTELLIGENCE（市場インテリジェンス）", "MI TOOLBAR", "REPLAY MARKET VIEW", "MARKER OVERLAY",
-        "AI INTELLIGENCE", "Real-time Market Recognition & AI Decision Engine", "AI FINAL DECISION", "Detector Summary",
-        "Feature Snapshot", "Strategy", "AI Review", "Governance", "EXECUTION / POSITION", "AUTO MARKET SELECTION COLLAPSIBLE", "REPLAY CONTROLLER",
-        "DECISION RAILWAY", "REPLAY INSPECTOR", "POSITION TIMELINE", "REPLAY TIMELINE"])
+    for (const expected of ["MARKET INTELLIGENCE（市場インテリジェンス）", "MI TOOLBAR", "REPLAY MARKET VIEW",
+        "AUTO MARKET SELECTION COLLAPSIBLE", "AI INTELLIGENCE", "Real-time Market Recognition & AI Decision Engine", "AI FINAL DECISION",
+        "Detector Summary", "Feature Snapshot", "Strategy", "AI Review", "Governance", "EXECUTION / POSITION",
+        "REPLAY / INVESTIGATION", "REPLAY CONTROLLER", "DECISION RAILWAY", "REPLAY INSPECTOR", "POSITION TIMELINE", "REPLAY TIMELINE"])
         assert.match(text, new RegExp(expected));
     assert.doesNotMatch(text, /MI HEADER|PAGE STATUS/);
-    assert.equal(text.indexOf("REPLAY MARKET VIEW") < text.indexOf("AI INTELLIGENCE"), true);
-    assert.equal(text.indexOf("AI INTELLIGENCE") < text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE"), true);
-    assert.equal(text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE") < text.indexOf("REPLAY CONTROLLER"), true);
+    assert.equal(text.indexOf("REPLAY MARKET VIEW") < text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE"), true);
+    assert.equal(text.indexOf("AUTO MARKET SELECTION COLLAPSIBLE") < text.indexOf("AI INTELLIGENCE"), true);
+    assert.equal(text.indexOf("AI INTELLIGENCE") < text.indexOf("REPLAY / INVESTIGATION"), true);
+    assert.equal(text.indexOf("REPLAY / INVESTIGATION") < text.indexOf("REPLAY CONTROLLER"), true);
     assert.equal(text.indexOf("REPLAY CONTROLLER") < text.indexOf("DECISION RAILWAY"), true);
     assert.equal(text.indexOf("DECISION RAILWAY") < text.indexOf("REPLAY INSPECTOR"), true);
     assert.equal(text.indexOf("REPLAY INSPECTOR") < text.indexOf("POSITION TIMELINE"), true);

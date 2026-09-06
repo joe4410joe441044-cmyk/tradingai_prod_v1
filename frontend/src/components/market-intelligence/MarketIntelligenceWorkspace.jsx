@@ -1,14 +1,16 @@
-export default function MarketIntelligenceWorkspace({ bottomPanel, leftPanel, rightPanel }) {
+export default function MarketIntelligenceWorkspace({ primaryLeft, primaryRight, secondary, investigation }) {
     return (
         <section aria-label="Market intelligence workspace" className="mi-workspace">
             <div className="mi-workspace__columns">
-                <div className="mi-workspace__left">{leftPanel}</div>
-                <div className="mi-workspace__right">{rightPanel}</div>
+                <div className="mi-workspace__left">{primaryLeft}</div>
+                <div className="mi-workspace__right">{primaryRight}</div>
             </div>
-            <section aria-labelledby="mi-replay-workspace-title" className="mi-replay-workspace">
-                <h2 className="mi-visually-hidden" id="mi-replay-workspace-title">REPLAY WORKSPACE</h2>
-                {bottomPanel}
-            </section>
+            <div className="mi-workspace__secondary">
+                {secondary}
+            </div>
+            <div className="mi-workspace__investigation">
+                {investigation}
+            </div>
         </section>
     );
 }
