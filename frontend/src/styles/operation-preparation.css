@@ -20,14 +20,39 @@
     min-width: 0;
 }
 
-/* 紧急操作控件 */
+/* 紧急操作控件（右列: Emergency block + Start block） */
 .operation-emergency-controls {
     grid-area: emergency;
     display: flex;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    gap: 10px;
     flex-shrink: 0;
-    align-self: center;
+    align-self: stretch;
+    width: 220px;
+    min-width: 0;
+}
+
+.operation-emergency-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid rgba(255, 80, 80, .3);
+    border-radius: 4px;
+    background: rgba(30, 8, 8, .35);
+    box-sizing: border-box;
+}
+
+.operation-start-controls {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid rgba(63, 212, 139, .3);
+    border-radius: 4px;
+    background: rgba(10, 28, 28, .5);
+    box-sizing: border-box;
 }
 
 .operation-emergency-controls .emergency-stop-button {
@@ -400,7 +425,7 @@
 /* 顶部控制带响应式: 窄viewport时EMERGENCY单行, FINAL PREPARATION独占整行 */
 @media (max-width: 1199px) {
     .operation-top-band { grid-template-columns: 1fr; grid-template-areas: "emergency" "final"; }
-    .operation-top-band > .operation-emergency-controls { grid-area: emergency; justify-content: flex-end; }
+    .operation-top-band > .operation-emergency-controls { grid-area: emergency; justify-content: flex-start; align-items: stretch; width: 100%; }
     .operation-top-band > .operation-prep-final--top { grid-area: final; }
 }
 
@@ -457,6 +482,43 @@
 
 .operation-prep-final--top .operation-prep-start > div > strong {
     font-size: 12px;
+}
+
+/* START block (right column): compact controls matching the Emergency scale. */
+.operation-start-controls small {
+    display: block;
+    color: #91a3ba;
+    font-size: 7px;
+    line-height: 1.4;
+}
+
+.operation-start-controls .operation-prep-start {
+    padding-top: 0;
+    border-top: 0;
+    gap: 6px;
+}
+
+.operation-start-controls .operation-prep-start > div > strong {
+    font-size: 12px;
+}
+
+.operation-start-controls .operation-prep-existing-start {
+    display: grid;
+    gap: 6px;
+}
+
+.operation-start-controls .operation-bot-action {
+    width: 100%;
+    min-width: 140px;
+    min-height: 36px;
+    height: 36px;
+    padding: 0 12px;
+    font-size: 11px;
+    letter-spacing: .35px;
+}
+
+.operation-start-controls .operation-bot-state {
+    margin-top: 0;
 }
 
 @media (max-width: 1399px) {

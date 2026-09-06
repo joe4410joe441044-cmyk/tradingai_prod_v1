@@ -158,7 +158,7 @@ const LowerStatusPanel = ({ decision }) => {
     );
 };
 
-export default function TradingDecisionCard({ decision }) {
+export default function TradingDecisionCard({ decision, lastOrderActivity = null, lastOrderValue = null }) {
     const model = createTradingCycleModel(decision);
 
     return (
@@ -206,6 +206,12 @@ export default function TradingDecisionCard({ decision }) {
                         <strong>{display(decision?.autoTrade ?? decision?.autoTradeEnabled)}</strong>
                     </div>
                 </div>
+            </section>
+
+            {/* LAST ORDER — compact footer status (secondary to the cycle stages). */}
+            <section className="trading-decision-last-order" data-testid="last-execution-activity">
+                <span>{lastOrderActivity?.label ?? "LAST ORDER"}</span>
+                <strong>{lastOrderValue ?? "NONE THIS SESSION"}</strong>
             </section>
         </section>
     );

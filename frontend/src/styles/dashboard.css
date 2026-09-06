@@ -2958,6 +2958,28 @@ replace the legacy scaled three-column layout.
     text-transform: uppercase;
 }
 
+/* LAST ORDER — compact footer status row (secondary to the cycle stages). */
+.trading-decision-last-order {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-top: 1px solid rgba(36, 49, 73, 0.75);
+    color: #8ea0b8;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .35px;
+}
+
+.trading-decision-last-order strong {
+    color: #eef4fc;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
 .trading-decision-header > div > span { display: none; }
 
 .trading-decision-header h2 {

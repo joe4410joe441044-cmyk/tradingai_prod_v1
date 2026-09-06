@@ -24,7 +24,8 @@ test("Dashboard preserves the runtime strip, operation, and runtime activity", (
     assert.match(dashboardSource, /<RuntimeDiagnosticsDisclosure/);
     assert.match(dashboardSource, /<BotControl/);
     assert.match(dashboardSource, /<TradingDecisionCard/);
-    assert.match(dashboardSource, /last-execution-activity/);
+    assert.match(dashboardSource, /lastOrderActivity=/);
+    assert.match(dashboardSource, /lastOrderValue=/);
     assert.match(dashboardSource, /firstAvailable/);
 });
 

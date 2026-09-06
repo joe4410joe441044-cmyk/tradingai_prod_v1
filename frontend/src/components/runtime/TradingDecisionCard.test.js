@@ -175,3 +175,21 @@ test("TradingDecisionCard handles stopped state correctly", async () => {
     );
     assert.equal(activeStages.length, 0);
 });
+
+test("TradingDecisionCard renders last order as a footer after the cycle stages", async () => {
+    const { default: TradingDecisionCard } = await loadModule();
+    const nodes = descendants(TradingDecisionCard({
+        decision: {},
+        lastOrderValue: "NONE THIS SESSION",
+    }));
+    const footer = nodes.find((node) => node.props?.["data-testid"] === "last-execution-activity");
+    assert.ok(footer, "last-order footer present");
+    const cycleIndex = nodes.findIndex(
+        (node) => node.type === "section" && node.props?.className?.includes("trading-cycle-flow"),
+    );
+    const footerIndex = nodes.findIndex((node) => node === footer);
+    assert.ok(cycleIndex >= 0, "cycle visualization present");
+    assert.ok(footerIndex > cycleIndex, "last order appears after the cycle visualization");
+    assert.equal(String(footer.props.children?.[0]?.props?.children).trim(), "LAST ORDER");
+    assert.equal(String(footer.props.children?.[1]?.props?.children).trim(), "NONE THIS SESSION");
+});

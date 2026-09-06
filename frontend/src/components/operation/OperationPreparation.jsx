@@ -563,66 +563,70 @@ return (
                             </div>
                         )}
                     </div>
-                    <div className="operation-prep-start" data-testid="ready-to-start">
-                        {botRunning ? (
-                            <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
-                        ) : null}
-                        {!botRunning && (
-                            <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
-                        )}
-                        {blockGuidance && (
-                            <div className="operation-prep-block-guidance" data-testid="block-guidance">
-                                <span className="operation-prep-block-guidance__title">START NOT READY — resolve the following（開始不可 — 以下を解消）:</span>
-                                <ul>
-                                    {blockGuidance.map((item) => (
-                                        <li key={item.id} data-testid={`block-guidance-${item.id}`}>
-                                            <strong>{item.label}</strong> — {item.status}
-                                            <div className="operation-prep-block-guidance__values">
-                                                <span>current / 現在値: {item.current}</span>
-                                                <span>required / 必要値: {item.required}</span>
-                                            </div>
-                                            <div className="operation-prep-block-guidance__fix">
-                                                <span>{item.en}</span>
-                                                <span>{item.ja}</span>
-                                                <span>Fix / 修正: {item.fix}</span>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </div>
                     {mmRiskDivergence && (
                         <small className="operation-prep-draft-note" data-testid="mm-risk-draft-note">
                             RISK shown is the UNSAVED MM DRAFT; START sends the SAVED value（表示は未保存ドラフト。STARTには保存済み値を送信します）. Press Save MM to apply the draft.
                         </small>
                     )}
-                    {botRunning ? null : (
-                        <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
-                    )}
-                    {children}
                 </section>
 
                 <div className="operation-emergency-controls">
-                    <button
-                        className="emergency-stop-button operation-emergency-button"
-                        disabled={resolvedEmergencyButtonDisabled}
-                        onClick={openEmergencyConfirm}
-                        aria-busy={emergencyPending ? "true" : "false"}
-                        type="button"
-                    >
-                        {emergencyPending
-                            ? "EMERGENCY IN PROGRESS..."
-                            : "EMERGENCY STOP"
-                        }
-                    </button>
-                    <div className="operation-emergency-lock">
-                        <span className="operation-state-label">
-                            LOCK
-                        </span>
-                        <strong className={resolvedEmergencyLockClass}>
-                            ● {resolvedEmergencyLockValue}
-                        </strong>
+                    <div className="operation-emergency-block">
+                        <button
+                            className="emergency-stop-button operation-emergency-button"
+                            disabled={resolvedEmergencyButtonDisabled}
+                            onClick={openEmergencyConfirm}
+                            aria-busy={emergencyPending ? "true" : "false"}
+                            type="button"
+                        >
+                            {emergencyPending
+                                ? "EMERGENCY IN PROGRESS..."
+                                : "EMERGENCY STOP"
+                            }
+                        </button>
+                        <div className="operation-emergency-lock">
+                            <span className="operation-state-label">
+                                LOCK
+                            </span>
+                            <strong className={resolvedEmergencyLockClass}>
+                                ● {resolvedEmergencyLockValue}
+                            </strong>
+                        </div>
+                    </div>
+                    <div className="operation-start-controls">
+                        <div className="operation-prep-start operation-prep-start--right" data-testid="ready-to-start">
+                            {botRunning ? (
+                                <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
+                            ) : null}
+                            {!botRunning && (
+                                <div><span className={`operation-prep-status operation-prep-status--${reviewReadiness}`}><i aria-hidden="true" /></span><strong>{reviewReadiness === "READY" ? "READY TO START" : reviewReadiness === "BLOCKED" ? "BLOCKED" : "WAITING"}</strong></div>
+                            )}
+                            {blockGuidance && (
+                                <div className="operation-prep-block-guidance" data-testid="block-guidance">
+                                    <span className="operation-prep-block-guidance__title">START NOT READY — resolve the following（開始不可 — 以下を解消）:</span>
+                                    <ul>
+                                        {blockGuidance.map((item) => (
+                                            <li key={item.id} data-testid={`block-guidance-${item.id}`}>
+                                                <strong>{item.label}</strong> — {item.status}
+                                                <div className="operation-prep-block-guidance__values">
+                                                    <span>current / 現在値: {item.current}</span>
+                                                    <span>required / 必要値: {item.required}</span>
+                                                </div>
+                                                <div className="operation-prep-block-guidance__fix">
+                                                    <span>{item.en}</span>
+                                                    <span>{item.ja}</span>
+                                                    <span>Fix / 修正: {item.fix}</span>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                        {botRunning ? null : (
+                            <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
+                        )}
+                        {children}
                     </div>
                 </div>
             </div>

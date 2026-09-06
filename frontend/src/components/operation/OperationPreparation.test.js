@@ -1176,3 +1176,40 @@ test("collapse state is presentation-only and does not affect the START slot or 
     );
     assert.ok(startPair);
 });
+
+test("START controls relocate to the right column below EMERGENCY", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const childrenOf = (node) => {
+        const kids = node?.props?.children;
+        if (kids == null) return [];
+        return Array.isArray(kids) ? kids.filter(Boolean) : [kids];
+    };
+    const descriptor = (node) => [
+        typeof node?.type === "string" ? node.type : "*",
+        String(node?.props?.className || ""),
+    ].join(".");
+
+    const topBand = childrenOf(renderer.root).find((node) => descriptor(node).includes("operation-top-band"));
+    assert.ok(topBand, "operation-top-band wraps the top zones");
+    const rightColumn = childrenOf(topBand).find((node) => descriptor(node).includes("operation-emergency-controls"));
+    assert.ok(rightColumn, "right control column present");
+    const rightClasses = childrenOf(rightColumn).map((node) => descriptor(node).split(".")[1]);
+    const emergencyIdx = rightClasses.findIndex((cls) => cls.includes("operation-emergency-block"));
+    const startIdx = rightClasses.findIndex((cls) => cls.includes("operation-start-controls"));
+    assert.ok(emergencyIdx >= 0, "emergency block present in right column");
+    assert.ok(startIdx > emergencyIdx, "start block sits below the emergency block");
+
+    // READY TO START + runtime-guards note + START BOT all live in the right column.
+    assert.ok(findTestId(renderer.root, "ready-to-start"), "READY TO START status preserved");
+    const startControls = childrenOf(rightColumn).find((node) => descriptor(node).includes("operation-start-controls"));
+    assert.ok(startControls, "start block present in right column");
+    assert.ok(descendants(startControls).some((node) => node.props?.["data-testid"] === "ready-to-start"), "ready-to-start is inside the start block");
+    assert.ok(findButton(renderer.root, "START BOT"), "START BOT control preserved");
+    assert.ok(descendants(startControls).some((node) => node.type === "button" && normalizedText(node) === "START BOT"), "START BOT is inside the start block");
+
+    // FINAL PREPARATION no longer contains the start block.
+    const finalPreparation = childrenOf(topBand).find((node) => descriptor(node).includes("operation-prep-final"));
+    assert.ok(finalPreparation, "FINAL PREPARATION present");
+    assert.equal(descendants(finalPreparation).some((node) => node.props?.["data-testid"] === "ready-to-start"), false, "old start block removed from FINAL PREPARATION");
+});

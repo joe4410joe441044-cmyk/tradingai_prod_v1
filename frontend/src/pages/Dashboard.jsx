@@ -291,26 +291,13 @@ useEffect(() => {
 
             </div>
 
-            {/* =================================================
-            CENTER COLUMN
-            ================================================= */}
-
-            <div className="center-column">
-
-                <div className="panel-card center-terminal-panel">
-
-                    <div className="execution-activity" data-testid="last-execution-activity">
-                        <span>{lastExecutionActivity.label}</span>
-                        <strong>{formatActivityTime(lastExecutionActivity.timestamp)}</strong>
-                    </div>
-
-                </div>
-
-            </div>
-
         </div>
 
-        <TradingDecisionCard decision={botStatus?.tradingDecision} />
+        <TradingDecisionCard
+            decision={botStatus?.tradingDecision}
+            lastOrderActivity={lastExecutionActivity}
+            lastOrderValue={formatActivityTime(lastExecutionActivity.timestamp)}
+        />
 
         <RuntimeDiagnosticsDisclosure
             runtimeHealth={runtimeHealth}
