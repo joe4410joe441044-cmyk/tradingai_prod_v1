@@ -15,6 +15,8 @@ from backend.ai_advisor.conversation_models import (
     AdvisorFreshnessMetadata,
     AdvisorFreshnessState,
     AdvisorKnowledgeExcerpt,
+    AdvisorMarketRuntimeContext,
+    AdvisorMoneyManagementRuntimeContext,
     AdvisorPermissionContext,
     AdvisorRuntimeContext,
     AdvisorSourceAuthority,
@@ -284,6 +286,34 @@ def build_runtime_context(
         sanitize_text(runtime.bot.exchange).value if runtime.bot.exchange else None
     )
     symbol = sanitize_text(runtime.bot.symbol).value if runtime.bot.symbol else None
+    runtime_position = getattr(runtime.operation, "positionState", None)
+    runtime_pending = getattr(runtime.operation, "pendingOrderState", None)
+    money_management = None
+    if runtime.moneyManagement is not None:
+        mm = runtime.moneyManagement
+        money_management = AdvisorMoneyManagementRuntimeContext(
+            regime=mm.regime,
+            equity=mm.equity,
+            availableCapital=mm.availableCapital,
+            exposure=mm.exposure,
+            remainingExposure=mm.remainingExposure,
+            positionCapacity=mm.positionCapacity,
+            remainingPositionCapacity=mm.remainingPositionCapacity,
+            riskBudget=mm.riskBudget,
+            drawdownPercent=mm.drawdownPercent,
+            ruinGuardStatus=mm.ruinGuardStatus,
+            compoundingEnabled=mm.compoundingEnabled,
+            authorityFresh=mm.authorityFresh,
+            capturedAt=mm.capturedAt,
+        )
+    market = None
+    if runtime.market is not None:
+        mk = runtime.market
+        market = AdvisorMarketRuntimeContext(
+            ready=mk.ready,
+            stale=mk.stale,
+            symbol=sanitize_text(mk.symbol).value if mk.symbol else None,
+        )
     context = AdvisorRuntimeContext(
         schemaVersion="1.0",
         sourceId=source_id,
@@ -298,6 +328,18 @@ def build_runtime_context(
         emergencyState=runtime.safety.emergencyState,
         dryRun=runtime.safety.dryRun,
         realOrderAllowed=runtime.safety.realOrderAllowed,
+        positionState=(
+            runtime_position
+            if runtime_position in {"FLAT", "OPEN", "UNKNOWN"}
+            else None
+        ),
+        pendingOrderState=(
+            runtime_pending
+            if runtime_pending in {"NONE", "OPEN", "UNKNOWN"}
+            else None
+        ),
+        moneyManagement=money_management,
+        market=market,
     )
     source = build_source_reference(
         source_id=source_id,

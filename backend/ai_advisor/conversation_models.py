@@ -529,6 +529,54 @@ class AdvisorKnowledgeExcerpt(AdvisorContractModel):
         return self
 
 
+class AdvisorMoneyManagementRuntimeContext(AdvisorContractModel):
+    """Read-only, MM-authoritative numeric projection (no MM math reproduced).
+
+    Values are extracted verbatim from the existing Money Management status
+    projection (``CapitalEligibilityContract`` and ``MoneyManagementMetricsResponse``).
+    ``None`` means the authoritative source did not provide the fact.
+    """
+
+    regime: Optional[ShortText] = None
+    equity: Optional[float] = None
+    availableCapital: Optional[float] = None
+    exposure: Optional[float] = None
+    remainingExposure: Optional[float] = None
+    positionCapacity: Optional[int] = None
+    remainingPositionCapacity: Optional[int] = None
+    riskBudget: Optional[float] = None
+    drawdownPercent: Optional[float] = None
+    ruinGuardStatus: Optional[ShortText] = None
+    compoundingEnabled: Optional[bool] = None
+    authorityFresh: Optional[bool] = None
+    capturedAt: Optional[str] = None
+
+    @field_validator(
+        "regime", "ruinGuardStatus", "capturedAt"
+    )
+    @classmethod
+    def validate_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        return _reject_control_characters(value) if value is not None else None
+
+
+class AdvisorMarketRuntimeContext(AdvisorContractModel):
+    """Read-only Market authority projection, kept strictly separate from MM.
+
+    Current main provides only a limited Market read-side (bot-manager runtime
+    readiness). ``ready``/``stale`` are authoritative runtime facts and never
+    derived from Money Management regime or numeric values.
+    """
+
+    ready: Optional[bool] = None
+    stale: Optional[bool] = None
+    symbol: Optional[ShortText] = None
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: Optional[str]) -> Optional[str]:
+        return _reject_control_characters(value) if value is not None else None
+
+
 class AdvisorRuntimeContext(AdvisorContractModel):
     schemaVersion: Literal["1.0"]
     sourceId: Identifier
@@ -556,6 +604,10 @@ class AdvisorRuntimeContext(AdvisorContractModel):
     ]
     dryRun: bool
     realOrderAllowed: bool
+    positionState: Optional[Literal["FLAT", "OPEN", "UNKNOWN"]] = None
+    pendingOrderState: Optional[Literal["NONE", "OPEN", "UNKNOWN"]] = None
+    moneyManagement: Optional[AdvisorMoneyManagementRuntimeContext] = None
+    market: Optional[AdvisorMarketRuntimeContext] = None
 
 
 class AdvisorConversationMessage(AdvisorContractModel):

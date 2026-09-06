@@ -86,6 +86,7 @@ from backend.money_management.loss_execution_integration import (
     unregister_money_management_execution_entry_gate,
 )
 from backend.money_management.loss_http_api import (
+    APPLICATION_STATE_ATTRIBUTE as MONEY_MANAGEMENT_HTTP_BOUNDARY_ATTRIBUTE,
     register_money_management_http_boundary,
     unregister_money_management_http_boundary,
 )
@@ -809,6 +810,11 @@ app.include_router(
                 else "OFFLINE"
             ),
             approvedSpecifications=load_authoritative_specifications(),
+            runtimeMmBoundaryProvider=lambda: getattr(
+                getattr(app, "state", None),
+                MONEY_MANAGEMENT_HTTP_BOUNDARY_ATTRIBUTE,
+                None,
+            ),
         )
     )
 )
