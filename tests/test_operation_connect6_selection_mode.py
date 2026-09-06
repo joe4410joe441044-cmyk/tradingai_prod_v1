@@ -426,6 +426,8 @@ def test_official_mm_capital_authority_forwards_force(monkeypatch):
         calls.append(force)
         return {"capitalEligibilityContract": None}
 
+    manager.config = {"mode": "live"}
+    manager.paper_account_state = None
     manager.refresh_production_ams_read_model = fake_refresh
     manager.get_official_mm_capital_authority(force=True)
     assert calls == [True]

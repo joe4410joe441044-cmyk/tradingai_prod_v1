@@ -2213,7 +2213,15 @@ class BotManager:
         return canonical_float
 
     def get_official_mm_capital_authority(self, *, force=False):
-        """Return the MM-owned monitoring contract shared with AMS."""
+        """Return the MM-owned monitoring contract shared with AMS.
+
+        The authority is mode-gated.  PAPER consumes the canonical PAPER
+        account authority (SET PAPER CAPITAL); LIVE preserves the existing
+        REAL_LIVE_ACCOUNT authority.  A missing/unknown PAPER account fails
+        closed and never falls back to the live account.
+        """
+        if self._selected_mode_is_paper():
+            return self._build_paper_capital_authority()
         observation = self.refresh_production_ams_read_model(force=force)
         capital = observation.get("capitalEligibilityContract") if isinstance(
             observation, dict
@@ -2222,6 +2230,36 @@ class BotManager:
             CapitalEligibilityContract,
         )
         return capital if isinstance(capital, CapitalEligibilityContract) else None
+
+    def _selected_mode_is_paper(self):
+        config = getattr(self, "config", None)
+        mode = config.get("mode", "paper") if isinstance(config, dict) else "paper"
+        return str(mode).strip().lower() == "paper"
+
+    def _build_paper_capital_authority(self):
+        """Project the canonical PAPER account into a CapitalEligibilityContract.
+
+        Fail-closed: an unavailable PAPER account/config yields None (blocked)
+        and never falls back to a live account.
+        """
+        from backend.money_management.paper_capital_authority import (
+            build_paper_capital_eligibility,
+        )
+        provider = getattr(self, "production_ams_mm_config_provider", None)
+        if not callable(provider):
+            return None
+        try:
+            config = provider()
+        except Exception:
+            return None
+        try:
+            return build_paper_capital_eligibility(
+                self.paper_account_state,
+                config=config,
+                policy_version="money-management-config/v1",
+            )
+        except Exception:
+            return None
 
     def _production_ams_safety_state(
         self, *, requested_mode=None, requested_dry_run=None,
