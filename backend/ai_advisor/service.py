@@ -3,10 +3,12 @@
 import math
 import time
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Optional
 
 from backend.ai_advisor.models import (
     AdvisorBotStatus,
+    AdvisorMarketRuntimeStatus,
+    AdvisorMoneyManagementRuntimeStatus,
     AdvisorOperationStatus,
     AdvisorRuntimeMetadata,
     AdvisorRuntimeResponse,
@@ -23,6 +25,61 @@ RUNTIME_FRESHNESS_SECONDS = 10.0
 
 def _epoch_iso(value: float) -> str:
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _epoch_or_iso(value: Optional[float]) -> Optional[str]:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    if not math.isfinite(value):
+        return None
+    return _epoch_iso(float(value))
+
+
+def _money_management_runtime(
+    snapshot: RuntimeScalarSnapshot,
+) -> Optional[AdvisorMoneyManagementRuntimeStatus]:
+    if (
+        snapshot.mm_regime is None
+        and snapshot.mm_equity is None
+        and snapshot.mm_available_capital is None
+        and snapshot.mm_exposure is None
+        and snapshot.mm_remaining_exposure is None
+        and snapshot.mm_position_capacity is None
+        and snapshot.mm_remaining_position_capacity is None
+        and snapshot.mm_risk_budget is None
+        and snapshot.mm_drawdown_percent is None
+        and snapshot.mm_ruin_guard_status is None
+        and snapshot.mm_compounding_enabled is None
+        and snapshot.mm_authority_fresh is None
+        and snapshot.mm_captured_at is None
+    ):
+        return None
+    return AdvisorMoneyManagementRuntimeStatus(
+        regime=snapshot.mm_regime,
+        equity=snapshot.mm_equity,
+        availableCapital=snapshot.mm_available_capital,
+        exposure=snapshot.mm_exposure,
+        remainingExposure=snapshot.mm_remaining_exposure,
+        positionCapacity=snapshot.mm_position_capacity,
+        remainingPositionCapacity=snapshot.mm_remaining_position_capacity,
+        riskBudget=snapshot.mm_risk_budget,
+        drawdownPercent=snapshot.mm_drawdown_percent,
+        ruinGuardStatus=snapshot.mm_ruin_guard_status,
+        compoundingEnabled=snapshot.mm_compounding_enabled,
+        authorityFresh=snapshot.mm_authority_fresh,
+        capturedAt=_epoch_or_iso(snapshot.mm_captured_at),
+    )
+
+
+def _market_runtime(
+    snapshot: RuntimeScalarSnapshot,
+) -> Optional[AdvisorMarketRuntimeStatus]:
+    if snapshot.market_ready is None and snapshot.market_symbol is None:
+        return None
+    return AdvisorMarketRuntimeStatus(
+        ready=snapshot.market_ready,
+        symbol=snapshot.market_symbol,
+    )
 
 
 def build_runtime_response(
@@ -66,6 +123,8 @@ def build_runtime_response(
             loopEnabled=snapshot.loop_enabled,
             loopState=snapshot.loop_state,
             autoTradeEnabled=snapshot.auto_trade_enabled,
+            positionState=snapshot.position_state,
+            pendingOrderState=snapshot.pending_order_state,
         ),
         safety=AdvisorSafetyStatus(
             emergencyLocked=snapshot.emergency_locked,
@@ -78,5 +137,7 @@ def build_runtime_response(
             sourceUpdatedAt=source_iso,
             freshness=freshness,
         ),
+        moneyManagement=_money_management_runtime(snapshot),
+        market=_market_runtime(snapshot),
         warnings=list(dict.fromkeys(warnings)),
     )

@@ -115,22 +115,50 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
             freshness=AdvisorFreshnessState.UNKNOWN,
         )
     source = next(item for item in context.sources if item.sourceId == runtime.sourceId)
-    content = _lines(
-        (
-            ("botState", runtime.state),
-            ("mode", runtime.mode),
-            ("exchange", runtime.exchange),
-            ("symbol", runtime.symbol),
-            ("loopEnabled", runtime.loopEnabled),
-            ("loopState", runtime.loopState),
-            ("autoTradeEnabled", runtime.autoTradeEnabled),
-            ("emergencyLocked", runtime.emergencyLocked),
-            ("emergencyState", runtime.emergencyState),
-            ("dryRun", runtime.dryRun),
-            ("realOrderAllowed", runtime.realOrderAllowed),
-            ("freshness", source.freshness.state),
+    lines: list[Tuple[str, object]] = [
+        ("botState", runtime.state),
+        ("mode", runtime.mode),
+        ("exchange", runtime.exchange),
+        ("symbol", runtime.symbol),
+        ("loopEnabled", runtime.loopEnabled),
+        ("loopState", runtime.loopState),
+        ("autoTradeEnabled", runtime.autoTradeEnabled),
+        ("emergencyLocked", runtime.emergencyLocked),
+        ("emergencyState", runtime.emergencyState),
+        ("dryRun", runtime.dryRun),
+        ("realOrderAllowed", runtime.realOrderAllowed),
+        ("positionState", runtime.positionState),
+        ("pendingOrderState", runtime.pendingOrderState),
+    ]
+    if runtime.market is not None:
+        lines.extend(
+            [
+                ("marketReady", runtime.market.ready),
+                ("marketStale", runtime.market.stale),
+                ("marketSymbol", runtime.market.symbol),
+            ]
         )
-    )
+    if runtime.moneyManagement is not None:
+        mm = runtime.moneyManagement
+        lines.extend(
+            [
+                ("mmRegime", mm.regime),
+                ("mmEquity", mm.equity),
+                ("mmAvailableCapital", mm.availableCapital),
+                ("mmExposure", mm.exposure),
+                ("mmRemainingExposure", mm.remainingExposure),
+                ("mmPositionCapacity", mm.positionCapacity),
+                ("mmRemainingPositionCapacity", mm.remainingPositionCapacity),
+                ("mmRiskBudget", mm.riskBudget),
+                ("mmDrawdownPercent", mm.drawdownPercent),
+                ("mmRuinGuardStatus", mm.ruinGuardStatus),
+                ("mmCompoundingEnabled", mm.compoundingEnabled),
+                ("mmAuthorityFresh", mm.authorityFresh),
+                ("mmCapturedAt", mm.capturedAt),
+            ]
+        )
+    lines.append(("freshness", source.freshness.state))
+    content = _lines(lines)
     return _section(
         AdvisorPromptSectionType.RUNTIME_CONTEXT,
         "Runtime Context (trusted typed scalars only)",
