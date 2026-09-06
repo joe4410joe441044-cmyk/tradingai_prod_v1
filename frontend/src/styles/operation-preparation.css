@@ -528,8 +528,32 @@
 }
 
 .operation-prep-final--top .operation-prep-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 2px 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
+/* FINAL PREPARATION ①–⑤ mirror cards + a full-width START / READINESS block.
+   The numbered cards reuse the TRADE SETTINGS card language; readiness spans
+   the full width in a single block. */
+.operation-prep-final--top .operation-prep-summary .operation-prep-section {
+    height: auto;
+}
+
+.operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness {
+    grid-column: 1 / -1;
+}
+
+.operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness > header {
+    padding-bottom: 4px;
+}
+
+.operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness .operation-prep-section__body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness .operation-prep-section__body > .operation-prep-derived-row {
+    grid-column: 1 / -1;
 }
 
 .operation-prep-final--top .operation-prep-derived-row {

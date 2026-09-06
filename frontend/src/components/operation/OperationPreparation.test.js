@@ -1407,6 +1407,34 @@ const summaryRowClass = (row, fragment) =>
             && String(child.props?.className || "").includes(fragment),
     );
 
+test("FINAL PREPARATION orders the TRADE SETTINGS mirror sections ①–⑤ then START / READINESS", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const summarySection = findTestId(renderer.root, "operation-preparation-summary");
+    assert.ok(summarySection, "FINAL PREPARATION summary present");
+    const orderedTestIds = [
+        "final-prep-trading-mode",
+        "final-prep-market-selection",
+        "final-prep-money-management",
+        "final-prep-trade-execution",
+        "final-prep-automation",
+        "final-prep-start-readiness",
+    ];
+    const nodes = descendants(summarySection);
+    const indexes = orderedTestIds.map((testId) => nodes.findIndex(
+        (node) => node.props?.["data-testid"] === testId,
+    ));
+    assert.deepEqual(orderedTestIds.filter((testId, index) => indexes[index] < 0), []);
+    assert.deepEqual(
+        indexes,
+        [...indexes].sort((left, right) => left - right),
+        "FINAL PREPARATION sections appear in ①–⑤ then START / READINESS order",
+    );
+    // Every mirror section body is present.
+    assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-market-selection"))).includes("SELECTION RUNTIME"), true);
+    assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-automation"))).includes("AUTO SELECTION START"), true);
+});
+
 test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readiness values keep semantic status", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps());
@@ -1419,7 +1447,6 @@ test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readin
     const rows = descendants(summaryGrid).filter(
         (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-derived-row"),
     );
-    assert.equal(rows.length, 14, "summary holds 12 setting + 2 readiness rows");
     const rowByLabel = (label) => rows.find(
         (row) => row.props.children.some(
             (child) => typeof child === "object" && child.type === "span" && normalizedText(child) === label,
@@ -1429,10 +1456,12 @@ test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readin
         (child) => typeof child === "object" && child.type === "strong",
     )?.props?.className || "";
 
+    // Operator-configured values (MODE..AUTO TRADE ON START) use the warm-gold
+    // setting class and are never semantic statuses.
     const settingLabels = [
-        "MODE", "MARKET", "SYMBOL", "RISK / Trade（1取引リスク）", "LEVERAGE",
-        "POSITION SIZE CAP", "STOP LOSS", "TAKE PROFIT", "TRAILING STOP",
-        "TIMEFRAME", "LOOP", "AUTO TRADE",
+        "MODE", "MARKET", "SYMBOL", "RISK / Trade（1取引リスク）",
+        "REQUESTED LEVERAGE", "POSITION SIZE CAP", "STOP LOSS", "TAKE PROFIT",
+        "TRAILING STOP", "TIMEFRAME", "LOOP ON START", "AUTO TRADE ON START",
     ];
     for (const label of settingLabels) {
         const row = rowByLabel(label);
