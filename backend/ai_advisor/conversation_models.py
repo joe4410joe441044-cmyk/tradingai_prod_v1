@@ -551,6 +551,19 @@ class AdvisorMoneyManagementContext(AdvisorContractModel):
     riskState: Optional[ShortText]
     recommendedAction: Optional[ShortText]
     executionEntryState: AdvisorExecutionEntryState
+    mmRegime: Optional[ShortText] = None
+    equity: Optional[float] = None
+    availableCapital: Optional[float] = None
+    exposure: Optional[float] = None
+    remainingExposure: Optional[float] = None
+    positionCapacity: Optional[int] = None
+    remainingPositionCapacity: Optional[int] = None
+    riskBudget: Optional[float] = None
+    drawdownPercent: Optional[float] = None
+    ruinGuardStatus: Optional[ShortText] = None
+    compoundingEnabled: Optional[bool] = None
+    authorityFresh: Optional[bool] = None
+    mmCapturedAt: Optional[str] = None
 
 
 class AdvisorHealthContext(AdvisorContractModel):
@@ -584,6 +597,8 @@ class AdvisorRuntimeContext(AdvisorContractModel):
     ]
     dryRun: bool
     realOrderAllowed: bool
+    positionState: Optional[Literal["FLAT", "OPEN", "UNKNOWN"]] = None
+    pendingOrderState: Optional[Literal["NONE", "OPEN", "UNKNOWN"]] = None
     market: Optional[AdvisorMarketContext] = None
     moneyManagement: Optional[AdvisorMoneyManagementContext] = None
     authority: Optional[AdvisorAuthorityContext] = None

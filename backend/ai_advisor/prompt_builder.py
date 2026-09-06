@@ -131,6 +131,8 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
         ("emergencyState", runtime.emergencyState),
         ("dryRun", runtime.dryRun),
         ("realOrderAllowed", runtime.realOrderAllowed),
+        ("positionState", runtime.positionState),
+        ("pendingOrderState", runtime.pendingOrderState),
     ]
     if runtime.market is not None:
         lines.extend(
@@ -156,12 +158,26 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
     else:
         lines.append(("authority", "UNAVAILABLE"))
     if runtime.moneyManagement is not None:
+        mm = runtime.moneyManagement
         lines.extend(
             [
-                ("mmState", runtime.moneyManagement.state),
-                ("mmRiskState", runtime.moneyManagement.riskState),
-                ("mmRecommendedAction", runtime.moneyManagement.recommendedAction),
-                ("mmEntryState", runtime.moneyManagement.executionEntryState),
+                ("mmState", mm.state),
+                ("mmRiskState", mm.riskState),
+                ("mmRecommendedAction", mm.recommendedAction),
+                ("mmEntryState", mm.executionEntryState),
+                ("mmRegime", mm.mmRegime),
+                ("mmEquity", mm.equity),
+                ("mmAvailableCapital", mm.availableCapital),
+                ("mmExposure", mm.exposure),
+                ("mmRemainingExposure", mm.remainingExposure),
+                ("mmPositionCapacity", mm.positionCapacity),
+                ("mmRemainingPositionCapacity", mm.remainingPositionCapacity),
+                ("mmRiskBudget", mm.riskBudget),
+                ("mmDrawdownPercent", mm.drawdownPercent),
+                ("mmRuinGuardStatus", mm.ruinGuardStatus),
+                ("mmCompoundingEnabled", mm.compoundingEnabled),
+                ("mmAuthorityFresh", mm.authorityFresh),
+                ("mmCapturedAt", mm.mmCapturedAt),
             ]
         )
     else:

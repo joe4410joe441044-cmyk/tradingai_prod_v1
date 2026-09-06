@@ -317,13 +317,25 @@ def build_runtime_context(
         )
     money_management = None
     if runtime.moneyManagement is not None:
+        mm = runtime.moneyManagement
         money_management = AdvisorMoneyManagementContext(
-            state=_safe_scalar(runtime.moneyManagement.state),
-            riskState=_safe_scalar(runtime.moneyManagement.riskState),
-            recommendedAction=_safe_scalar(
-                runtime.moneyManagement.recommendedAction
-            ),
-            executionEntryState=runtime.moneyManagement.executionEntryState,
+            state=_safe_scalar(mm.state),
+            riskState=_safe_scalar(mm.riskState),
+            recommendedAction=_safe_scalar(mm.recommendedAction),
+            executionEntryState=mm.executionEntryState,
+            mmRegime=_safe_scalar(mm.mmRegime),
+            equity=mm.equity,
+            availableCapital=mm.availableCapital,
+            exposure=mm.openExposure,
+            remainingExposure=mm.remainingExposure,
+            positionCapacity=mm.openPositionCapacity,
+            remainingPositionCapacity=mm.remainingOpenPositionCapacity,
+            riskBudget=mm.riskBudget,
+            drawdownPercent=mm.drawdownPercent,
+            ruinGuardStatus=_safe_scalar(mm.ruinGuardStatus),
+            compoundingEnabled=mm.compoundingEnabled,
+            authorityFresh=mm.authorityFresh,
+            mmCapturedAt=mm.mmCapturedAt,
         )
     health = None
     if runtime.health is not None:
@@ -342,6 +354,8 @@ def build_runtime_context(
         emergencyState=runtime.safety.emergencyState,
         dryRun=runtime.safety.dryRun,
         realOrderAllowed=runtime.safety.realOrderAllowed,
+        positionState=runtime.operation.openPosState,
+        pendingOrderState=runtime.operation.pendingOrderState,
         market=market,
         moneyManagement=money_management,
         authority=authority,

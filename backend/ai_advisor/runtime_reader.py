@@ -1,7 +1,9 @@
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
-
+import math
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Callable, Optional, Tuple
 
 from backend import config as backend_config
 from backend.bot_manager.bot_manager import get_existing_bot_manager
@@ -18,6 +20,28 @@ def _execution_entry_state(value: Any) -> str:
     if value is False:
         return "BLOCKED"
     return "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class MmRuntimeFacts:
+    """Read-only, MM-authoritative numeric facts (no duplicated MM math).
+
+    Extracted verbatim from an existing MM status projection (capital and
+    metrics), never recalculated here.
+    """
+    regime: Optional[str] = None
+    equity: Optional[float] = None
+    available_capital: Optional[float] = None
+    exposure: Optional[float] = None
+    remaining_exposure: Optional[float] = None
+    position_capacity: Optional[int] = None
+    remaining_position_capacity: Optional[int] = None
+    risk_budget: Optional[float] = None
+    drawdown_percent: Optional[float] = None
+    ruin_guard_status: Optional[str] = None
+    compounding_enabled: Optional[bool] = None
+    authority_fresh: Optional[bool] = None
+    captured_at: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +69,21 @@ class RuntimeScalarSnapshot:
     mm_execution_entry_state: str = "UNAVAILABLE"
     final_execution_entry_state: str = "UNKNOWN"
     health_state: str = "UNKNOWN"
+    position_state: str = "UNKNOWN"
+    pending_order_state: str = "UNKNOWN"
+    mm_regime: Optional[str] = None
+    mm_equity: Optional[float] = None
+    mm_available_capital: Optional[float] = None
+    mm_exposure: Optional[float] = None
+    mm_remaining_exposure: Optional[float] = None
+    mm_position_capacity: Optional[int] = None
+    mm_remaining_position_capacity: Optional[int] = None
+    mm_risk_budget: Optional[float] = None
+    mm_drawdown_percent: Optional[float] = None
+    mm_ruin_guard_status: Optional[str] = None
+    mm_compounding_enabled: Optional[bool] = None
+    mm_authority_fresh: Optional[bool] = None
+    mm_captured_at: Optional[float] = None
 
 
 def _optional_string(value: Any, warning: str, warnings: list[str]) -> Optional[str]:
@@ -138,34 +177,47 @@ def _market_staleness(
     return False
 
 
-def _read_money_management(
+def _read_mm_projection(
     provider: Callable[[], Any],
     warnings: list[str],
-) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
+) -> Any:
+    """Resolve the existing MM status projection once (read-only).
+
+    Returns the authoritative ``MoneyManagementStatusResponse`` (or None).
+    No MM calculation is performed here.
+    """
     if provider is None:
         warnings.append("MM_BOUNDARY_UNAVAILABLE")
-        return None, None, None, "UNAVAILABLE"
+        return None
     try:
         boundary = provider()
     except Exception:
         warnings.append("MM_BOUNDARY_READ_FAILED")
-        return None, None, None, "UNAVAILABLE"
+        return None
     if boundary is None:
         warnings.append("MM_BOUNDARY_NOT_REGISTERED")
-        return None, None, None, "UNAVAILABLE"
+        return None
     status = getattr(boundary, "get_status", None)
     if not callable(status):
         warnings.append("MM_STATUS_PROJECTOR_ABSENT")
-        return None, None, None, "UNAVAILABLE"
+        return None
     try:
         projection = status()
     except Exception:
         warnings.append("MM_STATUS_PROJECTION_FAILED")
-        return None, None, None, "UNAVAILABLE"
+        return None
     if projection is None:
         warnings.append("MM_STATUS_PROJECTION_EMPTY")
-        return None, None, None, "UNAVAILABLE"
+        return None
+    return projection
 
+
+def _money_management_from_projection(
+    projection: Any,
+    warnings: list[str],
+) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
+    if projection is None:
+        return None, None, None, "UNAVAILABLE"
     state = _optional_string(
         getattr(projection, "lifecycle_state", None),
         "MM_STATE_UNKNOWN",
@@ -185,6 +237,169 @@ def _read_money_management(
         getattr(projection, "execution_entry_allowed", None)
     )
     return state, risk_state, recommended_action, entry_state
+
+
+def _finite_float(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+    try:
+        converted = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(converted):
+        return None
+    return converted
+
+
+def _finite_int(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return int(value)
+    try:
+        decimal_value = Decimal(str(value))
+    except Exception:
+        return None
+    if not decimal_value.is_finite() or decimal_value != decimal_value.to_integral_value():
+        return None
+    return int(decimal_value)
+
+
+def _epoch_from_datetime(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, datetime):
+        return None
+    try:
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).timestamp()
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def _mm_runtime_facts(
+    projection: Any,
+    warnings: list[str],
+) -> MmRuntimeFacts:
+    """Reuse the existing MM status projection's capital + metrics verbatim.
+
+    No MM math is performed here. ``capital`` is the authoritative
+    ``CapitalEligibilityContract`` and ``metrics`` is the authoritative
+    ``MoneyManagementMetricsResponse`` already produced by the MM boundary.
+    """
+    if projection is None:
+        return MmRuntimeFacts()
+
+    capital = getattr(projection, "capital", None)
+    metrics = getattr(projection, "metrics", None)
+
+    capital_exposure = _finite_float(getattr(capital, "open_exposure", None))
+    metrics_exposure = _finite_float(getattr(metrics, "open_exposure", None))
+    metrics_equity = _finite_float(getattr(metrics, "equity", None))
+    metrics_available = _finite_float(
+        getattr(metrics, "available_capital", None)
+    )
+    metrics_risk_budget = _finite_float(
+        getattr(metrics, "risk_budget_remaining", None)
+    )
+    metrics_captured = _epoch_from_datetime(
+        getattr(metrics, "generated_at", None)
+    )
+    capital_captured = _epoch_from_datetime(
+        getattr(capital, "evaluated_at", None)
+    )
+    projection_captured = _epoch_from_datetime(
+        getattr(projection, "generated_at", None)
+    )
+
+    facts = MmRuntimeFacts(
+        regime=_optional_string(
+            getattr(capital, "mm_regime", None),
+            "MM_REGIME_UNKNOWN",
+            warnings,
+        ),
+        equity=(
+            _finite_float(getattr(capital, "equity", None))
+            if _finite_float(getattr(capital, "equity", None)) is not None
+            else metrics_equity
+        ),
+        available_capital=(
+            _finite_float(getattr(capital, "available_capital", None))
+            if _finite_float(getattr(capital, "available_capital", None))
+            is not None
+            else metrics_available
+        ),
+        exposure=(
+            metrics_exposure
+            if metrics_exposure is not None
+            else capital_exposure
+        ),
+        remaining_exposure=_finite_float(
+            getattr(capital, "remaining_exposure", None)
+        ),
+        position_capacity=_finite_int(
+            getattr(capital, "executable_max_concurrent_positions", None)
+        ),
+        remaining_position_capacity=_finite_int(
+            getattr(capital, "remaining_position_capacity", None)
+        ),
+        risk_budget=(
+            _finite_float(getattr(capital, "risk_budget", None))
+            if _finite_float(getattr(capital, "risk_budget", None)) is not None
+            else metrics_risk_budget
+        ),
+        drawdown_percent=_finite_float(
+            getattr(metrics, "drawdown_percent", None)
+        ),
+        ruin_guard_status=_optional_string(
+            getattr(capital, "ruin_guard_status", None),
+            "MM_RUIN_GUARD_UNKNOWN",
+            warnings,
+        ),
+        compounding_enabled=(
+            getattr(capital, "compounding_enabled", None)
+            if isinstance(getattr(capital, "compounding_enabled", None), bool)
+            else None
+        ),
+        authority_fresh=(
+            getattr(capital, "authority_fresh", None)
+            if isinstance(getattr(capital, "authority_fresh", None), bool)
+            else None
+        ),
+        captured_at=capital_captured or projection_captured or metrics_captured,
+    )
+    return facts
+
+
+def _position_state(manager: Any, warnings: list[str]) -> str:
+    state_obj = getattr(manager, "state", None)
+    value = getattr(state_obj, "position_state", None)
+    if value in {"FLAT", "OPEN", "remaining"}:
+        return "FLAT" if value == "FLAT" else "OPEN"
+    warnings.append("POSITION_STATE_UNKNOWN")
+    return "UNKNOWN"
+
+
+def _pending_order_state(manager: Any, warnings: list[str]) -> str:
+    value = getattr(manager, "pending_order", None)
+    if value is True:
+        return "OPEN"
+    if value is False:
+        return "NONE"
+    warnings.append("PENDING_ORDER_STATE_UNKNOWN")
+    return "UNKNOWN"
 
 
 def _health_state(
@@ -325,9 +540,13 @@ def read_runtime_scalars(
     if not isinstance(config, dict):
         live_order_entry_state = "UNAVAILABLE"
 
+    mm_projection = _read_mm_projection(mm_boundary_provider, warnings)
     mm_state, mm_risk_state, mm_recommended_action, mm_execution_entry_state = (
-        _read_money_management(mm_boundary_provider, warnings)
+        _money_management_from_projection(mm_projection, warnings)
     )
+    mm_facts = _mm_runtime_facts(mm_projection, warnings)
+    position_state = _position_state(manager, warnings)
+    pending_order_state = _pending_order_state(manager, warnings)
 
     real_order_allowed = _real_order_allowed(
         manager,
@@ -387,4 +606,19 @@ def read_runtime_scalars(
         mm_execution_entry_state=mm_execution_entry_state,
         final_execution_entry_state=final_execution_entry_state,
         health_state=health_state,
+        position_state=position_state,
+        pending_order_state=pending_order_state,
+        mm_regime=mm_facts.regime,
+        mm_equity=mm_facts.equity,
+        mm_available_capital=mm_facts.available_capital,
+        mm_exposure=mm_facts.exposure,
+        mm_remaining_exposure=mm_facts.remaining_exposure,
+        mm_position_capacity=mm_facts.position_capacity,
+        mm_remaining_position_capacity=mm_facts.remaining_position_capacity,
+        mm_risk_budget=mm_facts.risk_budget,
+        mm_drawdown_percent=mm_facts.drawdown_percent,
+        mm_ruin_guard_status=mm_facts.ruin_guard_status,
+        mm_compounding_enabled=mm_facts.compounding_enabled,
+        mm_authority_fresh=mm_facts.authority_fresh,
+        mm_captured_at=mm_facts.captured_at,
     )

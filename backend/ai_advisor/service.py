@@ -75,6 +75,8 @@ def build_runtime_response(
             loopEnabled=snapshot.loop_enabled,
             loopState=snapshot.loop_state,
             autoTradeEnabled=snapshot.auto_trade_enabled,
+            openPosState=snapshot.position_state,
+            pendingOrderState=snapshot.pending_order_state,
         ),
         safety=AdvisorSafetyStatus(
             emergencyLocked=snapshot.emergency_locked,
@@ -99,6 +101,24 @@ def build_runtime_response(
             riskState=snapshot.mm_risk_state,
             recommendedAction=snapshot.mm_recommended_action,
             executionEntryState=_entry_state(snapshot.mm_execution_entry_state),
+            mmRegime=snapshot.mm_regime,
+            equity=snapshot.mm_equity,
+            availableCapital=snapshot.mm_available_capital,
+            openExposure=snapshot.mm_exposure,
+            remainingExposure=snapshot.mm_remaining_exposure,
+            openPositionCapacity=snapshot.mm_position_capacity,
+            remainingOpenPositionCapacity=snapshot.mm_remaining_position_capacity,
+            riskBudget=snapshot.mm_risk_budget,
+            drawdownPercent=snapshot.mm_drawdown_percent,
+            ruinGuardStatus=snapshot.mm_ruin_guard_status,
+            compoundingEnabled=snapshot.mm_compounding_enabled,
+            authorityFresh=snapshot.mm_authority_fresh,
+            mmCapturedAt=(
+                _epoch_iso(float(snapshot.mm_captured_at))
+                if isinstance(snapshot.mm_captured_at, (int, float))
+                and not isinstance(snapshot.mm_captured_at, bool)
+                else None
+            ),
         ),
         health=AdvisorHealthStatus(healthState=snapshot.health_state),
         runtime=AdvisorRuntimeMetadata(

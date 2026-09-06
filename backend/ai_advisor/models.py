@@ -45,6 +45,8 @@ class AdvisorOperationStatus(StrictModel):
         "UNKNOWN",
     ]
     autoTradeEnabled: bool
+    openPosState: Optional[Literal["FLAT", "OPEN", "UNKNOWN"]] = None
+    pendingOrderState: Optional[Literal["NONE", "OPEN", "UNKNOWN"]] = None
 
 
 class AdvisorSafetyStatus(StrictModel):
@@ -77,6 +79,19 @@ class AdvisorMoneyManagementStatus(StrictModel):
     riskState: Optional[str]
     recommendedAction: Optional[str]
     executionEntryState: AdvisorExecutionEntryState
+    mmRegime: Optional[str] = None
+    equity: Optional[float] = None
+    availableCapital: Optional[float] = None
+    openExposure: Optional[float] = None
+    remainingExposure: Optional[float] = None
+    openPositionCapacity: Optional[int] = None
+    remainingOpenPositionCapacity: Optional[int] = None
+    riskBudget: Optional[float] = None
+    drawdownPercent: Optional[float] = None
+    ruinGuardStatus: Optional[str] = None
+    compoundingEnabled: Optional[bool] = None
+    authorityFresh: Optional[bool] = None
+    mmCapturedAt: Optional[str] = None
 
 
 class AdvisorHealthStatus(StrictModel):
