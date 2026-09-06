@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradingCycleModel';
 
 const label = (english, japanese) => `${english}（${japanese}）`;
@@ -87,39 +89,73 @@ const TradingCycleFlow = ({ stages }) => {
     );
 };
 
-const CurrentActivityPanel = ({ model }) => {
-    return (
-        <section className="current-activity-panel" aria-labelledby="current-activity-title">
-            <h3 id="current-activity-title">{label("CURRENT ACTIVITY", "現在処理")}</h3>
-            <div className="current-activity-grid">
-                <div>
-                    <span>{label("CURRENT STAGE", "現在の工程")}</span>
-                    <strong>{model.currentStage?.label || ''}</strong>
-                </div>
-                <div>
-                    <span>{label("CURRENT ACTION", "現在のアクション")}</span>
-                    <strong>{model.currentActivity}</strong>
-                </div>
-                <div>
-                    <span>{label("SELECTED SYMBOL", "選定された通貨ペア")}</span>
-                    <strong>{model.selectedSymbol}</strong>
-                </div>
-                <div>
-                    <span>{label("NEXT STAGE", "次の工程")}</span>
-                    <strong>{model.nextStage?.label || ''}</strong>
-                </div>
+const DetailDisclosure = ({ className = "", children, id, open, onToggle, title }) => (
+    <section className={className}>
+        <button
+            aria-controls={`${id}-content`}
+            aria-expanded={open}
+            className="trading-cycle-disclosure__toggle"
+            data-testid={`${id}-toggle`}
+            onClick={onToggle}
+            type="button"
+        >
+            <span className="trading-cycle-disclosure__title">{title}</span>
+            <span
+                aria-hidden="true"
+                className="trading-cycle-disclosure__indicator"
+            >
+                {open ? '▲' : '▼'}
+            </span>
+        </button>
+        {open && (
+            <div className="trading-cycle-disclosure__body" id={`${id}-content`}>
+                {children}
             </div>
-        </section>
-    );
-};
+        )}
+    </section>
+);
 
-const LowerStatusPanel = ({ decision }) => {
+const CurrentActivityPanel = ({ model, open, onToggle }) => (
+    <DetailDisclosure
+        className="current-activity-panel"
+        id="current-activity-title"
+        open={open}
+        onToggle={onToggle}
+        title={label("CURRENT ACTIVITY", "現在処理")}
+    >
+        <div className="current-activity-grid">
+            <div>
+                <span>{label("CURRENT STAGE", "現在の工程")}</span>
+                <strong>{model.currentStage?.label || ''}</strong>
+            </div>
+            <div>
+                <span>{label("CURRENT ACTION", "現在のアクション")}</span>
+                <strong>{model.currentActivity}</strong>
+            </div>
+            <div>
+                <span>{label("SELECTED SYMBOL", "選定された通貨ペア")}</span>
+                <strong>{model.selectedSymbol}</strong>
+            </div>
+            <div>
+                <span>{label("NEXT STAGE", "次の工程")}</span>
+                <strong>{model.nextStage?.label || ''}</strong>
+            </div>
+        </div>
+    </DetailDisclosure>
+);
+
+const LowerStatusPanel = ({ decision, open, onToggle }) => {
     const snapshot = decision || {};
     const stages = snapshot.stages || {};
 
     return (
-        <section className="lower-status-panel" aria-labelledby="lower-status-title">
-            <h3 id="lower-status-title">{label("DECISION DETAILS", "判断詳細")}</h3>
+        <DetailDisclosure
+            className="lower-status-panel"
+            id="lower-status-title"
+            open={open}
+            onToggle={onToggle}
+            title={label("DECISION DETAILS", "判断詳細")}
+        >
             <div className="lower-status-grid">
                 <div>
                     <span>{label("FINAL DECISION", "最終判断")}</span>
@@ -154,12 +190,15 @@ const LowerStatusPanel = ({ decision }) => {
                     <strong>{durationLabel(snapshot.stateSince)}</strong>
                 </div>
             </div>
-        </section>
+        </DetailDisclosure>
     );
 };
 
 export default function TradingDecisionCard({ decision, lastOrderActivity = null, lastOrderValue = null }) {
     const model = createTradingCycleModel(decision);
+    const [currentActivityOpen, setCurrentActivityOpen] = useState(false);
+    const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
+    const [thirdSectionOpen, setThirdSectionOpen] = useState(false);
 
     return (
         <section className="trading-decision-card" aria-labelledby="trading-decision-title">
@@ -173,13 +212,27 @@ export default function TradingDecisionCard({ decision, lastOrderActivity = null
             <TradingCycleFlow stages={model.stages} />
 
             {/* Current Activity Panel */}
-            <CurrentActivityPanel model={model} />
+            <CurrentActivityPanel
+                model={model}
+                open={currentActivityOpen}
+                onToggle={() => setCurrentActivityOpen((value) => !value)}
+            />
 
             {/* Lower Status Panel */}
-            <LowerStatusPanel decision={decision} />
+            <LowerStatusPanel
+                decision={decision}
+                open={decisionDetailsOpen}
+                onToggle={() => setDecisionDetailsOpen((value) => !value)}
+            />
 
-            {/* Runtime Meta - Compact */}
-            <section className="runtime-meta-compact">
+            {/* Runtime Meta - Compact (third existing detail section) */}
+            <DetailDisclosure
+                className="runtime-meta-compact"
+                id="runtime-meta-title"
+                open={thirdSectionOpen}
+                onToggle={() => setThirdSectionOpen((value) => !value)}
+                title={label("RUNTIME STATUS", "ランタイム状態")}
+            >
                 <div className="runtime-meta-grid">
                     <div>
                         <span>{label("MODE", "モード")}</span>
@@ -206,7 +259,7 @@ export default function TradingDecisionCard({ decision, lastOrderActivity = null
                         <strong>{display(decision?.autoTrade ?? decision?.autoTradeEnabled)}</strong>
                     </div>
                 </div>
-            </section>
+            </DetailDisclosure>
 
             {/* LAST ORDER — compact footer status (secondary to the cycle stages). */}
             <section className="trading-decision-last-order" data-testid="last-execution-activity">

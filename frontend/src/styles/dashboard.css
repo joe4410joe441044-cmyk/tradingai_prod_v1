@@ -5513,7 +5513,7 @@ CURRENT ACTIVITY PANEL
 ========================================================= */
 .current-activity-panel {
     margin: 16px 0;
-    padding: 14px;
+    padding: 8px 10px;
     border-radius: 8px;
     border: 1px solid #2a3139;
     background: #151a21;
@@ -5561,7 +5561,7 @@ LOWER STATUS PANEL
 ========================================================= */
 .lower-status-panel {
     margin: 16px 0;
-    padding: 14px;
+    padding: 8px 10px;
     border-radius: 8px;
     border: 1px solid #2a3139;
     background: #151a21;
@@ -5609,10 +5609,47 @@ RUNTIME META COMPACT
 ========================================================= */
 .runtime-meta-compact {
     margin: 16px 0;
-    padding: 14px;
+    padding: 8px 10px;
     border-radius: 8px;
     border: 1px solid #2a3139;
     background: #151a21;
+}
+
+/* TRADING CYCLE DETAIL DISCLOSURES
+   Each detail section (CURRENT ACTIVITY / DECISION DETAILS / RUNTIME
+   STATUS) collapses to a single title row by default. */
+.trading-cycle-disclosure__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 8px;
+    border: 1px solid #2a3139;
+    border-radius: 6px;
+    background: #10151c;
+    color: #dfe6f0;
+    font: 700 11px "Consolas", monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+}
+
+.trading-cycle-disclosure__toggle:hover {
+    border-color: #3b4657;
+    color: #ffffff;
+}
+
+.trading-cycle-disclosure__indicator {
+    color: #57b8ff;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.trading-cycle-disclosure__body {
+    padding: 10px 2px 4px;
 }
 
 .runtime-meta-grid {

@@ -1213,3 +1213,60 @@ test("START controls relocate to the right column below EMERGENCY", async () => 
     assert.ok(finalPreparation, "FINAL PREPARATION present");
     assert.equal(descendants(finalPreparation).some((node) => node.props?.["data-testid"] === "ready-to-start"), false, "old start block removed from FINAL PREPARATION");
 });
+
+test("EMERGENCY stop button and LOCK state share the emergency block in button-first order", async () => {
+    let confirmed = 0;
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        openEmergencyConfirm: () => { confirmed += 1; },
+    }));
+    const childrenOf = (node) => {
+        const kids = node?.props?.children;
+        if (kids == null) return [];
+        return Array.isArray(kids) ? kids.filter(Boolean) : [kids];
+    };
+    const descriptor = (node) => [
+        typeof node?.type === "string" ? node.type : "*",
+        String(node?.props?.className || ""),
+    ].join(".");
+
+    // The emergency block contains both the stop button and the LOCK row.
+    const block = descendants(renderer.root).find((node) => descriptor(node).includes("operation-emergency-block"));
+    assert.ok(block, "emergency block present");
+    const blockChildren = childrenOf(block);
+
+    // First child = EMERGENCY STOP button (A, D)
+    const buttonNode = blockChildren[0];
+    assert.ok(buttonNode, "emergency stop button is the first child of the block");
+    assert.equal(String(buttonNode.props?.className || "").includes("emergency-stop-button"), true, "button carries emergency-stop-button class");
+    assert.equal(normalizedText(buttonNode), "EMERGENCY STOP");
+
+    // Second child = LOCK row (B, D)
+    const lockNode = blockChildren[1];
+    assert.ok(lockNode, "LOCK row is the second child of the block");
+    assert.equal(String(lockNode.props?.className || "").includes("operation-emergency-lock"), true, "LOCK row carries operation-emergency-lock class");
+
+    // LOCK label + state value present (F)
+    assert.ok(
+        descendants(lockNode).some(
+            (node) => node.type === "span"
+                && String(node.props?.className || "").includes("operation-state-label")
+                && normalizedText(node) === "LOCK",
+        ),
+        "LOCK label present",
+    );
+    const lockStrong = descendants(lockNode).find(
+        (node) => node.type === "strong" && String(node.props?.className || "").includes("unlocked"),
+    );
+    assert.ok(lockStrong, "unlocked LOCK state present under READY");
+    assert.equal(normalizedText(lockStrong).includes("UNLOCKED"), true);
+
+    // C: the LOCK row is inside the same block as the button (asserted by the
+    // shared parent `block` above — both children come from `blockChildren`).
+
+    // E: emergency handler unchanged — click routes to openEmergencyConfirm.
+    assert.equal(typeof buttonNode.props.onClick, "function");
+    assert.notEqual(buttonNode.props.onClick, undefined);
+    buttonNode.props.onClick();
+    assert.equal(confirmed, 1);
+});
