@@ -1399,3 +1399,53 @@ test("collapse/expand triggers no operational side effects", async () => {
     assert.ok(findButton(renderer.root, "START BOT"), "START BOT slot unaffected by collapse/expand");
     assert.ok(findTestId(renderer.root, "operation-preparation-summary"), "FINAL PREPARATION unaffected by collapse/expand");
 });
+
+const summaryRowClass = (row, fragment) =>
+    row && row.props.children.some(
+        (child) => typeof child === "object"
+            && child.type === "strong"
+            && String(child.props?.className || "").includes(fragment),
+    );
+
+test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readiness values keep semantic status", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const summarySection = findTestId(renderer.root, "operation-preparation-summary");
+    assert.ok(summarySection, "FINAL PREPARATION summary present");
+    const summaryGrid = descendants(summarySection).find(
+        (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-summary"),
+    );
+    assert.ok(summaryGrid, "summary grid present");
+    const rows = descendants(summaryGrid).filter(
+        (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-derived-row"),
+    );
+    assert.equal(rows.length, 14, "summary holds 12 setting + 2 readiness rows");
+    const rowByLabel = (label) => rows.find(
+        (row) => row.props.children.some(
+            (child) => typeof child === "object" && child.type === "span" && normalizedText(child) === label,
+        ),
+    );
+    const rowStrongClass = (row) => row && row.props.children.find(
+        (child) => typeof child === "object" && child.type === "strong",
+    )?.props?.className || "";
+
+    const settingLabels = [
+        "MODE", "MARKET", "SYMBOL", "RISK / Trade（1取引リスク）", "LEVERAGE",
+        "POSITION SIZE CAP", "STOP LOSS", "TAKE PROFIT", "TRAILING STOP",
+        "TIMEFRAME", "LOOP", "AUTO TRADE",
+    ];
+    for (const label of settingLabels) {
+        const row = rowByLabel(label);
+        assert.ok(row, `setting row "${label}" present`);
+        assert.equal(summaryRowClass(row, "operation-prep-value--setting"), true, `setting row "${label}" uses warm-gold class`);
+        assert.equal(rowStrongClass(row).includes("operation-prep-status"), false, `setting row "${label}" is not a semantic status`);
+    }
+
+    const readinessLabels = ["START READINESS", "ENTRY READINESS"];
+    for (const label of readinessLabels) {
+        const row = rowByLabel(label);
+        assert.ok(row, `readiness row "${label}" present`);
+        assert.equal(summaryRowClass(row, "operation-prep-value--setting"), false, `readiness row "${label}" never uses warm-gold class`);
+        assert.equal(rowStrongClass(row).includes("operation-prep-status"), true, `readiness row "${label}" keeps semantic status class`);
+    }
+});

@@ -80,12 +80,12 @@ function SelectField({ disabled, id, label, onChange, options, value, format = S
     );
 }
 
-function DerivedRow({ label, source = "AUTO", status = false, value }) {
+function DerivedRow({ label, source = "AUTO", status = false, value, valueClass = "" }) {
     const tone = String(value || "unknown").toLowerCase().replace(/[^a-z]+/g, "-");
     return (
         <div className="operation-prep-derived-row">
             <span>{label}</span>
-            <strong className={status ? `operation-prep-status operation-prep-status--${tone}` : ""}>
+            <strong className={status ? `operation-prep-status operation-prep-status--${tone}` : valueClass}>
                 {status && <i aria-hidden="true" />}
                 {value}
             </strong>
@@ -493,18 +493,18 @@ return (
                 <section className="operation-prep-final operation-prep-final--top" data-testid="operation-preparation-summary">
                     <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
                     <div className="operation-prep-summary">
-                        <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} />
-                        <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} />
-                        <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} />
-                        <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} />
-                        <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} />
-                        <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} />
-                        <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} />
-                        <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} />
-                        <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} />
-                        <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} />
-                        <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} />
-                        <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} />
+                        <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="LOOP" source={botRunning ? "RUNTIME" : "OPERATOR"} status={loopStatus} value={loopValue} valueClass="operation-prep-value--setting" />
+                        <DerivedRow label="AUTO TRADE" source={botRunning ? "RUNTIME" : "OPERATOR"} status={autoTradeStatus} value={autoTradeValue} valueClass="operation-prep-value--setting" />
                         <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
                         <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
                     </div>

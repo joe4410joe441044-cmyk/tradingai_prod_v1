@@ -604,6 +604,16 @@
     display: none;
 }
 
+/* WF: FINAL PREPARATION setting values → warm gold.
+   The dedicated class is applied only to the current-setting value <strong>
+   (the non-semantic rows MODE..AUTO TRADE). Semantic status values
+   (READY/WAITING/BLOCKED) never receive this class, so existing green /
+   amber / red styling is preserved. Color-only: font, weight, alignment and
+   layout are untouched (no glow, no bold override). */
+.operation-prep-final--top .operation-prep-summary .operation-prep-value--setting {
+    color: #f3d98b;
+}
+
 .operation-prep-start {
     display: grid;
     justify-items: stretch;
