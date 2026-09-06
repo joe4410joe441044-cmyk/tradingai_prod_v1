@@ -39,7 +39,7 @@ const displayDuration = (value) => (
         : "--"
 );
 
-const missingSnapshot = () => ({
+const missingSnapshot = (mode = "PAPER") => ({
     snapshotPresent: false,
     snapshotId: null,
     lifecycleRevision: null,
@@ -47,6 +47,7 @@ const missingSnapshot = () => ({
     cycleId: null,
     statusFingerprint: null,
     running: false,
+    mode,
     executionAuthority: {
         status: "DISABLED_BY_OPERATOR",
         enabled: false,
@@ -145,10 +146,13 @@ const normalizeTimelineEvent = (event = {}) => {
 };
 
 export function deriveRuntimeHealth({ botStatus } = {}) {
+    const mode = String(botStatus?.tradeMode ?? "").trim().toUpperCase() === "LIVE"
+        ? "LIVE"
+        : "PAPER";
     const health = botStatus?.runtime_health;
 
     if (!health || typeof health !== "object" || !health.stages) {
-        return missingSnapshot();
+        return missingSnapshot(mode);
     }
 
     const stages = Object.entries(health.stages).map(normalizeStage);
@@ -169,6 +173,7 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         cycleId: health.cycleId,
         statusFingerprint: health.statusFingerprint,
         running: health.bot?.running === true,
+        mode,
         executionAuthority: health.executionAuthority || {
             status: health.executionEngine?.enabled === true
                 ? "ENABLED"

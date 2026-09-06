@@ -67,3 +67,11 @@ body {
 .status-value.danger {
     color: #ef4444;
 }
+
+.status-value.paper {
+    color: var(--status-color-paper);
+}
+
+.status-value.live {
+    color: var(--status-color-live);
+}

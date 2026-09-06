@@ -5,12 +5,8 @@ export default function StatusStrip({ runtimeHealth }) {
     const botStatus = runtimeHealth.running ? "RUNNING" : "STOPPED";
     const wsStatus = runtimeHealth.browserWebSocket.status;
     const engineStatus = runtimeHealth.runtimeEngine.status;
-    const executionState = runtimeHealth.executionEngine.status;
-    const pipelineStatus = runtimeHealth.pipelineStatus;
-    const loopCount = runtimeHealth.loopCount;
-    const session = runtimeHealth.session;
-    const version = runtimeHealth.version;
     const latency = formatLatency(runtimeHealth.latencyMs);
+    const mode = runtimeHealth.mode;
 
 
     /* =====================================================
@@ -124,103 +120,27 @@ export default function StatusStrip({ runtimeHealth }) {
             </div>
 
             {/* ============================================= */}
-            {/* EXECUTION */}
+            {/* MODE */}
             {/* ============================================= */}
 
             <div className="status-item">
 
                 <span className="status-label">
-                    EXEC / 実行
-                </span>
-
-                <span
-                    className={
-                        `status-value ${
-                            ["READY", "EXECUTED", "ENABLED_IDLE_BY_AI_HOLD"].includes(
-                                executionState,
-                            )
-                                ? "online"
-                                : "warning"
-                        }`
-                    }
-                >
-
-                    {
-                        executionState
-                    }
-
-                </span>
-
-            </div>
-
-            {/* ============================================= */}
-            {/* PIPELINE */}
-            {/* ============================================= */}
-
-            <div className="status-item">
-
-                <span className="status-label">
-                    PIPELINE
+                    MODE
                 </span>
 
                 <span className={
                     `status-value ${
-                        pipelineStatus === "OK"
-                            ? "online"
-                            : "warning"
+                        mode === "LIVE"
+                            ? "live"
+                            : "paper"
                     }`
                 }>
-                    {pipelineStatus}
-                </span>
 
-            </div>
+                    {
+                        mode
+                    }
 
-            {/* ============================================= */}
-            {/* STAGES */}
-            {/* ============================================= */}
-
-            <div className="status-item">
-
-                <span className="status-label">
-                    STAGES
-                </span>
-
-                <span className={
-                    `status-value ${loopCount > 0 ? "online" : "warning"}`
-                }>
-                    {loopCount}
-                </span>
-
-            </div>
-
-            {/* ============================================= */}
-            {/* SESSION */}
-            {/* ============================================= */}
-
-            <div className="status-item">
-
-                <span className="status-label">
-                    SESSION
-                </span>
-
-                <span className="status-value online">
-                    {session}
-                </span>
-
-            </div>
-
-            {/* ============================================= */}
-            {/* VERSION */}
-            {/* ============================================= */}
-
-            <div className="status-item">
-
-                <span className="status-label">
-                    VERSION
-                </span>
-
-                <span className="status-value">
-                    {version}
                 </span>
 
             </div>

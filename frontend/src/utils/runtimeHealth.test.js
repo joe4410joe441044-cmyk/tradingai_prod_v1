@@ -118,6 +118,28 @@ test("missing snapshot is explicit critical telemetry, not a WAIT placeholder", 
     assert.equal(result.timeline.length, 0);
 });
 
+test("MODE follows the authoritative tradeMode source to PAPER", () => {
+    const result = deriveRuntimeHealth({
+        botStatus: { runtime_health: backendHealth, tradeMode: "paper" },
+    });
+
+    assert.equal(result.mode, "PAPER");
+});
+
+test("MODE follows the authoritative tradeMode source to LIVE", () => {
+    const result = deriveRuntimeHealth({
+        botStatus: { runtime_health: backendHealth, tradeMode: "live" },
+    });
+
+    assert.equal(result.mode, "LIVE");
+});
+
+test("MODE fails closed to PAPER when the authoritative source is absent", () => {
+    const result = deriveRuntimeHealth({ botStatus: {} });
+
+    assert.equal(result.mode, "PAPER");
+});
+
 test("stopped snapshot keeps the previous hold out of current UI state", () => {
     const stoppedHealth = {
         ...backendHealth,
