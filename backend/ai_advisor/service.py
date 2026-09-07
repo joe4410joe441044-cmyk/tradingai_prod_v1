@@ -52,9 +52,18 @@ def _money_management_runtime(
         and snapshot.mm_compounding_enabled is None
         and snapshot.mm_authority_fresh is None
         and snapshot.mm_captured_at is None
+        and snapshot.mm_risk_state is None
+        and snapshot.mm_available is None
+        and snapshot.mm_metrics_status is None
+        and snapshot.mm_safe_reason is None
+        and not snapshot.mm_block_reasons
+        and snapshot.mm_execution_entry_allowed is None
     ):
         return None
     return AdvisorMoneyManagementRuntimeStatus(
+        capitalAuthority=snapshot.mm_capital_authority,
+        capitalSource=snapshot.mm_capital_source,
+        inputAuthority=snapshot.mm_input_authority,
         regime=snapshot.mm_regime,
         equity=snapshot.mm_equity,
         availableCapital=snapshot.mm_available_capital,
@@ -68,6 +77,12 @@ def _money_management_runtime(
         compoundingEnabled=snapshot.mm_compounding_enabled,
         authorityFresh=snapshot.mm_authority_fresh,
         capturedAt=_epoch_or_iso(snapshot.mm_captured_at),
+        riskState=snapshot.mm_risk_state,
+        available=snapshot.mm_available,
+        metricsStatus=snapshot.mm_metrics_status,
+        safeReason=snapshot.mm_safe_reason,
+        blockReasons=list(snapshot.mm_block_reasons),
+        executionEntryAllowed=snapshot.mm_execution_entry_allowed,
     )
 
 

@@ -193,6 +193,13 @@ _CURRENT_RUNTIME_CLAIM = re.compile(
     r"リスク状態|Runtime|実行モード|Execution\s*Mode|ポジション|残高|"
     r"Market\s*Recorder|Recorder|Governance|Emergency).{0,60}(?:は|=|です))"
 )
+_CURRENT_MM_NORMAL_CLAIM = re.compile(
+    r"(?is)(?:\b(?:current|currently|right\s+now)\b.{0,40}"
+    r"\b(?:mm|money\s+management|risk\s+state)\b.{0,30}"
+    r"(?:\bis\b|=|:)\s*(?:the\s+)?\bNORMAL\b|"
+    r"(?:現在|現時点)(?:の)?(?:MM|Money\s*Management|リスク状態)"
+    r".{0,30}(?:は|=|:)\s*NORMAL\b)"
+)
 _ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\u2060\ufeff]")
 _INVALID_UNICODE = re.compile("[\ud800-\udfff]")
 
@@ -301,6 +308,36 @@ def _has_ungrounded_current_runtime_claim(
         and source.sourceType in current_source_types
         and source.freshness.state is AdvisorFreshnessState.FRESH
         for source in context.sources
+    )
+
+
+def _has_unsupported_current_mm_normal_claim(
+    candidate: AdvisorResponseCandidate,
+    context: AdvisorContextEnvelope,
+) -> bool:
+    """Fail closed when overall MM authority does not establish NORMAL.
+
+    Capital eligibility is intentionally ignored here. Numeric availability or
+    capacity cannot establish the current overall MM evaluation.
+    """
+    if not any(
+        _CURRENT_MM_NORMAL_CLAIM.search(text) for text in _text_values(candidate)
+    ):
+        return False
+    mm = context.runtimeContext.moneyManagement if context.runtimeContext else None
+    if mm is None:
+        return True
+    return not (
+        mm.riskState is not None
+        and mm.riskState.upper() == "NORMAL"
+        and mm.available is True
+        and mm.metricsStatus is not None
+        and mm.metricsStatus.upper() != "UNAVAILABLE"
+        and (
+            mm.safeReason is None
+            or mm.safeReason.upper()
+            != "AUTHORITATIVE_EVALUATION_NOT_ESTABLISHED"
+        )
     )
 
 
@@ -545,6 +582,8 @@ def validate_advisor_response_with_diagnostic(
         if _has_ungrounded_current_market_claim(candidate, context):
             claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_MARKET_CLAIM,)
         if _has_ungrounded_current_runtime_claim(candidate, context):
+            claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
+        if _has_unsupported_current_mm_normal_claim(candidate, context):
             claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
         stage = SemanticValidationPhase.INTEGRITY
         integrity_diagnostic = _first_integrity_violation(

@@ -142,6 +142,9 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
         mm = runtime.moneyManagement
         lines.extend(
             [
+                ("mmCapitalAuthority", mm.capitalAuthority),
+                ("mmCapitalSource", mm.capitalSource),
+                ("mmInputAuthority", mm.inputAuthority),
                 ("mmRegime", mm.regime),
                 ("mmEquity", mm.equity),
                 ("mmAvailableCapital", mm.availableCapital),
@@ -155,6 +158,12 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
                 ("mmCompoundingEnabled", mm.compoundingEnabled),
                 ("mmAuthorityFresh", mm.authorityFresh),
                 ("mmCapturedAt", mm.capturedAt),
+                ("mmRiskState", mm.riskState),
+                ("mmAvailable", mm.available),
+                ("mmMetricsStatus", mm.metricsStatus),
+                ("mmSafeReason", mm.safeReason),
+                ("mmBlockReasons", ",".join(mm.blockReasons) or None),
+                ("mmExecutionEntryAllowed", mm.executionEntryAllowed),
             ]
         )
     lines.append(("freshness", source.freshness.state))

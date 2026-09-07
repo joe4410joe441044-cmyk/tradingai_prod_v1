@@ -292,6 +292,9 @@ def build_runtime_context(
     if runtime.moneyManagement is not None:
         mm = runtime.moneyManagement
         money_management = AdvisorMoneyManagementRuntimeContext(
+            capitalAuthority=mm.capitalAuthority,
+            capitalSource=mm.capitalSource,
+            inputAuthority=mm.inputAuthority,
             regime=mm.regime,
             equity=mm.equity,
             availableCapital=mm.availableCapital,
@@ -305,6 +308,12 @@ def build_runtime_context(
             compoundingEnabled=mm.compoundingEnabled,
             authorityFresh=mm.authorityFresh,
             capturedAt=mm.capturedAt,
+            riskState=mm.riskState,
+            available=mm.available,
+            metricsStatus=mm.metricsStatus,
+            safeReason=mm.safeReason,
+            blockReasons=tuple(mm.blockReasons),
+            executionEntryAllowed=mm.executionEntryAllowed,
         )
     market = None
     if runtime.market is not None:

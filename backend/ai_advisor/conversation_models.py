@@ -530,13 +530,16 @@ class AdvisorKnowledgeExcerpt(AdvisorContractModel):
 
 
 class AdvisorMoneyManagementRuntimeContext(AdvisorContractModel):
-    """Read-only, MM-authoritative numeric projection (no MM math reproduced).
+    """Separate read-only capital and overall MM authority projections.
 
     Values are extracted verbatim from the existing Money Management status
     projection (``CapitalEligibilityContract`` and ``MoneyManagementMetricsResponse``).
     ``None`` means the authoritative source did not provide the fact.
     """
 
+    capitalAuthority: Optional[ShortText] = None
+    capitalSource: Optional[ShortText] = None
+    inputAuthority: Optional[ShortText] = None
     regime: Optional[ShortText] = None
     equity: Optional[float] = None
     availableCapital: Optional[float] = None
@@ -550,9 +553,19 @@ class AdvisorMoneyManagementRuntimeContext(AdvisorContractModel):
     compoundingEnabled: Optional[bool] = None
     authorityFresh: Optional[bool] = None
     capturedAt: Optional[str] = None
+    riskState: Optional[ShortText] = None
+    available: Optional[bool] = None
+    metricsStatus: Optional[ShortText] = None
+    safeReason: Optional[ShortText] = None
+    blockReasons: Annotated[
+        Tuple[ShortText, ...], Field(default_factory=tuple, max_length=32, strict=False)
+    ]
+    executionEntryAllowed: Optional[bool] = None
 
     @field_validator(
-        "regime", "ruinGuardStatus", "capturedAt"
+        "capitalAuthority", "capitalSource", "inputAuthority", "regime",
+        "ruinGuardStatus", "capturedAt", "riskState", "metricsStatus",
+        "safeReason"
     )
     @classmethod
     def validate_optional_text(cls, value: Optional[str]) -> Optional[str]:

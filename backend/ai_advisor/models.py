@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
@@ -56,8 +56,11 @@ class AdvisorRuntimeMetadata(StrictModel):
 
 
 class AdvisorMoneyManagementRuntimeStatus(StrictModel):
-    """Read-only MM-authoritative numeric projection (verbatim, not recalculated)."""
+    """Read-only capital and overall MM authorities, never recalculated."""
 
+    capitalAuthority: Optional[str] = None
+    capitalSource: Optional[str] = None
+    inputAuthority: Optional[str] = None
     regime: Optional[str] = None
     equity: Optional[float] = None
     availableCapital: Optional[float] = None
@@ -71,6 +74,12 @@ class AdvisorMoneyManagementRuntimeStatus(StrictModel):
     compoundingEnabled: Optional[bool] = None
     authorityFresh: Optional[bool] = None
     capturedAt: Optional[str] = None
+    riskState: Optional[str] = None
+    available: Optional[bool] = None
+    metricsStatus: Optional[str] = None
+    safeReason: Optional[str] = None
+    blockReasons: List[str] = Field(default_factory=list)
+    executionEntryAllowed: Optional[bool] = None
 
 
 class AdvisorMarketRuntimeStatus(StrictModel):

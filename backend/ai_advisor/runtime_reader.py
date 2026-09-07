@@ -11,12 +11,15 @@ from backend.runtime.governance_runtime import governance_state
 
 @dataclass(frozen=True)
 class MmRuntimeFacts:
-    """Read-only, MM-authoritative numeric facts (no duplicated MM math).
+    """Read-only facts from the existing MM status projection.
 
-    Extracted verbatim from an existing MM status projection (capital and
-    metrics), never recalculated here.
+    Capital eligibility and the overall MM evaluation are separate authorities.
+    Both are extracted verbatim and no MM state or arithmetic is reproduced here.
     """
 
+    capital_authority: Optional[str] = None
+    capital_source: Optional[str] = None
+    input_authority: Optional[str] = None
     regime: Optional[str] = None
     equity: Optional[float] = None
     available_capital: Optional[float] = None
@@ -30,6 +33,12 @@ class MmRuntimeFacts:
     compounding_enabled: Optional[bool] = None
     authority_fresh: Optional[bool] = None
     captured_at: Optional[float] = None
+    risk_state: Optional[str] = None
+    available: Optional[bool] = None
+    metrics_status: Optional[str] = None
+    safe_reason: Optional[str] = None
+    block_reasons: Tuple[str, ...] = ()
+    execution_entry_allowed: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,15 @@ class RuntimeScalarSnapshot:
     mm_compounding_enabled: Optional[bool] = None
     mm_authority_fresh: Optional[bool] = None
     mm_captured_at: Optional[float] = None
+    mm_capital_authority: Optional[str] = None
+    mm_capital_source: Optional[str] = None
+    mm_input_authority: Optional[str] = None
+    mm_risk_state: Optional[str] = None
+    mm_available: Optional[bool] = None
+    mm_metrics_status: Optional[str] = None
+    mm_safe_reason: Optional[str] = None
+    mm_block_reasons: Tuple[str, ...] = ()
+    mm_execution_entry_allowed: Optional[bool] = None
 
 
 def _optional_string(value: Any, warning: str, warnings: list[str]) -> Optional[str]:
@@ -178,6 +196,30 @@ def _finite_int(value: Any) -> Optional[int]:
     return int(decimal_value)
 
 
+def _optional_bool(value: Any) -> Optional[bool]:
+    return value if isinstance(value, bool) else None
+
+
+def _optional_reason(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _reason_tuple(value: Any, warnings: list[str]) -> Tuple[str, ...]:
+    if not isinstance(value, (tuple, list)):
+        warnings.append("MM_BLOCK_REASONS_INVALID")
+        return ()
+    reasons = tuple(
+        item.strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    )
+    if len(reasons) != len(value):
+        warnings.append("MM_BLOCK_REASONS_INVALID")
+    return tuple(dict.fromkeys(reasons))
+
+
 def _epoch_from_datetime(value: Any) -> Optional[float]:
     if isinstance(value, bool) or not isinstance(value, datetime):
         return None
@@ -255,6 +297,11 @@ def _mm_runtime_facts(projection: Any, warnings: list[str]) -> MmRuntimeFacts:
     capital_risk_budget = _finite_float(getattr(capital, "risk_budget", None))
 
     return MmRuntimeFacts(
+        capital_authority=_optional_reason(
+            getattr(capital, "capital_authority", None)
+        ),
+        capital_source=_optional_reason(getattr(capital, "capital_source", None)),
+        input_authority=_optional_reason(getattr(capital, "input_authority", None)),
         regime=_optional_string(
             getattr(capital, "mm_regime", None),
             "MM_REGIME_UNKNOWN",
@@ -296,6 +343,18 @@ def _mm_runtime_facts(projection: Any, warnings: list[str]) -> MmRuntimeFacts:
             else None
         ),
         captured_at=capital_captured or projection_captured or metrics_captured,
+        risk_state=_optional_reason(getattr(projection, "risk_state", None)),
+        available=_optional_bool(getattr(projection, "available", None)),
+        metrics_status=_optional_reason(
+            getattr(projection, "metrics_status", None)
+        ),
+        safe_reason=_optional_reason(getattr(projection, "safe_reason", None)),
+        block_reasons=_reason_tuple(
+            getattr(projection, "block_reasons", ()), warnings
+        ),
+        execution_entry_allowed=_optional_bool(
+            getattr(projection, "execution_entry_allowed", None)
+        ),
     )
 
 
@@ -459,4 +518,13 @@ def read_runtime_scalars(
         mm_compounding_enabled=mm_facts.compounding_enabled,
         mm_authority_fresh=mm_facts.authority_fresh,
         mm_captured_at=mm_facts.captured_at,
+        mm_capital_authority=mm_facts.capital_authority,
+        mm_capital_source=mm_facts.capital_source,
+        mm_input_authority=mm_facts.input_authority,
+        mm_risk_state=mm_facts.risk_state,
+        mm_available=mm_facts.available,
+        mm_metrics_status=mm_facts.metrics_status,
+        mm_safe_reason=mm_facts.safe_reason,
+        mm_block_reasons=mm_facts.block_reasons,
+        mm_execution_entry_allowed=mm_facts.execution_entry_allowed,
     )
