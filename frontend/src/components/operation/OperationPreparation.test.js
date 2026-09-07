@@ -355,15 +355,17 @@ test("renders the approved sequential flow with Start Bot as the final preparati
         children: { type: "button", props: { children: "START BOT" } },
     });
     const nodes = descendants(renderer.root);
+    // DOM order = TRADE SETTINGS ①–⑤ first, then FINAL PREPARATION summary,
+    // then the START / READINESS + START BOT block (the final preparation action).
     const orderedTestIds = [
-        "operation-preparation-summary",
-        "final-preparation-heading",
-        "ready-to-start",
         "trading-mode-section",
         "market-selection-section",
         "money-management-section",
         "trade-execution-section",
         "automation-section",
+        "operation-preparation-summary",
+        "final-preparation-heading",
+        "ready-to-start",
     ];
     const indexes = orderedTestIds.map((testId) => nodes.findIndex(
         (node) => node.props?.["data-testid"] === testId,
@@ -431,6 +433,26 @@ test("DOM: FINAL PREPARATION and EMERGENCY occupy the top band with no OPERATION
     assert.equal(findTestId(renderer.root, "safety-readiness-section"), undefined, "independent ⑥ SAFETY / START READINESS card is removed");
     assert.equal(gridClasses.some((cls) => cls.includes("operation-column-right")), false, "lower grid must NOT contain an empty third / right column");
     assert.equal(descendants(lowerColumns).some((node) => String(node?.props?.className || "").includes("operation-prep-final")), false, "FINAL PREPARATION is not a descendant of the lower grid");
+});
+
+test("TRADE SETTINGS renders above FINAL PREPARATION (re-ordered zones)", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const childrenOf = (node) => {
+        const kids = node?.props?.children;
+        if (kids == null) return [];
+        return Array.isArray(kids) ? kids.filter(Boolean) : [kids];
+    };
+    const descriptor = (node) => [
+        typeof node?.type === "string" ? node.type : "*",
+        String(node?.props?.className || ""),
+    ].join(".");
+    const zones = childrenOf(renderer.root).map((node) => descriptor(node));
+    const tradeIdx = zones.findIndex((el) => el.includes("operation-trade-settings"));
+    const topBandIdx = zones.findIndex((el) => el.includes("operation-top-band"));
+    assert.ok(tradeIdx >= 0, "TRADE SETTINGS zone present at top level");
+    assert.ok(topBandIdx >= 0, "top band (FINAL PREPARATION | EMERGENCY) present at top level");
+    assert.ok(tradeIdx < topBandIdx, "TRADE SETTINGS renders above FINAL PREPARATION");
 });
 
 test("manual/auto, leverage, and automation controls update the reactive summary", async () => {

@@ -518,6 +518,142 @@ export default function OperationPreparation({
 
 return (
         <div className="operation-preparation" data-testid="operation-preparation">
+            {/* TRADE SETTINGS（取引設定）— collapsible disclosure wrapping the ①–⑤ detail cards.
+                Presentation-only: collapse/expand never resets or mutates any setting value. */}
+            <section className="operation-trade-settings" data-testid="trade-settings-disclosure">
+                <button
+                    aria-controls="trade-settings-body"
+                    aria-expanded={tradeSettingsOpen}
+                    className="operation-trade-settings__toggle"
+                    data-testid="trade-settings-toggle"
+                    onClick={() => setTradeSettingsOpen((open) => !open)}
+                    type="button"
+                >
+                    <span className="operation-trade-settings__title">TRADE SETTINGS（取引設定）</span>
+                    <span aria-hidden="true" className="operation-trade-settings__indicator">
+                        {tradeSettingsOpen ? "▲" : "▼"}
+                    </span>
+                </button>
+                <div
+                    className={
+                        "operation-trade-settings__body"
+                        + (tradeSettingsOpen ? "" : " operation-trade-settings__body--collapsed")
+                    }
+                    data-testid="trade-settings-body"
+                    id="trade-settings-body"
+                >
+                <div className="operation-main-grid">
+                {/* 左列 */}
+                <div className="operation-column-left">
+                    <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
+                        <span className="operation-prep-label">Mode（モード）</span>
+                        <SegmentedControl
+                            disabled={controlsDisabled}
+                            label="Trading mode"
+                            onChange={(value) => changeSetting("tradingMode", value)}
+                            options={OPERATION_PREPARATION_OPTIONS.tradingModes}
+                            value={settings.tradingMode}
+                        />
+                        {settings.tradingMode === "LIVE" && (
+                            <p className="operation-prep-warning">LIVE request selected. Existing backend and Governance guards remain authoritative.</p>
+                        )}
+                    </Section>
+
+                    <Section number="2" testId="market-selection-section" title="MARKET SELECTION（市場選択）">
+                        <span className="operation-prep-label">SELECTION MODE</span>
+                        <SegmentedControl
+                            disabled={controlsDisabled}
+                            label="Market selection mode"
+                            onChange={(value) => changeSetting("selectionMode", value)}
+                            options={OPERATION_PREPARATION_OPTIONS.selectionModes}
+                            value={settings.selectionMode}
+                        />
+                        {settings.selectionMode === "MANUAL" ? (
+                            <SelectField
+                                disabled={controlsDisabled}
+                                id="operation-prep-symbol"
+                                label="SYMBOL"
+                                onChange={(value) => changeSetting("manualSymbol", value)}
+                                options={OPERATION_PREPARATION_OPTIONS.symbols}
+                                value={settings.manualSymbol}
+                            />
+                        ) : (
+                            <div className="operation-prep-derived-list">
+                                <DerivedRow hideSource label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
+                                <DerivedRow hideSource label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
+                            </div>
+                        )}
+                        <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
+                    </Section>
+
+                    <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
+                        <SelectField
+                            disabled={mmControlsDisabled}
+                            format={percentage}
+                            id="operation-prep-risk"
+                            label="RISK / Trade（1取引リスク）"
+                            onChange={(value) => onMmDraftChange({ riskPerTradePercent: String(value) })}
+                            options={mmRiskOptions}
+                            value={mmAvailable ? mmRiskValue : ""}
+                        />
+                        <DerivedRow hideSource label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
+                        <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
+                        <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
+                        <DerivedRow hideSource label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
+                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
+                        <DerivedRow hideSource label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                        <div className="operation-prep-mm-save" data-testid="mm-save-controls">
+                            <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
+                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists.（有効な編集は自動保存されます）</small>
+                            <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
+                        </div>
+                        {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
+                        {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
+                        {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
+                        <DerivedRow hideSource label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
+                        <DerivedRow hideSource label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
+                        <a className="operation-prep-link" href="/money-management">Money Management →</a>
+                    </Section>
+                </div>
+
+                {/* 右列 */}
+                <div className="operation-column-center">
+                    <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
+                        <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
+                        <DerivedRow hideSource label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
+                        <DerivedRow hideSource label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
+                        <SelectField disabled={controlsDisabled} id="operation-prep-position-size" label="Position Size Cap（ポジション上限）" onChange={(value) => changeSetting("positionSize", Number(value))} options={OPERATION_PREPARATION_OPTIONS.positionSize} value={settings.positionSize} />
+                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-stop-loss" label="Stop Loss（損切り）" onChange={(value) => changeSetting("stopLossPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.stopLossPercent} value={settings.stopLossPercent} />
+                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-take-profit" label="Take Profit（利確）" onChange={(value) => changeSetting("takeProfitPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.takeProfitPercent} value={settings.takeProfitPercent} />
+                        <span className="operation-prep-label">TRAILING STOP</span>
+                        <ToggleControl disabled={controlsDisabled} label="Trailing stop" onChange={(value) => changeSetting("trailingStop", value)} value={settings.trailingStop} />
+                        <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
+                        <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
+                        <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                    </Section>
+
+                    <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
+                        <span className="operation-prep-label">LOOP ON START</span>
+                        <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
+                        <span className="operation-prep-label">AUTO TRADE ON START</span>
+                        <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
+                        {botRunning && (
+                            <div className="operation-prep-runtime-controls">
+                                <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
+                                <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
+                                <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
+                                <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
+                            </div>
+                        )}
+                        <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                    </Section>
+                </div>
+            </div>
+                </div>
+            </section>
+
             {/* 顶部控制带：FINAL PREPARATION | EMERGENCY */}
             <div className="operation-top-band">
                 <section className="operation-prep-final operation-prep-final--top" data-testid="operation-preparation-summary">
@@ -845,141 +981,6 @@ return (
                 </div>
             )}
 
-            {/* TRADE SETTINGS（取引設定）— collapsible disclosure wrapping the ①–⑤ detail cards.
-                Presentation-only: collapse/expand never resets or mutates any setting value. */}
-            <section className="operation-trade-settings" data-testid="trade-settings-disclosure">
-                <button
-                    aria-controls="trade-settings-body"
-                    aria-expanded={tradeSettingsOpen}
-                    className="operation-trade-settings__toggle"
-                    data-testid="trade-settings-toggle"
-                    onClick={() => setTradeSettingsOpen((open) => !open)}
-                    type="button"
-                >
-                    <span className="operation-trade-settings__title">TRADE SETTINGS（取引設定）</span>
-                    <span aria-hidden="true" className="operation-trade-settings__indicator">
-                        {tradeSettingsOpen ? "▲" : "▼"}
-                    </span>
-                </button>
-                <div
-                    className={
-                        "operation-trade-settings__body"
-                        + (tradeSettingsOpen ? "" : " operation-trade-settings__body--collapsed")
-                    }
-                    data-testid="trade-settings-body"
-                    id="trade-settings-body"
-                >
-                <div className="operation-main-grid">
-                {/* 左列 */}
-                <div className="operation-column-left">
-                    <Section number="1" testId="trading-mode-section" title="TRADING MODE（取引モード）">
-                        <span className="operation-prep-label">Mode（モード）</span>
-                        <SegmentedControl
-                            disabled={controlsDisabled}
-                            label="Trading mode"
-                            onChange={(value) => changeSetting("tradingMode", value)}
-                            options={OPERATION_PREPARATION_OPTIONS.tradingModes}
-                            value={settings.tradingMode}
-                        />
-                        {settings.tradingMode === "LIVE" && (
-                            <p className="operation-prep-warning">LIVE request selected. Existing backend and Governance guards remain authoritative.</p>
-                        )}
-                    </Section>
-
-                    <Section number="2" testId="market-selection-section" title="MARKET SELECTION（市場選択）">
-                        <span className="operation-prep-label">SELECTION MODE</span>
-                        <SegmentedControl
-                            disabled={controlsDisabled}
-                            label="Market selection mode"
-                            onChange={(value) => changeSetting("selectionMode", value)}
-                            options={OPERATION_PREPARATION_OPTIONS.selectionModes}
-                            value={settings.selectionMode}
-                        />
-                        {settings.selectionMode === "MANUAL" ? (
-                            <SelectField
-                                disabled={controlsDisabled}
-                                id="operation-prep-symbol"
-                                label="SYMBOL"
-                                onChange={(value) => changeSetting("manualSymbol", value)}
-                                options={OPERATION_PREPARATION_OPTIONS.symbols}
-                                value={settings.manualSymbol}
-                            />
-                        ) : (
-                            <div className="operation-prep-derived-list">
-                                <DerivedRow hideSource label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
-                                <DerivedRow hideSource label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
-                            </div>
-                        )}
-                        <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
-                    </Section>
-
-                    <Section bodyClassName="operation-prep-section__body--dense" number="3" testId="money-management-section" title="MONEY MANAGEMENT（資金管理）">
-                        <SelectField
-                            disabled={mmControlsDisabled}
-                            format={percentage}
-                            id="operation-prep-risk"
-                            label="RISK / Trade（1取引リスク）"
-                            onChange={(value) => onMmDraftChange({ riskPerTradePercent: String(value) })}
-                            options={mmRiskOptions}
-                            value={mmAvailable ? mmRiskValue : ""}
-                        />
-                        <DerivedRow hideSource label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                        <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                        <DerivedRow hideSource label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
-                        <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
-                        <DerivedRow hideSource label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
-                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
-                        <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
-                        <DerivedRow hideSource label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
-                        <div className="operation-prep-mm-save" data-testid="mm-save-controls">
-                            <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
-                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists.（有効な編集は自動保存されます）</small>
-                            <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
-                        </div>
-                        {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
-                        {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
-                        {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
-                        <DerivedRow hideSource label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
-                        <DerivedRow hideSource label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
-                        <a className="operation-prep-link" href="/money-management">Money Management →</a>
-                    </Section>
-                </div>
-
-                {/* 右列 */}
-                <div className="operation-column-center">
-                    <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
-                        <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                        <DerivedRow hideSource label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
-                        <DerivedRow hideSource label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
-                        <SelectField disabled={controlsDisabled} id="operation-prep-position-size" label="Position Size Cap（ポジション上限）" onChange={(value) => changeSetting("positionSize", Number(value))} options={OPERATION_PREPARATION_OPTIONS.positionSize} value={settings.positionSize} />
-                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-stop-loss" label="Stop Loss（損切り）" onChange={(value) => changeSetting("stopLossPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.stopLossPercent} value={settings.stopLossPercent} />
-                        <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-take-profit" label="Take Profit（利確）" onChange={(value) => changeSetting("takeProfitPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.takeProfitPercent} value={settings.takeProfitPercent} />
-                        <span className="operation-prep-label">TRAILING STOP</span>
-                        <ToggleControl disabled={controlsDisabled} label="Trailing stop" onChange={(value) => changeSetting("trailingStop", value)} value={settings.trailingStop} />
-                        <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
-                        <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
-                        <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
-                    </Section>
-
-                    <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
-                        <span className="operation-prep-label">LOOP ON START</span>
-                        <ToggleControl disabled={controlsDisabled} label="Loop on start" onChange={(value) => changeSetting("loopOnStart", value)} value={settings.loopOnStart} />
-                        <span className="operation-prep-label">AUTO TRADE ON START</span>
-                        <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
-                        {botRunning && (
-                            <div className="operation-prep-runtime-controls">
-                                <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
-                                <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
-                                <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
-                                <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
-                            </div>
-                        )}
-                        <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
-                    </Section>
-                </div>
-            </div>
-                </div>
-            </section>
         </div>
     );
 }
