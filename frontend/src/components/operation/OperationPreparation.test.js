@@ -1603,3 +1603,101 @@ test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readin
         assert.equal(rowStrongClass(row).includes("operation-prep-status"), true, `readiness row "${label}" keeps semantic status class`);
     }
 });
+
+/* =================================================
+   TRADE SETTINGS — presentation-only bar removal
+   Provenance/source bars are hidden (→ not rendered)
+   while authoritative status values are preserved.
+================================================= */
+
+test("Trade Settings ①–⑤ suppress provenance/source bars but preserve authoritative status values", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        mmDraft: mmDraft({ riskPerTradePercent: "0.50", compoundingEnabled: false }),
+        mmConfiguration: mmConfig({ riskPerTradePercent: "0.50", maximumLeverage: "5", compoundingEnabled: false }),
+        capitalAuthorityStatus: "AVAILABLE",
+        availableCapital: "100.00",
+        capitalBasis: "1000",
+        riskBudget: "5.00",
+        mmRuntime: "STOPPED",
+        lifecycleState: "STOPPED",
+        leverageAuthority: { requestedLeverage: 3, maximumLeverage: 5, effectiveLeverage: 5, allowed: true, reason: "NONE" },
+    }));
+    const body = findTestId(renderer.root, "trade-settings-body");
+    assert.ok(body, "trade-settings-body is present");
+    const bodyNodes = descendants(body);
+    // 1. No provenance/source bar is rendered anywhere inside Trade Settings.
+    const sourceBars = bodyNodes.filter(
+        (node) => String(node?.props?.className || "").includes("operation-prep-source"),
+    );
+    assert.equal(sourceBars.length, 0, "TRADE SETTINGS provenance/source bars are not rendered");
+    // 2. Actual authoritative status values remain visible (label + value pairs).
+    const text = normalizedText(bodyNodes);
+    for (const expected of [
+        "CAPITAL AUTHORITY AVAILABLE",
+        "AVAILABLE CAPITAL 100.00",
+        "COMPOUNDING POLICY OFF — INITIAL REFERENCE CAPITAL",
+        "CAPITAL BASIS 1000",
+        "RISK BUDGET 5.00",
+        "SIZING READINESS",
+        "MM RUNTIME STOPPED",
+        "Effective Leverage（有効レバレッジ） 5x",
+        "Execution（執行） SIMULATION",
+        "REAL ORDER DISABLED",
+        "AUTO SELECTION START MANUAL MODE",
+    ]) {
+        assert.equal(text.includes(expected), true, `value preserved: ${expected}`);
+    }
+    // 3. Save MM remains absent; Reset MM remains present.
+    assert.equal(findButton(renderer.root, "Save MM"), undefined, "Save MM remains absent in TRADE SETTINGS");
+    assert.ok(findButton(renderer.root, "Reset MM"), "Reset MM preserved in TRADE SETTINGS");
+});
+
+test("Trade Settings rows render label+value only, with the source bar omitted", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        mmConfiguration: mmConfig({ maximumLeverage: "5" }),
+        leverageAuthority: { effectiveLeverage: 5, allowed: true, reason: "NONE" },
+    }));
+    const body = findTestId(renderer.root, "trade-settings-body");
+    assert.ok(body, "trade-settings-body present");
+    // Every derived row inside Trade Settings has exactly two text children:
+    // the label <span> and the value <strong>. No source badge slot remains.
+    const rows = descendants(body).filter(
+        (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-derived-row"),
+    );
+    assert.ok(rows.length > 0, "Trade Settings derived rows present");
+    for (const row of rows) {
+        const children = row.props.children;
+        const spans = (Array.isArray(children) ? children.filter(
+            (child) => typeof child === "object" && child.type === "span",
+        ) : []);
+        // Only the label span remains; the source badge span is gone.
+        assert.equal(spans.length, 1, "each Trade Settings row has a single label span (no source bar)");
+    }
+    // Authoritative value text stays, never replaced by a provenance token.
+    const text = normalizedText(descendants(body));
+    assert.equal(text.includes("Effective Leverage（有効レバレッジ） 5x"), true);
+    assert.equal(text.includes("Execution（執行） SIMULATION"), true);
+    assert.equal(text.includes("REAL ORDER DISABLED"), true);
+    assert.equal(text.includes("AUTO SELECTION START MANUAL MODE"), true);
+    assert.equal(text.includes("MM LEVERAGE LIMIT"), false, "Final-prep-only uppercase label is not in Trade Settings");
+});
+
+test("FINAL PREPARATION remains simplified and unchanged by the Trade Settings bar removal", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: { mode: "LIVE", selectionMode: "MANUAL", symbol: "XRPUSDTM", executionMode: "SIMULATION", realOrderAllowed: false },
+    }));
+    const summary = findTestId(renderer.root, "operation-preparation-summary");
+    assert.ok(summary, "FINAL PREPARATION summary present");
+    // The accepted simplification: no REQUEST/CURRENT provenance chips.
+    const provenanceNodes = descendants(summary).filter(
+        (node) => String(node?.props?.className || "").includes("operation-prep-provenance"),
+    );
+    assert.equal(provenanceNodes.length, 0, "no REQUEST/CURRENT provenance chips in FINAL PREPARATION");
+    const summaryText = normalizedText(descendants(summary));
+    assert.equal(summaryText.includes("CURRENT EXECUTION SIMULATION"), true, "CURRENT EXECUTION SIMULATION row preserved");
+    assert.equal(summaryText.includes("REAL ORDER DISABLED"), true, "REAL ORDER DISABLED row preserved");
+});
+

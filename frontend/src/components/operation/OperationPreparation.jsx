@@ -83,7 +83,7 @@ function SelectField({ disabled, id, label, onChange, options, value, format = S
     );
 }
 
-function DerivedRow({ label, source = "AUTO", status = false, value, valueClass = "" }) {
+function DerivedRow({ hideSource = false, label, source = "AUTO", status = false, value, valueClass = "" }) {
     const tone = String(value || "unknown").toLowerCase().replace(/[^a-z]+/g, "-");
     return (
         <div className="operation-prep-derived-row">
@@ -92,7 +92,7 @@ function DerivedRow({ label, source = "AUTO", status = false, value, valueClass 
                 {status && <i aria-hidden="true" />}
                 {value}
             </strong>
-            {sourceBadge(source)}
+            {!hideSource && sourceBadge(source)}
         </div>
     );
 }
@@ -906,8 +906,8 @@ return (
                             />
                         ) : (
                             <div className="operation-prep-derived-list">
-                                <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
-                                <DerivedRow label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
+                                <DerivedRow hideSource label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
+                                <DerivedRow hideSource label="SELECTION" source="RUNTIME" value={selectedRuntimeSymbol || "WAITING"} />
                             </div>
                         )}
                         <a className="operation-prep-link" href="/market-intelligence">Market Intelligence →</a>
@@ -923,14 +923,14 @@ return (
                             options={mmRiskOptions}
                             value={mmAvailable ? mmRiskValue : ""}
                         />
-                        <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                        <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                        <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
+                        <DerivedRow hideSource label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
+                        <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
                         <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
-                        <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
-                        <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
                         <div className="operation-prep-mm-save" data-testid="mm-save-controls">
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
                             <small className="operation-prep-mm-save__hint">A valid edit auto-persists.（有効な編集は自動保存されます）</small>
@@ -939,8 +939,8 @@ return (
                         {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
                         {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}
                         {mmConflict && <p className="operation-prep-error" role="alert">Configuration conflict. Review before saving.</p>}
-                        <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
-                        <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
+                        <DerivedRow hideSource label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
+                        <DerivedRow hideSource label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                         <a className="operation-prep-link" href="/money-management">Money Management →</a>
                     </Section>
                 </div>
@@ -949,16 +949,16 @@ return (
                 <div className="operation-column-center">
                     <Section bodyClassName="operation-prep-section__body--automation" number="4" testId="trade-execution-section" title="TRADE / EXECUTION（取引 / 執行）">
                         <SelectField disabled={controlsDisabled} format={leverage} id="operation-prep-leverage" label="Requested Leverage（要求レバレッジ）" onChange={(value) => changeSetting("requestedLeverage", Number(value))} options={OPERATION_PREPARATION_OPTIONS.requestedLeverage} value={settings.requestedLeverage} />
-                        <DerivedRow label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
-                        <DerivedRow label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
+                        <DerivedRow hideSource label="MM Leverage Limit（MMレバレッジ上限）" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
+                        <DerivedRow hideSource label="Effective Leverage（有効レバレッジ）" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
                         <SelectField disabled={controlsDisabled} id="operation-prep-position-size" label="Position Size Cap（ポジション上限）" onChange={(value) => changeSetting("positionSize", Number(value))} options={OPERATION_PREPARATION_OPTIONS.positionSize} value={settings.positionSize} />
                         <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-stop-loss" label="Stop Loss（損切り）" onChange={(value) => changeSetting("stopLossPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.stopLossPercent} value={settings.stopLossPercent} />
                         <SelectField disabled={controlsDisabled} format={percentage} id="operation-prep-take-profit" label="Take Profit（利確）" onChange={(value) => changeSetting("takeProfitPercent", Number(value))} options={OPERATION_PREPARATION_OPTIONS.takeProfitPercent} value={settings.takeProfitPercent} />
                         <span className="operation-prep-label">TRAILING STOP</span>
                         <ToggleControl disabled={controlsDisabled} label="Trailing stop" onChange={(value) => changeSetting("trailingStop", value)} value={settings.trailingStop} />
                         <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
-                        <DerivedRow label="Execution（執行）" source={executionSource} value={executionMode} />
-                        <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                        <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
+                        <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
@@ -974,7 +974,7 @@ return (
                                 <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
                             </div>
                         )}
-                        <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                        <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
                     </Section>
                 </div>
             </div>
