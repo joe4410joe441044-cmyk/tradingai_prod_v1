@@ -153,7 +153,12 @@ def _runtime_section(context: AdvisorContextEnvelope) -> AdvisorPromptSection:
                 ("mmPositionCapacity", mm.positionCapacity),
                 ("mmRemainingPositionCapacity", mm.remainingPositionCapacity),
                 ("mmRiskBudget", mm.riskBudget),
-                ("mmDrawdownPercent", mm.drawdownPercent),
+                (
+                    "mmDrawdownPercent",
+                    f"{mm.drawdownPercent}%"
+                    if mm.drawdownPercent is not None
+                    else None,
+                ),
                 ("mmRuinGuardStatus", mm.ruinGuardStatus),
                 ("mmCompoundingEnabled", mm.compoundingEnabled),
                 ("mmAuthorityFresh", mm.authorityFresh),

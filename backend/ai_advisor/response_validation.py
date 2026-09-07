@@ -202,6 +202,18 @@ _CURRENT_MM_NORMAL_CLAIM = re.compile(
 )
 _ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\u2060\ufeff]")
 _INVALID_UNICODE = re.compile("[\ud800-\udfff]")
+_DRAWDOWN_PCT_CLAIM = re.compile(
+    r"(?is)"
+    r"(?:"
+    r"\bcurrent\s+draw[\s-]*down\b"
+    r"|\bdraw[\s-]*down\s+(?:is|=|of|at)\b"
+    r"|現在のドローダウン"
+    r"|ドローダウン(?:は|が)"
+    r")"
+    r".{0,40}?(\d+(?:\.\d+)?)\s*%"
+    r"|(\d+(?:\.\d+)?)\s*%.{0,20}?"
+    r"\b(?:current\s+)?draw[\s-]*down\b"
+)
 
 
 def _normalized_security_text(value: str) -> str:
@@ -339,6 +351,44 @@ def _has_unsupported_current_mm_normal_claim(
             != "AUTHORITATIVE_EVALUATION_NOT_ESTABLISHED"
         )
     )
+
+
+def _drawdown_percent_candidate_values(
+    candidate: AdvisorResponseCandidate,
+) -> tuple[float, ...]:
+    """Extract percentages claimed about the current drawdown from text values."""
+    values: list[float] = []
+    for text in _text_values(candidate):
+        for match in _DRAWDOWN_PCT_CLAIM.finditer(text):
+            raw = match.group(1) or match.group(2)
+            try:
+                values.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+    return tuple(values)
+
+
+def _has_unjustified_drawdown_percent_claim(
+    candidate: AdvisorResponseCandidate,
+    context: AdvisorContextEnvelope,
+) -> bool:
+    """Fail closed when a candidate claims a current drawdown percentile the
+    authoritative ``drawdownPercent`` does not establish.
+
+    The authoritative scalar is ALREADY in percent units (0.282405 means
+    0.282405%). A candidate that reports ~28.24% reproduces a 100x semantic
+    fraction misinterpretation and must not survive as a grounded claim.
+    """
+    if context.runtimeContext is None:
+        return False
+    mm = context.runtimeContext.moneyManagement
+    if mm is None or mm.drawdownPercent is None:
+        return False
+    values = _drawdown_percent_candidate_values(candidate)
+    if not values:
+        return False
+    authoritative = mm.drawdownPercent
+    return any(abs(value - authoritative) > 0.5 for value in values)
 
 
 def _duplicates(values: Iterable[str]) -> bool:
@@ -584,6 +634,8 @@ def validate_advisor_response_with_diagnostic(
         if _has_ungrounded_current_runtime_claim(candidate, context):
             claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
         if _has_unsupported_current_mm_normal_claim(candidate, context):
+            claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
+        if _has_unjustified_drawdown_percent_claim(candidate, context):
             claims += (AdvisorForbiddenClaim.UNGROUNDED_CURRENT_RUNTIME_CLAIM,)
         stage = SemanticValidationPhase.INTEGRITY
         integrity_diagnostic = _first_integrity_violation(
