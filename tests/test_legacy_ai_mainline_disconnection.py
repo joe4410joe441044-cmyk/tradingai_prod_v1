@@ -32,7 +32,7 @@ class SyntheticPaperEngine:
 
     def __init__(self, mm_allowed=True):
         self.mm_allowed = mm_allowed
-        self.config = {"dry_run": True}
+        self.config = {"mode": "paper", "dry_run": True}
         self.actual_position = None
         self.paper_orders = []
         self.preflight_cleared = []
