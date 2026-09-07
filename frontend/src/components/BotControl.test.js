@@ -117,6 +117,31 @@ const loadBotControl = async () => {
                 "    status: mm,",
                 "    configuration: globalThis.__MM_CONFIGURATION__,",
                 "    configurationDraft: globalThis.__MM_DRAFT__,",
+                "    configurationDraftInvalid: globalThis.__MM_DRAFT_INVALID__ === true,",
+                "    isUpdatingConfiguration: false,",
+                "    isInitialLoading: false,",
+                "    configurationError: null,",
+                "    updateError: null,",
+                "    configurationConflict: null,",
+                "    updateConfigurationDraft: (patch) => { globalThis.__MM_DRAFT__ = { ...(globalThis.__MM_DRAFT__ || {}), ...patch }; },",
+                "    resetConfigurationDraft: () => { globalThis.__MM_DRAFT__ = globalThis.__MM_CONFIGURATION__ || null; },",
+                "    saveConfiguration: () => {",
+                "      globalThis.__MM_SAVE_CALLS__ = (globalThis.__MM_SAVE_CALLS__ || 0) + 1;",
+                "      if (globalThis.__MM_SAVE_FAIL__ === true) {",
+                "        return { ok: false, error: { message: 'persist failed' }, inProgress: false };",
+                "      }",
+                "      const draft = globalThis.__MM_DRAFT__;",
+                "      const config = globalThis.__MM_CONFIGURATION__ || {};",
+                "      const merged = {",
+                "        ...config,",
+                "        ...(draft && {",
+                "          riskPerTradePercent: draft.riskPerTradePercent || config.riskPerTradePercent,",
+                "          maximumDrawdownPercent: draft.maximumDrawdownPercent || config.maximumDrawdownPercent,",
+                "        }),",
+                "      };",
+                "      globalThis.__MM_CONFIGURATION__ = merged;",
+                "      return { ok: true, result: { configuration: merged } };",
+                "    },",
                 "  };",
                 "}",
             ].join("\n"),
@@ -566,6 +591,37 @@ const clearMmConfiguration = () => {
 const clearMmDraft = () => {
     delete globalThis.__MM_DRAFT__;
 };
+
+const clearMmDraftInvalid = () => {
+    delete globalThis.__MM_DRAFT_INVALID__;
+};
+
+const clearMmSaveFail = () => {
+    delete globalThis.__MM_SAVE_FAIL__;
+};
+
+const clearMmSaveCalls = () => {
+    delete globalThis.__MM_SAVE_CALLS__;
+};
+
+const completeMmDraft = (
+    overrides = {}
+) => ({
+    enabled: true,
+    dailyWarningPercent: "5",
+    dailyBlockPercent: "10",
+    weeklyWarningPercent: "10",
+    weeklyBlockPercent: "20",
+    monthlyWarningPercent: "20",
+    monthlyBlockPercent: "40",
+    maximumDrawdownPercent: "5",
+    totalExposurePercent: "20",
+    riskPerTradePercent: "0.50",
+    maximumPositionNotional: "1000",
+    singleSymbolExposurePercent: "5",
+    compoundingEnabled: false,
+    ...overrides,
+});
 
 const readyStartProps = (
     overrides = {}
@@ -1060,9 +1116,9 @@ test("unsaved MM draft maximum cannot authorize START", async () => {
     }
 });
 
-test("START payload risk_percent uses saved MM configuration, ignoring legacy config and MM draft", async () => {
+test("START reconciles a valid changed MM draft risk before sending the payload", async () => {
     setMmConfiguration({ riskPerTradePercent: "2.00" });
-    globalThis.__MM_DRAFT__ = { riskPerTradePercent: "3.00", totalExposurePercent: "20.00", maximumDrawdownPercent: "5.00" };
+    globalThis.__MM_DRAFT__ = completeMmDraft({ riskPerTradePercent: "3.00" });
     const mock = installFetchMock((url) => {
         assert.equal(url, "/api/bot/start");
         return jsonResponse({ body: { status: "started" } });
@@ -1073,11 +1129,38 @@ test("START payload risk_percent uses saved MM configuration, ignoring legacy co
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         const payload = JSON.parse(mock.requests[0].options.body);
-        assert.equal(payload.risk_percent, 2);
+        assert.equal(payload.risk_percent, 3);
+        assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid draft is reconciled before START");
     } finally {
         mock.restore();
         clearMmConfiguration();
         clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
+    }
+});
+
+test("START reconciles a valid 0.50→0.75 MM draft risk before sending the payload", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    globalThis.__MM_DRAFT__ = completeMmDraft({ riskPerTradePercent: "0.75" });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.75);
+        assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid draft is reconciled before START");
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
     }
 });
 
@@ -1115,22 +1198,25 @@ test("START payload risk_percent is 0.75 when saved MM risk is 0.75", async () =
     }
 });
 
-test("START payload risk_percent uses saved MM risk over unsaved draft", async () => {
+test("invalid MM draft fails closed: START sends no request", async () => {
     setMmConfiguration({ riskPerTradePercent: "0.50" });
-    globalThis.__MM_DRAFT__ = { riskPerTradePercent: "0.75", totalExposurePercent: "20.00", maximumDrawdownPercent: "5.00" };
-    const mock = installFetchMock((url) => {
-        assert.equal(url, "/api/bot/start");
-        return jsonResponse({ body: { status: "started" } });
+    globalThis.__MM_DRAFT__ = completeMmDraft({ riskPerTradePercent: "3.00" });
+    globalThis.__MM_DRAFT_INVALID__ = true;
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
-        const payload = JSON.parse(mock.requests[0].options.body);
-        assert.equal(payload.risk_percent, 0.5);
+        assert.equal(mock.requests.length, 0);
+        assert.equal(globalThis.__MM_SAVE_CALLS__ ?? 0, 0, "invalid draft is never persisted");
     } finally {
         mock.restore();
         clearMmConfiguration();
         clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
     }
 });
 
@@ -1171,13 +1257,9 @@ test("START fails closed when saved MM risk is unavailable", async () => {
     }
 });
 
-test("START payload max_drawdown_pct uses saved MM maximumDrawdownPercent, ignoring legacy config.maxDd", async () => {
+test("START reconciles a valid changed MM max drawdown before sending the payload", async () => {
     setMmConfiguration({ maximumDrawdownPercent: "7.00", riskPerTradePercent: "0.50" });
-    globalThis.__MM_DRAFT__ = {
-        riskPerTradePercent: "0.50",
-        totalExposurePercent: "20.00",
-        maximumDrawdownPercent: "10.00",
-    };
+    globalThis.__MM_DRAFT__ = completeMmDraft({ maximumDrawdownPercent: "10.00" });
     const mock = installFetchMock((url) => {
         assert.equal(url, "/api/bot/start");
         return jsonResponse({ body: { status: "started" } });
@@ -1188,36 +1270,61 @@ test("START payload max_drawdown_pct uses saved MM maximumDrawdownPercent, ignor
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         const payload = JSON.parse(mock.requests[0].options.body);
-        assert.equal(payload.max_drawdown_pct, 7);
+        assert.equal(payload.max_drawdown_pct, 10);
+        assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid drawdown draft is reconciled before START");
     } finally {
         mock.restore();
         clearMmConfiguration();
         clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
     }
 });
 
-test("START payload max_drawdown_pct uses saved MM configuration over unsaved draft", async () => {
+test("MM persistence failure fails closed: START sends no request", async () => {
     setMmConfiguration({ maximumDrawdownPercent: "5.00", riskPerTradePercent: "0.50" });
-    globalThis.__MM_DRAFT__ = {
-        riskPerTradePercent: "0.50",
-        totalExposurePercent: "20.00",
-        maximumDrawdownPercent: "15.00",
-    };
-    const mock = installFetchMock((url) => {
-        assert.equal(url, "/api/bot/start");
-        return jsonResponse({ body: { status: "started" } });
+    globalThis.__MM_DRAFT__ = completeMmDraft({ maximumDrawdownPercent: "15.00" });
+    globalThis.__MM_SAVE_FAIL__ = true;
+    const mock = installFetchMock(() => {
+        throw new Error("No request expected");
     });
     try {
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", maxDd: 10 },
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
-        const payload = JSON.parse(mock.requests[0].options.body);
-        assert.equal(payload.max_drawdown_pct, 5);
+        assert.equal(mock.requests.length, 0);
     } finally {
         mock.restore();
         clearMmConfiguration();
         clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
+    }
+});
+
+test("unchanged valid MM configuration needs no redundant persistence before START", async () => {
+    setMmConfiguration({ riskPerTradePercent: "0.50", maximumDrawdownPercent: "5.00" });
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.risk_percent, 0.5);
+        assert.equal(payload.max_drawdown_pct, 5);
+        assert.equal(globalThis.__MM_SAVE_CALLS__ ?? 0, 0, "unchanged config is not re-persisted");
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmDraft();
+        clearMmDraftInvalid();
+        clearMmSaveFail();
+        clearMmSaveCalls();
     }
 });
 

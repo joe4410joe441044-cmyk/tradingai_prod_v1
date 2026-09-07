@@ -403,6 +403,7 @@ export default function BotControl({
         status: mmStatus,
         configuration: mmConfiguration,
         configurationDraft: mmDraft,
+        configurationDraftInvalid: mmDraftInvalid,
         isUpdatingConfiguration: mmUpdating,
         isInitialLoading: mmLoading,
         configurationError: mmConfigurationError,
@@ -754,13 +755,17 @@ export default function BotControl({
         && startMaxDrawdownPercent > 0
     );
     const isLiveMode = startSettings?.tradingMode === "LIVE";
-    const paperStartAllowed = !botRunning && !botPending && !isLiveMode && startReady === true;
+    // Problem 1/9: an invalid MM draft must never become authoritative and
+    // must not be silently ignored. START fails closed while the draft cannot
+    // be safely reconciled/persisted.
+    const startConfigSafe = startReady === true && mmDraftInvalid !== true;
+    const paperStartAllowed = !botRunning && !botPending && !isLiveMode && startConfigSafe;
     const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !liveConfirmOpen;
     const liveConfirmAllowed = (
         !botRunning
         && !botPending
         && isLiveMode
-        && startReady === true
+        && startConfigSafe
         && startRiskAvailable
         && startMaxDrawdownAvailable
         && !emergencyBlocksOperations
@@ -875,7 +880,44 @@ export default function BotControl({
         setLoopError(null);
         setAutoTradeError(null);
 
+        let riskPercentValue = startRiskPercent;
+        let maxDrawdownValue = startMaxDrawdownPercent;
         try {
+            // Problem 1/9: flush any pending VALID MM draft so the START
+            // payload uses the authoritative saved configuration the user
+            // sees in Final Preparation. An invalid draft is never sent;
+            // START fails closed rather than diverging from the saved config.
+            const authoritativeConfig = mmConfiguration;
+            if (mmDraft && authoritativeConfig) {
+                const mmFieldsDirty = (
+                    String(mmDraft.riskPerTradePercent)
+                    !== String(authoritativeConfig.riskPerTradePercent)
+                    || String(mmDraft.maximumDrawdownPercent)
+                    !== String(authoritativeConfig.maximumDrawdownPercent)
+                );
+                if (
+                    mmFieldsDirty
+                    && !mmDraftInvalid
+                    && typeof saveConfiguration === "function"
+                ) {
+                    const saveResult = await handleMmSave();
+                    if (saveResult?.result?.configuration) {
+                        const fresh = saveResult.result.configuration;
+                        riskPercentValue = Number(fresh.riskPerTradePercent);
+                        maxDrawdownValue = Number(fresh.maximumDrawdownPercent);
+                    } else if (saveResult?.ok === false && !saveResult?.inProgress) {
+                        // A genuine persistence failure: START must not
+                        // silently diverge from the authoritative config.
+                        setBotError("START failed: authoritative Money Management configuration could not be persisted.");
+                        botPendingRef.current = false;
+                        setBotPending(false);
+                        return;
+                    }
+                    // in-progress: fall back to the current authoritative saved
+                    // configuration already captured above (safe, non-divergent).
+                }
+            }
+
             const response = await authenticatedControlRequest(API.botStart(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -883,9 +925,9 @@ export default function BotControl({
                     symbol: effectiveStartSymbol,
                     selection_mode: startSettings.selectionMode,
                     exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
-                    risk_percent: startRiskPercent,
+                    risk_percent: riskPercentValue,
                     position_size: config?.positionSize ?? 0,
-                    max_drawdown_pct: startMaxDrawdownPercent,
+                    max_drawdown_pct: maxDrawdownValue,
                     sl_percent: config?.sl ?? 1,
                     leverage: startSettings.requestedLeverage,
                     timeframe: config?.timeframe || "1m",
@@ -1315,6 +1357,7 @@ export default function BotControl({
                 handleAutoTradeChange={handleAutoTradeChange}
                 mmDraft={mmDraft}
                 mmConfiguration={mmConfiguration}
+                mmDraftInvalid={mmDraftInvalid}
                 capitalBasis={capitalBasis}
                 leverageAuthority={config?.leverageAuthority}
                 mmUpdating={mmUpdating}

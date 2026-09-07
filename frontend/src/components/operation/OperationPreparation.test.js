@@ -712,7 +712,7 @@ test("saved ON policy remains distinct from an unsaved OFF draft", async () => {
     });
     const content = normalizedText(descendants(renderer.root));
     assert.equal(content.includes("ON — CURRENT AVAILABLE CAPITAL"), true);
-    assert.equal(content.includes("UNSAVED CHANGES"), true);
+    assert.equal(content.includes("PENDING AUTO-SAVE"), true);
 });
 
 test("MM controls are disabled and honest when configuration is unavailable", async () => {
@@ -748,7 +748,7 @@ test("MM conflict and dirty states are reported instead of a fake saved state", 
         mmDraft: mmDraft({ riskPerTradePercent: "1" }),
         mmConfiguration: mmConfig({ riskPerTradePercent: "0.50" }),
     });
-    assert.equal(normalizedText(findTestId(dirtyRenderer.root, "mm-save-state")), "UNSAVED CHANGES");
+    assert.equal(normalizedText(findTestId(dirtyRenderer.root, "mm-save-state")), "PENDING AUTO-SAVE");
 
     const conflictRenderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "AUTO" },
@@ -1122,6 +1122,60 @@ test("START GUARDS summary derives from authoritative readiness", async () => {
     assert.equal(findTestId(runningRenderer.root, "start-guards-count"), undefined);
 });
 
+test("Problem 2/3: Final Preparation distinguishes requested mode from current execution authority", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: {
+            mode: "LIVE",
+            selectionMode: "MANUAL",
+            symbol: "XRPUSDTM",
+            executionMode: "SIMULATION",
+            realOrderAllowed: false,
+        },
+    }));
+    const divergence = findTestId(renderer.root, "mode-divergence");
+    assert.ok(divergence, "LIVE request vs current SIMULATION authority is surfaced");
+    const divergenceText = normalizedText(divergence);
+    assert.equal(divergenceText.includes("START REQUEST = LIVE"), true);
+    assert.equal(divergenceText.includes("CURRENT EXECUTION AUTHORITY = SIMULATION"), true);
+    const content = normalizedText(descendants(renderer.root));
+    // Provenance badges make the requested (REQUEST) vs current (CURRENT)
+    // semantic class explicit, and a mere LIVE dropdown never grants REAL
+    // ORDER authority (CURRENT) while execution remains SIMULATION.
+    assert.equal(content.includes("REQUEST"), true);
+    assert.equal(content.includes("CURRENT"), true);
+    assert.equal(content.includes("REAL ORDER"), true);
+    assert.equal(content.includes("DISABLED"), true);
+});
+
+test("Problem 7: START GUARDS summary is scoped to the START gate; detail is labeled runtime & entry guards", async () => {
+    globalThis.__DBG_PREP__ = true;
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        governanceStatus: "SUSPENDED_BY_BOT_STOP",
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        mmConfiguration: { riskPerTradePercent: "0.50", totalExposurePercent: "20.00", maximumDrawdownPercent: "5.00", maximumLeverage: "5", compoundingEnabled: false },
+    }));
+    delete globalThis.__DBG_PREP__;
+    const count = findTestId(renderer.root, "start-guards-count");
+    if (count) {
+        const countText = normalizedText(count);
+        assert.equal(
+            countText.includes("START gate only"),
+            true,
+            "count is explicitly scoped to the START gate (runtime ENTRY/Governance are separate)",
+        );
+    }
+    const detailsToggle = normalizedText(findTestId(renderer.root, "safety-details-toggle"));
+    assert.equal(
+        detailsToggle.includes("RUNTIME & ENTRY GUARDS"),
+        true,
+        "detail section is labeled as runtime & entry guards",
+    );
+});
+
 test("SAFETY / READINESS DETAILS is collapsed by default and expands on toggle", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps());
@@ -1167,9 +1221,12 @@ test("critical BLOCKED / WAITING guidance stays visible while details are collap
     assert.ok(findTestId(renderer.root, "abnormal-guidance"), "abnormal guidance visible while collapsed");
     const abnormal = normalizedText(findTestId(renderer.root, "abnormal-guidance"));
     assert.equal(abnormal.includes("Pending Order Authority（保留注文権限）"), true, "Pending Order Authority non-ready exposed");
-    assert.equal(abnormal.includes("Governance（ガバナンス）"), true, "Governance blocked exposed");
     assert.equal(abnormal.includes("Position（ポジション）"), true, "Position blocked exposed");
     assert.equal(abnormal.includes("BLOCKED"), true, "BLOCKED status surfaced");
+    // Problem 6: Governance is a runtime-only post-START guard, so it must NOT
+    // be exposed as a START blocker (this would create an impossible circular
+    // dependency while the BOT is STOPPED).
+    assert.equal(abnormal.includes("Governance（ガバナンス）"), false, "Governance is a post-START runtime guard");
 });
 
 test("collapse state is presentation-only and does not affect the START slot or handlers", async () => {

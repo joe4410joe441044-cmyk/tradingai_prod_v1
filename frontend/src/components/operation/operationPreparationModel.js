@@ -273,6 +273,9 @@ export const deriveOperationReadiness = ({
     const normalizedMmBlockReasons = Array.isArray(mmBlockReasons)
         ? mmBlockReasons.map((reason) => String(reason).trim().toUpperCase())
         : [];
+    // WF: runtime-only MM metrics unavailability is a PAPER pre-start
+    // PRESENTATION hint. It is NOT itself a START gate condition, and it must
+    // never block START when the authoritative saved configuration is valid.
     const stoppedPaperRuntimeMetricsOnly = (
         botRunning !== true
         && normalizedMode === "PAPER"
@@ -282,10 +285,12 @@ export const deriveOperationReadiness = ({
         && normalizedMmBlockReasons.length === 1
         && normalizedMmBlockReasons[0] === "TRADING_RUNTIME_METRICS_UNAVAILABLE"
     );
-    const startMmReadiness = (
-        savedMmReadiness === "READY"
-        && (mmReadiness === "READY" || stoppedPaperRuntimeMetricsOnly)
-    ) ? "READY" : "BLOCKED";
+    // WF: START MM readiness depends ONLY on a valid authoritative saved
+    // configuration. Runtime MM entry guard (mmReadiness) and runtime-only
+    // metrics block reasons are ENTRY gates (post-START), never START gates.
+    // A valid saved config + a fresh draft is READY; a genuinely invalid,
+    // missing, or unavailable saved config fails closed to BLOCKED.
+    const startMmReadiness = savedMmReadiness;
 
     // LIVE pre-start authority: the authoritative gate is the global
     // ALLOW_LIVE + TRADE_MODE permission, never the runtime real-order
@@ -323,7 +328,13 @@ export const deriveOperationReadiness = ({
         paperBootstrapActive && orderAuthority === "UNKNOWN"
     ) ? "READY" : orderAuthority;
 
-    // Calculate readiness values for all modes
+    // Calculate readiness values for all modes.
+    //
+    // START gate semantics (Problems 5/6): the START gate answers "may the
+    // BOT initialize a fresh runtime?" — it must NOT require runtime-only
+    // post-START conditions (governance active, MM entry guard, execution
+    // enabled) that cannot exist while the BOT is STOPPED. Those stay in the
+    // ENTRY gate (entryReadinessValues) and remain fail-closed after start.
     const paperStartReadinessValues = [
         emergencyReadiness,
         startPositionReadiness,
@@ -333,27 +344,25 @@ export const deriveOperationReadiness = ({
         executionReadiness,
         leverageReadiness,
     ];
-    const legacyReadinessValues = [
+    const startedStartReadinessValues = [
         emergencyReadiness,
         positionState,
         orderAuthority,
         selectionReadiness,
-        mmReadiness,
-        governanceReadiness,
+        startMmReadiness,
         executionReadiness,
         leverageReadiness,
     ];
     let startReadinessValues = paperPreStart
         ? paperStartReadinessValues
-        : legacyReadinessValues;
+        : startedStartReadinessValues;
     if (normalizedMode === "LIVE") {
         startReadinessValues = [
             emergencyReadiness,
             positionState,
             orderAuthority,
             selectionReadiness,
-            savedMmReadiness,
-            governanceReadiness,
+            startMmReadiness,
             executionReadiness,
             leverageReadiness,
             liveAuthorityReadiness,

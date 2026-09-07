@@ -83,7 +83,16 @@ function SelectField({ disabled, id, label, onChange, options, value, format = S
     );
 }
 
-function DerivedRow({ label, source = "AUTO", status = false, value, valueClass = "" }) {
+const provenanceBadge = (provenance) => {
+    if (!provenance) return null;
+    return (
+        <span className={`operation-prep-provenance operation-prep-provenance--${provenance.toLowerCase()}`}>
+            {provenance === "REQ" ? "REQUEST" : "CURRENT"}
+        </span>
+    );
+};
+
+function DerivedRow({ label, source = "AUTO", status = false, value, valueClass = "", provenance }) {
     const tone = String(value || "unknown").toLowerCase().replace(/[^a-z]+/g, "-");
     return (
         <div className="operation-prep-derived-row">
@@ -92,6 +101,7 @@ function DerivedRow({ label, source = "AUTO", status = false, value, valueClass 
                 {status && <i aria-hidden="true" />}
                 {value}
             </strong>
+            {provenanceBadge(provenance)}
             {sourceBadge(source)}
         </div>
     );
@@ -140,6 +150,7 @@ export default function OperationPreparation({
     mmRecoveryRequired = false,
     mmDraft = null,
     mmConfiguration = null,
+    mmDraftInvalid = false,
     leverageAuthority = null,
     mmUpdating = false,
     mmLoading = false,
@@ -260,9 +271,19 @@ export default function OperationPreparation({
             : emergencyStateCode !== "READY"
     );
 
-    const executionMode = config.executionMode || "UNAVAILABLE";
+    const executionMode = config.executionMode || "SIMULATION";
     const executionSource = config.executionMode ? "RUNTIME" : "NOT CONNECTED";
     const realOrderSource = config.realOrderAuthorityKnown ? "RUNTIME" : "NOT CONNECTED";
+    // Problem 2/3: the START REQUEST (settings.tradingMode) is a distinct
+    // semantic class from the CURRENT RUNTIME / AUTHORITY (executionMode,
+    // realOrderAllowed, capital authority). Selecting LIVE in the UI must not
+    // present current PAPER execution authority as if it were LIVE authority.
+    const requestedMode = settings.tradingMode || "UNKNOWN";
+    const currentExecutionMode = executionMode;
+    const requestedModeDiffersFromExecution = (
+        requestedMode === "LIVE"
+        && currentExecutionMode !== "LIVE"
+    );
 
      const {
         reviewReadiness,
@@ -380,23 +401,32 @@ export default function OperationPreparation({
         ? withCurrentOption(OPERATION_PREPARATION_OPTIONS.maxDrawdown, mmDrawdownValue)
         : OPERATION_PREPARATION_OPTIONS.maxDrawdown;
 
+    // Problem 1/9: MM now auto-persists a valid draft (auto-reconcile) so the
+    // operator no longer has to manually Save MM. An invalid draft is never
+    // silently persisted; it is surfaced as an explicit invalid state.
+    // mmDraftInvalid is computed upstream (BotControl) from the authoritative
+    // validation so it stays test-friendly.
+    const mmDraftInvalidState = Boolean(mmDraftInvalid);
     const mmDraftState = mmUpdating
-        ? "SAVING"
+        ? "AUTO-SAVING"
         : mmConflict
             ? "CONFLICT"
             : mmUpdateError
                 ? "UPDATE FAILED"
-                : mmDirty
-                    ? "UNSAVED CHANGES"
-                    : mmAvailable
-                        ? "SAVED"
-                        : mmLoading
-                            ? "LOADING"
-                            : "UNAVAILABLE";
+                : mmDraftInvalidState
+                    ? "INVALID (NOT SAVED)"
+                    : mmDirty
+                        ? "PENDING AUTO-SAVE"
+                        : mmAvailable
+                            ? "SAVED"
+                            : mmLoading
+                                ? "LOADING"
+                                : "UNAVAILABLE";
     const mmSaveDisabled = !mmAvailable
         || mmUpdating
         || Boolean(mmConflict)
-        || Boolean(mmConfigurationError);
+        || Boolean(mmConfigurationError)
+        || mmDraftInvalidState;
 
     // WF-3: Final Preparation must distinguish the UNSAVED MM DRAFT from the
     // SAVED value that START actually sends. Presentation only.
@@ -505,54 +535,61 @@ return (
                     <h3 data-testid="final-preparation-heading">FINAL PREPARATION</h3>
                     <div className="operation-prep-summary">
                         <Section number="1" testId="final-prep-trading-mode" title="TRADING MODE">
-                            <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            {requestedModeDiffersFromExecution && (
+                                <div className="operation-prep-mode-divergence" data-testid="mode-divergence">
+                                    <span>START REQUEST = {requestedMode}</span>
+                                    <strong>CURRENT EXECUTION AUTHORITY = {currentExecutionMode}</strong>
+                                    <small>LIVE / REAL-ORDER authority is NOT granted by selecting LIVE（LIVE選択だけでは実注文権限は付与されません）</small>
+                                </div>
+                            )}
                         </Section>
 
                         <Section number="2" testId="final-prep-market-selection" title="MARKET SELECTION">
-                            <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
+                            <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} provenance="CUR" />
                         </Section>
 
                         <Section number="3" testId="final-prep-money-management" title="MONEY MANAGEMENT">
-                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                            <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
-                            <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
-                            <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
-                            <DerivedRow label="MAX EXPOSURE" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} />
-                            <DerivedRow label="MAX DRAWDOWN" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} />
-                            <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
-                            <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
-                            <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
+                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} provenance="CUR" />
+                            <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} provenance="CUR" />
+                            <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} provenance="CUR" />
+                            <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} provenance="CUR" />
+                            <DerivedRow label="MAX EXPOSURE" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} provenance="CUR" />
+                            <DerivedRow label="MAX DRAWDOWN" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} provenance="CUR" />
+                            <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} provenance="CUR" />
+                            <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} provenance="CUR" />
+                            <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} provenance="CUR" />
                         </Section>
 
                         <Section number="4" testId="final-prep-trade-execution" title="TRADE / EXECUTION">
-                            <DerivedRow label="REQUESTED LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="MM LEVERAGE LIMIT" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
-                            <DerivedRow label="EFFECTIVE LEVERAGE" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
-                            <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} />
-                            <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                            <DerivedRow label="REQUESTED LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="MM LEVERAGE LIMIT" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} provenance="CUR" />
+                            <DerivedRow label="EFFECTIVE LEVERAGE" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} provenance="CUR" />
+                            <DerivedRow label="POSITION SIZE CAP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} valueClass="operation-prep-value--setting" provenance={botRunning ? "CUR" : "REQ"} />
+                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} valueClass="operation-prep-value--setting" provenance={botRunning ? "CUR" : "REQ"} />
+                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} valueClass="operation-prep-value--setting" provenance={botRunning ? "CUR" : "REQ"} />
+                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} valueClass="operation-prep-value--setting" provenance={botRunning ? "CUR" : "REQ"} />
+                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} valueClass="operation-prep-value--setting" provenance={botRunning ? "CUR" : "REQ"} />
+                            <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} provenance="CUR" />
+                            <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} provenance="CUR" />
                         </Section>
 
                         <Section number="5" testId="final-prep-automation" title="AUTOMATION">
-                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={settings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={settings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} />
-                            <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={settings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={settings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" provenance="REQ" />
+                            <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} provenance="CUR" />
+                            <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} provenance="CUR" />
+                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} provenance="REQ" />
                         </Section>
 
                         <section className="operation-prep-section operation-prep-section--final-readiness" data-testid="final-prep-start-readiness">
                             <header><h3>START / READINESS（開始 / 準備状態）</h3></header>
                             <div className="operation-prep-section__body">
-                                <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} />
-                                <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} />
+                                <DerivedRow label="START READINESS" source="UI REVIEW" status value={runningStartReadiness} provenance="CUR" />
+                                <DerivedRow label="ENTRY READINESS" source="RUNTIME" status value={runningEntryReadiness} provenance="CUR" />
                             </div>
                             <div className="operation-prep-start-guards" data-testid="start-guards">
                                 <span className="operation-prep-start-guards__label">START GUARDS</span>
@@ -563,6 +600,9 @@ return (
                                 {!botRunning && startGuardsLabel !== "READY" && (
                                     <span className="operation-prep-start-guards__count" data-testid="start-guards-count">
                                         {startGuardsCounts.ready} READY / {startGuardsCounts.waiting} WAITING / {startGuardsCounts.blocked} BLOCKED
+                                        <small className="operation-prep-start-guards__scope">
+                                            (START gate only — runtime ENTRY / Governance gates are separate, see SAFETY / READINESS DETAILS)
+                                        </small>
                                     </span>
                                 )}
                             </div>
@@ -586,13 +626,16 @@ return (
                                     type="button"
                                 >
                                     <span aria-hidden="true">{safetyDetailsOpen ? "▲" : "▼"}</span>
-                                    SAFETY / READINESS DETAILS
+                                    SAFETY / READINESS DETAILS — RUNTIME &amp; ENTRY GUARDS
                                 </button>
                                 {safetyDetailsOpen && (
                                     <div className="operation-prep-details__body" data-testid="safety-readiness-details-body">
+                                        <p className="operation-prep-details__intro">
+                                            These are CURRENT runtime / entry guards. They are fail-closed <em>after</em> START and are not pre-START prerequisites.
+                                        </p>
                                         <div className="operation-prep-derived-list operation-prep-derived-list--safety">
                                             {safetyDetailRows.map((row) => (
-                                                <DerivedRow key={row.label} label={row.label} source={row.source} status value={row.value} />
+                                                <DerivedRow key={row.label} label={row.label} source={row.source} status value={row.value} provenance="CUR" />
                                             ))}
                                         </div>
                                         {!botRunning && (
@@ -612,7 +655,7 @@ return (
                             </div>
                             {mmRiskDivergence && (
                                 <small className="operation-prep-draft-note" data-testid="mm-risk-draft-note">
-                                    RISK shown is the UNSAVED MM DRAFT; START sends the SAVED value（表示は未保存ドラフト。STARTには保存済み値を送信します）. Press Save MM to apply the draft.
+                                    RISK shown is the MM DRAFT; START sends the authoritative saved value（表示はMMドラフト。STARTには権威ある保存済み値を送信します）. A valid draft auto-reconciles to the saved configuration.
                                 </small>
                             )}
                         </section>
@@ -903,6 +946,7 @@ return (
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
                             <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
                             <button disabled={mmSaveDisabled} onClick={onMmSave} type="button">Save MM</button>
+                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists; manual Save is optional.（有効な編集は自動保存されます）</small>
                         </div>
                         {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
                         {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}

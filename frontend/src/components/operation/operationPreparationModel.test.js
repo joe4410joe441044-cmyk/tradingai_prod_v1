@@ -308,12 +308,58 @@ test("runtime-only exception is PAPER pre-start only", () => {
     assert.equal(deriveOperationReadiness(readyInputs({
         ...inputs, mmRecoveryRequired: true,
     })).startReady, true);
+    // Problem 4: runtime-only block reasons (even when a diagnostic reason is
+    // additionally present) must NOT block a PAPER START while the
+    // authoritative saved configuration is valid. The runtime MM entry guard
+    // and its block reasons are ENTRY gates, never START gates.
     assert.equal(deriveOperationReadiness(readyInputs({
         ...inputs, mmBlockReasons: [
             "TRADING_RUNTIME_METRICS_UNAVAILABLE",
             "MM_CONFIGURATION_INVALID",
         ],
-    })).startReady, false);
+    })).startReady, true);
+});
+
+test("Problem 4 regression: a genuinely invalid saved config still blocks START", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+        mmConfiguration: {
+            riskPerTradePercent: "0.50",
+            totalExposurePercent: "20",
+            maximumLeverage: "5",
+        },
+    }));
+    assert.equal(result.savedMmReadiness, "BLOCKED");
+    assert.equal(result.startMmReadiness, "BLOCKED");
+    assert.equal(result.startReady, false);
+});
+
+test("Problem 6: Governance SUSPENDED_BY_BOT_STOP does not circularly block START", () => {
+    // Governance cannot become READY until the runtime starts. Requiring a
+    // READY governance as a pre-start gate would make START impossible by
+    // definition. It must remain an ENTRY (post-START) gate instead.
+    const result = deriveOperationReadiness(readyInputs({
+        governanceStatus: "SUSPENDED_BY_BOT_STOP",
+        executionEntryAllowed: false,
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    }));
+    assert.equal(result.governanceReadiness, "SUSPENDED_BY_BOT_STOP");
+    assert.equal(result.startReady, true);
+    assert.equal(result.entryReady, false);
+    assert.equal(result.entryReadiness, "WAITING");
+});
+
+test("Problem 5: START permission is independent of ENTRY permission (runtime-only)", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        riskState: "UNKNOWN",
+        mmBlockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    }));
+    assert.equal(result.startReady, true);
+    assert.equal(result.entryReady, false);
+    assert.equal(result.entryReadiness, "WAITING");
 });
 
 

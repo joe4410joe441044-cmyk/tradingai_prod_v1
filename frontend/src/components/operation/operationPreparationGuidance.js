@@ -11,14 +11,11 @@ export const deriveOperationBlockGuidance = ({
     selectionRuntime,
     selectedRuntimeSymbol,
     startMmReadiness,
-    mmEntryReadiness,
-    governanceReadiness,
     executionReadiness,
     leverageReadiness,
     emergencyState,
     position,
     pendingOrder,
-    governanceStatus,
     realOrderAllowed,
     executionEnabled,
     mmConfiguration,
@@ -131,38 +128,12 @@ export const deriveOperationBlockGuidance = ({
             required: "READY (valid saved risk + max drawdown)",
             section: "③ MONEY MANAGEMENT",
             en: divergence
-                ? "MM draft is unsaved and differs from the saved config that is actually sent to START. Save MM to align."
+                ? "MM draft differs from the saved config. A valid draft auto-reconciles to the saved (authoritative) config used by START."
                 : "MM START config must be a valid saved risk / max-drawdown configuration.",
             ja: divergence
-                ? "MMドラフトが未保存です。STARTには保存済み値が送られます。Save MMしてください。"
+                ? "MMドラフトが保存済み設定と異なります。有効なドラフトは保存済み値へ自動反映されます。"
                 : "有効なリスク/最大ドローダウン設定を保存してください。",
-            fix: "③ MONEY MANAGEMENT で設定を整え Save MM / ③ reconcile and Save MM",
-        });
-    }
-    if (!notBlocking(mmEntryReadiness?.state)) {
-        push({
-            id: "entryPermission",
-            label: "Entry Permission（エントリー権限）",
-            status: mmEntryReadiness?.state,
-            current: current(mmEntryReadiness?.label),
-            required: "READY / ENTRY ALLOWED",
-            section: "FINAL PREPARATION",
-            en: "Entry permission is not allowed (runtime MM guard). Resolve the MM recovery/hold before START.",
-            ja: "エントリー権限がありません。MMガードを解除してください。",
-            fix: "③ MM の hold/recovery を解消 / resolve MM recovery or hold",
-        });
-    }
-    if (!notBlocking(governanceReadiness)) {
-        push({
-            id: "governance",
-            label: "Governance（ガバナンス）",
-            status: governanceReadiness,
-            current: governanceStatus,
-            required: "READY / OK / ALLOWED",
-            section: "FINAL PREPARATION",
-            en: "Governance must be READY before START.",
-            ja: "ガバナンスがREADYになるまでSTARTできません。",
-            fix: "FINAL PREPARATION で Governance を READY にする / wait for Governance to be ready",
+            fix: "③ MONEY MANAGEMENT の設定を有効に編集する / ③ set a valid risk/max-drawdown configuration",
         });
     }
     if (!notBlocking(executionReadiness)) {
