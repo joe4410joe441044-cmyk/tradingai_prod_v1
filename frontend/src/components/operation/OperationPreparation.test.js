@@ -1121,6 +1121,25 @@ test("START GUARDS summary derives from authoritative readiness", async () => {
     assert.equal(findTestId(runningRenderer.root, "start-guards-count"), undefined);
 });
 
+test("REQUEST/CURRENT provenance labels and bars are not rendered in FINAL PREPARATION normal rows", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const summarySection = findTestId(renderer.root, "operation-preparation-summary");
+    assert.ok(summarySection, "FINAL PREPARATION summary present");
+    const all = descendants(summarySection);
+    const provenanceNodes = all.filter(
+        (node) => String(node?.props?.className || "").includes("operation-prep-provenance"),
+    );
+    assert.equal(provenanceNodes.length, 0, "no REQUEST/CURRENT provenance chips rendered");
+    const content = normalizedText(all);
+    // Provenance badge text is an exclusive label; normal rows must not emit it.
+    assert.equal(/REQUEST\b/.test(content), false, "no REQUEST provenance label in normal rows");
+    // "REQUESTED LEVERAGE" / "REAL ORDER" legitimately contain the substring, so
+    // assert the isolated provenance word is absent where it was a standalone badge.
+    assert.equal(content.includes("REQUEST="), false, "no START REQUEST label");
+    assert.equal(content.includes("CURRENT EXECUTION AUTHORITY"), false, "no CURRENT EXECUTION AUTHORITY label");
+});
+
 test("Problem 2/3: Final Preparation distinguishes requested mode from current execution authority", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps({
@@ -1132,26 +1151,69 @@ test("Problem 2/3: Final Preparation distinguishes requested mode from current e
             realOrderAllowed: false,
         },
     }));
+    const rowByLabelIn = (node, label) => descendants(node).filter(
+        (row) => row.type === "div" && String(row.props?.className || "").includes("operation-prep-derived-row"),
+    ).find((row) => row.props.children.some(
+        (child) => typeof child === "object" && child.type === "span" && normalizedText(child) === label,
+    ));
+    const rowValueIn = (row) => normalizedText(row.props.children.find(
+        (child) => typeof child === "object" && child.type === "strong",
+    ));
+
+    const tradingMode = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.ok(tradingMode, "TRADING MODE summary present");
+    // LIVE requested mode == current execution SIMULATION and REAL ORDER DISABLED
+    // must coexist as authoritative distinct values in the TRADING MODE card.
+    assert.equal(rowValueIn(rowByLabelIn(tradingMode, "MODE")), "LIVE", "requested MODE is LIVE");
+    assert.equal(rowValueIn(rowByLabelIn(tradingMode, "CURRENT EXECUTION")), "SIMULATION", "current execution authority is SIMULATION");
+    assert.equal(rowValueIn(rowByLabelIn(tradingMode, "REAL ORDER")), "DISABLED", "real order authority stays DISABLED");
+    // The divergence is surfaced as a single concise explanatory note, not a
+    // repetitive START REQUEST / CURRENT EXECUTION AUTHORITY provenance block.
     const divergence = findTestId(renderer.root, "mode-divergence");
-    assert.ok(divergence, "LIVE request vs current SIMULATION authority is surfaced");
+    assert.ok(divergence, "LIVE divergence explanatory note present");
     const divergenceText = normalizedText(divergence);
-    assert.equal(divergenceText.includes("START REQUEST"), true);
-    assert.equal(divergenceText.includes("LIVE"), true);
-    assert.equal(divergenceText.includes("CURRENT EXECUTION AUTHORITY"), true);
-    assert.equal(divergenceText.includes("SIMULATION"), true);
-    // REQUEST / CURRENT provenance chips render as distinct semantic labels.
-    const provenanceNodes = descendants(divergence).filter(
+    assert.equal(divergenceText.includes("LIVE is selected for the next START"), true, "concise LIVE note present");
+    assert.equal(divergenceText.includes("Real-order authority is not active"), true);
+    assert.equal(divergenceText.includes("START REQUEST"), false, "no START REQUEST duplicate label");
+    assert.equal(divergenceText.includes("CURRENT EXECUTION AUTHORITY"), false, "no CURRENT EXECUTION AUTHORITY label");
+    // No REQUEST / CURRENT provenance chips anywhere in the summary.
+    const provenanceNodes = descendants(findTestId(renderer.root, "operation-preparation-summary")).filter(
         (node) => String(node?.props?.className || "").includes("operation-prep-provenance"),
     );
-    assert.equal(provenanceNodes.length >= 2, true, "REQUEST and CURRENT chips present in the divergence");
-    const provenanceText = provenanceNodes.map((node) => normalizedText(node)).join(",");
-    assert.equal(provenanceText.includes("REQUEST"), true);
-    assert.equal(provenanceText.includes("CURRENT"), true);
+    assert.equal(provenanceNodes.length, 0, "REQUEST and CURRENT chips are not rendered");
     const content = normalizedText(descendants(renderer.root));
-    // A mere LIVE dropdown never grants REAL ORDER authority (CURRENT) while
-    // execution remains SIMULATION.
+    // A mere LIVE dropdown never grants REAL ORDER authority while execution
+    // remains SIMULATION.
     assert.equal(content.includes("REAL ORDER"), true);
     assert.equal(content.includes("DISABLED"), true);
+});
+
+test("START READINESS and ENTRY READINESS remain separate rows in FINAL PREPARATION", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: {
+            mode: "LIVE",
+            selectionMode: "MANUAL",
+            symbol: "XRPUSDTM",
+            executionMode: "SIMULATION",
+            realOrderAllowed: false,
+        },
+    }));
+    const readiness = findTestId(renderer.root, "final-prep-start-readiness");
+    assert.ok(readiness, "START / READINESS block present");
+    const rows = descendants(readiness).filter(
+        (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-derived-row"),
+    );
+    const rowByLabel = (label) => rows.find(
+        (row) => row.props.children.some(
+            (child) => typeof child === "object" && child.type === "span" && normalizedText(child) === label,
+        ),
+    );
+    const startRow = rowByLabel("START READINESS");
+    const entryRow = rowByLabel("ENTRY READINESS");
+    assert.ok(startRow, "START READINESS row present");
+    assert.ok(entryRow, "ENTRY READINESS row present");
+    assert.notEqual(startRow, entryRow, "START READINESS and ENTRY READINESS are separate rows");
 });
 
 test("Problem 7: START GUARDS summary is scoped to the START gate; detail is labeled runtime & entry guards", async () => {
