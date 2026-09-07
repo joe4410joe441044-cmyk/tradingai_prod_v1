@@ -100,6 +100,40 @@ class ExecutionRuntime:
 
         self.engine = engine
 
+    def _authoritative_execution_mode(self):
+        """Resolve the engine execution mode without a PAPER fallback."""
+
+        if self.engine is None:
+            return None
+
+        engine_mode = str(
+            getattr(self.engine, "mode", "")
+        ).strip().lower()
+        engine_config = getattr(self.engine, "config", None)
+        if not isinstance(engine_config, dict):
+            return None
+
+        configured_mode = str(
+            engine_config.get("mode", "")
+        ).strip().lower()
+        dry_run = engine_config.get("dry_run")
+
+        if (
+            engine_mode == "paper"
+            and configured_mode == "paper"
+            and dry_run is True
+        ):
+            return "PAPER"
+
+        if (
+            engine_mode == "live"
+            and configured_mode == "live"
+            and dry_run is False
+        ):
+            return "LIVE"
+
+        return None
+
     # ========================================================
     # DIRECTION CONTRACT
     # ========================================================
@@ -171,7 +205,16 @@ class ExecutionRuntime:
             self.handoff_blocked_reason = "ORDER_INTENT_SYMBOL_MISMATCH"
             return
 
-        if getattr(self.engine, "mode", None) == "live":
+        execution_mode = self._authoritative_execution_mode()
+
+        if execution_mode is None:
+
+            self.handoff_blocked_reason = (
+                "EXECUTION_MODE_UNKNOWN_OR_CONFLICTING"
+            )
+            return
+
+        if execution_mode == "LIVE":
 
             live_readiness = (
                 self.engine.build_live_readiness()
@@ -222,49 +265,10 @@ class ExecutionRuntime:
 
             return
 
-        engine_config = getattr(
-            self.engine,
-            "config",
-            {},
-        )
-
-        config_dry_run = (
-            engine_config.get("dry_run")
-            if isinstance(engine_config, dict)
-            else None
-        )
-
-        engine_dry_run = getattr(
-            self.engine,
-            "dry_run",
-            config_dry_run,
-        )
-
-        if engine_dry_run is not True:
-
-            self.handoff_blocked_reason = (
-                "ENGINE_DRY_RUN_NOT_TRUE"
-            )
-            return
-
         if getattr(self.engine, "exchange", None) is not None:
 
             self.handoff_blocked_reason = (
                 "ENGINE_EXCHANGE_ATTACHED"
-            )
-            return
-
-        if config.ALLOW_LIVE is not False:
-
-            self.handoff_blocked_reason = (
-                "CONFIG_ALLOW_LIVE_NOT_FALSE"
-            )
-            return
-
-        if config.TRADE_MODE != "paper":
-
-            self.handoff_blocked_reason = (
-                "CONFIG_TRADE_MODE_NOT_PAPER"
             )
             return
 
@@ -751,11 +755,7 @@ class ExecutionRuntime:
     ):
         trace_id = strategy_state.get("traceId") or new_trace_id()
         strategy_state["traceId"] = trace_id
-        mode = (
-            "LIVE"
-            if getattr(self.engine, "mode", None) == "live"
-            else "PAPER"
-        )
+        mode = self._authoritative_execution_mode() or "UNKNOWN"
         context = (
             runtime_symbol_context
             or strategy_state.get("runtimeSymbolContext")
