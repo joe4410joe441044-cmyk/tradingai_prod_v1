@@ -198,47 +198,6 @@ export function useMoneyManagement({
     };
   }, [enabled, refreshConfiguration]);
 
-  // Problem 1/9: auto-persist a valid MM edit so the operator does not have
-  // to manually Save MM. An invalid draft is never silently persisted; it is
-  // surfaced as an invalid state. Persistence / MM authority / fail-closed
-  // behaviour are preserved (the authoritative config lives on the backend).
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const config = state.configuration;
-    const draft = state.configurationDraft;
-    if (!config || !draft) return undefined;
-    if (
-      state.configurationUpdating ||
-      state.recoveryRunning ||
-      state.manualRefreshing
-    ) {
-      return undefined;
-    }
-    const authoritative = configurationDraftFromAuthoritative(config);
-    if (!authoritative) return undefined;
-    const hasChanges = Object.keys(authoritative).some(
-      (key) => authoritative[key] !== draft[key],
-    );
-    if (!hasChanges) return undefined;
-    const validation = validateMoneyManagementConfigurationDraft(
-      draft,
-      config?.revision,
-    );
-    if (!validation.valid) return undefined;
-    const timer = setTimeout(() => {
-      void saveConfiguration();
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [
-    enabled,
-    saveConfiguration,
-    state.configuration,
-    state.configurationDraft,
-    state.configurationUpdating,
-    state.manualRefreshing,
-    state.recoveryRunning,
-  ]);
-
   const refresh = useCallback(async () => {
     if (
       manualRefreshRunningRef.current ||
@@ -343,6 +302,49 @@ export function useMoneyManagement({
       updateRunningRef.current = false;
     }
   }, [client, refreshConfiguration, refreshStatus, timeoutMs]);
+
+  // Problem 1/9: auto-persist a valid MM edit so the operator does not have
+  // to manually Save MM. An invalid draft is never silently persisted; it is
+  // surfaced as an invalid state. Persistence / MM authority / fail-closed
+  // behaviour are preserved (the authoritative config lives on the backend).
+  // Defined after saveConfiguration so the dependency array never references
+  // a const that is still in the temporal dead zone (a black-screen crash).
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const config = state.configuration;
+    const draft = state.configurationDraft;
+    if (!config || !draft) return undefined;
+    if (
+      state.configurationUpdating ||
+      state.recoveryRunning ||
+      state.manualRefreshing
+    ) {
+      return undefined;
+    }
+    const authoritative = configurationDraftFromAuthoritative(config);
+    if (!authoritative) return undefined;
+    const hasChanges = Object.keys(authoritative).some(
+      (key) => authoritative[key] !== draft[key],
+    );
+    if (!hasChanges) return undefined;
+    const validation = validateMoneyManagementConfigurationDraft(
+      draft,
+      config?.revision,
+    );
+    if (!validation.valid) return undefined;
+    const timer = setTimeout(() => {
+      void saveConfiguration();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [
+    enabled,
+    saveConfiguration,
+    state.configuration,
+    state.configurationDraft,
+    state.configurationUpdating,
+    state.manualRefreshing,
+    state.recoveryRunning,
+  ]);
 
   const recover = useCallback(async () => {
     if (
