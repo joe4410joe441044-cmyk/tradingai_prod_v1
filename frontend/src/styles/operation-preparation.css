@@ -14,21 +14,21 @@
     width: 100%;
     min-width: 0;
     /* SILVER raised metallic outer frame — section identification only.
-       Built from a machined rim: bright top/left highlight, main silver metal
+       Final 5px machined rim: bright top/left highlight, main silver metal
        body, dark gunmetal bottom/right bevel, and a faint outer drop shadow.
        Never a status color, never neon, no animation. */
     padding: 6px;
-    border: 2px solid #a7b1bd;
+    border: 5px solid #a7b1bd;
     border-radius: 6px;
     box-shadow:
-        inset 0 2px 0 rgba(238, 243, 247, .55),
-        inset 2px 0 0 rgba(238, 243, 247, .24),
-        inset 0 -2px 0 rgba(86, 97, 110, .55),
-        inset -2px 0 0 rgba(86, 97, 110, .34),
-        inset 0 1px 0 rgba(255, 255, 255, .70),
-        inset 0 -1px 0 rgba(9, 15, 24, .60),
+        inset 0 5px 0 rgba(238, 243, 247, .45),
+        inset 5px 0 0 rgba(238, 243, 247, .20),
+        inset 0 -5px 0 rgba(86, 97, 110, .50),
+        inset -5px 0 0 rgba(86, 97, 110, .30),
+        inset 0 2px 0 rgba(255, 255, 255, .60),
+        inset 0 -2px 0 rgba(9, 15, 24, .55),
         0 1px 2px rgba(0, 0, 0, .45),
-        0 0 10px rgba(168, 185, 208, .16);
+        0 0 8px rgba(168, 185, 208, .12);
 }
 
 .operation-trade-settings__toggle {
@@ -547,21 +547,21 @@
     gap: 6px;
     padding: 8px 12px;
     /* GOLD raised metallic outer frame — section identification only.
-       Replaces the inherited green tinted border. Machined muted-gold rim:
-       bright gold top/left highlight, main gold metal body, dark bronze
-       bottom/right bevel, and a faint outer drop shadow. Distinct from WAITING
-       yellow and READY green — never neon, no animation. */
-    border: 2px solid #c9a447;
+       Final 5px machined rim. Replaces the inherited green tinted border.
+       Machined muted-gold rim: bright gold top/left highlight, main gold metal
+       body, dark bronze bottom/right bevel, and a faint outer drop shadow.
+       Distinct from WAITING yellow and READY green — never neon, no animation. */
+    border: 5px solid #c9a447;
     border-radius: 6px;
     box-shadow:
-        inset 0 2px 0 rgba(255, 228, 154, .55),
-        inset 2px 0 0 rgba(255, 228, 154, .24),
-        inset 0 -2px 0 rgba(114, 88, 23, .55),
-        inset -2px 0 0 rgba(114, 88, 23, .34),
-        inset 0 1px 0 rgba(255, 244, 214, .70),
-        inset 0 -1px 0 rgba(30, 20, 4, .60),
+        inset 0 5px 0 rgba(255, 228, 154, .45),
+        inset 5px 0 0 rgba(255, 228, 154, .20),
+        inset 0 -5px 0 rgba(114, 88, 23, .50),
+        inset -5px 0 0 rgba(114, 88, 23, .30),
+        inset 0 2px 0 rgba(255, 244, 214, .60),
+        inset 0 -2px 0 rgba(30, 20, 4, .55),
         0 1px 2px rgba(0, 0, 0, .45),
-        0 0 10px rgba(196, 158, 70, .16);
+        0 0 8px rgba(196, 158, 70, .12);
 }
 
 .operation-prep-final--top > h3 {
