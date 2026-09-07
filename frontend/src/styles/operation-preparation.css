@@ -13,18 +13,22 @@
 .operation-trade-settings {
     width: 100%;
     min-width: 0;
-    /* SILVER metallic outer frame — section identification only.
-       Static raised rim (top/left highlight + bottom/right edge) + a faint
-       outer silver glow. Never a status color, never neon. */
+    /* SILVER raised metallic outer frame — section identification only.
+       Built from a machined rim: bright top/left highlight, main silver metal
+       body, dark gunmetal bottom/right bevel, and a faint outer drop shadow.
+       Never a status color, never neon, no animation. */
     padding: 6px;
-    border: 1px solid #9aa5b5;
+    border: 2px solid #a7b1bd;
     border-radius: 6px;
     box-shadow:
-        inset 0 1px 0 rgba(234, 240, 247, .34),
-        inset 1px 0 0 rgba(234, 240, 247, .16),
-        inset 0 -1px 0 rgba(9, 15, 24, .5),
-        inset -1px 0 0 rgba(9, 15, 24, .3),
-        0 0 8px rgba(168, 185, 208, .12);
+        inset 0 2px 0 rgba(238, 243, 247, .55),
+        inset 2px 0 0 rgba(238, 243, 247, .24),
+        inset 0 -2px 0 rgba(86, 97, 110, .55),
+        inset -2px 0 0 rgba(86, 97, 110, .34),
+        inset 0 1px 0 rgba(255, 255, 255, .70),
+        inset 0 -1px 0 rgba(9, 15, 24, .60),
+        0 1px 2px rgba(0, 0, 0, .45),
+        0 0 10px rgba(168, 185, 208, .16);
 }
 
 .operation-trade-settings__toggle {
@@ -542,18 +546,22 @@
     margin-top: 0;
     gap: 6px;
     padding: 8px 12px;
-    /* GOLD metallic outer frame — section identification only.
-       Replaces the inherited green tinted border. Static raised rim
-       (top/left gold highlight + bottom/right dark edge) + a faint outer
-       gold glow. Muted metallic gold, deliberately distinct from WAITING
-       yellow and READY green. Never neon. */
-    border: 1px solid #a8842f;
+    /* GOLD raised metallic outer frame — section identification only.
+       Replaces the inherited green tinted border. Machined muted-gold rim:
+       bright gold top/left highlight, main gold metal body, dark bronze
+       bottom/right bevel, and a faint outer drop shadow. Distinct from WAITING
+       yellow and READY green — never neon, no animation. */
+    border: 2px solid #c9a447;
+    border-radius: 6px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 231, 168, .30),
-        inset 1px 0 0 rgba(255, 231, 168, .14),
-        inset 0 -1px 0 rgba(20, 14, 4, .45),
-        inset -1px 0 0 rgba(20, 14, 4, .28),
-        0 0 8px rgba(196, 158, 70, .13);
+        inset 0 2px 0 rgba(255, 228, 154, .55),
+        inset 2px 0 0 rgba(255, 228, 154, .24),
+        inset 0 -2px 0 rgba(114, 88, 23, .55),
+        inset -2px 0 0 rgba(114, 88, 23, .34),
+        inset 0 1px 0 rgba(255, 244, 214, .70),
+        inset 0 -1px 0 rgba(30, 20, 4, .60),
+        0 1px 2px rgba(0, 0, 0, .45),
+        0 0 10px rgba(196, 158, 70, .16);
 }
 
 .operation-prep-final--top > h3 {
