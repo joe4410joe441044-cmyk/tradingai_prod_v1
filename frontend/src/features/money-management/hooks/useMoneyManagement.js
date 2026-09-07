@@ -14,11 +14,13 @@ import {
 } from "../api/moneyManagementApi.js";
 import {
   buildMoneyManagementConfigurationPayload,
+  configurationDraftFromAuthoritative,
   MoneyManagementContractError,
   normalizeConfigurationUpdateResponse,
   normalizeMoneyManagementConfiguration,
   normalizeMoneyManagementStatus,
   normalizeRecoveryResponse,
+  validateMoneyManagementConfigurationDraft,
 } from "../contracts/moneyManagementContracts.js";
 import {
   createInitialMoneyManagementState,
@@ -196,6 +198,47 @@ export function useMoneyManagement({
     };
   }, [enabled, refreshConfiguration]);
 
+  // Problem 1/9: auto-persist a valid MM edit so the operator does not have
+  // to manually Save MM. An invalid draft is never silently persisted; it is
+  // surfaced as an invalid state. Persistence / MM authority / fail-closed
+  // behaviour are preserved (the authoritative config lives on the backend).
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const config = state.configuration;
+    const draft = state.configurationDraft;
+    if (!config || !draft) return undefined;
+    if (
+      state.configurationUpdating ||
+      state.recoveryRunning ||
+      state.manualRefreshing
+    ) {
+      return undefined;
+    }
+    const authoritative = configurationDraftFromAuthoritative(config);
+    if (!authoritative) return undefined;
+    const hasChanges = Object.keys(authoritative).some(
+      (key) => authoritative[key] !== draft[key],
+    );
+    if (!hasChanges) return undefined;
+    const validation = validateMoneyManagementConfigurationDraft(
+      draft,
+      config?.revision,
+    );
+    if (!validation.valid) return undefined;
+    const timer = setTimeout(() => {
+      void saveConfiguration();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [
+    enabled,
+    saveConfiguration,
+    state.configuration,
+    state.configurationDraft,
+    state.configurationUpdating,
+    state.manualRefreshing,
+    state.recoveryRunning,
+  ]);
+
   const refresh = useCallback(async () => {
     if (
       manualRefreshRunningRef.current ||
@@ -346,11 +389,21 @@ export function useMoneyManagement({
     });
   }, []);
 
+  const configurationDraftInvalid = Boolean(
+    state.configurationDraft
+    && state.configuration
+    && !validateMoneyManagementConfigurationDraft(
+      state.configurationDraft,
+      state.configuration?.revision,
+    ).valid
+  );
+
   return useMemo(() => ({
     status: state.status,
     rawStatus: state.rawStatus,
     configuration: state.configuration,
     configurationDraft: state.configurationDraft,
+    configurationDraftInvalid,
     isInitialLoading:
       state.statusLoading || state.configurationLoading,
     isRefreshing: state.refreshing,
@@ -375,6 +428,7 @@ export function useMoneyManagement({
     clearError,
   }), [
     clearError,
+    configurationDraftInvalid,
     recover,
     refresh,
     resetConfigurationDraft,

@@ -69,7 +69,7 @@ test("CASE 3: AUTO selection not ready renders ② MARKET SELECTION guidance", (
     assert.ok(market.current.includes("AUTO runtime=WAITING"));
 });
 
-test("CASE 4: unsaved MM draft divergence renders ③ guidance and tells operator to Save MM", () => {
+test("CASE 4: unsaved MM draft divergence renders ③ guidance for auto-reconcile", () => {
     const guidance = deriveOperationBlockGuidance(readyContext({
         startMmReadiness: "BLOCKED",
         mmDraft: { riskPerTradePercent: "0.75", maximumDrawdownPercent: "7" },
@@ -84,8 +84,8 @@ test("CASE 4: unsaved MM draft divergence renders ③ guidance and tells operato
     assert.equal(mmStart.section, "③ MONEY MANAGEMENT");
     assert.ok(mmStart.current.includes("draft risk=0.75%"));
     assert.ok(mmStart.current.includes("saved risk=0.50%"));
-    assert.ok(mmStart.en.includes("Save MM"));
-    assert.ok(mmStart.ja.includes("Save MM"));
+    assert.ok(!mmStart.en.includes("Save MM"));
+    assert.ok(mmStart.en.includes("auto-reconcile"));
 });
 
 test("CASE 5: multiple simultaneous blockers all render", () => {
@@ -109,23 +109,29 @@ test("CASE 6: fully READY start renders no stale block guidance", () => {
     assert.deepEqual(deriveOperationBlockGuidance(readyContext()), []);
 });
 
-test("WF-1 coverage: each readiness dimension maps to the correct section", () => {
+test("WF-1 coverage: each START readiness dimension maps to the correct section", () => {
+    // ENTRY PERMISSION and Governance are runtime-only post-START guards and
+    // are intentionally NOT part of the START block guidance (Problems 5/6).
     const expectation = [
         ["emergency", "emergencyReadiness"],
         ["position", "positionState"],
         ["pendingOrder", "orderAuthority"],
-        ["entryPermission", "mmEntryReadiness"],
-        ["governance", "governanceReadiness"],
         ["execution", "executionReadiness"],
     ];
     for (const [id, key] of expectation) {
-        const overrides = id === "entryPermission"
-            ? { mmEntryReadiness: { state: "BLOCKED", label: "BLOCKED" } }
-            : { [key]: "BLOCKED" };
-        const guidance = deriveOperationBlockGuidance(readyContext(overrides));
+        const guidance = deriveOperationBlockGuidance(readyContext({ [key]: "BLOCKED" }));
         const item = guidance.find((entry) => entry.id === id);
         assert.ok(item, `${id} guidance present`);
         assert.equal(item.section, "FINAL PREPARATION", `${id} consolidates into FINAL PREPARATION`);
         assert.ok(item.en.length > 0 && item.ja.length > 0 && item.fix.length > 0);
     }
+});
+
+test("Problem 5/6: EnTRY Permission and Governance never render as START blockers", () => {
+    const guidance = deriveOperationBlockGuidance(readyContext({
+        mmEntryReadiness: { state: "WAITING", label: "WAITING" },
+        governanceReadiness: "SUSPENDED_BY_BOT_STOP",
+    }));
+    assert.equal(guidance.find((item) => item.id === "entryPermission"), undefined);
+    assert.equal(guidance.find((item) => item.id === "governance"), undefined);
 });
