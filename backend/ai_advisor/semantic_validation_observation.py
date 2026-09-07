@@ -12,9 +12,9 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal, Protocol
+from typing import Literal, Optional, Protocol
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from backend.ai_advisor.provider_models import AdvisorProviderContractModel
 
@@ -39,6 +39,8 @@ class SemanticValidationObservation(AdvisorProviderContractModel):
     safeReason: Literal["UNEXPECTED_VALIDATION_EXCEPTION"]
     ruleIdentifier: str
     responseCategory: Literal["REJECTED"] = "REJECTED"
+    pydanticErrorType: Optional[str] = Field(default=None, max_length=64)
+    pydanticFieldPath: Optional[str] = Field(default=None, max_length=256)
 
 
 class SemanticValidationObservationSink(Protocol):
@@ -103,6 +105,54 @@ def safe_rule_identifier(exception: Exception) -> str:
     return type(exception).__name__
 
 
+def safe_validation_error_location(exception: Exception) -> Optional[str]:
+    """Return a bounded, value-free pydantic field path (or None)."""
+    if not isinstance(exception, ValidationError):
+        return None
+    try:
+        errors = exception.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    for error in errors:
+        location = error.get("loc", ())
+        if not location:
+            continue
+        parts = []
+        for part in location:
+            if isinstance(part, str) and not part.isdigit():
+                parts.append(part)
+            elif isinstance(part, int):
+                parts.append(f"[{part}]")
+            else:
+                return None
+        if parts:
+            return ".".join(parts)[:256]
+    return None
+
+
+def safe_validation_error_type(exception: Exception) -> Optional[str]:
+    """Return the stable pydantic error type keyword (never input values)."""
+    if not isinstance(exception, ValidationError):
+        return None
+    try:
+        errors = exception.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    for error in errors:
+        error_type = error.get("type")
+        if isinstance(error_type, str) and error_type:
+            return error_type[:64]
+    return None
+
+
 def project_semantic_validation_exception(
     *,
     request_id: str,
@@ -117,4 +167,6 @@ def project_semantic_validation_exception(
         safeReason=SemanticValidationSafeReason.UNEXPECTED_VALIDATION_EXCEPTION.value,
         ruleIdentifier=rule_identifier,
         responseCategory="REJECTED",
+        pydanticErrorType=safe_validation_error_type(exception),
+        pydanticFieldPath=safe_validation_error_location(exception),
     )

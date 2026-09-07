@@ -399,6 +399,61 @@ class AdvisorSemanticValidationContractTest(unittest.TestCase):
             },
         )
 
+    def test_q1_cross_category_claim_id_collision_is_usable(self):
+        # Q1 envelope-construction defect: an unknownId colliding with a factId
+        # caused a ``grounded claim IDs must be unique`` ValidationError at
+        # ENVELOPE_CONSTRUCTION. After repair the merged grounded-claim ids are
+        # category-scoped so a broad current-state candidate stays usable.
+        request, context, prompt = self._trusted_default()
+        payload = candidate_payload()
+        payload["unknowns"] = [
+            {
+                "unknownId": "fact-a",
+                "topic": "Market stability is not described.",
+                "reason": "SOURCE_UNKNOWN",
+                "requiredSourceType": None,
+            }
+        ]
+        outcome, sink = self._validate(payload, request, context, prompt)
+        self.assertIn(
+            outcome.response.status,
+            {
+                AdvisorResponseStatus.VALID,
+                AdvisorResponseStatus.VALID_WITH_WARNINGS,
+            },
+        )
+        claim_ids = [claim.claimId for claim in outcome.response.groundedClaims]
+        self.assertEqual(len(claim_ids), len(set(claim_ids)))
+        self.assertIn("unknown:fact-a", claim_ids)
+        self.assertTrue(
+            any(claim.claimType == "UNKNOWN" for claim in outcome.response.groundedClaims)
+        )
+
+    def test_pydantic_field_diagnostic_is_secret_free(self):
+        from pydantic import BaseModel, ValidationError
+
+        class _Probe(BaseModel):
+            requestId: str
+            facts: list[int]
+
+        try:
+            _Probe(requestId="r", facts=[1, "not-an-int"])
+        except ValidationError as error:
+            observation = project_semantic_validation_exception(
+                request_id="request-1",
+                stage=SemanticValidationPhase.ENVELOPE_CONSTRUCTION,
+                exception=error,
+                rule_identifier=safe_rule_identifier(error),
+            )
+            self.assertEqual(observation.exceptionClass, "ValidationError")
+            self.assertIsNotNone(observation.pydanticErrorType)
+            self.assertIsNotNone(observation.pydanticFieldPath)
+            dumped = observation.model_dump(mode="json")
+            self.assertNotIn("not-an-int", json.dumps(dumped))
+            self.assertNotIn("sk-secret", json.dumps(dumped))
+        else:  # pragma: no cover
+            self.fail("expected pydantic ValidationError for the probe")
+
 
 if __name__ == "__main__":
     unittest.main()

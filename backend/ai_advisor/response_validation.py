@@ -309,6 +309,18 @@ def _duplicates(values: Iterable[str]) -> bool:
     return len(materialized) != len(set(materialized))
 
 
+def _scoped_claim_id(category: str, raw_id: str) -> str:
+    """Scope a claim id by category so merged grounded claim ids stay unique.
+
+    ``AdvisorResponseCandidate`` keeps fact/inference/unknown ids in separate
+    namespaces, but ``AdvisorResponseEnvelope`` exposes them in a single
+    ``groundedClaims`` collection whose ids must be globally unique. Prefixing
+    by category is deterministic and prevents a cross-category id collision from
+    violating the envelope contract (the Q1 502-contract failure class).
+    """
+    return f"{category}:{raw_id}"
+
+
 @dataclass(frozen=True)
 class AdvisorResponseValidationOutcome:
     response: AdvisorResponseEnvelope
@@ -592,7 +604,7 @@ def validate_advisor_response_with_diagnostic(
         grounded_claims = (
             tuple(
                 AdvisorGroundedClaim(
-                    claimId=item.factId,
+                    claimId=_scoped_claim_id("fact", item.factId),
                     claimType=(
                         "INTERPRETATION"
                         if item.freshness
@@ -621,7 +633,7 @@ def validate_advisor_response_with_diagnostic(
             )
             + tuple(
                 AdvisorGroundedClaim(
-                    claimId=item.inferenceId,
+                    claimId=_scoped_claim_id("inference", item.inferenceId),
                     claimType="INFERENCE",
                     text=item.statement,
                     citationSourceIds=item.basedOnSourceIds,
@@ -632,7 +644,7 @@ def validate_advisor_response_with_diagnostic(
             )
             + tuple(
                 AdvisorGroundedClaim(
-                    claimId=item.unknownId,
+                    claimId=_scoped_claim_id("unknown", item.unknownId),
                     claimType="UNKNOWN",
                     text=item.topic,
                     citationSourceIds=(),
