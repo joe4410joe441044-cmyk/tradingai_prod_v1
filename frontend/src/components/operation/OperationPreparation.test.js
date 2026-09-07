@@ -657,26 +657,24 @@ test("MM RISK/Exposure/Drawdown display authoritative draft and route changes to
     assert.deepEqual(draftChanges.at(-1), { maximumDrawdownPercent: "5" });
 });
 
-test("MM Save and Reset route to the shared save/reset handlers", async () => {
-    let saved = 0;
+test("Save MM button removed; Reset MM preserved; auto-save state is surfaced", async () => {
     let reset = 0;
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
         config: { mode: "PAPER", selectionMode: "AUTO" },
         mmDraft: mmDraft(),
         mmConfiguration: mmConfig(),
-        onMmSave: () => { saved += 1; },
         onMmReset: () => { reset += 1; },
     });
-    const save = findButton(renderer.root, "Save MM");
+    assert.equal(findButton(renderer.root, "Save MM"), undefined, "manual Save MM button must not render");
     const resetButton = findButton(renderer.root, "Reset MM");
-    assert.ok(save);
-    assert.equal(save.props.disabled, false);
-    assert.ok(resetButton);
-    save.props.onClick();
+    assert.ok(resetButton, "Reset MM remains");
+    assert.equal(resetButton.props.disabled, false);
     resetButton.props.onClick();
-    assert.equal(saved, 1);
     assert.equal(reset, 1);
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("SAVED"), true, "save-state feedback remains");
+    assert.equal(content.includes("manual Save is optional"), false, "manual-save guidance removed");
 });
 
 test("Compounding shows saved policy and edits only the MM draft", async () => {
@@ -721,7 +719,7 @@ test("MM controls are disabled and honest when configuration is unavailable", as
         config: { mode: "PAPER", selectionMode: "AUTO" },
     });
     assert.equal(findSelect(renderer.root, "operation-prep-risk").props.disabled, true);
-    assert.equal(findButton(renderer.root, "Save MM").props.disabled, true);
+    assert.equal(findButton(renderer.root, "Save MM"), undefined, "no Save MM button when MM unavailable");
     assert.equal(normalizedText(descendants(renderer.root)).includes("UNAVAILABLE"), true);
     assert.equal(
         normalizedText(descendants(findTestId(renderer.root, "operation-preparation-summary"))).includes("NOT CONNECTED"),
@@ -737,7 +735,7 @@ test("MM update error is surfaced without a fake saved state", async () => {
         mmConfiguration: mmConfig(),
         mmUpdateError: { message: "Revision conflict" },
     });
-    assert.equal(normalizedText(findTestId(renderer.root, "mm-save-state")), "UPDATE FAILED");
+    assert.equal(normalizedText(findTestId(renderer.root, "mm-save-state")), "SAVE FAILED");
     assert.equal(normalizedText(descendants(renderer.root)).includes("Revision conflict"), true);
 });
 
@@ -757,7 +755,8 @@ test("MM conflict and dirty states are reported instead of a fake saved state", 
         mmConflict: { active: true },
     });
     assert.equal(normalizedText(findTestId(conflictRenderer.root, "mm-save-state")), "CONFLICT");
-    assert.equal(findButton(conflictRenderer.root, "Save MM").props.disabled, true);
+    assert.equal(findButton(conflictRenderer.root, "Save MM"), undefined, "no Save MM button when in conflict");
+    assert.equal(findButton(conflictRenderer.root, "Reset MM").props.disabled, true);
 });
 
 test("requested, MM maximum, and Backend effective leverage remain distinct", async () => {
@@ -1136,14 +1135,21 @@ test("Problem 2/3: Final Preparation distinguishes requested mode from current e
     const divergence = findTestId(renderer.root, "mode-divergence");
     assert.ok(divergence, "LIVE request vs current SIMULATION authority is surfaced");
     const divergenceText = normalizedText(divergence);
-    assert.equal(divergenceText.includes("START REQUEST = LIVE"), true);
-    assert.equal(divergenceText.includes("CURRENT EXECUTION AUTHORITY = SIMULATION"), true);
+    assert.equal(divergenceText.includes("START REQUEST"), true);
+    assert.equal(divergenceText.includes("LIVE"), true);
+    assert.equal(divergenceText.includes("CURRENT EXECUTION AUTHORITY"), true);
+    assert.equal(divergenceText.includes("SIMULATION"), true);
+    // REQUEST / CURRENT provenance chips render as distinct semantic labels.
+    const provenanceNodes = descendants(divergence).filter(
+        (node) => String(node?.props?.className || "").includes("operation-prep-provenance"),
+    );
+    assert.equal(provenanceNodes.length >= 2, true, "REQUEST and CURRENT chips present in the divergence");
+    const provenanceText = provenanceNodes.map((node) => normalizedText(node)).join(",");
+    assert.equal(provenanceText.includes("REQUEST"), true);
+    assert.equal(provenanceText.includes("CURRENT"), true);
     const content = normalizedText(descendants(renderer.root));
-    // Provenance badges make the requested (REQUEST) vs current (CURRENT)
-    // semantic class explicit, and a mere LIVE dropdown never grants REAL
-    // ORDER authority (CURRENT) while execution remains SIMULATION.
-    assert.equal(content.includes("REQUEST"), true);
-    assert.equal(content.includes("CURRENT"), true);
+    // A mere LIVE dropdown never grants REAL ORDER authority (CURRENT) while
+    // execution remains SIMULATION.
     assert.equal(content.includes("REAL ORDER"), true);
     assert.equal(content.includes("DISABLED"), true);
 });

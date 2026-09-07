@@ -158,7 +158,6 @@ export default function OperationPreparation({
     mmUpdateError = null,
     mmConflict = null,
     onMmDraftChange = () => {},
-    onMmSave = () => {},
     onMmReset = () => {},
     lockedFacts = [],
     actionWarnings = [],
@@ -408,13 +407,13 @@ export default function OperationPreparation({
     // validation so it stays test-friendly.
     const mmDraftInvalidState = Boolean(mmDraftInvalid);
     const mmDraftState = mmUpdating
-        ? "AUTO-SAVING"
+        ? "SAVING"
         : mmConflict
             ? "CONFLICT"
             : mmUpdateError
-                ? "UPDATE FAILED"
+                ? "SAVE FAILED"
                 : mmDraftInvalidState
-                    ? "INVALID (NOT SAVED)"
+                    ? "INVALID — NOT SAVED"
                     : mmDirty
                         ? "PENDING AUTO-SAVE"
                         : mmAvailable
@@ -538,9 +537,17 @@ return (
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" provenance="REQ" />
                             {requestedModeDiffersFromExecution && (
                                 <div className="operation-prep-mode-divergence" data-testid="mode-divergence">
-                                    <span>START REQUEST = {requestedMode}</span>
-                                    <strong>CURRENT EXECUTION AUTHORITY = {currentExecutionMode}</strong>
-                                    <small>LIVE / REAL-ORDER authority is NOT granted by selecting LIVE（LIVE選択だけでは実注文権限は付与されません）</small>
+                                    <div className="operation-prep-mode-divergence__row">
+                                        <span className="operation-prep-mode-divergence__label">START REQUEST =</span>
+                                        <strong>{requestedMode}</strong>
+                                        {provenanceBadge("REQ")}
+                                    </div>
+                                    <div className="operation-prep-mode-divergence__row">
+                                        <span className="operation-prep-mode-divergence__label">CURRENT EXECUTION AUTHORITY =</span>
+                                        <strong>{currentExecutionMode}</strong>
+                                        {provenanceBadge("CUR")}
+                                    </div>
+                                    <small className="operation-prep-mode-divergence__note">LIVE / REAL-ORDER authority is NOT granted by selecting LIVE（LIVE選択だけでは実注文権限は付与されません）</small>
                                 </div>
                             )}
                         </Section>
@@ -944,9 +951,8 @@ return (
                         <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
                         <div className="operation-prep-mm-save" data-testid="mm-save-controls">
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
+                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists.（有効な編集は自動保存されます）</small>
                             <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
-                            <button disabled={mmSaveDisabled} onClick={onMmSave} type="button">Save MM</button>
-                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists; manual Save is optional.（有効な編集は自動保存されます）</small>
                         </div>
                         {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
                         {mmConfigurationError && <p className="operation-prep-error" role="alert">{mmConfigurationError.message ?? "Money Management configuration unavailable."}</p>}

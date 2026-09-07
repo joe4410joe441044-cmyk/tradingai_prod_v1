@@ -398,6 +398,73 @@
     color: #e8b45f;
 }
 
+/* REQUEST vs CURRENT provenance: distinct chip so it never visually merges
+   with the value or adjacent text (black-screen/concatenation-safe layout). */
+.operation-prep-provenance {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 4px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 6px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    line-height: 1;
+    vertical-align: bottom;
+    white-space: nowrap;
+}
+
+.operation-prep-provenance--req {
+    color: #f0c96a;
+    border-color: rgba(240, 201, 106, .5);
+}
+
+.operation-prep-provenance--cur {
+    color: #7fdcf6;
+    border-color: rgba(102, 214, 244, .45);
+}
+
+/* START REQUEST vs CURRENT EXECUTION divergence: block rows with gap so the
+   requested mode and the current runtime/authority can never concatenate. */
+.operation-prep-mode-divergence {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    margin: 6px 0 4px;
+    border-left: 2px solid rgba(243, 217, 139, .6);
+    background: rgba(243, 217, 139, .06);
+}
+
+.operation-prep-mode-divergence__row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+.operation-prep-mode-divergence__row > .operation-prep-provenance {
+    margin-left: auto;
+}
+
+.operation-prep-mode-divergence__label {
+    color: #c9b07a;
+    font-size: 9px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.operation-prep-mode-divergence__row strong {
+    color: #f3d98b;
+    font-size: 10px;
+}
+
+.operation-prep-mode-divergence__note {
+    color: #91a3ba;
+    font-size: 7px;
+    line-height: 1.4;
+}
+
 .operation-prep-status {
     display: inline-flex;
     align-items: center;
