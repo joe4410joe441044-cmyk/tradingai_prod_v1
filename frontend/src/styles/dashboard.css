@@ -5872,3 +5872,293 @@ Intelligence are unaffected.
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
+/* =================================================
+   ACCOUNT FINANCIAL STATUS — financial priority
+   -------------------------------------------------
+   The 3x3 financial grid is the primary account
+   surface. Connection / authentication metadata is
+   demoted to the collapsed DETAILS panel.
+
+   Silver raised metallic frame reuses the Trade
+   Settings canonical 5px machined rim so the visual
+   identity is shared without coupling selectors.
+================================================= */
+
+/* Canonical strip: POSITION is always visible next to the
+   authoritative READ ONLY authority. */
+.account-status-page .as-canonical-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--semantic-card-separator);
+}
+
+.account-status-page .as-canonical-strip .semantic-metric {
+    padding: 0;
+    border: 0;
+}
+
+.account-status-page .as-canonical-strip .semantic-metric-value {
+    color: var(--real-color);
+}
+
+.account-status-page .as-canonical-strip .semantic-badge {
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid rgba(101, 201, 135, 0.45);
+    border-radius: 999px;
+    background: rgba(101, 201, 135, 0.08);
+    color: var(--semantic-success);
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Silver raised metallic outer frame (Trade Settings canonical). */
+.account-status-page .as-financial-frame {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 6px;
+    border: 5px solid #a7b1bd;
+    border-radius: 6px;
+    box-shadow:
+        inset 0 5px 0 rgba(238, 243, 247, .45),
+        inset 5px 0 0 rgba(238, 243, 247, .20),
+        inset 0 -5px 0 rgba(86, 97, 110, .50),
+        inset -5px 0 0 rgba(86, 97, 110, .30),
+        inset 0 2px 0 rgba(255, 255, 255, .60),
+        inset 0 -2px 0 rgba(9, 15, 24, .55),
+        0 1px 2px rgba(0, 0, 0, .45),
+        0 0 8px rgba(168, 185, 208, .12);
+}
+
+.account-status-page .as-financial-frame-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--semantic-card-separator);
+}
+
+.account-status-page .as-financial-kicker {
+    display: block;
+    color: #eef4fc;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.account-status-page .as-details-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: 1px solid #2d405e;
+    border-radius: 6px;
+    background: #0b101a;
+    color: #57b8ff;
+    font: 700 10px "Consolas", monospace;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.account-status-page .as-details-toggle:hover {
+    border-color: #3b4657;
+    color: #ffffff;
+}
+
+.account-status-page .as-details-toggle:focus-visible {
+    outline: 2px solid #57b8ff;
+    outline-offset: 2px;
+}
+
+/* 3x3 centered financial grid. */
+.account-status-page .as-financial-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 2px 2px 6px;
+}
+
+.account-status-page .as-fin-card {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--semantic-grid-line);
+    border-radius: 6px;
+    background: var(--semantic-card-bg);
+    color: #e7edf7;
+}
+
+.account-status-page .as-fin-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+/* Dark icon container with a cyan/blue primary icon. */
+.account-status-page .as-fin-icon {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(87, 184, 255, 0.28);
+    border-radius: 5px;
+    background: rgba(87, 184, 255, 0.10);
+    color: #57b8ff;
+}
+
+.account-status-page .as-fin-icon--positive {
+    border-color: rgba(101, 201, 135, 0.30);
+    background: rgba(101, 201, 135, 0.10);
+    color: #65c987;
+}
+
+.account-status-page .as-fin-icon--negative {
+    border-color: rgba(255, 115, 122, 0.30);
+    background: rgba(255, 115, 122, 0.10);
+    color: #ff737a;
+}
+
+.account-status-page .as-fin-card-title {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.account-status-page .as-fin-card-label {
+    color: #8ea0b8;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-status-page .as-fin-card-jp {
+    color: #5f7189;
+    font-size: 8px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Value is stronger than the label. */
+.account-status-page .as-fin-card-value {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-wrap: wrap;
+    min-height: 20px;
+}
+
+.account-status-page .as-fin-card-number {
+    color: #eef4fc;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.2px;
+    overflow-wrap: anywhere;
+}
+
+.account-status-page .as-fin-card-unit {
+    color: #7e90a8;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.account-status-page .as-fin-card--positive .as-fin-card-number {
+    color: #65c987;
+}
+
+.account-status-page .as-fin-card--negative .as-fin-card-number {
+    color: #ff737a;
+}
+
+.account-status-page .as-fin-card-state {
+    align-self: flex-start;
+    padding: 1px 6px;
+    border: 1px solid rgba(142, 160, 184, 0.30);
+    border-radius: 999px;
+    background: rgba(142, 160, 184, 0.08);
+    color: #8ea0b8;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    line-height: 1.2;
+}
+
+.account-status-page .as-fin-card-state--refreshing {
+    border-color: rgba(87, 184, 255, 0.30);
+    background: rgba(87, 184, 255, 0.08);
+    color: #57b8ff;
+}
+
+.account-status-page .as-fin-card-state--stale {
+    border-color: rgba(232, 180, 95, 0.32);
+    background: rgba(232, 180, 95, 0.08);
+    color: #e8b45f;
+}
+
+.account-status-page .as-fin-card-state--unavailable {
+    border-color: rgba(142, 160, 184, 0.30);
+    background: rgba(142, 160, 184, 0.08);
+    color: #8ea0b8;
+}
+
+/* DETAILS — collapsible connection / authentication metadata. */
+.account-status-page .as-financial-details {
+    display: none;
+}
+
+.account-status-page .as-financial-details--open {
+    display: block;
+}
+
+.account-status-page .as-financial-details .as-primary-details {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+    .account-status-page .as-financial-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .account-status-page .as-financial-details .as-primary-details {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .account-status-page .as-financial-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .account-status-page .as-financial-details .as-primary-details {
+        grid-template-columns: 1fr;
+    }
+}

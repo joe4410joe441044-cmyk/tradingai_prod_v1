@@ -960,6 +960,13 @@ class BotManager:
             if stale
             else None
         )
+        unrealized_pnl = (
+            overview.get("unrealizedPnl")
+            if balance_ok
+            else previous.get("unrealizedPnl")
+            if stale
+            else None
+        )
         positions_value = (
             positions
             if position_ok
@@ -996,6 +1003,7 @@ class BotManager:
             "balance": balance,
             "equity": equity,
             "availableBalance": available_balance,
+            "unrealizedPnl": unrealized_pnl,
             "positions": positions_value,
             "positionSummary": self._position_summary(
                 positions_value

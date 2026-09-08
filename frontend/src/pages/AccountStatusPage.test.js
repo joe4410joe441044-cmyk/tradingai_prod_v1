@@ -174,11 +174,23 @@ test("Account Status renders Real / Live as primary and Paper / Simulation as se
     assert.match(String(paper.props.className), /as-paper-card/);
 });
 
-test("Account Status renders Real account metrics and connection/auth/permission", async () => {
+test("Account Status renders real financial grid, icons and connection/auth/permission", async () => {
     const { AccountStatusView } = await loadModule();
     const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
-    assert.ok(findByTestId(nodes, "real-account-metrics"));
-    assert.equal(readTestIdValue(nodes, "real-balance"), "NOT_CONNECTED");
+    assert.ok(findByTestId(nodes, "account-financial-status"), "financial status frame renders");
+    assert.ok(findByTestId(nodes, "financial-metric-grid"), "3x3 financial grid renders");
+    const metricKeys = [
+        "equity", "availableBalance", "walletBalance", "unrealizedPnl",
+        "realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio",
+    ];
+    metricKeys.forEach((key) => {
+        assert.ok(findByTestId(nodes, `financial-${key}`), `financial ${key} slot renders`);
+        assert.ok(findByTestId(nodes, `financial-icon-${key}`), `financial ${key} icon renders`);
+    });
+    // Unavailable real account never fabricates a zero for authoritative metrics
+    assert.equal(findByTestId(nodes, "financial-equity-state").props.children, "UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "financial-equity-value"), "—");
+    // connection/auth metadata preserved inside DETAILS (kept in DOM)
     assert.equal(readTestIdValue(nodes, "real-connection"), "NOT_CONNECTED");
     assert.equal(readTestIdValue(nodes, "real-auth"), "NOT_VERIFIED");
     assert.equal(readTestIdValue(nodes, "real-permission"), "NOT_VERIFIED");
@@ -265,10 +277,12 @@ test("UNKNOWN account state fails closed and is never upgraded to a READY state"
     // UNKNOWN is a fail-closed placeholder ("--"), never upgraded to VERIFIED/READ_ONLY/READY
     assert.equal(readTestIdValue(nodes, "real-permission"), "--");
     assert.equal(readTestIdValue(nodes, "real-account-type"), "--");
-    // auth stays NOT_VERIFIED (not upgraded to VERIFIED) and balance stays NOT_CONNECTED
+    // auth stays NOT_VERIFIED (not upgraded to VERIFIED); real equity stays UNAVAILABLE
     assert.equal(readTestIdValue(nodes, "real-auth"), "NOT_VERIFIED");
-    assert.equal(readTestIdValue(nodes, "real-balance"), "NOT_CONNECTED");
-    assert.equal(readTestIdValue(nodes, "real-equity"), "NOT_CONNECTED");
+    // UNKNOWN (null) real balance never becomes "0.00"
+    assert.equal(findByTestId(nodes, "financial-equity-state").props.children, "UNAVAILABLE");
+    assert.notEqual(readTestIdValue(nodes, "financial-equity-value"), "0.00");
+    assert.notEqual(readTestIdValue(nodes, "financial-walletBalance-value"), "0.00");
     assert.equal(readTestIdValue(nodes, "live-context-freshness"), "NOT_FETCHED");
     const allText = texts(nodes);
     assert.equal(allText.some((text) => /LIVE READY|READY TO|FULL LIVE/i.test(text)), false);
@@ -288,10 +302,12 @@ test("UNAVAILABLE account reason fails closed instead of fabricating a balance",
         },
     };
     const nodes = walk(AccountStatusView({ botStatus: unavailableStatus }));
-    assert.equal(readTestIdValue(nodes, "real-balance"), "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE");
-    assert.equal(readTestIdValue(nodes, "real-equity"), "EXCHANGE_ACCOUNT_CLIENT_UNAVAILABLE");
     // no numeric balance is fabricated for an unavailable account
-    assert.notEqual(readTestIdValue(nodes, "real-balance"), "0.00");
+    assert.equal(findByTestId(nodes, "financial-equity-state").props.children, "UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "financial-equity-value"), "—");
+    assert.equal(readTestIdValue(nodes, "financial-availableBalance-value"), "—");
+    assert.notEqual(readTestIdValue(nodes, "financial-equity-value"), "0.00");
+    assert.notEqual(readTestIdValue(nodes, "financial-availableBalance-value"), "0.00");
     assert.equal(readTestIdValue(nodes, "live-context-freshness"), "NOT_FETCHED");
 });
 
@@ -305,11 +321,15 @@ test("Paper metrics and Set Paper Capital control render", async () => {
     assert.ok(findByTestId(nodes, "set-paper-capital"), "Set Paper Capital control present");
 });
 
-test("Account Status renders no operation controls and no buttons", async () => {
+test("Account Status renders only the DETAILS toggle and no operation buttons", async () => {
     const { AccountStatusView } = await loadModule();
-    const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
+    const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS, detailsExpanded: false }));
     const buttons = nodes.filter((node) => typeof node === "object" && node.type === "button");
-    assert.equal(buttons.length, 0);
+    // The only button is the presentation-only DETAILS toggle (not an operation control).
+    assert.equal(buttons.length, 1);
+    assert.equal(buttons[0].props.type, "button");
+    assert.equal(buttons[0].props["aria-expanded"], false);
+    assert.equal(buttons[0].props["aria-controls"], "account-financial-details");
     const allText = texts(nodes);
     const operationPhrases = [
         "START BOT", "STOP BOT", "AUTO TRADE ON", "AUTO TRADE OFF",
@@ -334,17 +354,117 @@ test("Account Status renders bilingual English（日本語）labels", async () =
         "Account Status（アカウント状況）",
         "Real / Live Account（実口座）",
         "Production Account（本番口座）",
-        "Balance（残高）",
-        "Equity（純資産）",
+        "Account Financial Status",
+        "EQUITY",
+        "純資産",
+        "AVAILABLE BALANCE",
+        "利用可能額",
         "Authentication（取引所認証）",
         "Account Runtime（アカウント実行状態）",
         "Live Context（LIVE状態）",
         "Paper / Simulation（ペーパー・シミュレーション）",
         "SET PAPER CAPITAL（ペーパー資金設定）",
+        "DETAILS",
     ];
     required.forEach((label) => {
         assert.equal(allText.includes(label), true, `missing bilingual label: ${label}`);
     });
+});
+
+test("financial metrics expose authoritative Equity / Available / Unrealized when connected", async () => {
+    const { AccountStatusView } = await loadModule();
+    const connected = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                unrealizedPnl: 12.5,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: connected }));
+    assert.equal(readTestIdValue(nodes, "financial-equity-value"), "1,500.00");
+    assert.equal(readTestIdValue(nodes, "financial-equity-unit"), "USDT");
+    assert.equal(readTestIdValue(nodes, "financial-availableBalance-value"), "1,200.00");
+    assert.equal(readTestIdValue(nodes, "financial-availableBalance-unit"), "USDT");
+    assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-value"), "+12.50");
+    assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-unit"), "USDT");
+    // walletBalance aliases equity in the backend -> classified ambiguous -> never duplicated as zero
+    assert.equal(findByTestId(nodes, "financial-walletBalance-state").props.children, "UNAVAILABLE");
+});
+
+test("negative unrealized PnL is never forced to a positive or neutral zero", async () => {
+    const { AccountStatusView } = await loadModule();
+    const connected = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                unrealizedPnl: -8.25,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: connected }));
+    assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-value"), "-8.25");
+    const card = findByTestId(nodes, "financial-unrealizedPnl");
+    assert.match(String(card.props.className), /as-fin-card--negative/);
+});
+
+test("POSITION remains always visible in the primary account card", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));
+    assert.ok(findByTestId(nodes, "real-position"), "POSITION always visible");
+    assert.ok(findByTestId(nodes, "real-account-canonical"), "canonical strip renders");
+});
+
+test("DETAILS is collapsed by default and toggles on click", async () => {
+    const { AccountStatusView } = await loadModule();
+    const collapsed = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS, detailsExpanded: false }));
+    const toggle = findByTestId(collapsed, "account-details-toggle");
+    assert.equal(toggle.props["aria-expanded"], false);
+    const details = findByTestId(collapsed, "account-financial-details");
+    assert.match(String(details.props.className), /as-financial-details/);
+    assert.doesNotMatch(String(details.props.className), /as-financial-details--open/);
+    // clicking invokes the toggle handler
+    let called = false;
+    const interacted = walk(AccountStatusView({
+        botStatus: PAPER_BOT_STATUS,
+        detailsExpanded: false,
+        onDetailsToggle: () => { called = true; },
+    }));
+    findByTestId(interacted, "account-details-toggle").props.onClick();
+    assert.equal(called, true);
+    // expanded renders the open state
+    const expanded = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS, detailsExpanded: true }));
+    assert.equal(findByTestId(expanded, "account-details-toggle").props["aria-expanded"], true);
+    assert.match(
+        String(findByTestId(expanded, "account-financial-details").props.className),
+        /as-financial-details--open/,
+    );
+});
+
+test("DETAILS preserves all connection / authentication metadata", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS, detailsExpanded: true }));
+    [
+        "real-exchange", "real-connection", "real-auth", "real-api-key",
+        "real-permission", "real-account-type", "real-sync-status", "real-last-sync",
+    ].forEach((id) => {
+        assert.ok(findByTestId(nodes, id), `DETAILS preserves ${id}`);
+    });
+    assert.equal(readTestIdValue(nodes, "real-connection"), "CONNECTED");
+    assert.equal(readTestIdValue(nodes, "real-exchange"), "kucoin");
+});
+
+test("financial silver frame and READ ONLY authority are preserved", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));
+    const frame = findByTestId(nodes, "account-financial-status");
+    assert.match(String(frame.props.className), /as-financial-frame/);
+    assert.ok(findByTestId(nodes, "real-read-only-authority"), "READ ONLY authority badge present");
+    assert.ok(findByTestId(nodes, "real-account-badge"), "real account badge present");
 });
 
 test("Account Status preserves canonical status values alongside bilingual labels", async () => {

@@ -102,12 +102,13 @@ const derive = (botStatus) => {
 let buildAccountRuntimeProps;
 let deriveAccountRuntime;
 let deriveLiveContext;
+let deriveFinancialMetrics;
 let displayRuntimeValue;
 let isAvailable;
 
 test.before(async () => {
     const module = await loadModule();
-    ({ buildAccountRuntimeProps, deriveAccountRuntime, deriveLiveContext, displayRuntimeValue, isAvailable } = module);
+    ({ buildAccountRuntimeProps, deriveAccountRuntime, deriveLiveContext, deriveFinancialMetrics, displayRuntimeValue, isAvailable } = module);
 });
 
 test("nested realAccount is authoritative over flattened compatibility fields", async () => {
@@ -415,4 +416,101 @@ test("Dashboard and Account Status resolve identical canonical values from one s
     canonicalKeys.forEach((key) => {
         assert.equal(dashboardDerived[key], pageDerived[key], `canonical value must match for ${key}`);
     });
+});
+
+test("financial metrics preserve the authoritative 3x3 priority order", async () => {
+    const { derived } = derive(makeStatus());
+    const metrics = deriveFinancialMetrics(derived);
+    assert.deepEqual(
+        metrics.map((metric) => metric.key),
+        [
+            "equity", "availableBalance", "walletBalance", "unrealizedPnl",
+            "realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio",
+        ],
+    );
+    assert.equal(metrics.length, 9);
+    // Asset row -> PnL row -> Margin row (desktop 3x3)
+    assert.deepEqual(metrics.slice(0, 3).map((m) => m.category), ["asset", "asset", "asset"]);
+    assert.deepEqual(metrics.slice(3, 6).map((m) => m.category), ["pnl", "pnl", "pnl"]);
+    assert.deepEqual(metrics.slice(6, 9).map((m) => m.category), ["margin", "margin", "margin"]);
+});
+
+test("financial metrics surface authoritative Equity / Available and never fabricate zeros", async () => {
+    const connected = makeStatus({
+        realAccountConnected: true,
+        accountRuntime: {
+            ...makeStatus().accountRuntime,
+            realAccount: {
+                ...REAL_NOT_CONNECTED,
+                connected: true,
+                authenticated: true,
+                apiKeyPresent: true,
+                permission: "READ_ONLY",
+                balance: 1500,
+                equity: 1500,
+                availableBalance: 1200,
+                unrealizedPnl: 12.5,
+                positions: [],
+                positionSummary: "FLAT",
+                lastSync: Date.now() / 1000,
+            },
+        },
+    });
+    const { derived } = derive(connected);
+    const metrics = deriveFinancialMetrics(derived);
+    const byKey = Object.fromEntries(metrics.map((m) => [m.key, m]));
+
+    assert.equal(byKey.equity.value, "1,500.00");
+    assert.equal(byKey.equity.unit, "USDT");
+    assert.equal(byKey.equity.state, null);
+    assert.equal(byKey.availableBalance.value, "1,200.00");
+    assert.equal(byKey.availableBalance.unit, "USDT");
+    assert.equal(byKey.unrealizedPnl.value, "+12.50");
+    assert.equal(byKey.unrealizedPnl.unit, "USDT");
+    assert.equal(byKey.unrealizedPnl.tone, "positive");
+
+    // walletBalance aliases equity -> classified ambiguous -> UNAVAILABLE (no duplicate zero)
+    assert.equal(byKey.walletBalance.state, "UNAVAILABLE");
+    assert.equal(byKey.walletBalance.value, null);
+    // No authoritative source for the remaining metrics -> UNAVAILABLE
+    ["realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio"]
+        .forEach((key) => {
+            assert.equal(byKey[key].state, "UNAVAILABLE", `${key} should be UNAVAILABLE`);
+            assert.equal(byKey[key].value, null, `${key} must not be fabricated`);
+        });
+});
+
+test("financial metrics never turn an unavailable account into zeros", async () => {
+    const { derived } = derive(makeStatus()); // real account not connected
+    const metrics = deriveFinancialMetrics(derived);
+    metrics.forEach((metric) => {
+        assert.equal(metric.state, "UNAVAILABLE", `${metric.key} unavailable`);
+        assert.equal(metric.value, null, `${metric.key} value must be null, not 0`);
+    });
+});
+
+test("financial PnL tone follows the sign and treats zero as neutral", async () => {
+    const positive = deriveFinancialMetrics(derive(makeStatus({
+        accountRuntime: {
+            ...makeStatus().accountRuntime,
+            realAccount: {
+                ...REAL_NOT_CONNECTED, connected: true, authenticated: true,
+                equity: 1500, availableBalance: 1200, balance: 1500, unrealizedPnl: 5,
+                positions: [], positionSummary: "FLAT", lastSync: 1,
+            },
+        },
+    })).derived);
+    assert.equal(positive.find((m) => m.key === "unrealizedPnl").tone, "positive");
+
+    const zero = deriveFinancialMetrics(derive(makeStatus({
+        accountRuntime: {
+            ...makeStatus().accountRuntime,
+            realAccount: {
+                ...REAL_NOT_CONNECTED, connected: true, authenticated: true,
+                equity: 1500, availableBalance: 1200, balance: 1500, unrealizedPnl: 0,
+                positions: [], positionSummary: "FLAT", lastSync: 1,
+            },
+        },
+    })).derived);
+    assert.equal(zero.find((m) => m.key === "unrealizedPnl").tone, "neutral");
 });

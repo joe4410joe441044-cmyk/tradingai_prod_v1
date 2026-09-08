@@ -1,9 +1,11 @@
+import { useState } from "react";
 import usePolling from "../hooks/usePolling";
 import PaperCapitalControl from "../components/runtime/PaperCapitalControl";
 import StatusMetric from "../components/runtime/StatusMetric";
 import {
     buildAccountRuntimeProps,
     deriveAccountRuntime,
+    deriveFinancialMetrics,
     deriveLiveContext,
     displayRuntimeValue,
     displayValue,
@@ -51,18 +53,151 @@ const displayCurrentContext = (value) => (
     CURRENT_CONTEXT_LABELS[value] ?? String(value ?? "")
 );
 
+/* =================================================
+   Financial metric icons — small inline SVGs, no
+   external asset, no emoji, no new dependency. The
+   visual language mirrors the dashboard cyan icon
+   containers. PnL icons inherit the status color.
+================================================= */
+const FINANCIAL_GLYPHS = {
+    equity: (
+        <>
+            <ellipse cx="12" cy="7" rx="6" ry="3" />
+            <path d="M6 7v5c0 1.66 2.69 3 6 3s6-1.34 6-3V7" />
+            <path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5" />
+        </>
+    ),
+    availableBalance: (
+        <>
+            <rect x="3" y="6" width="18" height="13" rx="2" />
+            <path d="M3 10h18" />
+            <circle cx="16" cy="14" r="1" />
+        </>
+    ),
+    walletBalance: (
+        <>
+            <path d="M4 7h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" />
+            <path d="M4 7a3 3 0 0 1 3-3h9" />
+            <circle cx="17" cy="13" r="1" />
+        </>
+    ),
+    unrealizedPnl: (
+        <>
+            <polyline points="3 17 9 11 13 14 21 6" />
+            <polyline points="15 6 21 6 21 12" />
+        </>
+    ),
+    realizedPnlToday: (
+        <>
+            <line x1="5" y1="21" x2="5" y2="13" />
+            <line x1="12" y1="21" x2="12" y2="8" />
+            <line x1="19" y1="21" x2="19" y2="11" />
+        </>
+    ),
+    totalPnlToday: (
+        <>
+            <polyline points="3 19 9 13 13 15 21 7" />
+            <path d="M3 19h18" />
+        </>
+    ),
+    marginUsed: (
+        <>
+            <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+        </>
+    ),
+    marginAvailable: (
+        <>
+            <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" />
+            <polyline points="9 12 11 14 15 10" />
+        </>
+    ),
+    marginRatio: (
+        <>
+            <circle cx="12" cy="12" r="9" />
+            <line x1="8.5" y1="15.5" x2="15.5" y2="8.5" />
+            <circle cx="9" cy="9" r="1" />
+            <circle cx="15" cy="15" r="1" />
+        </>
+    ),
+};
+
+function FinancialIcon({ icon = "equity", tone = "neutral" }) {
+    return (
+        <span
+            className={`as-fin-icon as-fin-icon--${tone}`}
+            data-testid={`financial-icon-${icon}`}
+        >
+            <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+            >
+                {FINANCIAL_GLYPHS[icon]}
+            </svg>
+        </span>
+    );
+}
+
+function FinancialMetricCard({ metric }) {
+    const stateClass = metric.state
+        ? `as-fin-card-state--${metric.state.toLowerCase()}`
+        : "";
+    return (
+        <div
+            className={`as-fin-card as-fin-card--${metric.tone}`}
+            data-testid={`financial-${metric.key}`}
+        >
+            <div className="as-fin-card-head">
+                <FinancialIcon icon={metric.icon} tone={metric.tone} />
+                <div className="as-fin-card-title">
+                    <span className="as-fin-card-label">{metric.label}</span>
+                    <span className="as-fin-card-jp">{metric.jpLabel}</span>
+                </div>
+            </div>
+            <div className="as-fin-card-value">
+                <span
+                    className="as-fin-card-number"
+                    data-testid={`financial-${metric.key}-value`}
+                >
+                    {metric.value ?? "—"}
+                </span>
+                {metric.unit && (
+                    <span className="as-fin-card-unit" data-testid={`financial-${metric.key}-unit`}>
+                        {metric.unit}
+                    </span>
+                )}
+            </div>
+            {metric.state && (
+                <span
+                    className={`as-fin-card-state ${stateClass}`}
+                    data-testid={`financial-${metric.key}-state`}
+                >
+                    {metric.state}
+                </span>
+            )}
+        </div>
+    );
+}
+
 export function AccountStatusView({
     botStatus = {},
     onPaperCapitalApplied,
+    detailsExpanded = false,
+    onDetailsToggle = () => {},
 }) {
     const props = buildAccountRuntimeProps(botStatus);
     const derived = deriveAccountRuntime(props);
     const liveContext = deriveLiveContext(props, derived);
+    const financialMetrics = deriveFinancialMetrics(derived);
 
     const {
-        realBalanceValue,
-        realEquityValue,
-        realAvailableValue,
         realPositionValue,
         realConnected,
         realLoading,
@@ -162,86 +297,111 @@ export function AccountStatusView({
                     </p>
                 )}
 
-                <div className="as-primary-metrics" data-testid="real-account-metrics">
-                    <StatusMetric
-                        label="Balance（残高）"
-                        value={realBalanceValue}
-                        testId="real-balance"
-                        tone="real"
-                    />
-                    <StatusMetric
-                        label="Equity（純資産）"
-                        value={realEquityValue}
-                        testId="real-equity"
-                        tone="real"
-                    />
-                    <StatusMetric
-                        label="Available（利用可能額）"
-                        value={realAvailableValue}
-                        testId="real-available"
-                        tone="real"
-                    />
+                <div className="as-canonical-strip" data-testid="real-account-canonical">
                     <StatusMetric
                         label="Position（ポジション）"
                         value={realPositionValue}
                         testId="real-position"
                         tone="real"
                     />
+                    <span className="semantic-badge semantic-badge-connected" data-testid="real-read-only-authority">
+                        {displayValue(resolvedPermission)}
+                    </span>
                 </div>
 
-                <div className="as-primary-details" data-testid="real-account-details">
-                    <StatusMetric
-                        label="Exchange（取引所）"
-                        value={displayValue(realExchange)}
-                        testId="real-exchange"
-                        tone="connection"
-                    />
-                    <StatusMetric
-                        label="Connection（接続）"
-                        value={displayValue(resolvedExchangeConnection)}
-                        testId="real-connection"
-                        tone={realConnected ? "safe" : "connection"}
-                    />
-                    <StatusMetric
-                        label="Authentication（取引所認証）"
-                        value={displayValue(resolvedExchangeAuth)}
-                        testId="real-auth"
-                        tone={authVerified ? "safe" : "connection"}
-                    />
-                    <StatusMetric
-                        label="API Key（APIキー）"
-                        value={displayValue(resolvedApiKeyStatus)}
-                        testId="real-api-key"
-                        tone={authVerified ? "safe" : "connection"}
-                    />
-                    <StatusMetric
-                        label="Permission（権限）"
-                        value={displayValue(resolvedPermission)}
-                        testId="real-permission"
-                        tone={realConnected ? "safe" : "connection"}
-                    />
-                    <StatusMetric
-                        label="Account Type（口座種別）"
-                        value={displayValue(resolvedAccountType)}
-                        testId="real-account-type"
-                        tone="connection"
-                    />
-                    <StatusMetric
-                        label="Sync Status（同期状態）"
-                        value={realSyncStatus}
-                        testId="real-sync-status"
-                        tone={realConnected ? "safe" : "warning"}
-                    />
-                    <StatusMetric
-                        label="Last Sync（最終同期）"
-                        value={realConnected
-                            ? displayValue(accountLastSync, formatLastUpdate)
-                            : "--"
-                        }
-                        testId="real-last-sync"
-                        tone="connection"
-                    />
-                </div>
+                {/*
+                   ACCOUNT FINANCIAL STATUS — 5px SILVER raised metallic frame.
+                   Authoritative backend/exchange fields only. Missing or
+                   ambiguous metrics surface as UNAVAILABLE (never a fake zero).
+                */}
+                <section
+                    className="as-financial-frame"
+                    data-testid="account-financial-status"
+                >
+                    <header className="as-financial-frame-header">
+                        <div className="as-financial-frame-title">
+                            <span className="as-financial-kicker">Account Financial Status</span>
+                        </div>
+                        <button
+                            type="button"
+                            className="as-details-toggle"
+                            data-testid="account-details-toggle"
+                            aria-expanded={detailsExpanded}
+                            aria-controls="account-financial-details"
+                            onClick={onDetailsToggle}
+                        >
+                            DETAILS {detailsExpanded ? "▲" : "▼"}
+                        </button>
+                    </header>
+
+                    <div className="as-financial-grid" data-testid="financial-metric-grid">
+                        {financialMetrics.map((metric) => (
+                            <FinancialMetricCard key={metric.key} metric={metric} />
+                        ))}
+                    </div>
+
+                    <div
+                        id="account-financial-details"
+                        className={`as-financial-details${
+                            detailsExpanded ? " as-financial-details--open" : ""
+                        }`}
+                        data-testid="account-financial-details"
+                    >
+                        <div className="as-primary-details" data-testid="real-account-details">
+                            <StatusMetric
+                                label="Exchange（取引所）"
+                                value={displayValue(realExchange)}
+                                testId="real-exchange"
+                                tone="connection"
+                            />
+                            <StatusMetric
+                                label="Connection（接続）"
+                                value={displayValue(resolvedExchangeConnection)}
+                                testId="real-connection"
+                                tone={realConnected ? "safe" : "connection"}
+                            />
+                            <StatusMetric
+                                label="Authentication（取引所認証）"
+                                value={displayValue(resolvedExchangeAuth)}
+                                testId="real-auth"
+                                tone={authVerified ? "safe" : "connection"}
+                            />
+                            <StatusMetric
+                                label="API Key（APIキー）"
+                                value={displayValue(resolvedApiKeyStatus)}
+                                testId="real-api-key"
+                                tone={authVerified ? "safe" : "connection"}
+                            />
+                            <StatusMetric
+                                label="Permission（権限）"
+                                value={displayValue(resolvedPermission)}
+                                testId="real-permission"
+                                tone={realConnected ? "safe" : "connection"}
+                            />
+                            <StatusMetric
+                                label="Account Type（口座種別）"
+                                value={displayValue(resolvedAccountType)}
+                                testId="real-account-type"
+                                tone="connection"
+                            />
+                            <StatusMetric
+                                label="Sync Status（同期状態）"
+                                value={realSyncStatus}
+                                testId="real-sync-status"
+                                tone={realConnected ? "safe" : "warning"}
+                            />
+                            <StatusMetric
+                                label="Last Sync（最終同期）"
+                                value={realConnected
+                                    ? displayValue(accountLastSync, formatLastUpdate)
+                                    : "--"
+                                }
+                                testId="real-last-sync"
+                                tone="connection"
+                            />
+                        </div>
+                    </div>
+                </section>
             </article>
 
             {/* =================================================
@@ -461,6 +621,7 @@ export function AccountStatusView({
 export default function AccountStatusPage() {
     const { data } = usePolling(fetchBotStatus, 5000);
     const botStatus = data?.data;
+    const [detailsExpanded, setDetailsExpanded] = useState(false);
 
     const refreshBotStatus = async () => {
         const snapshot = await fetchBotStatus();
@@ -471,6 +632,8 @@ export default function AccountStatusPage() {
         <AccountStatusView
             botStatus={botStatus}
             onPaperCapitalApplied={refreshBotStatus}
+            detailsExpanded={detailsExpanded}
+            onDetailsToggle={() => setDetailsExpanded((expanded) => !expanded)}
         />
     );
 }

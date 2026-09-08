@@ -329,6 +329,9 @@ export const deriveAccountRuntime = (props) => {
     const realAvailableRaw = realExchangeMatches
         ? realAccount.availableBalance ?? realAvailableBalance
         : null;
+    const realUnrealizedPnlRaw = realExchangeMatches
+        ? realAccount.unrealizedPnl
+        : null;
     const realPositionSummary = realExchangeMatches
         ? realAccount.positionSummary ?? realPositionState
         : "ACCOUNT_EXCHANGE_MISMATCH";
@@ -389,6 +392,13 @@ export const deriveAccountRuntime = (props) => {
             stale: realStale,
         })
         : displayValue(resolvedPositionReason || resolvedAccountReason || "NOT_CONNECTED");
+    const realUnrealizedPnlValue = realConnected || realLoading || realStale
+        ? displayRuntimeValue(realUnrealizedPnlRaw, {
+            formatter: formatPnl,
+            loading: realLoading,
+            stale: realStale,
+        })
+        : realUnavailable;
     const displayedReason = normalizedSelectedMode === "LIVE" && !realOrderAllowed
         && !String(safetyReason ?? "").includes("LIVE_NOT_ENABLED")
         ? "LIVE_NOT_ENABLED / DRY_RUN_ACTIVE"
@@ -426,6 +436,7 @@ export const deriveAccountRuntime = (props) => {
         realBalanceRaw,
         realEquityRaw,
         realAvailableRaw,
+        realUnrealizedPnlRaw,
         realPositionSummary,
         realConnected,
         realAvailablePresetEnabled,
@@ -439,9 +450,108 @@ export const deriveAccountRuntime = (props) => {
         realBalanceValue,
         realEquityValue,
         realAvailableValue,
+        realUnrealizedPnlValue,
         realPositionValue,
         displayedReason,
     };
+};
+
+/* =================================================
+   ACCOUNT FINANCIAL STATUS — read-only projection.
+
+   The 3x3 Account Financial Status grid is driven by
+   authoritative backend / exchange fields only.
+
+   Only fields with a real canonical source produce a
+   numeric value. Missing / ambiguous / undefined fields
+   surface as UNAVAILABLE — never as a fabricated zero.
+   This module performs no arithmetic and never invents a
+   derived figure that is not already an authoritative
+   backend field.
+
+   Order is the authoritative UI priority:
+     ROW 1 assets -> ROW 2 pnl -> ROW 3 margin.
+================================================= */
+
+export const ACCOUNT_FINANCIAL_UNIT = "USDT";
+
+export const ACCOUNT_FINANCIAL_METRICS = [
+    { key: "equity", label: "EQUITY", jpLabel: "純資産", icon: "equity", category: "asset" },
+    { key: "availableBalance", label: "AVAILABLE BALANCE", jpLabel: "利用可能額", icon: "availableBalance", category: "asset" },
+    { key: "walletBalance", label: "WALLET BALANCE", jpLabel: "ウォレット残高", icon: "walletBalance", category: "asset", unavailable: true },
+    { key: "unrealizedPnl", label: "UNREALIZED PNL", jpLabel: "含み損益", icon: "unrealizedPnl", category: "pnl" },
+    { key: "realizedPnlToday", label: "REALIZED PNL TODAY", jpLabel: "本日実現損益", icon: "realizedPnlToday", category: "pnl", unavailable: true },
+    { key: "totalPnlToday", label: "TOTAL PNL TODAY", jpLabel: "本日総損益", icon: "totalPnlToday", category: "pnl", unavailable: true },
+    { key: "marginUsed", label: "MARGIN USED", jpLabel: "使用証拠金", icon: "marginUsed", category: "margin", unavailable: true },
+    { key: "marginAvailable", label: "MARGIN AVAILABLE", jpLabel: "利用可能証拠金", icon: "marginAvailable", category: "margin", unavailable: true },
+    { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", unavailable: true },
+];
+
+const isFiniteNumber = (value) => (
+    typeof value === "number" && Number.isFinite(value)
+);
+
+const pnlTone = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue === 0) {
+        return "neutral";
+    }
+    return numericValue > 0 ? "positive" : "negative";
+};
+
+export const deriveFinancialMetrics = (derived = {}) => {
+    const {
+        realLoading,
+        realStale,
+        realConnected,
+        realBalanceRaw,
+        realEquityRaw,
+        realAvailableRaw,
+        realUnrealizedPnlRaw,
+    } = derived;
+
+    const rawByKey = {
+        equity: realEquityRaw,
+        availableBalance: realAvailableRaw,
+        walletBalance: realBalanceRaw,
+        unrealizedPnl: realUnrealizedPnlRaw,
+    };
+
+    return ACCOUNT_FINANCIAL_METRICS.map((def) => {
+        let value = null;
+        let unit = null;
+        let state = null;
+
+        if (def.unavailable) {
+            state = "UNAVAILABLE";
+        } else if (realLoading) {
+            state = "REFRESHING";
+        } else if (realStale) {
+            state = "STALE";
+        } else if (
+            realConnected
+            && isFiniteNumber(rawByKey[def.key])
+        ) {
+            value = def.category === "pnl"
+                ? formatPnl(rawByKey[def.key])
+                : formatAmount(rawByKey[def.key]);
+            unit = ACCOUNT_FINANCIAL_UNIT;
+        } else {
+            state = "UNAVAILABLE";
+        }
+
+        const tone = def.category === "pnl"
+            ? pnlTone(rawByKey[def.key])
+            : "neutral";
+
+        return {
+            ...def,
+            value,
+            unit,
+            state,
+            tone,
+        };
+    });
 };
 
 /* =================================================
