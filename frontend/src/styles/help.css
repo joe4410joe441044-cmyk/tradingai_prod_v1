@@ -50,7 +50,7 @@
 .ai-help-overlay {
     position: fixed;
     inset: 0;
-    z-index: 950;
+    z-index: 10001;
     display: flex;
     background: color-mix(in srgb, #040810 55%, transparent);
 }
