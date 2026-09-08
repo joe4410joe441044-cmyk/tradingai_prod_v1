@@ -585,6 +585,9 @@ class BotManager:
             "balance": None,
             "equity": None,
             "availableBalance": None,
+            "unrealizedPnl": None,
+            "marginUsed": None,
+            "marginAvailable": None,
             "positions": None,
             "positionSummary": None,
             "lastSync": None,
@@ -967,6 +970,20 @@ class BotManager:
             if stale
             else None
         )
+        margin_used = (
+            overview.get("marginUsed")
+            if balance_ok
+            else previous.get("marginUsed")
+            if stale
+            else None
+        )
+        margin_available = (
+            overview.get("availableMargin")
+            if balance_ok
+            else previous.get("marginAvailable")
+            if stale
+            else None
+        )
         positions_value = (
             positions
             if position_ok
@@ -1004,6 +1021,8 @@ class BotManager:
             "equity": equity,
             "availableBalance": available_balance,
             "unrealizedPnl": unrealized_pnl,
+            "marginUsed": margin_used,
+            "marginAvailable": margin_available,
             "positions": positions_value,
             "positionSummary": self._position_summary(
                 positions_value
@@ -1553,6 +1572,8 @@ class BotManager:
                     "realAvailableBalance"
                 ),
                 "unrealizedPnl": readiness.get("realUnrealizedPnl"),
+                "marginUsed": readiness.get("realMarginUsed"),
+                "marginAvailable": readiness.get("realMarginAvailable"),
                 "positions": readiness_positions,
                 "positionSummary": (
                     readiness.get("realPositionState")
@@ -1644,6 +1665,8 @@ class BotManager:
             "realAvailableBalance": real_account.get(
                 "availableBalance"
             ),
+            "realMarginUsed": real_account.get("marginUsed"),
+            "realMarginAvailable": real_account.get("marginAvailable"),
             "realPosition": real_account.get("positions"),
             "realPositionState": real_account.get(
                 "positionSummary"

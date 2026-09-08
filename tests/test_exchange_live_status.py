@@ -988,6 +988,93 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             request_get.call_args.args[0],
         )
 
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
+    def test_kucoin_account_overview_extracts_authoritative_margin_fields(self, request_get):
+        request_get.return_value.json.return_value = {
+            "code": "200000",
+            "data": {
+                "currency": "USDT",
+                "accountEquity": "1000.00",
+                "unrealisedPNL": "5.00",
+                "marginBalance": "1000.00",
+                "positionMargin": "200.50",
+                "orderMargin": "30.25",
+                "frozenFunds": "0.00",
+                "availableBalance": "740.25",
+                "availableMargin": "769.25",
+                "riskRatio": "0.05",
+                "maxWithdrawAmount": "769.25",
+            },
+        }
+        client = KucoinTradeClient(
+            api_key="key",
+            api_secret="secret",
+            passphrase="passphrase",
+        )
+
+        overview = client.get_account_overview()
+
+        # Raw KuCoin authoritative margin fields must survive the adapter.
+        self.assertEqual(overview["positionMargin"], 200.50)
+        self.assertEqual(overview["orderMargin"], 30.25)
+        self.assertEqual(overview["availableMargin"], 769.25)
+        # Margin in use = positionMargin + orderMargin (authorised by KuCoin
+        # decomposition), NOT a fabricated value.
+        self.assertEqual(overview["marginUsed"], 230.75)
+        # availableMargin is distinct from availableBalance even when it
+        # happens to be an amount.
+        self.assertEqual(overview["availableBalance"], 740.25)
+        self.assertNotEqual(overview["availableMargin"], overview["availableBalance"])
+
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
+    def test_kucoin_account_overview_margin_used_unknown_when_component_missing(self, request_get):
+        request_get.return_value.json.return_value = {
+            "code": "200000",
+            "data": {
+                "currency": "USDT",
+                "accountEquity": "1000.00",
+                "marginBalance": "1000.00",
+                "availableMargin": "1000.00",
+            },
+        }
+        client = KucoinTradeClient(
+            api_key="key",
+            api_secret="secret",
+            passphrase="passphrase",
+        )
+
+        overview = client.get_account_overview()
+
+        # No positionMargin / orderMargin -> marginUsed must stay None (never 0).
+        self.assertIsNone(overview["marginUsed"])
+        self.assertEqual(overview["availableMargin"], 1000.00)
+
+    @patch("backend.execution.kucoin_trade.requests.Session.get")
+    def test_kucoin_account_overview_margin_zero_is_authoritative_zero(self, request_get):
+        request_get.return_value.json.return_value = {
+            "code": "200000",
+            "data": {
+                "currency": "USDT",
+                "accountEquity": "7.92",
+                "marginBalance": "7.92",
+                "positionMargin": "0",
+                "orderMargin": "0",
+                "availableMargin": "7.92",
+            },
+        }
+        client = KucoinTradeClient(
+            api_key="key",
+            api_secret="secret",
+            passphrase="passphrase",
+        )
+
+        overview = client.get_account_overview()
+
+        # A FLAT account returns authoritative zero margin used (not None).
+        self.assertEqual(overview["marginUsed"], 0.0)
+        self.assertIsNotNone(overview["marginUsed"])
+        self.assertEqual(overview["availableMargin"], 7.92)
+
     @staticmethod
     def _kucoin_client():
         return KucoinTradeClient(
@@ -10275,6 +10362,115 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         real_account = status["accountRuntime"]["realAccount"]
         self.assertIsNone(real_account["unrealizedPnl"])
 
+    @staticmethod
+    def _margin_contract_engine(margin_used, margin_available):
+        """Return a live-readiness engine that forwards the authoritative
+        KuCoin margin fields captured in its account snapshot."""
+        engine = SimpleNamespace()
+        engine.real_account_snapshot = {
+            "balance": 1000.00,
+            "equity": 1000.00,
+            "availableBalance": 769.25,
+            "unrealizedPnl": 0.0,
+            "marginUsed": margin_used,
+            "availableMargin": margin_available,
+        }
+        engine.real_balance = 1000.00
+        engine.real_equity = 1000.00
+        engine.real_available_balance = 769.25
+        engine.real_position = None
+        engine.real_position_state = "FLAT"
+        engine.real_account_last_sync = 1234567890.0
+        engine.build_live_readiness = Mock(
+            return_value={
+                "ready": False,
+                "realOrderAllowed": False,
+                "checks": {},
+                "blockReasons": ["LIVE_NOT_ENABLED", "DRY_RUN_ACTIVE"],
+                "selectedMode": "PAPER",
+                "dryRun": True,
+                "tradeMode": "paper",
+                "allowLive": False,
+                "exchangeClientReady": True,
+                "exchangeAuthReady": True,
+                "balanceCheckOk": True,
+                "positionCheckOk": True,
+                "executionEnabled": False,
+                "emergencyStop": False,
+                "realBalance": engine.real_balance,
+                "realEquity": engine.real_equity,
+                "realAvailableBalance": engine.real_available_balance,
+                "realUnrealizedPnl": engine.real_account_snapshot.get(
+                    "unrealizedPnl"
+                ),
+                "realMarginUsed": engine.real_account_snapshot.get(
+                    "marginUsed"
+                ),
+                "realMarginAvailable": engine.real_account_snapshot.get(
+                    "availableMargin"
+                ),
+                "realPosition": engine.real_position,
+                "realPositionState": engine.real_position_state,
+                "realAccountLastSync": engine.real_account_last_sync,
+                "exchangeConnection": "CONNECTED",
+                "apiKeyStatus": "VERIFIED",
+                "permission": "READ_ONLY",
+                "accountType": "KUCOIN_FUTURES",
+                "exchangeAuthReason": "KUCOIN_CREDENTIALS_VERIFIED",
+                "exchangeConnectionReason": "KUCOIN_CLIENT_READY",
+                "accountReason": "KUCOIN_READ_ONLY_SYNC_OK",
+                "balanceReason": "KUCOIN_BALANCE_SYNC_OK",
+                "positionReason": "KUCOIN_POSITION_SYNC_OK",
+                "accountSnapshot": engine.real_account_snapshot,
+            }
+        )
+        return engine
+
+    def test_live_readiness_real_account_forwards_authoritative_margin_contract(self):
+        # The Account Status realAccount must forward the authoritative
+        # marginUsed (positionMargin + orderMargin) and marginAvailable
+        # (availableMargin) fields captured in the engine snapshot.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._margin_contract_engine(230.75, 769.25)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertEqual(real_account["marginUsed"], 230.75)
+        self.assertEqual(real_account["marginAvailable"], 769.25)
+
+    def test_live_readiness_real_account_zero_margin_is_preserved(self):
+        # A flat account may return authoritative zero margin. Zero is a valid
+        # value and must never be collapsed into None (which presents as
+        # UNAVAILABLE) by the real-account reconstruction.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._margin_contract_engine(0, 7.92)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertEqual(real_account["marginUsed"], 0)
+        self.assertIsNotNone(real_account["marginUsed"])
+        self.assertEqual(real_account["marginAvailable"], 7.92)
+
+    def test_live_readiness_real_account_unknown_margin_stays_none(self):
+        # No authoritative source -> must stay None (frontend renders
+        # UNAVAILABLE), never fabricated to zero.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._margin_contract_engine(None, None)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertIsNone(real_account["marginUsed"])
+        self.assertIsNone(real_account["marginAvailable"])
+
     def test_stopped_unconfigured_bot_syncs_kucoin_read_only_account(self):
         bot = BotManager()
         bot._running = False
@@ -10308,6 +10504,40 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         self.assertEqual(real_account["availableBalance"], 0)
         self.assertEqual(real_account["positions"], [])
         self.assertEqual(real_account["positionSummary"], "FLAT")
+
+    def test_stopped_bot_forwards_authoritative_margin_contract(self):
+        # The stopped / unconfigured bot still syncs the KuCoin read-only
+        # account; the margin contract must survive the adapter -> snapshot ->
+        # realAccount reconstruction without being dropped.
+        bot = BotManager()
+        bot._running = False
+        bot.config = {}
+        bot.engine = None
+
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ) as client_class:
+            client_class.credentials_present.return_value = True
+            client = client_class.return_value
+            client.get_account_overview.return_value = {
+                "accountType": "KUCOIN_FUTURES",
+                "balance": 1000.0,
+                "equity": 1000.0,
+                "availableBalance": 769.25,
+                "unrealizedPnl": 5.0,
+                "marginUsed": 230.75,
+                "availableMargin": 769.25,
+                "permission": "READ_ONLY",
+            }
+            client.get_positions.return_value = []
+
+            status = bot.get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertEqual(real_account["balance"], 1000.0)
+        self.assertEqual(real_account["unrealizedPnl"], 5.0)
+        self.assertEqual(real_account["marginUsed"], 230.75)
+        self.assertEqual(real_account["marginAvailable"], 769.25)
 
     @staticmethod
     def _bootstrap_start_config():

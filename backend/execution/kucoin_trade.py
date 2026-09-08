@@ -354,6 +354,29 @@ class KucoinTradeClient(BaseClient):
             "unrealisedPnl",
             "unrealizedPNL",
         )
+        position_margin = as_float(
+            "positionMargin",
+            "position_margin",
+        )
+        order_margin = as_float(
+            "orderMargin",
+            "order_margin",
+        )
+        available_margin = as_float(
+            "availableMargin",
+            "available_margin",
+        )
+        # Margin in use is authorised by KuCoin's own decomposition of the
+        # cross-margin account: occupied margin = margin held for open
+        # positions (positionMargin) + margin reserved for open orders
+        # (orderMargin). Neither component is optional; if either is absent
+        # the occupied-margin figure is treated as unknown (None), never a
+        # fabricated zero.
+        margin_used = (
+            (position_margin + order_margin)
+            if position_margin is not None and order_margin is not None
+            else None
+        )
         balance = (
             equity
             if equity is not None
@@ -395,6 +418,26 @@ class KucoinTradeClient(BaseClient):
             "unrealizedPnl": (
                 float(unrealized_pnl)
                 if unrealized_pnl is not None
+                else None
+            ),
+            "positionMargin": (
+                float(position_margin)
+                if position_margin is not None
+                else None
+            ),
+            "orderMargin": (
+                float(order_margin)
+                if order_margin is not None
+                else None
+            ),
+            "availableMargin": (
+                float(available_margin)
+                if available_margin is not None
+                else None
+            ),
+            "marginUsed": (
+                float(margin_used)
+                if margin_used is not None
                 else None
             ),
             "exchangeAuth": "VERIFIED",

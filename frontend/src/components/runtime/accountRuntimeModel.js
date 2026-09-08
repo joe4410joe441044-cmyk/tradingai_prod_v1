@@ -332,6 +332,12 @@ export const deriveAccountRuntime = (props) => {
     const realUnrealizedPnlRaw = realExchangeMatches
         ? realAccount.unrealizedPnl
         : null;
+    const realMarginUsedRaw = realExchangeMatches
+        ? realAccount.marginUsed
+        : null;
+    const realMarginAvailableRaw = realExchangeMatches
+        ? realAccount.marginAvailable
+        : null;
     const realPositionSummary = realExchangeMatches
         ? realAccount.positionSummary ?? realPositionState
         : "ACCOUNT_EXCHANGE_MISMATCH";
@@ -437,6 +443,8 @@ export const deriveAccountRuntime = (props) => {
         realEquityRaw,
         realAvailableRaw,
         realUnrealizedPnlRaw,
+        realMarginUsedRaw,
+        realMarginAvailableRaw,
         realPositionSummary,
         realConnected,
         realAvailablePresetEnabled,
@@ -482,8 +490,8 @@ export const ACCOUNT_FINANCIAL_METRICS = [
     { key: "unrealizedPnl", label: "UNREALIZED PNL", jpLabel: "含み損益", icon: "unrealizedPnl", category: "pnl" },
     { key: "realizedPnlToday", label: "REALIZED PNL TODAY", jpLabel: "本日実現損益", icon: "realizedPnlToday", category: "pnl", unavailable: true },
     { key: "totalPnlToday", label: "TOTAL PNL TODAY", jpLabel: "本日総損益", icon: "totalPnlToday", category: "pnl", unavailable: true },
-    { key: "marginUsed", label: "MARGIN USED", jpLabel: "使用証拠金", icon: "marginUsed", category: "margin", unavailable: true },
-    { key: "marginAvailable", label: "MARGIN AVAILABLE", jpLabel: "利用可能証拠金", icon: "marginAvailable", category: "margin", unavailable: true },
+    { key: "marginUsed", label: "MARGIN USED", jpLabel: "使用証拠金", icon: "marginUsed", category: "margin" },
+    { key: "marginAvailable", label: "MARGIN AVAILABLE", jpLabel: "利用可能証拠金", icon: "marginAvailable", category: "margin" },
     { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", unavailable: true },
 ];
 
@@ -508,6 +516,8 @@ export const deriveFinancialMetrics = (derived = {}) => {
         realEquityRaw,
         realAvailableRaw,
         realUnrealizedPnlRaw,
+        realMarginUsedRaw,
+        realMarginAvailableRaw,
     } = derived;
 
     const rawByKey = {
@@ -515,6 +525,8 @@ export const deriveFinancialMetrics = (derived = {}) => {
         availableBalance: realAvailableRaw,
         walletBalance: realBalanceRaw,
         unrealizedPnl: realUnrealizedPnlRaw,
+        marginUsed: realMarginUsedRaw,
+        marginAvailable: realMarginAvailableRaw,
     };
 
     return ACCOUNT_FINANCIAL_METRICS.map((def) => {

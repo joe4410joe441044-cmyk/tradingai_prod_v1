@@ -686,6 +686,12 @@ class ExecutionEngine:
             "realUnrealizedPnl": self.real_account_snapshot.get(
                 "unrealizedPnl"
             ),
+            "realMarginUsed": self.real_account_snapshot.get(
+                "marginUsed"
+            ),
+            "realMarginAvailable": self.real_account_snapshot.get(
+                "availableMargin"
+            ),
             "realPosition": self.real_position,
             "realPositionState": self.real_position_state,
             "realAccountLastSync": self.real_account_last_sync,

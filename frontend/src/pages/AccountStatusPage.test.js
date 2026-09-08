@@ -394,6 +394,62 @@ test("financial metrics expose authoritative Equity / Available / Unrealized whe
     assert.equal(findByTestId(nodes, "financial-walletBalance-state").props.children, "UNAVAILABLE");
 });
 
+test("financial metrics expose authoritative Margin Used / Margin Available when connected", async () => {
+    const { AccountStatusView } = await loadModule();
+    const connected = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                marginUsed: 230.75,
+                marginAvailable: 769.25,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: connected }));
+    // marginUsed = positionMargin + orderMargin (authoritative KuCoin decomposition)
+    assert.equal(readTestIdValue(nodes, "financial-marginUsed-value"), "230.75");
+    assert.equal(readTestIdValue(nodes, "financial-marginUsed-unit"), "USDT");
+    assert.equal(findByTestId(nodes, "financial-marginUsed-state"), undefined, "no UNAVAILABLE state");
+    // marginAvailable = availableMargin (direct exchange authoritative)
+    assert.equal(readTestIdValue(nodes, "financial-marginAvailable-value"), "769.25");
+    assert.equal(readTestIdValue(nodes, "financial-marginAvailable-unit"), "USDT");
+    assert.equal(findByTestId(nodes, "financial-marginAvailable-state"), undefined, "no UNAVAILABLE state");
+});
+
+test("authoritative zero margin is a valid value, never UNAVAILABLE", async () => {
+    const { AccountStatusView } = await loadModule();
+    const zero = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                marginUsed: 0,
+                marginAvailable: 7.92,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: zero }));
+    // A FLAT account returns authoritative zero margin used -> 0.00 USDT.
+    assert.equal(readTestIdValue(nodes, "financial-marginUsed-value"), "0.00");
+    assert.equal(readTestIdValue(nodes, "financial-marginUsed-unit"), "USDT");
+    assert.equal(readTestIdValue(nodes, "financial-marginAvailable-value"), "7.92");
+});
+
+test("missing margin fields fail closed to UNAVAILABLE", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));
+    // READ_ONLY_BOT_STATUS has no margin fields -> never fabricated to 0.00.
+    assert.equal(findByTestId(nodes, "financial-marginUsed-state").props.children, "UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "financial-marginUsed-value"), "—");
+    assert.equal(findByTestId(nodes, "financial-marginAvailable-state").props.children, "UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "financial-marginAvailable-value"), "—");
+    // marginRatio remains explicitly UNAVAILABLE (riskRatio semantics not proven).
+    assert.equal(findByTestId(nodes, "financial-marginRatio-state").props.children, "UNAVAILABLE");
+});
+
 test("negative unrealized PnL is never forced to a positive or neutral zero", async () => {
     const { AccountStatusView } = await loadModule();
     const connected = {
