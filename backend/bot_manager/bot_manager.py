@@ -78,7 +78,8 @@ from backend.core.logger import (
 )
 
 from backend.execution.kucoin_trade import (
-    KucoinTradeClient
+    KucoinTradeClient,
+    account_status_total_pnl_today,
 )
 
 from backend.money_management.loss_authoritative_runtime_metrics import (
@@ -585,9 +586,16 @@ class BotManager:
             "balance": None,
             "equity": None,
             "availableBalance": None,
+            "walletBalance": None,
             "unrealizedPnl": None,
+            "realizedPnlToday": None,
+            "totalPnlToday": None,
             "marginUsed": None,
             "marginAvailable": None,
+            "marginRatio": None,
+            "dailyPnlSource": None,
+            "dailyPnlObservedAt": None,
+            "dailyPnlDayStart": None,
             "positions": None,
             "positionSummary": None,
             "lastSync": None,
@@ -880,6 +888,7 @@ class BotManager:
             return commit(failed)
 
         overview = {}
+        daily_pnl = None
         balance_ok = False
         balance_reason = "BALANCE_FETCH_FAILED"
 
@@ -904,6 +913,23 @@ class BotManager:
                 e,
                 "BALANCE_FETCH_FAILED",
             )
+
+        # Daily PnL has an independent fail-closed authority boundary.  A
+        # complete successful Classic Futures ledger snapshot may authorise
+        # zero; a missing method, incomplete pagination, or API failure may
+        # not.  The client owns its bounded successful-result cache.
+        try:
+            daily_reader = getattr(client, "get_realized_pnl_today", None)
+            if callable(daily_reader):
+                candidate = daily_reader()
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("complete") is True
+                    and candidate.get("value") is not None
+                ):
+                    daily_pnl = candidate
+        except Exception:
+            daily_pnl = None
 
         positions = None
         position_ok = False
@@ -963,6 +989,13 @@ class BotManager:
             if stale
             else None
         )
+        wallet_balance = (
+            overview.get("walletBalance")
+            if balance_ok
+            else previous.get("walletBalance")
+            if stale
+            else None
+        )
         unrealized_pnl = (
             overview.get("unrealizedPnl")
             if balance_ok
@@ -983,6 +1016,22 @@ class BotManager:
             else previous.get("marginAvailable")
             if stale
             else None
+        )
+        margin_ratio = (
+            overview.get("marginRatio")
+            if balance_ok
+            else previous.get("marginRatio")
+            if stale
+            else None
+        )
+        realized_pnl_today = (
+            daily_pnl.get("value")
+            if daily_pnl is not None
+            else None
+        )
+        total_pnl_today = account_status_total_pnl_today(
+            realized_pnl_today,
+            unrealized_pnl,
         )
         positions_value = (
             positions
@@ -1020,9 +1069,22 @@ class BotManager:
             "balance": balance,
             "equity": equity,
             "availableBalance": available_balance,
+            "walletBalance": wallet_balance,
             "unrealizedPnl": unrealized_pnl,
+            "realizedPnlToday": realized_pnl_today,
+            "totalPnlToday": total_pnl_today,
             "marginUsed": margin_used,
             "marginAvailable": margin_available,
+            "marginRatio": margin_ratio,
+            "dailyPnlSource": (
+                daily_pnl.get("source") if daily_pnl is not None else None
+            ),
+            "dailyPnlObservedAt": (
+                daily_pnl.get("observedAt") if daily_pnl is not None else None
+            ),
+            "dailyPnlDayStart": (
+                daily_pnl.get("dayStart") if daily_pnl is not None else None
+            ),
             "positions": positions_value,
             "positionSummary": self._position_summary(
                 positions_value
@@ -1357,6 +1419,10 @@ class BotManager:
             "realAvailableBalance": real_account.get(
                 "availableBalance"
             ),
+            "realWalletBalance": real_account.get("walletBalance"),
+            "realRealizedPnlToday": real_account.get("realizedPnlToday"),
+            "realTotalPnlToday": real_account.get("totalPnlToday"),
+            "realMarginRatio": real_account.get("marginRatio"),
             "realPosition": self._legacy_real_position_value(
                 real_account.get("positions")
             ),
@@ -1523,10 +1589,11 @@ class BotManager:
             or readiness.get("balanceCheckOk")
             or readiness.get("positionCheckOk")
         )
+        canonical_account = self._get_real_account_snapshot()
         real_account = (
             {}
             if readiness_account_available
-            else self._get_real_account_snapshot()
+            else canonical_account
         )
 
         if (
@@ -1571,9 +1638,16 @@ class BotManager:
                 "availableBalance": readiness.get(
                     "realAvailableBalance"
                 ),
+                "walletBalance": canonical_account.get("walletBalance"),
                 "unrealizedPnl": readiness.get("realUnrealizedPnl"),
+                "realizedPnlToday": canonical_account.get("realizedPnlToday"),
+                "totalPnlToday": canonical_account.get("totalPnlToday"),
                 "marginUsed": readiness.get("realMarginUsed"),
                 "marginAvailable": readiness.get("realMarginAvailable"),
+                "marginRatio": canonical_account.get("marginRatio"),
+                "dailyPnlSource": canonical_account.get("dailyPnlSource"),
+                "dailyPnlObservedAt": canonical_account.get("dailyPnlObservedAt"),
+                "dailyPnlDayStart": canonical_account.get("dailyPnlDayStart"),
                 "positions": readiness_positions,
                 "positionSummary": (
                     readiness.get("realPositionState")
@@ -1665,8 +1739,12 @@ class BotManager:
             "realAvailableBalance": real_account.get(
                 "availableBalance"
             ),
+            "realWalletBalance": real_account.get("walletBalance"),
+            "realRealizedPnlToday": real_account.get("realizedPnlToday"),
+            "realTotalPnlToday": real_account.get("totalPnlToday"),
             "realMarginUsed": real_account.get("marginUsed"),
             "realMarginAvailable": real_account.get("marginAvailable"),
+            "realMarginRatio": real_account.get("marginRatio"),
             "realPosition": real_account.get("positions"),
             "realPositionState": real_account.get(
                 "positionSummary"

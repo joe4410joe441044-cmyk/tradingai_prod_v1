@@ -142,6 +142,10 @@ const READ_ONLY_BOT_STATUS = {
             balance: 1500,
             equity: 1500,
             availableBalance: 1200,
+            walletBalance: 1500,
+            realizedPnlToday: 0,
+            totalPnlToday: 0,
+            marginRatio: 0,
             positions: [],
             positionSummary: "FLAT",
             lastSync: Date.now() / 1000,
@@ -379,7 +383,11 @@ test("financial metrics expose authoritative Equity / Available / Unrealized whe
             ...READ_ONLY_BOT_STATUS.accountRuntime,
             realAccount: {
                 ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                walletBalance: 1487.5,
                 unrealizedPnl: 12.5,
+                realizedPnlToday: 3,
+                totalPnlToday: 15.5,
+                marginRatio: 5,
             },
         },
     };
@@ -390,8 +398,11 @@ test("financial metrics expose authoritative Equity / Available / Unrealized whe
     assert.equal(readTestIdValue(nodes, "financial-availableBalance-unit"), "USDT");
     assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-value"), "+12.50");
     assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-unit"), "USDT");
-    // walletBalance aliases equity in the backend -> classified ambiguous -> never duplicated as zero
-    assert.equal(findByTestId(nodes, "financial-walletBalance-state").props.children, "UNAVAILABLE");
+    assert.equal(readTestIdValue(nodes, "financial-walletBalance-value"), "1,487.50");
+    assert.equal(readTestIdValue(nodes, "financial-realizedPnlToday-value"), "+3.00");
+    assert.equal(readTestIdValue(nodes, "financial-totalPnlToday-value"), "+15.50");
+    assert.equal(readTestIdValue(nodes, "financial-marginRatio-value"), "5.00");
+    assert.equal(readTestIdValue(nodes, "financial-marginRatio-unit"), "%");
 });
 
 test("financial metrics expose authoritative Margin Used / Margin Available when connected", async () => {
@@ -446,8 +457,9 @@ test("missing margin fields fail closed to UNAVAILABLE", async () => {
     assert.equal(readTestIdValue(nodes, "financial-marginUsed-value"), "—");
     assert.equal(findByTestId(nodes, "financial-marginAvailable-state").props.children, "UNAVAILABLE");
     assert.equal(readTestIdValue(nodes, "financial-marginAvailable-value"), "—");
-    // marginRatio remains explicitly UNAVAILABLE (riskRatio semantics not proven).
-    assert.equal(findByTestId(nodes, "financial-marginRatio-state").props.children, "UNAVAILABLE");
+    // The fixture carries an authoritative exchange zero risk ratio.
+    assert.equal(readTestIdValue(nodes, "financial-marginRatio-value"), "0.00");
+    assert.equal(readTestIdValue(nodes, "financial-marginRatio-unit"), "%");
 });
 
 test("negative unrealized PnL is never forced to a positive or neutral zero", async () => {

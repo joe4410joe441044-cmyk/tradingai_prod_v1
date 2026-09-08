@@ -449,7 +449,11 @@ test("financial metrics surface authoritative Equity / Available and never fabri
                 balance: 1500,
                 equity: 1500,
                 availableBalance: 1200,
+                walletBalance: 1487.5,
                 unrealizedPnl: 12.5,
+                realizedPnlToday: 3,
+                totalPnlToday: 15.5,
+                marginRatio: 5,
                 positions: [],
                 positionSummary: "FLAT",
                 lastSync: Date.now() / 1000,
@@ -469,11 +473,14 @@ test("financial metrics surface authoritative Equity / Available and never fabri
     assert.equal(byKey.unrealizedPnl.unit, "USDT");
     assert.equal(byKey.unrealizedPnl.tone, "positive");
 
-    // walletBalance aliases equity -> classified ambiguous -> UNAVAILABLE (no duplicate zero)
-    assert.equal(byKey.walletBalance.state, "UNAVAILABLE");
-    assert.equal(byKey.walletBalance.value, null);
-    // No authoritative source for the remaining metrics -> UNAVAILABLE
-    ["realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio"]
+    assert.equal(byKey.walletBalance.value, "1,487.50");
+    assert.equal(byKey.walletBalance.unit, "USDT");
+    assert.equal(byKey.realizedPnlToday.value, "+3.00");
+    assert.equal(byKey.realizedPnlToday.tone, "positive");
+    assert.equal(byKey.totalPnlToday.value, "+15.50");
+    assert.equal(byKey.marginRatio.value, "5.00");
+    assert.equal(byKey.marginRatio.unit, "%");
+    ["marginUsed", "marginAvailable"]
         .forEach((key) => {
             assert.equal(byKey[key].state, "UNAVAILABLE", `${key} should be UNAVAILABLE`);
             assert.equal(byKey[key].value, null, `${key} must not be fabricated`);

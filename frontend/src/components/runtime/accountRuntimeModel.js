@@ -329,14 +329,26 @@ export const deriveAccountRuntime = (props) => {
     const realAvailableRaw = realExchangeMatches
         ? realAccount.availableBalance ?? realAvailableBalance
         : null;
+    const realWalletBalanceRaw = realExchangeMatches
+        ? realAccount.walletBalance
+        : null;
     const realUnrealizedPnlRaw = realExchangeMatches
         ? realAccount.unrealizedPnl
+        : null;
+    const realRealizedPnlTodayRaw = realExchangeMatches
+        ? realAccount.realizedPnlToday
+        : null;
+    const realTotalPnlTodayRaw = realExchangeMatches
+        ? realAccount.totalPnlToday
         : null;
     const realMarginUsedRaw = realExchangeMatches
         ? realAccount.marginUsed
         : null;
     const realMarginAvailableRaw = realExchangeMatches
         ? realAccount.marginAvailable
+        : null;
+    const realMarginRatioRaw = realExchangeMatches
+        ? realAccount.marginRatio
         : null;
     const realPositionSummary = realExchangeMatches
         ? realAccount.positionSummary ?? realPositionState
@@ -442,9 +454,13 @@ export const deriveAccountRuntime = (props) => {
         realBalanceRaw,
         realEquityRaw,
         realAvailableRaw,
+        realWalletBalanceRaw,
         realUnrealizedPnlRaw,
+        realRealizedPnlTodayRaw,
+        realTotalPnlTodayRaw,
         realMarginUsedRaw,
         realMarginAvailableRaw,
+        realMarginRatioRaw,
         realPositionSummary,
         realConnected,
         realAvailablePresetEnabled,
@@ -486,13 +502,13 @@ export const ACCOUNT_FINANCIAL_UNIT = "USDT";
 export const ACCOUNT_FINANCIAL_METRICS = [
     { key: "equity", label: "EQUITY", jpLabel: "純資産", icon: "equity", category: "asset" },
     { key: "availableBalance", label: "AVAILABLE BALANCE", jpLabel: "利用可能額", icon: "availableBalance", category: "asset" },
-    { key: "walletBalance", label: "WALLET BALANCE", jpLabel: "ウォレット残高", icon: "walletBalance", category: "asset", unavailable: true },
+    { key: "walletBalance", label: "WALLET BALANCE", jpLabel: "ウォレット残高", icon: "walletBalance", category: "asset" },
     { key: "unrealizedPnl", label: "UNREALIZED PNL", jpLabel: "含み損益", icon: "unrealizedPnl", category: "pnl" },
-    { key: "realizedPnlToday", label: "REALIZED PNL TODAY", jpLabel: "本日実現損益", icon: "realizedPnlToday", category: "pnl", unavailable: true },
-    { key: "totalPnlToday", label: "TOTAL PNL TODAY", jpLabel: "本日総損益", icon: "totalPnlToday", category: "pnl", unavailable: true },
+    { key: "realizedPnlToday", label: "REALIZED PNL TODAY", jpLabel: "本日実現損益", icon: "realizedPnlToday", category: "pnl" },
+    { key: "totalPnlToday", label: "TOTAL PNL TODAY", jpLabel: "本日総損益", icon: "totalPnlToday", category: "pnl" },
     { key: "marginUsed", label: "MARGIN USED", jpLabel: "使用証拠金", icon: "marginUsed", category: "margin" },
     { key: "marginAvailable", label: "MARGIN AVAILABLE", jpLabel: "利用可能証拠金", icon: "marginAvailable", category: "margin" },
-    { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", unavailable: true },
+    { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", percent: true },
 ];
 
 const isFiniteNumber = (value) => (
@@ -515,18 +531,25 @@ export const deriveFinancialMetrics = (derived = {}) => {
         realBalanceRaw,
         realEquityRaw,
         realAvailableRaw,
+        realWalletBalanceRaw,
         realUnrealizedPnlRaw,
+        realRealizedPnlTodayRaw,
+        realTotalPnlTodayRaw,
         realMarginUsedRaw,
         realMarginAvailableRaw,
+        realMarginRatioRaw,
     } = derived;
 
     const rawByKey = {
         equity: realEquityRaw,
         availableBalance: realAvailableRaw,
-        walletBalance: realBalanceRaw,
+        walletBalance: realWalletBalanceRaw,
         unrealizedPnl: realUnrealizedPnlRaw,
+        realizedPnlToday: realRealizedPnlTodayRaw,
+        totalPnlToday: realTotalPnlTodayRaw,
         marginUsed: realMarginUsedRaw,
         marginAvailable: realMarginAvailableRaw,
+        marginRatio: realMarginRatioRaw,
     };
 
     return ACCOUNT_FINANCIAL_METRICS.map((def) => {
@@ -534,9 +557,7 @@ export const deriveFinancialMetrics = (derived = {}) => {
         let unit = null;
         let state = null;
 
-        if (def.unavailable) {
-            state = "UNAVAILABLE";
-        } else if (realLoading) {
+        if (realLoading) {
             state = "REFRESHING";
         } else if (realStale) {
             state = "STALE";
@@ -547,7 +568,7 @@ export const deriveFinancialMetrics = (derived = {}) => {
             value = def.category === "pnl"
                 ? formatPnl(rawByKey[def.key])
                 : formatAmount(rawByKey[def.key]);
-            unit = ACCOUNT_FINANCIAL_UNIT;
+            unit = def.percent ? "%" : ACCOUNT_FINANCIAL_UNIT;
         } else {
             state = "UNAVAILABLE";
         }

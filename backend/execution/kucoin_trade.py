@@ -13,11 +13,144 @@ import hashlib
 import json
 import math
 import os
+import threading
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlencode
 
 from dotenv import load_dotenv
 from backend.utils.log_buffer import logger, runtime_debug
 from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+
+
+DAILY_PNL_CACHE_TTL_SECONDS = 60
+DAILY_PNL_MAX_PAGES = 100
+DAILY_PNL_PAGE_SIZE = 50
+
+
+def normalize_kucoin_risk_ratio(value):
+    """Convert KuCoin Classic Futures' account risk ratio to display percent.
+
+    KuCoin defines cross-margin risk rate as a ratio and liquidates at 100%.
+    The account-overview ``riskRatio`` is therefore normalized from ratio form
+    (1.0 == the 100% liquidation threshold) to the percentage displayed by
+    Account Status. Missing, malformed, negative, or non-finite input is
+    unavailable rather than a fabricated zero.
+    """
+
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        ratio = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not ratio.is_finite() or ratio < 0:
+        return None
+    return float(ratio * Decimal("100"))
+
+
+def account_status_total_pnl_today(realized_pnl_today, unrealized_pnl):
+    """Today's net realized trading result plus current unrealized PnL.
+
+    This is an Account Status snapshot metric, not a daily equity delta.  Both
+    operands must be authoritative; a missing or malformed operand makes the
+    result unavailable.
+    """
+
+    values = []
+    for value in (realized_pnl_today, unrealized_pnl):
+        if value is None or value == "" or isinstance(value, bool):
+            return None
+        try:
+            normalized = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+        if not normalized.is_finite():
+            return None
+        values.append(normalized)
+    return float(sum(values, Decimal("0")))
+
+
+def utc_day_window(now):
+    """Return the Account Status UTC-day half-open boundary in milliseconds."""
+
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise TypeError("timezone-aware datetime required")
+    observed = now.astimezone(timezone.utc)
+    start = observed.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, observed, int(start.timestamp() * 1000), int(observed.timestamp() * 1000)
+
+
+def normalize_kucoin_realized_pnl_today(items, *, start_ms, end_ms):
+    """Normalize one complete Classic Futures UTC-day ledger snapshot.
+
+    Official KuCoin Futures semantics define Realized PnL as net of trading
+    fees and funding fees. Consequently ``RealisedPNL.amount`` is summed
+    directly; the ledger's separate ``fee`` metadata is deliberately not
+    subtracted a second time. Both Completed settlement periods and the
+    current eight-hour Pending period are economically realized and included.
+    Deposits, withdrawals, transfers, and all other cash movements are
+    excluded. Duplicate page rows are counted once.
+    """
+
+    if not isinstance(items, (list, tuple)):
+        raise ValueError("Futures ledger items required")
+    if type(start_ms) is not int or type(end_ms) is not int or end_ms < start_ms:
+        raise ValueError("invalid UTC-day window")
+
+    total = Decimal("0")
+    seen = {}
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("malformed Futures ledger item")
+        if str(item.get("type", "")).lower() != "realisedpnl":
+            continue
+
+        required = {"time", "amount", "status", "offset", "currency"}
+        if not required.issubset(item):
+            raise ValueError("incomplete RealisedPNL ledger item")
+        if item.get("currency") != "USDT":
+            raise ValueError("unexpected RealisedPNL currency")
+        status = item.get("status")
+        if status not in {"Completed", "Pending"}:
+            raise ValueError("unknown RealisedPNL settlement status")
+        try:
+            occurred_ms = int(item.get("time"))
+            amount = Decimal(str(item.get("amount")))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("invalid RealisedPNL ledger value") from None
+        if not amount.is_finite():
+            raise ValueError("invalid RealisedPNL ledger value")
+        if occurred_ms < start_ms or occurred_ms > end_ms:
+            continue
+
+        offset = item.get("offset")
+        identity = (
+            ("COMPLETED", str(offset))
+            if status == "Completed" and offset not in (None, "")
+            else (
+                "PENDING",
+                str(item.get("remark") or ""),
+                occurred_ms,
+                str(amount),
+            )
+        )
+        canonical = (
+            occurred_ms,
+            status,
+            str(amount),
+            str(item.get("remark") or ""),
+            item.get("currency"),
+        )
+        previous = seen.get(identity)
+        if previous is not None:
+            if previous != canonical:
+                raise ValueError("conflicting duplicate RealisedPNL ledger item")
+            continue
+        seen[identity] = canonical
+        total += amount
+
+    return float(total)
 
 
 # =====================================
@@ -124,6 +257,8 @@ class KucoinTradeClient(BaseClient):
         self.session = requests.Session()
         self.session.mount("https://", ForceIPv4Adapter())
         self.session.mount("http://", ForceIPv4Adapter())
+        self._daily_pnl_cache = None
+        self._daily_pnl_cache_lock = threading.Lock()
 
     def credentials_ready(self):
 
@@ -182,6 +317,92 @@ class KucoinTradeClient(BaseClient):
         return self.private_get(
             "/api/v1/transaction-history?" + urlencode(params), timeout=timeout,
         )
+
+    def get_realized_pnl_today(self, *, now=None, cache_ttl_seconds=DAILY_PNL_CACHE_TTL_SECONDS):
+        """Return a complete, cached, GET-only UTC-day realized-PnL snapshot."""
+
+        observed = now or datetime.now(timezone.utc)
+        start, observed, start_ms, end_ms = utc_day_window(observed)
+        if cache_ttl_seconds < 0:
+            raise ValueError("cache TTL must be non-negative")
+        cache_key = start_ms
+        monotonic_now = time.monotonic()
+
+        with self._daily_pnl_cache_lock:
+            cached = self._daily_pnl_cache
+            if (
+                cached
+                and cached["dayStartMs"] == cache_key
+                and monotonic_now - cached["cachedAt"] < cache_ttl_seconds
+            ):
+                return dict(cached["result"])
+
+            # The empty interval at the exact UTC boundary is mathematically
+            # complete without an exchange request.
+            if end_ms == start_ms:
+                value = 0.0
+            else:
+                rows = []
+                offset = None
+                seen_offsets = set()
+                for _ in range(DAILY_PNL_MAX_PAGES):
+                    page = self.get_futures_transaction_history(
+                        start_at=start_ms,
+                        end_at=end_ms,
+                        offset=offset,
+                        max_count=DAILY_PNL_PAGE_SIZE,
+                    )
+                    if not isinstance(page, dict) or set(page) != {"dataList", "hasMore"}:
+                        raise ValueError("Futures ledger pagination contract invalid")
+                    page_rows = page.get("dataList")
+                    if not isinstance(page_rows, list) or type(page.get("hasMore")) is not bool:
+                        raise ValueError("Futures ledger pagination contract invalid")
+                    rows.extend(page_rows)
+                    if not page["hasMore"]:
+                        break
+                    offsets = []
+                    for item in page_rows:
+                        if not isinstance(item, dict) or isinstance(item.get("offset"), bool):
+                            raise ValueError("Futures ledger pagination contract invalid")
+                        try:
+                            candidate_offset = int(item.get("offset"))
+                            # KuCoin emits the current settlement-period Pending
+                            # row with the sentinel offset -1. The official
+                            # pagination example advances with the Completed
+                            # row offset, so the sentinel is never a cursor.
+                            if item.get("status") != "Pending" and candidate_offset >= 0:
+                                offsets.append(candidate_offset)
+                        except (TypeError, ValueError):
+                            raise ValueError("Futures ledger pagination contract invalid") from None
+                    if not offsets:
+                        raise ValueError("Futures ledger pagination inconsistency")
+                    next_offset = min(offsets)
+                    if next_offset in seen_offsets or next_offset == offset:
+                        raise ValueError("Futures ledger pagination cycle")
+                    seen_offsets.add(next_offset)
+                    offset = next_offset
+                else:
+                    raise ValueError("Futures ledger pagination limit exceeded")
+                value = normalize_kucoin_realized_pnl_today(
+                    rows,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                )
+
+            result = {
+                "value": value,
+                "source": "KUCOIN_FUTURES_REALISED_PNL_LEDGER",
+                "dayStart": start.isoformat().replace("+00:00", "Z"),
+                "observedAt": observed.isoformat().replace("+00:00", "Z"),
+                "timezone": "UTC",
+                "complete": True,
+            }
+            self._daily_pnl_cache = {
+                "dayStartMs": cache_key,
+                "cachedAt": monotonic_now,
+                "result": dict(result),
+            }
+            return result
 
     def set_live_order_gate(
         self,
@@ -343,11 +564,12 @@ class KucoinTradeClient(BaseClient):
         # MARGIN BALANCE FALLBACK
         # =====================================
 
-        margin_balance = as_float(
-            "marginBalance",
-            "balance",
-            "accountEquity",
-        )
+        # Official Classic Futures contract:
+        # accountEquity = marginBalance + unrealisedPNL.  marginBalance is
+        # therefore the pre-unrealized Futures account balance and the
+        # authoritative wallet-equivalent for Account Status.  It must remain
+        # unavailable when the direct exchange field is absent.
+        margin_balance = as_float("marginBalance")
         unrealized_pnl = as_float(
             "unrealisedPNL",
             "unrealizedPnl",
@@ -366,6 +588,8 @@ class KucoinTradeClient(BaseClient):
             "availableMargin",
             "available_margin",
         )
+        risk_ratio_raw = d.get("riskRatio")
+        margin_ratio = normalize_kucoin_risk_ratio(risk_ratio_raw)
         # Margin in use is authorised by KuCoin's own decomposition of the
         # cross-margin account: occupied margin = margin held for open
         # positions (positionMargin) + margin reserved for open orders
@@ -415,6 +639,11 @@ class KucoinTradeClient(BaseClient):
                 if margin_balance is not None
                 else None
             ),
+            "walletBalance": (
+                float(margin_balance)
+                if margin_balance is not None
+                else None
+            ),
             "unrealizedPnl": (
                 float(unrealized_pnl)
                 if unrealized_pnl is not None
@@ -440,6 +669,8 @@ class KucoinTradeClient(BaseClient):
                 if margin_used is not None
                 else None
             ),
+            "riskRatio": risk_ratio_raw,
+            "marginRatio": margin_ratio,
             "exchangeAuth": "VERIFIED",
             "exchangeConnection": "CONNECTED",
             "apiKeyStatus": "VERIFIED",

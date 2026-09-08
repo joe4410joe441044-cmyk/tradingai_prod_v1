@@ -156,6 +156,14 @@ class StatusResponse(BaseModel):
 
     realAvailableBalance: Optional[float] = None
 
+    realWalletBalance: Optional[float] = None
+
+    realRealizedPnlToday: Optional[float] = None
+
+    realTotalPnlToday: Optional[float] = None
+
+    realMarginRatio: Optional[float] = None
+
     realPosition: Optional[Any] = None
 
     realPositionState: Optional[str] = None
