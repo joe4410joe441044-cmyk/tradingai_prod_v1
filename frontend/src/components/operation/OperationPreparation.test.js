@@ -1495,12 +1495,19 @@ test("TRADE SETTINGS expands and re-collapses on header click", async () => {
     }
 });
 
-test("expanded TRADE SETTINGS exposes a large bottom control that shares the header collapse action", async () => {
+test("expanded TRADE SETTINGS exposes a large bottom control that collapses then scrolls the dashboard top", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps());
     const topToggle = () => findTestId(renderer.root, "trade-settings-toggle");
     const bottomToggle = () => findTestId(renderer.root, "trade-settings-bottom-toggle");
     const body = () => findTestId(renderer.root, "trade-settings-body");
+    const animationFrames = [];
+    const scrollCalls = [];
+    const previousWindow = globalThis.window;
+    globalThis.window = {
+        matchMedia: () => ({ matches: false }),
+        requestAnimationFrame: (callback) => animationFrames.push(callback),
+    };
 
     assert.equal(bottomToggle(), undefined, "bottom control is absent while TRADE SETTINGS is collapsed");
     topToggle().props.onClick();
@@ -1513,10 +1520,17 @@ test("expanded TRADE SETTINGS exposes a large bottom control that shares the hea
     assert.equal(bottom.props["aria-controls"], "trade-settings-body", "bottom control targets the shared body");
     assert.equal(bottom.props["aria-expanded"], true, "bottom control exposes the shared expanded state");
     assert.equal(bottom.props["aria-label"], "Close Trade Settings", "bottom control has an explicit accessible label");
-    assert.equal(bottom.props.onClick, topToggle().props.onClick, "top and bottom controls share one collapse handler");
+    assert.notEqual(bottom.props.onClick, topToggle().props.onClick, "only the bottom control adds the scroll side effect");
     assert.equal(normalizedText(bottom).includes("CLOSE TRADE SETTINGS"), true, "bottom control clearly labels its section action");
 
-    bottom.props.onClick();
+    bottom.props.onClick({
+        currentTarget: {
+            closest: (selector) => {
+                assert.equal(selector, ".dashboard", "bottom control resolves the actual dashboard scroll owner");
+                return { scrollTo: (options) => scrollCalls.push(options) };
+            },
+        },
+    });
     renderer.render();
     assert.equal(topToggle().props["aria-expanded"], false, "bottom control collapses the shared Trade Settings state");
     assert.equal(
@@ -1525,10 +1539,24 @@ test("expanded TRADE SETTINGS exposes a large bottom control that shares the hea
         "bottom control applies the existing collapsed-body behavior",
     );
     assert.equal(bottomToggle(), undefined, "bottom control disappears with expanded content");
+    assert.equal(scrollCalls.length, 0, "scroll waits for the collapsed layout render");
+    assert.equal(animationFrames.length, 1, "bottom collapse schedules post-render scrolling");
+
+    animationFrames.shift()();
+    assert.equal(scrollCalls.length, 0, "scroll waits through the first animation frame");
+    animationFrames.shift()();
+    assert.deepEqual(scrollCalls, [{ behavior: "smooth", top: 0 }], "bottom collapse scrolls the dashboard smoothly to top");
 
     topToggle().props.onClick();
     renderer.render();
     assert.ok(bottomToggle(), "top control re-expands the body and restores the bottom control");
+    assert.equal(animationFrames.length, 0, "re-expand does not schedule scrolling");
+
+    topToggle().props.onClick();
+    renderer.render();
+    assert.equal(animationFrames.length, 0, "top collapse does not schedule bottom-specific scrolling");
+    assert.equal(scrollCalls.length, 1, "top collapse does not issue another scroll");
+    globalThis.window = previousWindow;
 });
 
 test("collapse/expand preserves a changed setting without resetting it", async () => {

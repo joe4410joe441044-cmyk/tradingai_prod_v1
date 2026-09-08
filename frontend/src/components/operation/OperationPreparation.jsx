@@ -172,6 +172,22 @@ export default function OperationPreparation({
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
     const toggleTradeSettings = () => setTradeSettingsOpen((open) => !open);
+    const handleBottomTradeSettingsCollapse = (event) => {
+        const scrollOwner = event.currentTarget.closest(".dashboard");
+
+        toggleTradeSettings();
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                scrollOwner?.scrollTo({
+                    behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+                        ? "auto"
+                        : "smooth",
+                    top: 0,
+                });
+            });
+        });
+    };
      const changeSetting = (key, value) => {
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
@@ -657,7 +673,7 @@ return (
                             aria-label="Close Trade Settings"
                             className="operation-trade-settings__bottom-toggle"
                             data-testid="trade-settings-bottom-toggle"
-                            onClick={toggleTradeSettings}
+                            onClick={handleBottomTradeSettingsCollapse}
                             type="button"
                         >
                             <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
