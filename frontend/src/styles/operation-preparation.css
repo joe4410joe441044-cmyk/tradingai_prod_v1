@@ -79,6 +79,45 @@
     display: none;
 }
 
+.operation-trade-settings__bottom-toggle {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    min-height: 64px;
+    padding: 18px 12px;
+    border: 1px solid #566579;
+    border-radius: 4px;
+    background: rgba(11, 16, 26, .72);
+    color: #dfe6f0;
+    box-sizing: border-box;
+    cursor: pointer;
+    font: 700 11px "Consolas", monospace;
+    letter-spacing: .12em;
+    text-align: center;
+}
+
+.operation-trade-settings__bottom-toggle:hover {
+    border-color: #78889c;
+    background: rgba(18, 27, 41, .82);
+    color: #f4f8fc;
+}
+
+.operation-trade-settings__bottom-toggle:focus-visible {
+    outline: 2px solid #66e3ff;
+    outline-offset: 2px;
+}
+
+.operation-trade-settings__bottom-indicator {
+    color: #8fb9d8;
+    font-size: 14px;
+    line-height: 1;
+}
+
 /* 顶部控制带: FINAL PREPARATION | EMERGENCY */
 .operation-top-band {
     display: grid;
@@ -201,7 +240,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    align-items: start;
+    align-items: stretch;
 }
 
 .operation-column-left,
@@ -506,7 +545,15 @@
 }
 
 @media (max-width: 767px) {
-    .operation-main-grid { grid-template-columns: 1fr; }
+    .operation-main-grid {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+    .operation-trade-settings__bottom-toggle {
+        flex: 0 0 auto;
+        flex-direction: row;
+        padding: 14px 12px;
+    }
 }
 
 /* 顶部控制带响应式: 窄viewport时EMERGENCY单行, FINAL PREPARATION独占整行 */

@@ -1495,6 +1495,42 @@ test("TRADE SETTINGS expands and re-collapses on header click", async () => {
     }
 });
 
+test("expanded TRADE SETTINGS exposes a large bottom control that shares the header collapse action", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps());
+    const topToggle = () => findTestId(renderer.root, "trade-settings-toggle");
+    const bottomToggle = () => findTestId(renderer.root, "trade-settings-bottom-toggle");
+    const body = () => findTestId(renderer.root, "trade-settings-body");
+
+    assert.equal(bottomToggle(), undefined, "bottom control is absent while TRADE SETTINGS is collapsed");
+    topToggle().props.onClick();
+    renderer.render();
+
+    const bottom = bottomToggle();
+    assert.ok(bottom, "bottom control is visible when TRADE SETTINGS is expanded");
+    assert.equal(bottom.type, "button", "bottom control uses button semantics");
+    assert.equal(bottom.props.type, "button", "bottom control type=button");
+    assert.equal(bottom.props["aria-controls"], "trade-settings-body", "bottom control targets the shared body");
+    assert.equal(bottom.props["aria-expanded"], true, "bottom control exposes the shared expanded state");
+    assert.equal(bottom.props["aria-label"], "Close Trade Settings", "bottom control has an explicit accessible label");
+    assert.equal(bottom.props.onClick, topToggle().props.onClick, "top and bottom controls share one collapse handler");
+    assert.equal(normalizedText(bottom).includes("CLOSE TRADE SETTINGS"), true, "bottom control clearly labels its section action");
+
+    bottom.props.onClick();
+    renderer.render();
+    assert.equal(topToggle().props["aria-expanded"], false, "bottom control collapses the shared Trade Settings state");
+    assert.equal(
+        String(body().props?.className || "").includes("operation-trade-settings__body--collapsed"),
+        true,
+        "bottom control applies the existing collapsed-body behavior",
+    );
+    assert.equal(bottomToggle(), undefined, "bottom control disappears with expanded content");
+
+    topToggle().props.onClick();
+    renderer.render();
+    assert.ok(bottomToggle(), "top control re-expands the body and restores the bottom control");
+});
+
 test("collapse/expand preserves a changed setting without resetting it", async () => {
     const Component = await loadComponent();
     const initial = readyProps();

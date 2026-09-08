@@ -171,6 +171,7 @@ export default function OperationPreparation({
     const settings = createOperationPreparationSettings(config);
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
+    const toggleTradeSettings = () => setTradeSettingsOpen((open) => !open);
      const changeSetting = (key, value) => {
         if (key === "tradingMode") onLegacyConfigChange({ mode: value });
         if (key === "selectionMode") onLegacyConfigChange({ selectionMode: value });
@@ -526,7 +527,7 @@ return (
                     aria-expanded={tradeSettingsOpen}
                     className="operation-trade-settings__toggle"
                     data-testid="trade-settings-toggle"
-                    onClick={() => setTradeSettingsOpen((open) => !open)}
+                    onClick={toggleTradeSettings}
                     type="button"
                 >
                     <span className="operation-trade-settings__title">TRADE SETTINGS（取引設定）</span>
@@ -649,6 +650,20 @@ return (
                         )}
                         <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
                     </Section>
+                    {tradeSettingsOpen && (
+                        <button
+                            aria-controls="trade-settings-body"
+                            aria-expanded={tradeSettingsOpen}
+                            aria-label="Close Trade Settings"
+                            className="operation-trade-settings__bottom-toggle"
+                            data-testid="trade-settings-bottom-toggle"
+                            onClick={toggleTradeSettings}
+                            type="button"
+                        >
+                            <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
+                            <span>CLOSE TRADE SETTINGS</span>
+                        </button>
+                    )}
                 </div>
             </div>
                 </div>
