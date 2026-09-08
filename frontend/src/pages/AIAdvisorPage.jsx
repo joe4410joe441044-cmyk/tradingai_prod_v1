@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import AdvisorConversation from "../components/ai-advisor/AdvisorConversation";
 import AdvisorConversationHistory from "../components/ai-advisor/AdvisorConversationHistory";
@@ -11,6 +11,11 @@ import {
     AiHelpLauncher,
     WhichAiGuide,
 } from "../components/help/AiHelp";
+import {
+    consumeAiHelpScrollTarget,
+    focusAiHelpTarget,
+    navigateAiHelp,
+} from "../components/help/aiHelpRouting";
 import useAdvisorRuntime from "../features/ai-advisor/runtime/useAdvisorRuntime";
 
 export default function AIAdvisorPage() {
@@ -21,6 +26,14 @@ export default function AIAdvisorPage() {
     const closeHelp = () => setHelpDrawer(null);
     const openWhichAi = () => setHelpDrawer("which-ai");
     const openAdvisorGuide = () => setHelpDrawer("advisor-guide");
+    const navigateWhichAi = (target) => navigateAiHelp(target, { onClose: closeHelp });
+
+    useEffect(() => {
+        const targetId = consumeAiHelpScrollTarget();
+        if (targetId) {
+            requestAnimationFrame(() => focusAiHelpTarget(targetId));
+        }
+    }, []);
 
     const runtimeLabel = runtime.connectionState === "CONNECTED"
         ? "Connected"
@@ -169,7 +182,7 @@ export default function AIAdvisorPage() {
                 title="どのAIに聞く？"
                 onClose={closeHelp}
             >
-                <WhichAiGuide />
+                <WhichAiGuide onNavigate={navigateWhichAi} />
             </AiHelpDrawer>
 
             <AiHelpDrawer

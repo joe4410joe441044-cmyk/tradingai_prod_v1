@@ -100,6 +100,20 @@ test("Supervisor help does not add operational or provider-setup controls", func
     assert.doesNotMatch(source, /API Key|Provider selector|OpenAI selector/);
 });
 
+test("Supervisor wires the shared AI-help routing to the WhichAiDrawer", function () {
+    assert.match(source, /navigateAiHelp/);
+    assert.match(source, /consumeAiHelpScrollTarget/);
+    assert.match(source, /focusAiHelpTarget/);
+    assert.match(source, /useEffect/);
+    assert.match(source, /WhichAiGuide onNavigate=\{navigateWhichAi\}/);
+    assert.match(source, /onClose: closeHelp/);
+    assert.match(source, /tabIndex=\{-1\}/);
+});
+
+test("Supervisor keeps the Master and MM headings focusable for programmatic routing", function () {
+    assert.match(source, /id="master-supervisor-heading"[^>]*tabIndex=\{-1\}/);
+});
+
 test("MM Supervisor section opens the same Supervisor guide and is SHADOW", async function () {
     const mm = await readFile(
         new URL("../components/supervisor/MMSupervisorSection.jsx", import.meta.url),

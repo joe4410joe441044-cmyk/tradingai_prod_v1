@@ -179,6 +179,38 @@
     margin: 0;
 }
 
+.ai-help-which-action {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    display: inline-block;
+    font: 700 10px/1.55 var(--mi-font-mono, "JetBrains Mono", Consolas, monospace);
+    letter-spacing: 0.06em;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+    text-transform: none;
+}
+
+.ai-help-which-action:hover {
+    color: var(--mi-accent, #57b8ff);
+}
+
+.ai-help-which-action:focus-visible {
+    outline: 2px solid var(--mi-accent, #57b8ff);
+    outline-offset: 2px;
+}
+
+.ai-help-which-static {
+    color: var(--mi-text, #e7edf7);
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 0;
+}
+
 .ai-help-disclosure {
     border: 1px solid var(--mi-border, #243149);
     border-radius: 8px;
