@@ -47,6 +47,8 @@ SUPPORTED_PROTECTED_PATHS = frozenset({
     "/api/bot/live-auto/approve",
     "/api/bot/live-auto/start",
     "/api/bot/live-auto/stop",
+    "/api/bot/live-order-entry/arm",
+    "/api/bot/live-order-entry/disarm",
     "/api/bot/paper-account/capital",
     "/api/governance/mode",
     "/api/governance/execution",
@@ -146,6 +148,17 @@ class FakeBotManager:
         self._record("stop_live_auto_control")
         return {"accepted": True}
 
+    def set_live_order_entry_authority(self, armed):
+        self._record("set_live_order_entry_authority")
+        return {
+            "success": True,
+            "armed": bool(armed),
+            "liveOrderEntryAllowed": bool(armed),
+            "realOrderAllowed": bool(armed),
+            "executionEntryAllowed": bool(armed),
+            "reason": "LIVE_ORDER_ENTRY_ARMED" if armed else "LIVE_ORDER_ENTRY_DISARMED",
+        }
+
     def start_auto_market_selection_runtime(self):
         self._record("start_auto_market_selection_runtime")
         return {"success": True}
@@ -230,6 +243,10 @@ ROUTE_CASES = [
      "approve_live_auto_control"),
     ("/api/bot/live-auto/start", "POST", None, "start_live_auto_control"),
     ("/api/bot/live-auto/stop", "POST", None, "stop_live_auto_control"),
+    ("/api/bot/live-order-entry/arm", "POST", None,
+     "set_live_order_entry_authority"),
+    ("/api/bot/live-order-entry/disarm", "POST", None,
+     "set_live_order_entry_authority"),
     ("/api/bot/paper-account/capital", "POST", {"capital": "100"},
      "reset_paper_capital"),
     ("/api/governance/mode", "POST", {"mode": "SAFE"}, "GOVERNANCE_STATE"),

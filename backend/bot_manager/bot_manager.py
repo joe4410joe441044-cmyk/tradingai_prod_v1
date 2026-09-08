@@ -2107,6 +2107,122 @@ class BotManager:
         governance_state["execution_enabled"] = enabled
         return {"success": True, "execution_enabled": enabled}
 
+    def set_live_order_entry_authority(self, armed):
+        """Operator-gated ARM/DISARM of LIVE real-order entry authority.
+
+        ARM is a distinct, explicit action that is never implied by starting
+        LIVE runtime or by selecting LIVE mode.  ARM fails closed unless every
+        safety prerequisite currently holds; DISARM revokes real-order entry
+        while preserving monitoring and WITHOUT stopping the runtime, cancelling
+        orders, or closing any exchange position.  No hidden auto-arm is
+        possible: only this method may set the authority true.
+        """
+        if armed:
+            return self._arm_live_order_entry()
+        return self._disarm_live_order_entry()
+
+    def _arm_live_order_entry(self):
+
+        selected_mode = str(
+            self.config.get("mode", "paper")
+        ).strip().lower()
+        dry_run = self.config.get("dry_run", True)
+
+        reasons = []
+
+        if selected_mode != "live":
+            reasons.append("SELECTED_MODE_NOT_LIVE")
+        if dry_run is not False:
+            reasons.append("DRY_RUN_ACTIVE")
+        if backend_config.ALLOW_LIVE is not True:
+            reasons.append("LIVE_NOT_ENABLED")
+        if backend_config.TRADE_MODE != "live":
+            reasons.append("TRADE_MODE_NOT_LIVE")
+        if (
+            governance_state.get("emergency_state") != EMERGENCY_READY
+            or governance_state.get("emergency_stop") is not False
+        ):
+            reasons.append("EMERGENCY_STOP_ACTIVE")
+
+        # Pending / open order authority must be KNOWN and SAFE, never unknown.
+        pending = self.get_authoritative_pending_order_state()
+        if (
+            pending.get("known") is not True
+            or pending.get("pending") is True
+            or pending.get("safe") is not True
+        ):
+            reasons.append(
+                pending.get("reason") or "PENDING_ORDER_AUTHORITY_UNSAFE"
+            )
+
+        if self.engine is None:
+            reasons.append("ENGINE_AVAILABLE")
+
+        # The engine re-asserts its full readiness netting below (exchange
+        # client/credentials, balance/position sync authority, emergency).
+        # Authoritative pending-order authority is also required by the engine
+        # gate; an unknown or unsafe pending-order position authority fails
+        # closed here.
+        if reasons:
+            return {
+                "success": False,
+                "armed": False,
+                "liveOrderEntryAllowed": False,
+                "realOrderAllowed": False,
+                "executionEntryAllowed": False,
+                "reason": reasons[0],
+                "blockReasons": reasons,
+            }
+
+        # Engine consumes the arming and re-asserts its full readiness netting
+        # (exchange, credentials, balance/position sync, emergency).
+        arming = self.engine.set_live_order_entry_authority(True)
+        if arming.get("success") is not True:
+            return {
+                "success": False,
+                "armed": False,
+                "liveOrderEntryAllowed": False,
+                "realOrderAllowed": False,
+                "executionEntryAllowed": False,
+                "reason": arming.get("reason") or "LIVE_ARM_PREFLIGHT_FAILED",
+                "blockReasons": arming.get("blockReasons") or [],
+            }
+
+        # Propagate for status / observability (manager copy).
+        self.config["liveOrderEntryAllowed"] = True
+        self.config["realOrderAllowed"] = True
+        self.config["executionEntryAllowed"] = True
+
+        return {
+            "success": True,
+            "armed": True,
+            "liveOrderEntryAllowed": True,
+            "realOrderAllowed": True,
+            "executionEntryAllowed": True,
+            "reason": "LIVE_ORDER_ENTRY_ARMED",
+        }
+
+    def _disarm_live_order_entry(self):
+
+        if self.engine is not None:
+            try:
+                self.engine.set_live_order_entry_authority(False)
+            except Exception:
+                logger.warning("LIVE order-entry disarm engine sync failed")
+
+        self.config["liveOrderEntryAllowed"] = False
+        self.config["realOrderAllowed"] = False
+        self.config["executionEntryAllowed"] = False
+
+        return {
+            "success": True,
+            "armed": False,
+            "liveOrderEntryAllowed": False,
+            "realOrderAllowed": False,
+            "executionEntryAllowed": False,
+            "reason": "LIVE_ORDER_ENTRY_DISARMED",
+        }
+
     def _recheck_stale_stopped_paper_start_authority(
         self,
         config,

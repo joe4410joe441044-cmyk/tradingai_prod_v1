@@ -467,6 +467,31 @@ def stop_live_auto(_operator: str = Depends(require_operator_session)):
 
 
 # =========================
+# LIVE ORDER ENTRY AUTHORITY
+# =========================
+# Arming LIVE real-order entry is a distinct, explicit operator action.  It is
+# never implied by starting LIVE runtime, by selecting LIVE mode, or by any
+# lifecycle state transition.  Arming fails closed unless every safety
+# prerequisite currently holds; disarming revokes real-order entry while
+# preserving monitoring without cancelling or closing any position.
+@router.post("/live-order-entry/arm")
+def arm_live_order_entry(
+    _operator: str = Depends(require_operator_session),
+):
+    result = get_bot_manager().set_live_order_entry_authority(True)
+    if result.get("success") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/live-order-entry/disarm")
+def disarm_live_order_entry(
+    _operator: str = Depends(require_operator_session),
+):
+    return get_bot_manager().set_live_order_entry_authority(False)
+
+
+# =========================
 # STATUS
 # =========================
 @router.get("/status", response_model=StatusResponse)
