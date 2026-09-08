@@ -145,6 +145,13 @@ class ExecutionEngine:
         self.last_order_blocked_reason = None
         self.last_live_block_reasons = []
 
+        # LIVE close observability.  A natural (non-emergency) LIVE exit must
+        # submit a real reduceOnly exchange close and may only move local state
+        # to FLAT on authoritative exchange confirmation.  These fields are
+        # intentionally distinct from emergency flatten state.
+        self.live_close_state = None
+        self.live_close_in_flight = False
+
         # Paper execution audit trail.  Paper orders fill immediately, but we
         # retain the order and fill as separate lifecycle records so the
         # simulation path can be inspected without touching an exchange.
@@ -715,6 +722,62 @@ class ExecutionEngine:
         self.last_order_blocked_reason = "LIVE_NOT_READY"
 
         return False
+
+    def set_live_order_entry_authority(self, armed):
+        """ARM/DISARM LIVE real-order entry authority.
+
+        ARM is fail-closed: it only succeeds while every runtime safety
+        prerequisite currently holds (LIVE mode, dry-run disabled, ALLOW_LIVE,
+        TRADE_MODE=live, exchange client/credentials ready, balance/position
+        authority synced and consistent, emergency clear).  The auto-trade-loop
+        gate (governance ``execution_enabled``) is intentionally NOT required
+        here because arming real-order entry is a distinct concept from running
+        the auto-trade loop.
+
+        This mutates only the three authority flags; it never creates, cancels,
+        or closes an order or a position.  DISARM is the inverse and preserves
+        runtime/monitoring.
+        """
+        if armed:
+            readiness = self.build_live_readiness()
+            reasons = [
+                reason
+                for reason in (readiness.get("blockReasons") or [])
+                if reason not in {"LIVE_ORDER_ENTRY_DISARMED", "EXECUTION_DISABLED"}
+            ]
+            if reasons:
+                return {
+                    "success": False,
+                    "armed": False,
+                    "liveOrderEntryAllowed": False,
+                    "realOrderAllowed": False,
+                    "executionEntryAllowed": False,
+                    "reason": reasons[0],
+                    "blockReasons": reasons,
+                }
+            self.config["liveOrderEntryAllowed"] = True
+            self.config["realOrderAllowed"] = True
+            self.config["executionEntryAllowed"] = True
+            return {
+                "success": True,
+                "armed": True,
+                "liveOrderEntryAllowed": True,
+                "realOrderAllowed": True,
+                "executionEntryAllowed": True,
+                "reason": "LIVE_ORDER_ENTRY_ARMED",
+            }
+
+        self.config["liveOrderEntryAllowed"] = False
+        self.config["realOrderAllowed"] = False
+        self.config["executionEntryAllowed"] = False
+        return {
+            "success": True,
+            "armed": False,
+            "liveOrderEntryAllowed": False,
+            "realOrderAllowed": False,
+            "executionEntryAllowed": False,
+            "reason": "LIVE_ORDER_ENTRY_DISARMED",
+        }
 
     def set_config(self, config: dict):
 
@@ -2321,12 +2384,133 @@ class ExecutionEngine:
     # CLOSE
     # =====================================
 
+    def _live_close_via_exchange(self, symbol):
+        """Submit and classify a normal (non-emergency) LIVE close.
+
+        Reuses the exchange adapter's reduceOnly flatten primitive
+        (:meth:`flatten_current_position`) so close order construction is not
+        duplicated.  This is the real exchange-side close; the caller may only
+        move local state to FLAT when the primitive reports authoritative
+        confirmation.  Partial / unknown / rejected / timeout closings fail
+        closed and preserve the open position.
+        """
+        result = {
+            "success": False,
+            "status": "UNKNOWN",
+            "confirmed": False,
+            "closed": False,
+            "exchangeCall": False,
+            "reason": "EXCHANGE_CLOSE_UNAVAILABLE",
+        }
+        exchange = self.exchange
+        if exchange is None or not callable(
+            getattr(exchange, "flatten_current_position", None)
+        ):
+            result.update({
+                "reason": "EXCHANGE_CLOSE_CAPABILITY_MISSING",
+            })
+            self.live_close_state = dict(result)
+            return result
+
+        try:
+            flatten = exchange.flatten_current_position(symbol)
+        except Exception as e:
+            result.update({
+                "reason": "EXCHANGE_CLOSE_EXCEPTION",
+                "error": str(e),
+            })
+            self.live_close_state = dict(result)
+            return result
+
+        if not isinstance(flatten, dict):
+            result.update({
+                "reason": "EXCHANGE_CLOSE_UNKNOWN",
+            })
+            self.live_close_state = dict(result)
+            return result
+
+        result["exchangeCall"] = True
+        result["symbol"] = flatten.get("symbol")
+        result["order_id"] = flatten.get("order_id")
+        result["raw_order"] = flatten.get("raw_order")
+        result["final_position"] = flatten.get("final_position")
+        result["error_code"] = flatten.get("error_code")
+
+        confirmed = bool(flatten.get("confirmed"))
+        closed = bool(flatten.get("closed"))
+        skipped = bool(flatten.get("skipped"))
+        accepted = bool(flatten.get("accepted"))
+        error_code = flatten.get("error_code")
+
+        if confirmed and (closed or skipped):
+            result.update({
+                "success": True,
+                "status": "CONFIRMED",
+                "confirmed": True,
+                "closed": True,
+                "reason": "EXCHANGE_CLOSE_CONFIRMED",
+            })
+        elif error_code == "POSITION_REMAINS":
+            result.update({
+                "status": "PARTIAL",
+                "reason": "EXCHANGE_CLOSE_PARTIAL",
+                "accepted": accepted,
+            })
+        elif error_code == "TIMEOUT":
+            result.update({
+                "status": "UNKNOWN",
+                "reason": "EXCHANGE_CLOSE_UNKNOWN",
+                "accepted": accepted,
+            })
+        elif not accepted:
+            result.update({
+                "status": "REJECTED",
+                "reason": "EXCHANGE_CLOSE_REJECTED",
+            })
+        else:
+            result.update({
+                "status": "UNKNOWN",
+                "reason": "EXCHANGE_CLOSE_UNKNOWN",
+            })
+
+        self.live_close_state = dict(result)
+        return result
+
     def close_position(self, price, reason):
 
         add_log(f"🚪 CLOSE ({reason})")
 
         if not self.actual_position:
-            return
+            return None
+
+        live_close = None
+
+        # =====================================
+        # NORMAL LIVE EXIT: real reduceOnly close
+        # =====================================
+        # A natural LIVE exit must submit a real exchange-side reduceOnly close
+        # and only move local state to FLAT on authoritative exchange evidence.
+        # A paper / dry-run exit stays simulation-only (unchanged).
+        if self.mode == "live" and not self.config.get("dry_run", True):
+            if self.live_close_in_flight:
+                # Do not send repeated blind close orders while a prior close is
+                # accepted-but-unconfirmed.  Fail closed.
+                return dict(self.live_close_state or {
+                    "success": False,
+                    "status": "UNKNOWN",
+                    "confirmed": False,
+                    "closed": False,
+                    "reason": "EXCHANGE_CLOSE_PENDING",
+                })
+            live_close = self._live_close_via_exchange(self.symbol)
+            if live_close.get("confirmed") is not True:
+                self.live_close_state = dict(live_close)
+                self.live_close_in_flight = True
+                add_log(
+                    f"🔒 LIVE CLOSE UNCONFIRMED ({reason}): "
+                    f"{live_close.get('status')}"
+                )
+                return live_close
 
         entry = self.actual_position.get(
             "entry_price",
@@ -2481,6 +2665,59 @@ class ExecutionEngine:
                     pass
 
         # =========================
+        # LIVE EXCHANGE EVIDENCE
+        # =========================
+        # Preserve the authoritative exchange-side evidence for a confirmed real
+        # close.  The locally estimated PnL above is NOT authoritative LIVE
+        # realized PnL; it is retained only as an estimate and the exchange
+        # order evidence is recorded separately.  Do not fabricate exchange
+        # realized PnL that the current architecture cannot observe.
+        if self.mode == "live" and isinstance(live_close, dict):
+            runtime_context = position_before.get("runtimeSymbolContext") or {}
+            identity = {
+                key: runtime_context.get(key)
+                for key in (
+                    "contextKey", "runtimeInstanceId", "runtimeId", "exchangeSymbol",
+                )
+                if runtime_context.get(key) is not None
+            } or {
+                "symbol": self.symbol,
+                "exchangeSymbol": (
+                    live_close.get("symbol") or self.symbol
+                ),
+            }
+            live_record = {
+                "status": "CLOSED",
+                "mode": "live",
+                "symbol": self.symbol,
+                "exchangeSymbol": live_close.get("symbol"),
+                "side": side,
+                "qty": coin_qty,
+                "entryPrice": entry,
+                "exitPrice": price,
+                "estimatedPnl": pnl,
+                "estimatedPnlAuthoritative": False,
+                "reason": reason,
+                "orderId": live_close.get("order_id"),
+                "exchangeCall": True,
+                "confirmed": True,
+                "closed": True,
+                "exchangeClose": {
+                    k: live_close.get(k)
+                    for k in ("order_id", "raw_order", "final_position", "symbol")
+                },
+                **identity,
+            }
+            self.trade_history.append(live_record)
+            self.live_close_state = {
+                "status": "CONFIRMED",
+                "confirmed": True,
+                "closed": True,
+                "reason": "EXCHANGE_CLOSE_CONFIRMED",
+                "order_id": live_close.get("order_id"),
+            }
+
+        # =========================
         # CLEANUP
         # =========================
 
@@ -2488,7 +2725,24 @@ class ExecutionEngine:
 
         self.pending_order = False
 
+        self.live_close_in_flight = False
+
         add_log("🧹 POSITION CLEANUP")
+
+        if self.mode == "live":
+            return {
+                "success": True,
+                "confirmed": True,
+                "closed": True,
+                "status": "CONFIRMED",
+                "reason": "EXCHANGE_CLOSE_CONFIRMED",
+                "order_id": (
+                    live_close.get("order_id")
+                    if isinstance(live_close, dict)
+                    else None
+                ),
+            }
+        return None
 
     # =====================================
     # RESULT
