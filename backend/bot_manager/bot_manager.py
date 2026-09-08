@@ -2515,6 +2515,12 @@ class BotManager:
             "emergencyAvailable": True,
             "governanceAvailable": True,
         }
+        state["canonicalAutoMonitoring"] = bool(
+            str(self.config.get("selection_mode", "MANUAL")).strip().upper() == "AUTO"
+            and self.config.get("liveRuntimeStartAllowed") is True
+            and self.config.get("liveOrderEntryAllowed") is False
+            and self.config.get("executionEntryAllowed") is False
+        )
         state["liveSelectionOnly"] = bool(
             effective_mode == "live"
             and effective_dry_run is False
@@ -2524,6 +2530,7 @@ class BotManager:
             and (
                 state["liveAutoSwitchDisabled"] is False
                 or self.live_auto_control_arming is True
+                or state["canonicalAutoMonitoring"] is True
             )
         )
         state["stoppedLiveMonitoring"] = bool(

@@ -288,6 +288,7 @@ class TradingRuntime:
         exchange=None,
         market_type=None,
         exchange_symbol=None,
+        runtime_instance_id=None,
     ):
 
         from backend.runtime.runtime_symbol_context import (
@@ -299,7 +300,7 @@ class TradingRuntime:
             exchange=exchange,
             market_type=market_type,
             exchange_symbol=exchange_symbol,
-            runtime_instance_id=runtime_id,
+            runtime_instance_id=runtime_instance_id or runtime_id,
         )
         symbol_context_payload = (
             symbol_context.to_dict() if symbol_context is not None else None

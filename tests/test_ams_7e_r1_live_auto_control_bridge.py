@@ -263,3 +263,25 @@ def test_live_auto_start_rejects_any_order_authority(unsafe_key):
     result = manager.start_live_auto_control()
     assert result["accepted"] is False
     assert result["reason"] == "LIVE_RUNTIME_START_FAILED"
+
+
+def test_canonical_auto_monitoring_is_a_disarmed_live_selection_state():
+    manager = BotManager()
+    manager.config = {
+        "mode": "live", "dry_run": False, "selection_mode": "AUTO",
+        "liveRuntimeStartAllowed": True,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    manager._running = True
+
+    state = manager._production_ams_safety_state()
+    assert state["canonicalAutoMonitoring"] is True
+    assert state["liveSelectionOnly"] is True
+    assert state["realOrderAllowed"] is False
+
+    manager.config["executionEntryAllowed"] = True
+    stale = manager._production_ams_safety_state()
+    assert stale["canonicalAutoMonitoring"] is False
+    assert stale["liveSelectionOnly"] is False

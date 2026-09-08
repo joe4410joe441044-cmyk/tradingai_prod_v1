@@ -1,4 +1,4 @@
-"""Production lifecycle boundary for Paper AUTO market selection."""
+"""Production lifecycle boundary for canonical AUTO market selection."""
 
 from copy import deepcopy
 from enum import Enum
@@ -16,7 +16,12 @@ class AutoSelectionLifecycleState(str, Enum):
 
 
 class PaperAutoSelectionLifecycle:
-    """Manage an injected AMS-4B single-cycle runtime without scheduling it."""
+    """Manage an injected AMS-4B single-cycle runtime without scheduling it.
+
+    The historical class name is retained for compatibility.  The lifecycle
+    may also run in LIVE monitoring mode, but only while every order-entry
+    authority is explicitly disarmed.
+    """
 
     def __init__(self, bot_manager, e2e_runtime, *, readiness_provider):
         if not callable(getattr(e2e_runtime, "run", None)):
@@ -165,7 +170,7 @@ class PaperAutoSelectionLifecycle:
             "lockedAt": switch.get("committedAt") if locked else None,
             "lastReason": self._reason_codes[0] if self._reason_codes else None,
             "lastUpdatedAt": last_updated,
-            "amsMode": "AUTO_PAPER" if self._enabled or self._state is AutoSelectionLifecycleState.RUNNING_CYCLE else "MANUAL",
+            "amsMode": self._auto_mode() if enabled else "MANUAL",
             "amsRuntimeState": self._state.value,
             "currentCycleId": self._current_cycle_id,
             "lastCycleId": last.get("e2eCycleId"),
@@ -184,13 +189,34 @@ class PaperAutoSelectionLifecycle:
         if not isinstance(config, Mapping):
             return "AUTO_RUNTIME_MODE_UNAVAILABLE"
         mode = str(config.get("mode", config.get("tradeMode", "paper"))).lower()
+        dry_run = config.get("dryRun", config.get("dry_run", True))
+        if mode == "live":
+            if dry_run is not False:
+                return "AUTO_RUNTIME_LIVE_DRY_RUN_FORBIDDEN"
+            disarmed = (
+                config.get("liveOrderEntryAllowed") is False
+                and config.get("realOrderAllowed") is False
+                and config.get("executionEntryAllowed") is False
+                and config.get("autoTradeEnabled", False) is False
+                and config.get("executionRealOrderEnabled", False) is False
+            )
+            if not disarmed:
+                return "AUTO_RUNTIME_LIVE_ENTRY_ARMED"
+            return None
         if mode != "paper":
-            return "AUTO_RUNTIME_LIVE_BLOCKED"
-        if config.get("dryRun", config.get("dry_run", True)) is not True:
+            return "AUTO_RUNTIME_MODE_UNSUPPORTED"
+        if dry_run is not True:
             return "AUTO_RUNTIME_DRY_RUN_REQUIRED"
         if config.get("realOrderAllowed", config.get("real_order_allowed", False)) is not False:
             return "AUTO_RUNTIME_REAL_ORDER_FORBIDDEN"
         return None
+
+    def _auto_mode(self):
+        config = getattr(self.manager, "config", None)
+        mode = str(config.get("mode", "paper")).strip().lower() if isinstance(
+            config, Mapping
+        ) else "paper"
+        return "AUTO_LIVE" if mode == "live" else "AUTO_PAPER"
 
     @staticmethod
     def _readiness_reason(value):

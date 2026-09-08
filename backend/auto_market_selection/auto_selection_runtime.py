@@ -1,4 +1,4 @@
-"""Paper-only orchestration of one deterministic AUTO selection cycle."""
+"""Orchestration of one deterministic canonical AUTO selection cycle."""
 
 from copy import deepcopy
 from dataclasses import dataclass
@@ -22,6 +22,7 @@ from .selection_proposal import build_selection_proposal, snapshot_active_symbol
 class AutoSelectionRuntimeMode(str, Enum):
     MANUAL = "MANUAL"
     AUTO_PAPER = "AUTO_PAPER"
+    AUTO_LIVE = "AUTO_LIVE"
 
 
 class AutoSelectionCycleStatus(str, Enum):
@@ -85,10 +86,12 @@ class AutoSelectionCycleResult:
 
 
 class AutoMarketSelectionRuntime:
-    """Connect existing AMS contracts for exactly one Paper dry-run cycle.
+    """Connect existing AMS contracts for exactly one AUTO selection cycle.
 
     Providers are authoritative I/O boundaries. This class does not calculate
-    MM eligibility, ranking scores, execution decisions, or orders.
+    MM eligibility, ranking scores, execution decisions, or orders.  LIVE is
+    admitted only as a disarmed monitoring runtime; selection never grants
+    order-entry authority.
     """
 
     def __init__(
@@ -146,7 +149,7 @@ class AutoMarketSelectionRuntime:
                 publish=False,
             )
         try:
-            safety_reason = self._paper_safety_reason()
+            safety_reason = self._safety_reason()
             if safety_reason:
                 return self._finish(self._result(
                     cycle_id, started, AutoSelectionCycleStatus.FAILED,
@@ -261,6 +264,7 @@ class AutoMarketSelectionRuntime:
             self.manager, position_provider=self.position_provider,
             mm_provider=self.capital_provider,
             emergency_provider=self.emergency_provider, clock=self.clock,
+            allow_live_monitoring=self._auto_mode() is AutoSelectionRuntimeMode.AUTO_LIVE,
         )
         return SafeSymbolSwitch(adapter)
 
@@ -269,19 +273,44 @@ class AutoMarketSelectionRuntime:
             self.manager, position_provider=self.position_provider,
             mm_provider=self.capital_provider,
             emergency_provider=self.emergency_provider, clock=self.clock,
+            allow_live_monitoring=self._auto_mode() is AutoSelectionRuntimeMode.AUTO_LIVE,
         )
         return InitialSymbolCommit(adapter)
 
-    def _paper_safety_reason(self):
+    def _safety_reason(self):
         config = getattr(self.manager, "config", None)
         if not isinstance(config, dict):
             return "AUTO_SELECTION_MODE_UNAVAILABLE"
         mode = str(config.get("mode", config.get("tradeMode", "paper"))).strip().lower()
+        dry_run = config.get("dryRun", config.get("dry_run", True))
+        if mode == "live":
+            if dry_run is not False:
+                return "AUTO_SELECTION_LIVE_DRY_RUN_FORBIDDEN"
+            if not all((
+                config.get("liveOrderEntryAllowed") is False,
+                config.get("realOrderAllowed") is False,
+                config.get("executionEntryAllowed") is False,
+                config.get("autoTradeEnabled", False) is False,
+                config.get("executionRealOrderEnabled", False) is False,
+            )):
+                return "AUTO_SELECTION_LIVE_ENTRY_ARMED"
+            return None
         if mode != "paper":
-            return "AUTO_SELECTION_PAPER_ONLY"
-        if config.get("dryRun", config.get("dry_run", True)) is not True:
+            return "AUTO_SELECTION_MODE_UNSUPPORTED"
+        if dry_run is not True:
             return "AUTO_SELECTION_DRY_RUN_REQUIRED"
         return None
+
+    def _auto_mode(self):
+        config = getattr(self.manager, "config", None)
+        mode = str(config.get("mode", "paper")).strip().lower() if isinstance(
+            config, dict
+        ) else "paper"
+        return (
+            AutoSelectionRuntimeMode.AUTO_LIVE
+            if mode == "live"
+            else AutoSelectionRuntimeMode.AUTO_PAPER
+        )
 
     def _active_symbol(self):
         value = getattr(self.manager, "activeSymbol", None)
@@ -310,9 +339,11 @@ class AutoMarketSelectionRuntime:
 
     def _result(self, cycle_id, started, status, reasons, *, active,
                 scanner=None, ranking=None, audit=None, proposal=None,
-                switch=None, final_active=None, mode=AutoSelectionRuntimeMode.AUTO_PAPER,
+                switch=None, final_active=None, mode=None,
                 publish=True):
         del publish
+        if mode is None:
+            mode = self._auto_mode()
         return AutoSelectionCycleResult(
             cycle_id, started, _utc(self.clock()), mode, active,
             ranking.top_candidate.symbol if ranking and ranking.top_candidate else None,

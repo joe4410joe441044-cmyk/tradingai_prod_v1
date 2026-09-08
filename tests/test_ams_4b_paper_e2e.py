@@ -152,7 +152,7 @@ def test_emergency_position_and_pending_block_before_decision_chain():
 def test_live_dryrun_and_real_order_safety_fail_before_auto_cycle():
     cases = (
         ({"mode": "live", "dry_run": True, "realOrderAllowed": False},
-         "PAPER_E2E_LIVE_BLOCKED"),
+         "LIVE_MONITORING_PIPELINE_REQUIRED"),
         ({"mode": "paper", "dry_run": False, "realOrderAllowed": False},
          "PAPER_E2E_DRY_RUN_REQUIRED"),
         ({"mode": "paper", "dry_run": True, "realOrderAllowed": True},
@@ -208,3 +208,52 @@ def test_dashboard_projection_follows_authority_and_keeps_candidate_separate():
     assert status["requestedSymbol"] == "SOLUSDT"
     assert status["autoRuntime"]["status"] == "COMPLETED"
     assert status["switch"]["state"] == "COMPLETED"
+
+
+def test_live_disarmed_e2e_reuses_canonical_pipeline_without_order():
+    config = {
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    manager = Manager(config=config)
+    manager.exchange_name = "kucoin"
+    manager.orderbook_source = "kucoin_futures"
+    manager.orderbook_symbol = "BTCUSDTM"
+    manager.runtime_instance_id = "live-session-1"
+    auto, manager, _, _ = runtime(manager=manager)
+    calls = []
+
+    def production_pipeline(context):
+        calls.append(context)
+        return {
+            "valid": True, "runtimeSymbolContext": context,
+            "strategy": {"decision": "BUY"},
+            "moneyManagement": {"decision": "ALLOW"},
+            "moneyManagementReached": True, "moneyManagementAllowed": True,
+            "governance": {"decision": "ALLOW"},
+            "governanceReached": True, "governanceAllowed": True,
+            "paperOrderCreated": False, "reason": "LIVE_NOT_READY",
+        }
+
+    service = PaperAutoSelectionE2E(
+        manager, auto, initial_state_provider=lambda: SAFE_STATE,
+        market_intelligence=None, strategy=None, ai_review=None,
+        money_management=None, governance=None, paper_execution=None,
+        production_pipeline=production_pipeline, clock=lambda: NOW,
+    )
+    result = service.run(started_at=NOW)
+
+    assert result.status is PaperAutoSelectionE2EStatus.COMPLETED_SWITCHED
+    assert result.final_active_symbol == "BTCUSDT"
+    assert calls == [{
+        "symbol": "BTCUSDT", "runtimeId": manager.active_runtime_id,
+        "contextKey": "KUCOIN:FUTURES:BTCUSDTM",
+        "exchangeSymbol": "BTCUSDTM",
+        "runtimeInstanceId": "live-session-1",
+        "evaluatedAt": "2026-08-09T03:00:00Z",
+    }]
+    assert result.strategy_decision == "BUY"
+    assert result.paper_order_created is False
+    assert manager.config == config

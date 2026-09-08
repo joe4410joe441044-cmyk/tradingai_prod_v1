@@ -194,3 +194,42 @@ def test_bot_manager_live_commit_requires_typed_permission_and_trade_stays_off()
     ) is True
     assert manager.config["realOrderAllowed"] is False
     assert manager.config["autoTradeEnabled"] is False
+
+
+def test_canonical_live_monitoring_commit_requires_exact_disarm_state():
+    class Manager:
+        activeSymbol = "ETHUSDT"
+        config = {
+            "mode": "live", "dry_run": False,
+            "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+            "executionEntryAllowed": False, "autoTradeEnabled": False,
+            "executionRealOrderEnabled": False,
+        }
+
+        def _commit_active_symbol_for_safe_switch(self, *args):
+            self.args = args
+            return True
+
+    class Handle:
+        feed = object()
+        runtime_id = "new-runtime"
+        exchange_symbol = "XBTUSDTM"
+
+    manager = Manager()
+    runtime = BotManagerSwitchRuntime(
+        manager, position_provider=lambda: "FLAT", mm_provider=lambda: None,
+        emergency_provider=lambda: True,
+        allow_live_monitoring=True,
+    )
+    assert runtime.commit_active_symbol(
+        "ETHUSDT", "BTCUSDT", Handle(), "tx",
+    ) is True
+    assert manager.args[:2] == ("ETHUSDT", "BTCUSDT")
+    assert manager.config["liveOrderEntryAllowed"] is False
+    assert manager.config["realOrderAllowed"] is False
+    assert manager.config["executionEntryAllowed"] is False
+
+    manager.config["liveOrderEntryAllowed"] = True
+    assert runtime.commit_active_symbol(
+        "ETHUSDT", "BTCUSDT", Handle(), "stale-tx",
+    ) is False

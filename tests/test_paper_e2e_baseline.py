@@ -49,8 +49,10 @@ def test_paper_e2e_baseline():
     bot_manager.state.emergency_stop = False
     
     # Mock Kucoin futures client
-    with patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin:
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with patch(
+        'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+        return_value=MockKucoinFuturesPublicClient(),
+    ):
         
         # Attach production paper auto selection
         from backend.auto_market_selection.paper_production import attach_production_paper_auto_selection
@@ -108,10 +110,11 @@ def test_paper_production_composition():
     governance = MagicMock()
     governance.process_governance = MagicMock()
     trading_runtime = MagicMock(governance_runtime=governance)
-    with (patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin,
-          patch('backend.auto_market_selection.paper_production.runtime_registry.trading_runtime',
-                trading_runtime)):
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with (patch(
+              'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+              return_value=MockKucoinFuturesPublicClient(),
+          ), patch('backend.auto_market_selection.paper_production.runtime_registry.trading_runtime',
+                   trading_runtime)):
         
         # Attach production paper auto selection
         from backend.auto_market_selection.paper_production import attach_production_paper_auto_selection

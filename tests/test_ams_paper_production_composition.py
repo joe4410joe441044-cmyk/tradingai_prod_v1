@@ -49,8 +49,10 @@ def test_attach_production_paper_auto_selection():
     bot_manager.state.emergency_stop = False
     
     # Mock Kucoin futures client
-    with patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin:
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with patch(
+        'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+        return_value=MockKucoinFuturesPublicClient(),
+    ):
         
         # Attach production paper auto selection
         from backend.auto_market_selection.paper_production import attach_production_paper_auto_selection
@@ -74,8 +76,10 @@ def test_paper_production_lifecycle():
     bot_manager.state.emergency_stop = False
     
     # Mock Kucoin futures client
-    with patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin:
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with patch(
+        'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+        return_value=MockKucoinFuturesPublicClient(),
+    ):
         
         # Attach production paper auto selection
         from backend.auto_market_selection.paper_production import attach_production_paper_auto_selection
@@ -121,10 +125,11 @@ def test_paper_production_readiness():
     governance = MagicMock()
     governance.process_governance = MagicMock()
     trading_runtime = MagicMock(governance_runtime=governance)
-    with (patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin,
-          patch('backend.auto_market_selection.paper_production.runtime_registry.trading_runtime',
-                trading_runtime)):
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with (patch(
+              'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+              return_value=MockKucoinFuturesPublicClient(),
+          ), patch('backend.auto_market_selection.paper_production.runtime_registry.trading_runtime',
+                   trading_runtime)):
         
         # Attach production paper auto selection
         from backend.auto_market_selection.paper_production import attach_production_paper_auto_selection
@@ -159,8 +164,10 @@ def test_paper_production_unknown_authority_is_fail_safe():
     bot_manager.state.position_state = 'UNKNOWN'
     bot_manager.state.emergency_stop = None
 
-    with patch.object(KucoinFuturesPublicClient, '__new__') as mock_kucoin:
-        mock_kucoin.return_value = MockKucoinFuturesPublicClient()
+    with patch(
+        'backend.auto_market_selection.paper_production.KucoinFuturesPublicClient',
+        return_value=MockKucoinFuturesPublicClient(),
+    ):
         from backend.auto_market_selection.paper_production import (
             attach_production_paper_auto_selection,
         )
@@ -281,4 +288,72 @@ def test_production_pipeline_blocks_attached_real_exchange_before_runtime():
 
     assert result['valid'] is False
     assert result['reason'] == 'REAL_EXCHANGE_ATTACHED'
+    runtime.process_runtime.assert_not_called()
+
+
+def test_live_disarmed_pipeline_observes_natural_buy_without_submission():
+    from backend.auto_market_selection.paper_production import (
+        PaperProductionPipelineAdapter,
+    )
+    manager = _production_manager()
+    manager.config = {
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    exchange = MagicMock()
+    execution_runtime = MagicMock()
+    execution_runtime.engine.mode = "live"
+    execution_runtime.engine.exchange = exchange
+    execution_runtime.handoff_attempted = True
+    execution_runtime.handoff_executed = False
+    runtime = MagicMock(execution_runtime=execution_runtime)
+    runtime.process_runtime.return_value = {
+        "valid": True,
+        "strategyOutput": {"strategy": {"direction": "BUY"}},
+        "moneyManagementReached": True,
+        "moneyManagementDecision": {"allowed": True, "decision": "ALLOW"},
+        "governanceRuntimeReached": True,
+        "governanceOutput": {"allowed": True},
+        "runtime": {"executionAllowed": False, "reason": "LIVE_NOT_READY"},
+    }
+    context = {"symbol": "BTCUSDT", "runtimeId": "runtime-1"}
+
+    with patch(
+        "backend.auto_market_selection.paper_production.runtime_registry.trading_runtime",
+        runtime,
+    ):
+        result = PaperProductionPipelineAdapter(manager).run(context)
+
+    runtime.process_runtime.assert_called_once()
+    exchange.place_order.assert_not_called()
+    assert result["strategy"]["decision"] == "BUY"
+    assert result["moneyManagementAllowed"] is True
+    assert result["governanceAllowed"] is True
+    assert result["paperOrderCreated"] is False
+    assert result["reason"] == "LIVE_NOT_READY"
+
+
+def test_live_pipeline_rechecks_disarm_before_observation():
+    from backend.auto_market_selection.paper_production import (
+        PaperProductionPipelineAdapter,
+    )
+    manager = _production_manager()
+    manager.config = {
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": True, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    runtime = MagicMock()
+    with patch(
+        "backend.auto_market_selection.paper_production.runtime_registry.trading_runtime",
+        runtime,
+    ):
+        result = PaperProductionPipelineAdapter(manager).run(
+            {"symbol": "BTCUSDT", "runtimeId": "runtime-1"},
+        )
+    assert result["valid"] is False
+    assert result["reason"] == "LIVE_ORDER_ENTRY_NOT_DISARMED"
     runtime.process_runtime.assert_not_called()

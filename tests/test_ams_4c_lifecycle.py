@@ -80,7 +80,7 @@ def test_restart_defaults_stopped_and_start_only_makes_runtime_ready():
 
 @pytest.mark.parametrize("config,reason", [
     ({"mode": "live", "dry_run": True, "realOrderAllowed": False},
-     "AUTO_RUNTIME_LIVE_BLOCKED"),
+     "AUTO_RUNTIME_LIVE_DRY_RUN_FORBIDDEN"),
     ({"mode": "paper", "dry_run": False, "realOrderAllowed": False},
      "AUTO_RUNTIME_DRY_RUN_REQUIRED"),
     ({"mode": "paper", "dry_run": True, "realOrderAllowed": True},
@@ -269,3 +269,43 @@ def test_status_projects_initial_proposal_commit_lock_and_counts():
     assert status["committedSymbol"] == status["lockedSymbol"] == "BTCUSDT"
     assert status["lockOnState"] == "LOCKED"
     assert status["lockedAt"] == "2026-08-09T03:00:01Z"
+
+
+def test_live_disarmed_monitoring_starts_and_preserves_entry_flags():
+    config = {
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    service, manager, e2e = lifecycle(config=config)
+
+    status = service.start()
+    assert status["amsRuntimeState"] == "READY"
+    assert status["amsMode"] == "AUTO_LIVE"
+    assert "AUTO_RUNTIME_LIVE_BLOCKED" not in status["reasonCodes"]
+    assert service.run_one_cycle(started_at=NOW)["accepted"] is True
+    assert e2e.calls == [NOW]
+    assert manager.config == config
+    assert manager.config["liveOrderEntryAllowed"] is False
+    assert manager.config["realOrderAllowed"] is False
+    assert manager.config["executionEntryAllowed"] is False
+
+
+@pytest.mark.parametrize("armed_key", [
+    "liveOrderEntryAllowed", "realOrderAllowed", "executionEntryAllowed",
+    "autoTradeEnabled", "executionRealOrderEnabled",
+])
+def test_live_monitoring_rejects_any_stale_entry_authority(armed_key):
+    config = {
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    }
+    config[armed_key] = True
+    service, _, e2e = lifecycle(config=config)
+    status = service.start()
+    assert status["amsRuntimeState"] == "BLOCKED"
+    assert status["reasonCodes"] == ["AUTO_RUNTIME_LIVE_ENTRY_ARMED"]
+    assert e2e.calls == []

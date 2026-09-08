@@ -1,4 +1,4 @@
-"""Paper-only BotManager runtime boundary for AMS-2B."""
+"""BotManager runtime boundary for canonical disarmed AMS-2B switching."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,7 +24,7 @@ class BotManagerSwitchRuntime:
 
     def __init__(self, bot_manager, *, position_provider, mm_provider,
                  emergency_provider, snapshot_timeout_seconds=10, clock=None,
-                 recorder_integration=None):
+                 recorder_integration=None, allow_live_monitoring=False):
         self.manager = bot_manager
         self.position_provider = position_provider
         self.mm_provider = mm_provider
@@ -32,6 +32,7 @@ class BotManagerSwitchRuntime:
         self.snapshot_timeout_seconds = snapshot_timeout_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.recorder_integration = recorder_integration
+        self.allow_live_monitoring = allow_live_monitoring is True
 
     def now(self):
         return self.clock()
@@ -141,10 +142,21 @@ class BotManagerSwitchRuntime:
         }
 
     def commit_active_symbol(self, expected, proposed, handle, transaction_id):
-        # AMS-2B is deliberately unavailable outside dry-run Paper runtime.
+        # Symbol/feed authority is independent from order-entry authority.
+        # PAPER retains its dry-run contract; LIVE may commit only while all
+        # entry paths remain explicitly disarmed.
         config = self.manager.config
-        if (str(config.get("mode", "paper")).lower() != "paper"
-                or config.get("dry_run", True) is not True):
+        mode = str(config.get("mode", "paper")).strip().lower()
+        paper_safe = mode == "paper" and config.get("dry_run", True) is True
+        live_safe = self.allow_live_monitoring and mode == "live" and all((
+            config.get("dry_run") is False,
+            config.get("liveOrderEntryAllowed") is False,
+            config.get("realOrderAllowed") is False,
+            config.get("executionEntryAllowed") is False,
+            config.get("autoTradeEnabled", False) is False,
+            config.get("executionRealOrderEnabled", False) is False,
+        ))
+        if not (paper_safe or live_safe):
             return False
         return self.manager._commit_active_symbol_for_safe_switch(
             expected, proposed, handle.feed, handle.runtime_id,

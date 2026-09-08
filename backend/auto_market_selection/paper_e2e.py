@@ -1,4 +1,4 @@
-"""Paper-only AUTO market selection end-to-end coordination boundary."""
+"""Canonical AUTO market selection end-to-end coordination boundary."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -70,7 +70,11 @@ class PaperAutoSelectionE2EResult:
 
 
 class PaperAutoSelectionE2E:
-    """Connect AMS-4A to existing decision-stage adapters in Paper only."""
+    """Connect AMS-4A to existing decision-stage adapters.
+
+    The compatibility name and paper result fields remain stable. LIVE is
+    supported only through the production pipeline while entry is disarmed.
+    """
 
     def __init__(self, bot_manager, auto_runtime, *, initial_state_provider,
                  market_intelligence, strategy, ai_review, money_management,
@@ -143,7 +147,14 @@ class PaperAutoSelectionE2E:
 
         symbol = self._active_symbol()
         runtime_id = getattr(self.manager, "active_runtime_id", None)
-        context = build_runtime_symbol_context(symbol, runtime_id, evaluated_at=self.clock())
+        context = build_runtime_symbol_context(
+            symbol, runtime_id, evaluated_at=self.clock(),
+            exchange=self._exchange(), market_type=self._market_type(),
+            exchange_symbol=getattr(self.manager, "orderbook_symbol", None),
+            runtime_instance_id=getattr(
+                self.manager, "runtime_instance_id", runtime_id,
+            ),
+        )
         if context is None or symbol != auto.final_active_symbol:
             return self._result(started, status=PaperAutoSelectionE2EStatus.FAILED,
                                 reasons=("ACTIVE_SYMBOL_CONTEXT_INVALID",), **common)
@@ -284,9 +295,24 @@ class PaperAutoSelectionE2E:
         if not isinstance(config, Mapping):
             return "PAPER_E2E_MODE_UNAVAILABLE"
         mode = str(config.get("tradeMode", config.get("mode", ""))).lower()
+        dry_run = config.get("dryRun", config.get("dry_run"))
+        if mode == "live":
+            if self.production_pipeline is None:
+                return "LIVE_MONITORING_PIPELINE_REQUIRED"
+            if dry_run is not False:
+                return "LIVE_MONITORING_DRY_RUN_FORBIDDEN"
+            if not all((
+                config.get("liveOrderEntryAllowed") is False,
+                config.get("realOrderAllowed") is False,
+                config.get("executionEntryAllowed") is False,
+                config.get("autoTradeEnabled", False) is False,
+                config.get("executionRealOrderEnabled", False) is False,
+            )):
+                return "LIVE_MONITORING_ENTRY_ARMED"
+            return None
         if mode != "paper":
-            return "PAPER_E2E_LIVE_BLOCKED"
-        if config.get("dryRun", config.get("dry_run")) is not True:
+            return "PAPER_E2E_MODE_UNSUPPORTED"
+        if dry_run is not True:
             return "PAPER_E2E_DRY_RUN_REQUIRED"
         if config.get("realOrderAllowed", config.get("real_order_allowed", False)) is not False:
             return "PAPER_E2E_REAL_ORDER_FORBIDDEN"
@@ -318,6 +344,21 @@ class PaperAutoSelectionE2E:
     def _decision(value):
         raw = value.get("decision") if isinstance(value, Mapping) else None
         return str(raw).upper() if raw is not None else None
+
+    def _exchange(self):
+        config = getattr(self.manager, "config", None)
+        configured = config.get("exchange") if isinstance(config, Mapping) else None
+        return getattr(self.manager, "exchange_name", None) or configured
+
+    def _market_type(self):
+        value = getattr(self.manager, "market_type", None)
+        if value is not None:
+            raw = getattr(value, "value", value)
+            normalized = str(raw).strip().upper().split(".")[-1]
+            if normalized:
+                return normalized
+        source = str(getattr(self.manager, "orderbook_source", "")).upper()
+        return "FUTURES" if source.endswith("FUTURES") else None
 
     def _active_symbol(self):
         value = getattr(self.manager, "activeSymbol", None)

@@ -1,4 +1,4 @@
-"""Production composition for the PAPER auto-selection lifecycle."""
+"""Production composition for the canonical AUTO-selection lifecycle."""
 
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -22,7 +22,12 @@ from backend.runtime import runtime_registry
 
 
 class PaperProductionPipelineAdapter:
-    """Bridge validated KuCoin telemetry into the authoritative mainline."""
+    """Bridge validated KuCoin telemetry into the authoritative mainline.
+
+    The historical name is retained. PAPER can simulate execution; LIVE may
+    observe the same strategy/MM/Governance pipeline only while entry is
+    disarmed, leaving final execution blocked by the runtime and engine gates.
+    """
 
     maximum_market_age_seconds = 5.0
 
@@ -100,16 +105,32 @@ class PaperProductionPipelineAdapter:
             return self._blocked(context, "TRADING_RUNTIME_UNAVAILABLE")
         execution_runtime = getattr(trading_runtime, "execution_runtime", None)
         engine = getattr(execution_runtime, "engine", None)
-        if engine is None or str(getattr(engine, "mode", "paper")).lower() != "paper":
-            return self._blocked(context, "PAPER_EXECUTION_UNAVAILABLE")
-        if getattr(engine, "exchange", None) is not None:
+        mode = self._mode()
+        engine_mode = str(getattr(engine, "mode", "paper")).strip().lower()
+        if engine is None or engine_mode != mode:
+            return self._blocked(
+                context,
+                "PAPER_EXECUTION_UNAVAILABLE"
+                if mode == "paper" else "LIVE_EXECUTION_RUNTIME_UNAVAILABLE",
+            )
+        if mode == "paper" and getattr(engine, "exchange", None) is not None:
             return self._blocked(context, "REAL_EXCHANGE_ATTACHED")
+        if mode == "live" and getattr(engine, "exchange", None) is None:
+            return self._blocked(context, "LIVE_EXCHANGE_UNAVAILABLE")
 
-        orders_before = len(getattr(engine, "paper_orders", ()) or ())
+        orders_before = (
+            len(getattr(engine, "paper_orders", ()) or ())
+            if mode == "paper" else 0
+        )
+        context_key_parts = str(context.get("contextKey") or "").split(":", 2)
         result = process(
             microstructure,
             active_symbol=context["symbol"],
             runtime_id=context["runtimeId"],
+            exchange=(context_key_parts[0] if len(context_key_parts) == 3 else None),
+            market_type=(context_key_parts[1] if len(context_key_parts) == 3 else None),
+            exchange_symbol=context.get("exchangeSymbol"),
+            runtime_instance_id=context.get("runtimeInstanceId"),
         )
         self.manager.latest_runtime_result = result
         attach_debug = getattr(
@@ -117,7 +138,10 @@ class PaperProductionPipelineAdapter:
         )
         if callable(attach_debug) and isinstance(result, dict):
             attach_debug(result)
-        orders_after = len(getattr(engine, "paper_orders", ()) or ())
+        orders_after = (
+            len(getattr(engine, "paper_orders", ()) or ())
+            if mode == "paper" else 0
+        )
         return self._project_result(
             context, result, execution_runtime,
             paper_order_created=orders_after > orders_before,
@@ -128,10 +152,23 @@ class PaperProductionPipelineAdapter:
         if not isinstance(config, dict):
             return "PAPER_CONFIG_UNKNOWN"
         mode = str(config.get("mode", config.get("tradeMode", ""))).lower()
-        if mode != "paper":
-            return "PAPER_MODE_REQUIRED"
-        if config.get("dry_run", config.get("dryRun")) is not True:
-            return "DRY_RUN_REQUIRED"
+        dry_run = config.get("dry_run", config.get("dryRun"))
+        if mode == "live":
+            if dry_run is not False:
+                return "LIVE_DRY_RUN_FORBIDDEN"
+            if not all((
+                config.get("liveOrderEntryAllowed") is False,
+                config.get("realOrderAllowed") is False,
+                config.get("executionEntryAllowed") is False,
+                config.get("autoTradeEnabled", False) is False,
+                config.get("executionRealOrderEnabled", False) is False,
+            )):
+                return "LIVE_ORDER_ENTRY_NOT_DISARMED"
+        elif mode == "paper":
+            if dry_run is not True:
+                return "DRY_RUN_REQUIRED"
+        else:
+            return "AUTO_RUNTIME_MODE_UNSUPPORTED"
         if config.get("realOrderAllowed", False) is not False:
             return "REAL_ORDER_FORBIDDEN"
         if getattr(self.manager, "_running", None) is not True:
@@ -231,6 +268,12 @@ class PaperProductionPipelineAdapter:
         except (TypeError, ValueError):
             return False
         return math.isfinite(number) and number > 0
+
+    def _mode(self):
+        config = getattr(self.manager, "config", None)
+        return str(config.get("mode", "paper")).strip().lower() if isinstance(
+            config, dict
+        ) else "paper"
 
     def _active_symbol(self):
         value = getattr(self.manager, "activeSymbol", None)

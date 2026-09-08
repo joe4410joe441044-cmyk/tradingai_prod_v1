@@ -131,9 +131,9 @@ def test_initial_selection_remains_fail_closed(position, pending, emergency, rea
 
 
 @pytest.mark.parametrize("config,reason", [
-    ({"mode": "live", "dry_run": True}, "AUTO_SELECTION_PAPER_ONLY"),
+    ({"mode": "live", "dry_run": True}, "AUTO_SELECTION_LIVE_DRY_RUN_FORBIDDEN"),
     ({"mode": "paper", "dry_run": False}, "AUTO_SELECTION_DRY_RUN_REQUIRED"),
-    ({"mode": "unknown", "dry_run": True}, "AUTO_SELECTION_PAPER_ONLY"),
+    ({"mode": "unknown", "dry_run": True}, "AUTO_SELECTION_MODE_UNSUPPORTED"),
 ])
 def test_non_paper_or_non_dry_run_fails_before_collecting_inputs(config, reason):
     calls = []
@@ -274,3 +274,38 @@ def test_runtime_source_contains_no_direct_symbol_or_trade_authority_mutation():
         "._active_symbol =", ".activeSymbol =", "create_order", "submit_order",
         "realOrderAllowed =", "execution_authorization", "governance_bypass",
     ))
+
+
+def test_live_disarmed_cycle_promotes_ranked_canonical_symbol_and_identity():
+    manager = Manager(config={
+        "mode": "live", "dry_run": False,
+        "liveOrderEntryAllowed": False, "realOrderAllowed": False,
+        "executionEntryAllowed": False, "autoTradeEnabled": False,
+        "executionRealOrderEnabled": False,
+    })
+    service, manager, switch_runtime, calls = runtime(manager=manager)
+
+    result = service.run_cycle(started_at=NOW)
+
+    assert result.status is AutoSelectionCycleStatus.COMPLETED
+    assert result.mode.value == "AUTO_LIVE"
+    assert result.top_candidate_symbol == result.final_active_symbol == "BTCUSDT"
+    assert manager.activeSymbol == "BTCUSDT"
+    assert manager.active_runtime_id == result.switch_transaction_id
+    assert manager.auto_market_selection_observation["switchResult"]["committedSymbol"] == "BTCUSDT"
+    assert "commit" in switch_runtime.events
+    assert calls == ["universe", "ticker", "capital", "eligibility",
+                     "position", "pending", "emergency"]
+
+
+def test_live_cycle_fails_before_inputs_when_disarm_identity_is_missing():
+    manager = Manager(config={
+        "mode": "live", "dry_run": False, "realOrderAllowed": False,
+    })
+    calls = []
+    service, manager, switch_runtime, _ = runtime(manager=manager, calls=calls)
+    result = service.run_cycle(started_at=NOW)
+    assert result.status is AutoSelectionCycleStatus.FAILED
+    assert result.reason_codes == ("AUTO_SELECTION_LIVE_ENTRY_ARMED",)
+    assert manager.activeSymbol == "ETHUSDT"
+    assert switch_runtime.events == [] and calls == []
