@@ -21,6 +21,7 @@ const loadPage = async () => {
     const conversationHistory = join(temporary, "AdvisorConversationHistory.mjs");
     const operatorLogin = join(temporary, "OperatorLogin.mjs");
     const disclosure = join(temporary, "AdvisorDisclosure.mjs");
+    const help = join(temporary, "AiHelp.mjs");
     const react = join(temporary, "react.mjs");
     try {
         await writeFile(hook, [
@@ -49,6 +50,15 @@ const loadPage = async () => {
             disclosure,
             "export default({title,children})=>({type:'section',props:{'data-disclosure':title,children:[title,children]}});",
         );
+        await writeFile(
+            help,
+            [
+                "export const AiHelpLauncher=(props)=>({type:'button',props:{children:props.label,'data-help-launcher':props.side,'data-help-expanded':props.expanded}});",
+                "export const AiHelpDrawer=({open,children})=>(open?{type:'div',props:{children}}:null);",
+                "export const WhichAiGuide=()=>({type:'div',props:{children:'Which AI guide'}});",
+                "export const AdvisorGuide=()=>({type:'div',props:{children:'Advisor guide'}});",
+            ].join("\n"),
+        );
         await writeFile(react, "export const useState=(value)=>[value,()=>{}];");
         const code = transformed.code
             .replace('from "react";', `from "${pathToFileURL(react).href}";`)
@@ -75,6 +85,10 @@ const loadPage = async () => {
             .replace(
                 'from "../components/ai-advisor/AdvisorDisclosure";',
                 `from "${pathToFileURL(disclosure).href}";`,
+            )
+            .replace(
+                'from "../components/help/AiHelp";',
+                `from "${pathToFileURL(help).href}";`,
             );
 
         await writeFile(output, code);
@@ -128,6 +142,46 @@ test("AI Advisor is conversation-first: compact header, no hero, collapsed detai
     assert.match(text, /CAPABILITIES/);
 
     assert.equal(fetchCalls, 0);
+});
+
+test("AI Advisor wires compact left/right help launchers that default CLOSED", async () => {
+    const { default: AIAdvisorPage } = await loadPage();
+    const page = AIAdvisorPage();
+    const text = textOf(page);
+    const nodes = descendants(page);
+
+    assert.match(text, /どのAIに聞く？/);
+    assert.match(text, /AI Advisor ガイド/);
+    assert.ok(nodes.some((node) => node.props?.["data-help-launcher"] === "left"));
+    assert.ok(nodes.some((node) => node.props?.["data-help-launcher"] === "right"));
+    const launchers = nodes.filter((node) => node.props?.["data-help-launcher"]);
+    assert.ok(launchers.length === 2, "expected two help launchers");
+    assert.ok(
+        launchers.every((node) => node.props?.["data-help-expanded"] === false),
+        "both launchers must default to a closed (not expanded) state",
+    );
+
+    // guide content must not be present while drawers are closed
+    assert.doesNotMatch(text, /Which AI guide/);
+    assert.doesNotMatch(text, /Advisor guide/);
+});
+
+test("AI Advisor keeps the conversation-first controls while help is present", async () => {
+    const { default: AIAdvisorPage } = await loadPage();
+    const text = textOf(AIAdvisorPage());
+    assert.match(text, /Prompt Input Send Cancel Clear Conversation Thread/);
+    assert.match(text, /Operator authentication/);
+    assert.match(text, /RUNTIME STATUS/);
+});
+
+test("AI Advisor source declares read-only/no-execution help copy", async () => {
+    const guide = await readFile(
+        new URL("../components/help/AdvisorGuide.jsx", import.meta.url),
+        "utf8",
+    );
+    assert.match(guide, /読み取り専用の研究・分析パートナー/);
+    assert.match(guide, /実行や変更は一切しません/);
+    assert.doesNotMatch(guide, /fetch\(|axios|WebSocket|localStorage|botStart|botStop/);
 });
 
 test("AI Advisor has no large hero title or permanent technical columns", async () => {

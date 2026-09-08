@@ -1,0 +1,262 @@
+/* =========================================================
+   Shared AI help launcher + drawer (AI Advisor / Supervisor)
+========================================================= */
+
+.ai-help-dock {
+    display: flex;
+    max-width: 1180px;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 auto 10px;
+    padding: 2px 2px 0;
+}
+
+.ai-help-launcher {
+    display: inline-flex;
+    min-height: 26px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--mi-border, #243149);
+    border-radius: 999px;
+    background: var(--mi-surface-raised, #111a29);
+    color: var(--mi-text-muted, #9badc6);
+    cursor: pointer;
+    font: 600 11px/1 var(--mi-font-ui, "Inter", "Noto Sans JP", "Yu Gothic", "Segoe UI", system-ui, sans-serif);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.ai-help-launcher__mark {
+    color: var(--mi-accent, #57b8ff);
+    font: 700 12px/1 var(--mi-font-mono, "JetBrains Mono", Consolas, monospace);
+}
+
+.ai-help-launcher:hover,
+.ai-help-launcher[aria-expanded="true"],
+.ai-help-launcher:focus-visible {
+    border-color: color-mix(in srgb, var(--mi-accent, #57b8ff) 45%, transparent);
+    color: var(--mi-text, #e7edf7);
+}
+
+/* ------------------------------------------------------------------
+   Drawer overlay + panel
+------------------------------------------------------------------ */
+
+.ai-help-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    display: flex;
+    background: color-mix(in srgb, #040810 55%, transparent);
+}
+
+.ai-help-overlay--left {
+    justify-content: flex-start;
+}
+
+.ai-help-overlay--right {
+    justify-content: flex-end;
+}
+
+.ai-help-drawer {
+    width: min(460px, 92vw);
+    height: 100%;
+    overflow-y: auto;
+    background: var(--mi-surface, #0d1320);
+    color: var(--mi-text, #e7edf7);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    font-family: var(--mi-font-ui, "Inter", "Noto Sans JP", "Yu Gothic", "Segoe UI", system-ui, sans-serif);
+}
+
+.ai-help-drawer--left,
+.ai-help-drawer--right {
+    border-left: 1px solid var(--mi-border, #243149);
+    border-right: 1px solid var(--mi-border, #243149);
+}
+
+.ai-help-drawer__header {
+    position: sticky;
+    top: 0;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--mi-border, #243149);
+    background: var(--mi-surface-raised, #111a29);
+}
+
+.ai-help-drawer__title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin: 0;
+}
+
+.ai-help-drawer__close {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--mi-border, #243149);
+    border-radius: 5px;
+    background: var(--mi-surface-raised, #111a29);
+    color: var(--mi-text-muted, #9badc6);
+    cursor: pointer;
+    font: 700 16px/1 var(--mi-font-mono, "JetBrains Mono", Consolas, monospace);
+}
+
+.ai-help-drawer__close:hover,
+.ai-help-drawer__close:focus-visible {
+    border-color: color-mix(in srgb, var(--mi-accent, #57b8ff) 45%, transparent);
+    color: var(--mi-text, #e7edf7);
+}
+
+.ai-help-drawer__body {
+    padding: 16px;
+}
+
+/* ------------------------------------------------------------------
+   Content + progressive disclosure
+------------------------------------------------------------------ */
+
+.ai-help-content {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.ai-help-intro {
+    color: var(--mi-text, #e7edf7);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.ai-help-note {
+    color: var(--mi-text-muted, #9badc6);
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.ai-help-facts,
+.ai-help-which-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+}
+
+.ai-help-which-row,
+.ai-help-facts > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--mi-border, #243149);
+    border-radius: 8px;
+    background: var(--mi-surface-raised, #111a29);
+}
+
+.ai-help-facts dt,
+.ai-help-which-row dt {
+    color: var(--mi-accent, #57b8ff);
+    font: 700 10px/1 var(--mi-font-mono, "JetBrains Mono", Consolas, monospace);
+    letter-spacing: 0.06em;
+}
+
+.ai-help-facts dd,
+.ai-help-which-row dd {
+    color: var(--mi-text, #e7edf7);
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 0;
+}
+
+.ai-help-disclosure {
+    border: 1px solid var(--mi-border, #243149);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.ai-help-disclosure__toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 0;
+    background: var(--mi-surface-raised, #111a29);
+    color: var(--mi-text, #e7edf7);
+    cursor: pointer;
+    font: 600 12px/1.2 var(--mi-font-ui, sans-serif);
+    text-align: left;
+}
+
+.ai-help-disclosure__toggle:hover,
+.ai-help-disclosure__toggle:focus-visible {
+    color: var(--mi-accent, #57b8ff);
+}
+
+.ai-help-disclosure__content {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--mi-border, #243149);
+}
+
+.ai-help-disclosure__content p {
+    color: var(--mi-text-muted, #9badc6);
+    font-size: 12px;
+    line-height: 1.7;
+    margin: 10px 0 0;
+}
+
+/* Contextual "?" beside a heading reused by Supervisor sections */
+.supervisor-heading-help {
+    display: inline-flex;
+    min-width: 22px;
+    min-height: 22px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid var(--mi-border, #243149);
+    border-radius: 5px;
+    background: var(--mi-surface-raised, #111a29);
+    color: var(--mi-accent, #57b8ff);
+    cursor: pointer;
+    font: 700 11px/1 var(--mi-font-mono, "JetBrains Mono", Consolas, monospace);
+}
+
+.supervisor-heading-help:hover,
+.supervisor-heading-help:focus-visible {
+    border-color: color-mix(in srgb, var(--mi-accent, #57b8ff) 45%, transparent);
+    color: var(--mi-text, #e7edf7);
+}
+
+.supervisor-heading-help--label {
+    font-family: var(--mi-font-ui, sans-serif);
+    font-weight: 600;
+    padding: 0 8px;
+}
+
+/* ------------------------------------------------------------------
+   Responsive: near-full-width drawer on narrow screens
+------------------------------------------------------------------ */
+
+@media (max-width: 600px) {
+    .ai-help-drawer {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .ai-help-launcher {
+        font-size: 10px;
+        padding: 0 8px;
+    }
+}

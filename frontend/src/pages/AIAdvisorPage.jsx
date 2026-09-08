@@ -5,11 +5,22 @@ import AdvisorConversationHistory from "../components/ai-advisor/AdvisorConversa
 import AdvisorDisclosure from "../components/ai-advisor/AdvisorDisclosure";
 import AdvisorRuntimeStatus from "../components/ai-advisor/AdvisorRuntimeStatus";
 import OperatorLogin from "../components/auth/OperatorLogin";
+import {
+    AdvisorGuide,
+    AiHelpDrawer,
+    AiHelpLauncher,
+    WhichAiGuide,
+} from "../components/help/AiHelp";
 import useAdvisorRuntime from "../features/ai-advisor/runtime/useAdvisorRuntime";
 
 export default function AIAdvisorPage() {
     const runtime = useAdvisorRuntime();
     const [archivedExchanges, setArchivedExchanges] = useState([]);
+    const [helpDrawer, setHelpDrawer] = useState(null);
+
+    const closeHelp = () => setHelpDrawer(null);
+    const openWhichAi = () => setHelpDrawer("which-ai");
+    const openAdvisorGuide = () => setHelpDrawer("advisor-guide");
 
     const runtimeLabel = runtime.connectionState === "CONNECTED"
         ? "Connected"
@@ -38,6 +49,23 @@ export default function AIAdvisorPage() {
 
     return (
         <main className="ai-advisor-page">
+            <div className="ai-help-dock">
+                <AiHelpLauncher
+                    side="left"
+                    label="どのAIに聞く？"
+                    expanded={helpDrawer === "which-ai"}
+                    controls="ai-advisor-which-ai-drawer"
+                    onToggle={helpDrawer === "which-ai" ? closeHelp : openWhichAi}
+                />
+                <AiHelpLauncher
+                    side="right"
+                    label="AI Advisor ガイド"
+                    expanded={helpDrawer === "advisor-guide"}
+                    controls="ai-advisor-guide-drawer"
+                    onToggle={helpDrawer === "advisor-guide" ? closeHelp : openAdvisorGuide}
+                />
+            </div>
+
             <header className="ai-advisor-page__header">
                 <div className="ai-advisor-page__brand">
                     <span className="ai-advisor-page__title">AI Advisor（AIアドバイザー）</span>
@@ -133,6 +161,26 @@ export default function AIAdvisorPage() {
                     </div>
                 </AdvisorDisclosure>
             </section>
+
+            <AiHelpDrawer
+                id="ai-advisor-which-ai-drawer"
+                side="left"
+                open={helpDrawer === "which-ai"}
+                title="どのAIに聞く？"
+                onClose={closeHelp}
+            >
+                <WhichAiGuide />
+            </AiHelpDrawer>
+
+            <AiHelpDrawer
+                id="ai-advisor-guide-drawer"
+                side="right"
+                open={helpDrawer === "advisor-guide"}
+                title="AI Advisor ガイド"
+                onClose={closeHelp}
+            >
+                <AdvisorGuide />
+            </AiHelpDrawer>
         </main>
     );
 }

@@ -21,7 +21,7 @@ function deriveMMState(snapshot) {
     return "UNKNOWN";
 }
 
-export default function MMSupervisorSection() {
+export default function MMSupervisorSection({ onRequestSupervisorHelp }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [state, setState] = useState("UNKNOWN");
     const contentId = "mm-supervisor-content";
@@ -45,7 +45,19 @@ export default function MMSupervisorSection() {
             <div className="mm-supervisor__summary">
                 <div>
                     <p className="supervisor-page__section-kicker">SPECIALIST SUPERVISOR</p>
-                    <h2 id="mm-supervisor-heading">MM SUPERVISOR</h2>
+                    <div className="supervisor-page__section-heading-text">
+                        <h2 id="mm-supervisor-heading">MM SUPERVISOR</h2>
+                        {typeof onRequestSupervisorHelp === "function" && (
+                            <button
+                                type="button"
+                                className="supervisor-heading-help"
+                                aria-label="MM Supervisor ヘルプを開く"
+                                onClick={() => onRequestSupervisorHelp("mm")}
+                            >
+                                ?
+                            </button>
+                        )}
+                    </div>
                     <p className="mm-supervisor__state">State: <strong>{state}</strong></p>
                 </div>
                 <button
