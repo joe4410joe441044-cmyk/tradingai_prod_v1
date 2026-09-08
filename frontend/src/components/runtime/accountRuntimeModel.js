@@ -279,6 +279,12 @@ export const deriveAccountRuntime = (props) => {
     const paperPnl = paperAvailable
         ? paperAccount.totalPnl ?? pnl
         : null;
+    const paperUnrealizedPnl = paperAvailable
+        ? paperAccount.unrealizedPnl
+        : null;
+    const paperRealizedPnl = paperAvailable
+        ? paperAccount.realizedPnl
+        : null;
 
     const selectedExchange = String(exchange ?? "").trim().toUpperCase();
     const realExchange = String(realAccount.exchange ?? "").trim().toUpperCase();
@@ -434,6 +440,8 @@ export const deriveAccountRuntime = (props) => {
         paperAvailableBalance,
         paperPosition,
         paperPnl,
+        paperUnrealizedPnl,
+        paperRealizedPnl,
         selectedExchange,
         realExchange,
         realExchangeMatches,

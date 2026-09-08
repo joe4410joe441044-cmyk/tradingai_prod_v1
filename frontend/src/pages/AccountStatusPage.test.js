@@ -100,6 +100,8 @@ const PAPER_BOT_STATUS = {
             availableBalance: 980,
             positions: [],
             totalPnl: 0,
+            realizedPnl: 0,
+            unrealizedPnl: 0,
             source: "PAPER_SIMULATION",
             positionState: "FLAT",
             available: true,
@@ -337,6 +339,9 @@ test("Paper metrics and Set Paper Capital control render", async () => {
     assert.equal(readTestIdValue(nodes, "paper-equity"), "1,000.00");
     assert.equal(readTestIdValue(nodes, "paper-source"), "PAPER_SIMULATION");
     assert.ok(findByTestId(nodes, "set-paper-capital"), "Set Paper Capital control present");
+    // PAPER PnL is split into authoritative UNREALIZED and REALIZED components.
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "0.00");
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "0.00");
 });
 
 test("Account Status renders only the DETAILS toggle and no operation buttons", async () => {
@@ -616,4 +621,156 @@ test("Account Status preserves canonical status values alongside bilingual label
         assert.equal(allText.includes(value), true, `missing canonical value: ${value}`);
     });
     assert.equal(allText.includes("LIVE READY"), false);
+});
+
+/* =================================================
+   PAPER PNL SPLIT — authoritative UNREALIZED vs REALIZED
+   -------------------------------------------------
+   The PAPER runtime already tracks realizedPnl and
+   unrealizedPnl separately (accounting identity
+   total = realized + unrealized). Account Status must
+   expose each authoritative value without inventing
+   zeros for missing fields.
+================================================= */
+
+const paperStatusWith = (paperAccount) => ({
+    ...PAPER_BOT_STATUS,
+    accountRuntime: {
+        ...PAPER_BOT_STATUS.accountRuntime,
+        paperAccount: {
+            ...PAPER_BOT_STATUS.accountRuntime.paperAccount,
+            ...paperAccount,
+        },
+    },
+});
+
+test("A. PAPER FLAT surfaces authoritative zero UNREALIZED and authoritative REALIZED", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: 5.5,
+            realizedPnl: 5.5,
+            unrealizedPnl: 0,
+            positions: [],
+            positionState: "FLAT",
+        }),
+    }));
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "0.00");
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "+5.50");
+    assert.equal(readTestIdValue(nodes, "paper-position"), "FLAT");
+});
+
+test("B. PAPER OPEN surfaces nonzero authoritative UNREALIZED", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: 12.5,
+            realizedPnl: 3,
+            unrealizedPnl: 9.5,
+            positions: [{ symbol: "BTCUSDT", side: "long", qty: 1 }],
+            positionState: "OPEN",
+        }),
+    }));
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "+9.50");
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "+3.00");
+});
+
+test("C. CLOSED PAPER TRADE surfaces nonzero authoritative REALIZED", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: 42.25,
+            realizedPnl: 42.25,
+            unrealizedPnl: 0,
+            positions: [],
+            positionState: "FLAT",
+        }),
+    }));
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "+42.25");
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "0.00");
+});
+
+test("D. NEGATIVE REALIZED and UNREALIZED render correctly", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: -10.75,
+            realizedPnl: -2.5,
+            unrealizedPnl: -8.25,
+            positions: [{ symbol: "BTCUSDT", side: "short", qty: 1 }],
+            positionState: "OPEN",
+        }),
+    }));
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "-8.25");
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "-2.50");
+});
+
+test("E. authoritative paper zero PnL remains 0.00", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: 0,
+            realizedPnl: 0,
+            unrealizedPnl: 0,
+            positions: [],
+            positionState: "FLAT",
+        }),
+    }));
+    assert.equal(readTestIdValue(nodes, "paper-unrealized-pnl"), "0.00");
+    assert.equal(readTestIdValue(nodes, "paper-realized-pnl"), "0.00");
+});
+
+test("F. missing paper UNREALIZED / REALIZED never becomes a fake zero", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({
+        botStatus: paperStatusWith({
+            totalPnl: 0,
+            realizedPnl: undefined,
+            unrealizedPnl: undefined,
+        }),
+    }));
+    const unrealized = readTestIdValue(nodes, "paper-unrealized-pnl");
+    const realized = readTestIdValue(nodes, "paper-realized-pnl");
+    assert.notEqual(unrealized, "0.00", "missing unrealized must not become 0.00");
+    assert.notEqual(realized, "0.00", "missing realized must not become 0.00");
+    assert.notEqual(unrealized, "+0.00", "missing unrealized must not become +0.00");
+    assert.notEqual(realized, "+0.00", "missing realized must not become +0.00");
+    // existing paper fail-closed equivalent, never a fabricated figure
+    assert.equal(unrealized, "NOT FETCHED");
+    assert.equal(realized, "NOT FETCHED");
+});
+
+test("G. LIVE 9-field financial grid remains present as a regression safeguard", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));
+    [
+        "equity", "availableBalance", "walletBalance", "unrealizedPnl",
+        "realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio",
+    ].forEach((key) => {
+        assert.ok(findByTestId(nodes, `financial-${key}`), `LIVE regression: financial ${key}`);
+    });
+    const cards = nodes.filter((node) => (
+        typeof node === "object"
+        && node.props?.["data-testid"]?.startsWith("financial-")
+        && /^financial-(equity|availableBalance|walletBalance|unrealizedPnl|realizedPnlToday|totalPnlToday|marginUsed|marginAvailable|marginRatio)$/.test(node.props["data-testid"])
+    ));
+    assert.equal(cards.length, 9, "LIVE financial grid has exactly 9 slots");
+});
+
+test("H. existing PAPER fields remain present alongside the split PnL", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
+    [
+        "paper-balance",
+        "paper-equity",
+        "paper-available",
+        "paper-position",
+        "paper-source",
+    ].forEach((id) => {
+        assert.ok(findByTestId(nodes, id), `existing paper field present: ${id}`);
+    });
+    assert.ok(findByTestId(nodes, "paper-unrealized-pnl"), "paper unrealized present");
+    assert.ok(findByTestId(nodes, "paper-realized-pnl"), "paper realized present");
+    assert.equal(findByTestId(nodes, "paper-pnl"), undefined, "generic paper PnL replaced");
+    assert.ok(findByTestId(nodes, "set-paper-capital"), "Set Paper Capital present");
 });

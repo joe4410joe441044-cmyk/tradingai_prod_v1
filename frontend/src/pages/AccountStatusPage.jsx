@@ -218,7 +218,8 @@ export function AccountStatusView({
         paperEquity,
         paperAvailableBalance,
         paperPosition,
-        paperPnl,
+        paperUnrealizedPnl,
+        paperRealizedPnl,
         paperAccount,
         realAvailableRaw,
         realPositionSummary,
@@ -571,11 +572,19 @@ export function AccountStatusView({
                         tone="paper"
                     />
                     <StatusMetric
-                        label="PnL（模擬損益）"
-                        value={displayRuntimeValue(paperPnl, {
+                        label="Unrealized PnL（含み損益）"
+                        value={displayRuntimeValue(paperUnrealizedPnl, {
                             formatter: formatPnl,
                         })}
-                        testId="paper-pnl"
+                        testId="paper-unrealized-pnl"
+                        tone="paper"
+                    />
+                    <StatusMetric
+                        label="Realized PnL（確定損益）"
+                        value={displayRuntimeValue(paperRealizedPnl, {
+                            formatter: formatPnl,
+                        })}
+                        testId="paper-realized-pnl"
                         tone="paper"
                     />
                     <StatusMetric
