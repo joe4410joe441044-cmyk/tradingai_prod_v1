@@ -178,6 +178,17 @@ test("Account Status renders Real / Live as primary and Paper / Simulation as se
     assert.match(String(paper.props.className), /as-paper-card/);
 });
 
+test("primary account information is condensed into one summary band without a duplicate badge", async () => {
+    const { AccountStatusView } = await loadModule();
+    const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));
+    const summary = findByTestId(nodes, "real-account-canonical");
+    assert.match(String(summary.props.className), /as-account-summary/);
+    assert.equal(findByTestId(nodes, "real-account-badge"), undefined);
+    assert.equal(readTestIdValue(nodes, "real-position"), "FLAT");
+    assert.equal(readTestIdValue(nodes, "real-read-only-authority"), "READ_ONLY");
+    assert.equal(texts(nodes).filter((value) => value === "READ ONLY").length, 1);
+});
+
 test("Account Status renders real financial grid, icons and connection/auth/permission", async () => {
     const { AccountStatusView } = await loadModule();
     const nodes = walk(AccountStatusView({ botStatus: PAPER_BOT_STATUS }));
@@ -188,8 +199,11 @@ test("Account Status renders real financial grid, icons and connection/auth/perm
         "realizedPnlToday", "totalPnlToday", "marginUsed", "marginAvailable", "marginRatio",
     ];
     metricKeys.forEach((key) => {
-        assert.ok(findByTestId(nodes, `financial-${key}`), `financial ${key} slot renders`);
+        const card = findByTestId(nodes, `financial-${key}`);
+        assert.ok(card, `financial ${key} slot renders`);
         assert.ok(findByTestId(nodes, `financial-icon-${key}`), `financial ${key} icon renders`);
+        assert.match(String(card.props.children[0].props.className), /as-fin-card-identity/);
+        assert.match(String(card.props.children[1].props.className), /as-fin-card-value-cluster/);
     });
     // Unavailable real account never fabricates a zero for authoritative metrics
     assert.equal(findByTestId(nodes, "financial-equity-state").props.children, "UNAVAILABLE");
@@ -563,7 +577,24 @@ test("financial silver frame and READ ONLY authority are preserved", async () =>
     const frame = findByTestId(nodes, "account-financial-status");
     assert.match(String(frame.props.className), /as-financial-frame/);
     assert.ok(findByTestId(nodes, "real-read-only-authority"), "READ ONLY authority badge present");
-    assert.ok(findByTestId(nodes, "real-account-badge"), "real account badge present");
+    assert.equal(findByTestId(nodes, "real-account-badge"), undefined, "duplicate account badge removed");
+});
+
+test("Account Status CSS protects compact summary, horizontal cards and 3/2/1 responsive grid", async () => {
+    const css = await readFile(new URL("../styles/dashboard.css", import.meta.url), "utf8");
+    [
+        ".account-status-page .as-account-summary",
+        "grid-template-columns: minmax(190px, 1fr) minmax(250px, 1.45fr) auto auto",
+        "justify-content: space-between",
+        "font-size: clamp(23px, 1.7vw, 28px)",
+        "font-size: 14px",
+        "font-size: 12px",
+        "width: 30px",
+        "border: 5px solid #a7b1bd",
+        "grid-template-columns: repeat(3, minmax(0, 1fr))",
+        "grid-template-columns: repeat(2, minmax(0, 1fr))",
+        "grid-template-columns: 1fr",
+    ].forEach((rule) => assert.equal(css.includes(rule), true, `missing CSS contract: ${rule}`));
 });
 
 test("Account Status preserves canonical status values alongside bilingual labels", async () => {

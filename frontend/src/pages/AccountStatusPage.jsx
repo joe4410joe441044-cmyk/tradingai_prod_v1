@@ -154,34 +154,36 @@ function FinancialMetricCard({ metric }) {
             className={`as-fin-card as-fin-card--${metric.tone}`}
             data-testid={`financial-${metric.key}`}
         >
-            <div className="as-fin-card-head">
+            <div className="as-fin-card-head as-fin-card-identity">
                 <FinancialIcon icon={metric.icon} tone={metric.tone} />
                 <div className="as-fin-card-title">
                     <span className="as-fin-card-label">{metric.label}</span>
                     <span className="as-fin-card-jp">{metric.jpLabel}</span>
                 </div>
             </div>
-            <div className="as-fin-card-value">
-                <span
-                    className="as-fin-card-number"
-                    data-testid={`financial-${metric.key}-value`}
-                >
-                    {metric.value ?? "—"}
-                </span>
-                {metric.unit && (
-                    <span className="as-fin-card-unit" data-testid={`financial-${metric.key}-unit`}>
-                        {metric.unit}
+            <div className="as-fin-card-value-cluster">
+                <div className="as-fin-card-value">
+                    <span
+                        className="as-fin-card-number"
+                        data-testid={`financial-${metric.key}-value`}
+                    >
+                        {metric.value ?? "—"}
+                    </span>
+                    {metric.unit && (
+                        <span className="as-fin-card-unit" data-testid={`financial-${metric.key}-unit`}>
+                            {metric.unit}
+                        </span>
+                    )}
+                </div>
+                {metric.state && (
+                    <span
+                        className={`as-fin-card-state ${stateClass}`}
+                        data-testid={`financial-${metric.key}-state`}
+                    >
+                        {metric.state}
                     </span>
                 )}
             </div>
-            {metric.state && (
-                <span
-                    className={`as-fin-card-state ${stateClass}`}
-                    data-testid={`financial-${metric.key}-state`}
-                >
-                    {metric.state}
-                </span>
-            )}
         </div>
     );
 }
@@ -270,44 +272,28 @@ export function AccountStatusView({
                LEVEL 1: REAL / LIVE ACCOUNT (PRIMARY)
             ================================================= */}
             <article className="semantic-card as-primary-card clear" data-testid="real-account-section">
-                <header className="semantic-card-header">
-                    <div>
+                <header
+                    className="as-account-summary"
+                    data-testid="real-account-canonical"
+                >
+                    <div className="as-account-summary-identity">
                         <span className="semantic-card-kicker">Production Account（本番口座）</span>
                         <h2>Real / Live Account（実口座）</h2>
                     </div>
-                    <span
-                        className={`semantic-badge semantic-badge-${
-                            realLoading
-                                ? "refreshing"
-                                : realStale
-                                    ? "stale"
-                                    : realConnected
-                                        ? "connected"
-                                        : "not-connected"
-                        }`}
-                        data-testid="real-account-badge"
+                    <p
+                        className="as-account-summary-context"
+                        data-testid="real-account-paper-context"
                     >
-                        {paperMode ? "READ ONLY" : realSyncStatus}
-                    </span>
-                </header>
-
-                {paperMode && (
-                    <p className="semantic-card-context" data-testid="real-account-paper-context">
                         {displayCurrentContext(liveContext.currentContext)}
                     </p>
-                )}
-
-                <div className="as-canonical-strip" data-testid="real-account-canonical">
-                    <StatusMetric
-                        label="Position（ポジション）"
-                        value={realPositionValue}
-                        testId="real-position"
-                        tone="real"
-                    />
-                    <span className="semantic-badge semantic-badge-connected" data-testid="real-read-only-authority">
+                    <div className="as-account-summary-position">
+                        <span>POSITION（ポジション）</span>
+                        <strong data-testid="real-position">{realPositionValue}</strong>
+                    </div>
+                    <span className="as-account-summary-authority" data-testid="real-read-only-authority">
                         {displayValue(resolvedPermission)}
                     </span>
-                </div>
+                </header>
 
                 {/*
                    ACCOUNT FINANCIAL STATUS — 5px SILVER raised metallic frame.
