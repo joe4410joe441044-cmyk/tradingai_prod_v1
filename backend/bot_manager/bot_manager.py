@@ -3684,6 +3684,12 @@ class BotManager:
                                     micro_state,
                                     active_symbol=self.activeSymbol,
                                     runtime_id=runtime_id,
+                                    exchange=self.exchange_name,
+                                    market_type=data.get("market_type") or self.market_type,
+                                    exchange_symbol=(
+                                        data.get("exchange_symbol")
+                                        or self.orderbook_symbol
+                                    ),
                                 )
                             )
 
@@ -9998,7 +10004,7 @@ class BotManager:
             self.engine,
             active_symbol=self.activeSymbol,
             context_key=marker_context_key,
-            runtime_instance_id=self.runtime_instance_id,
+            runtime_instance_id=self.active_runtime_id,
         )
         market_payload["markerStatus"] = (
             "READY" if paper_marker_authority_available(self.engine)

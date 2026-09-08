@@ -12,10 +12,20 @@ from backend.money_management.loss_execution_integration import (
     LossExecutionAdmissionReason,
     LossExecutionAdmissionResult,
 )
+from backend.market.paper_execution_markers import build_paper_execution_markers
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.routers import positions
 from backend.runtime.ExecutionRuntime import ExecutionRuntime
 from backend.runtime.governance_runtime import governance_state
+
+
+RUNTIME_CONTEXT = {
+    "symbol": "BTCUSDT",
+    "runtimeId": "feed-runtime-1",
+    "runtimeInstanceId": "feed-runtime-1",
+    "exchangeSymbol": "BTCUSDTM",
+    "contextKey": "KUCOIN:FUTURES:BTCUSDTM",
+}
 
 
 class PriceManager:
@@ -76,6 +86,7 @@ def test_paper_buy_runtime_order_fill_close_account_history_and_dashboard():
         "edge": 0.9,
         "confidence": 0.9,
         "risk": 0.1,
+        "runtimeSymbolContext": RUNTIME_CONTEXT,
     }
     previous = dict(governance_state)
     try:
@@ -91,6 +102,7 @@ def test_paper_buy_runtime_order_fill_close_account_history_and_dashboard():
                     "reason": None,
                     "direction": "BUY",
                 },
+                runtime_symbol_context=RUNTIME_CONTEXT,
             )
     finally:
         governance_state.clear()
@@ -102,6 +114,9 @@ def test_paper_buy_runtime_order_fill_close_account_history_and_dashboard():
     assert len(engine.paper_fills) == 1
     assert engine.paper_orders[0]["status"] == "FILLED"
     assert engine.paper_fills[0]["orderId"] == engine.paper_orders[0]["orderId"]
+    assert engine.paper_fills[0]["fillType"] == "ENTRY"
+    assert engine.paper_fills[0]["contextKey"] == RUNTIME_CONTEXT["contextKey"]
+    assert engine.paper_fills[0]["runtimeInstanceId"] == RUNTIME_CONTEXT["runtimeInstanceId"]
     assert engine.actual_position["side"] == "BUY"
     assert "BTCUSDT" in portfolio.positions
 
@@ -119,6 +134,21 @@ def test_paper_buy_runtime_order_fill_close_account_history_and_dashboard():
     assert len(engine.trade_history) == 1
     assert engine.trade_history[0]["pnl"] == 2.0
     assert engine.trade_history[0]["reason"] == "TP"
+    assert len(engine.paper_fills) == 2
+    close_fill = engine.paper_fills[1]
+    assert close_fill["fillType"] == "CLOSE"
+    assert close_fill["tradeId"] == engine.trade_history[0]["tradeId"]
+    assert close_fill["contextKey"] == RUNTIME_CONTEXT["contextKey"]
+    assert close_fill["runtimeInstanceId"] == RUNTIME_CONTEXT["runtimeInstanceId"]
+    assert engine.trade_history[0]["contextKey"] == RUNTIME_CONTEXT["contextKey"]
+    assert engine.trade_history[0]["runtimeInstanceId"] == RUNTIME_CONTEXT["runtimeInstanceId"]
+    markers = build_paper_execution_markers(
+        engine,
+        active_symbol="BTCUSDT",
+        context_key=RUNTIME_CONTEXT["contextKey"],
+        runtime_instance_id=RUNTIME_CONTEXT["runtimeInstanceId"],
+    )
+    assert [marker["type"] for marker in markers] == ["EXIT", "ENTRY"]
 
     # The same account values consumed by Dashboard and Money Management are
     # updated after the close; realized PnL is not double-counted in equity.
@@ -188,3 +218,17 @@ def test_trade_history_endpoint_never_reads_live_history():
         assert positions.get_history() == []
     finally:
         positions.set_engine(None)
+
+
+def test_requested_close_without_position_emits_no_close_fill_history_or_marker():
+    engine, _, _ = paper_engine()
+    engine.close_position(101.0, "NATURAL_EXIT_INTENT")
+
+    assert engine.paper_fills == []
+    assert engine.trade_history == []
+    assert build_paper_execution_markers(
+        engine,
+        active_symbol="BTCUSDT",
+        context_key=RUNTIME_CONTEXT["contextKey"],
+        runtime_instance_id=RUNTIME_CONTEXT["runtimeInstanceId"],
+    ) == []

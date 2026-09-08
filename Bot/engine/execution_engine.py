@@ -2148,6 +2148,16 @@ class ExecutionEngine:
                     f"paper-{self.engine_id}-{signal.get('id') or int(time.time() * 1000)}"
                 )
                 filled_at = time.time()
+                runtime_context = signal.get("runtimeSymbolContext")
+                if not isinstance(runtime_context, dict):
+                    runtime_context = {}
+                source_identity = {
+                    key: runtime_context.get(key)
+                    for key in (
+                        "contextKey", "runtimeInstanceId", "runtimeId", "exchangeSymbol",
+                    )
+                    if runtime_context.get(key) is not None
+                }
                 self.paper_orders.append({
                     "orderId": paper_order_id,
                     "mode": "paper",
@@ -2159,6 +2169,7 @@ class ExecutionEngine:
                     "signalId": signal.get("id"),
                     "traceId": signal.get("traceId"),
                     "createdAt": filled_at,
+                    **source_identity,
                 })
                 self.paper_fills.append({
                     "fillId": f"{paper_order_id}-fill-1",
@@ -2170,6 +2181,9 @@ class ExecutionEngine:
                     "qty": qty,
                     "price": price,
                     "filledAt": filled_at,
+                    "fillType": "ENTRY",
+                    "tradeId": paper_order_id,
+                    **source_identity,
                 })
 
                 rules = (
@@ -2415,6 +2429,34 @@ class ExecutionEngine:
                 "closedAt": closed_at,
                 "balanceAfter": self.balance,
             }
+            runtime_context = position_before.get("runtimeSymbolContext")
+            if not isinstance(runtime_context, dict):
+                runtime_context = {}
+            source_identity = {
+                key: runtime_context.get(key)
+                for key in (
+                    "contextKey", "runtimeInstanceId", "runtimeId", "exchangeSymbol",
+                )
+                if runtime_context.get(key) is not None
+            }
+            history_record.update(source_identity)
+            trade_id = history_record["tradeId"]
+            self.paper_fills.append({
+                "fillId": f"{trade_id}-close-fill-1",
+                "orderId": position_before.get("order_id"),
+                "tradeId": trade_id,
+                "traceId": position_before.get("trace_id"),
+                "mode": "paper",
+                "fillType": "CLOSE",
+                "symbol": self.symbol,
+                "side": "BUY" if self._is_short(side) else "SELL",
+                "positionSide": side,
+                "qty": coin_qty,
+                "price": price,
+                "filledAt": closed_at,
+                "reason": reason,
+                **source_identity,
+            })
             self.trade_history.append(history_record)
             # Trace recording is intentionally best-effort and cannot affect P&L.
             trace_id = position_before.get("trace_id")

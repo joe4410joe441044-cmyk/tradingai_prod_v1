@@ -10,10 +10,10 @@ CONTEXT = "KUCOIN:FUTURES:XRPUSDTM"
 RUNTIME = "runtime-current"
 
 
-def markers(engine, symbol="XRPUSDT"):
+def markers(engine, symbol="XRPUSDT", context=CONTEXT, runtime=RUNTIME):
     return build_paper_execution_markers(
-        engine, active_symbol=symbol, context_key=CONTEXT,
-        runtime_instance_id=RUNTIME,
+        engine, active_symbol=symbol, context_key=context,
+        runtime_instance_id=runtime,
     )
 
 
@@ -22,6 +22,7 @@ def fill(**overrides):
         "fillId": "fill-1", "orderId": "order-1", "mode": "paper",
         "symbol": "XRPUSDT", "side": "BUY", "qty": 2.0,
         "price": 0.6123, "filledAt": 100.0,
+        "contextKey": CONTEXT, "runtimeInstanceId": RUNTIME,
     }
     value.update(overrides)
     return value
@@ -32,6 +33,7 @@ def trade(**overrides):
         "tradeId": "trade-1", "mode": "paper", "status": "CLOSED",
         "symbol": "XRPUSDT", "side": "BUY", "qty": 2.0,
         "exitPrice": 0.62, "closedAt": 101.0, "reason": "TP",
+        "contextKey": CONTEXT, "runtimeInstanceId": RUNTIME,
     }
     value.update(overrides)
     return value
@@ -49,17 +51,17 @@ def test_actual_paper_fill_and_closed_trade_map_to_stable_markers():
 
 def test_non_authority_malformed_duplicate_and_foreign_records_are_rejected():
     engine = SimpleNamespace(mode="paper", paper_fills=[
-        fill(), fill(), fill(fillId=None), fill(fillId="btc", symbol="BTCUSDT"),
+        fill(), fill(), fill(fillId=None), fill(fillId="btc", symbol="BTCUSDT", contextKey="KUCOIN:FUTURES:BTCUSDTM"),
         fill(fillId="context", contextKey="KUCOIN:FUTURES:BTCUSDTM"),
         fill(fillId="runtime", runtimeInstanceId="runtime-old"),
     ], trade_history=[
         trade(), trade(), trade(tradeId="open", status="OPEN"),
-        trade(tradeId="bad", exitPrice=None), trade(tradeId="btc", symbol="BTCUSDT"),
+        trade(tradeId="bad", exitPrice=None), trade(tradeId="btc", symbol="BTCUSDT", contextKey="KUCOIN:FUTURES:BTCUSDTM"),
     ])
     assert [item["id"] for item in markers(engine)] == [
         "paper-exit:trade-1", "paper-entry:fill-1",
     ]
-    assert [item["id"] for item in markers(engine, symbol="BTCUSDT")] == [
+    assert [item["id"] for item in markers(engine, symbol="BTCUSDT", context="KUCOIN:FUTURES:BTCUSDTM")] == [
         "paper-exit:btc", "paper-entry:btc",
     ]
 
@@ -80,3 +82,34 @@ def test_ordering_is_deterministic_and_history_is_bounded():
         fill(fillId="z", filledAt=100), fill(fillId="a", filledAt=100),
     ], trade_history=[])
     assert [item["id"] for item in markers(tied)] == ["paper-entry:a", "paper-entry:z"]
+
+
+def test_missing_or_wrong_source_identity_and_close_fills_fail_closed():
+    records = [
+        fill(fillId="missing-context", contextKey=None),
+        fill(fillId="missing-runtime", runtimeInstanceId=None),
+        fill(fillId="wrong-context", contextKey="KUCOIN:FUTURES:BTCUSDTM"),
+        fill(fillId="wrong-runtime", runtimeInstanceId="runtime-old"),
+        fill(fillId="close", fillType="CLOSE"),
+        fill(fillId="valid"),
+    ]
+    history = [
+        trade(tradeId="missing-context", contextKey=None),
+        trade(tradeId="missing-runtime", runtimeInstanceId=None),
+        trade(tradeId="wrong-context", contextKey="KUCOIN:FUTURES:BTCUSDTM"),
+        trade(tradeId="wrong-runtime", runtimeInstanceId="runtime-old"),
+        trade(tradeId="valid"),
+    ]
+    engine = SimpleNamespace(mode="paper", paper_fills=records, trade_history=history)
+    assert {item["id"] for item in markers(engine)} == {
+        "paper-entry:valid", "paper-exit:valid",
+    }
+
+
+def test_return_to_same_symbol_does_not_reactivate_old_runtime_markers():
+    engine = SimpleNamespace(
+        mode="paper",
+        paper_fills=[fill(fillId="a1", runtimeInstanceId="runtime-a1")],
+        trade_history=[trade(tradeId="a1", runtimeInstanceId="runtime-a1")],
+    )
+    assert markers(engine, runtime="runtime-a2") == []

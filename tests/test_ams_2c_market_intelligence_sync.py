@@ -22,6 +22,22 @@ def test_runtime_symbol_context_is_derived_and_rejects_old_identity():
     assert not symbol_context_matches(context, "BTCUSDT", "runtime-old")
 
 
+def test_runtime_symbol_context_carries_feed_instance_and_market_identity():
+    context = build_runtime_symbol_context(
+        "ethusdt", "feed-runtime-2", evaluated_at=NOW,
+        exchange="kucoin", market_type="futures", exchange_symbol="ETHUSDTM",
+        runtime_instance_id="feed-runtime-2",
+    )
+    assert context.to_dict() == {
+        "symbol": "ETHUSDT",
+        "runtimeId": "feed-runtime-2",
+        "runtimeInstanceId": "feed-runtime-2",
+        "exchangeSymbol": "ETHUSDTM",
+        "contextKey": "KUCOIN:FUTURES:ETHUSDTM",
+        "evaluatedAt": "2026-08-09T03:00:00Z",
+    }
+
+
 def test_execution_fails_closed_when_strategy_or_governance_symbol_is_stale():
     runtime = ExecutionRuntime()
     runtime.engine = type("Engine", (), {"symbol": "BTCUSDT"})()

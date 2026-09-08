@@ -362,6 +362,15 @@ function connectWebSocket() {
 
         const formalMarket = message?.market;
         if (formalMarket && typeof formalMarket === "object" && !Array.isArray(formalMarket)) {
+            // Formal packets are the authoritative BotManager status envelope.
+            // Keep the legacy flat-packet path below, but do not leave
+            // consumers pinned to the pre-start status after an AUTO switch.
+            if ("status" in message) {
+                updateRuntimeTelemetry({
+                    botStatus: message,
+                    botStatusLastUpdate: lastPacketTimestamp,
+                });
+            }
             updateMarketTelemetry({
                 exchange: formalMarket.exchange,
                 marketType: formalMarket.marketType,

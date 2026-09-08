@@ -51,9 +51,7 @@ def _identity_matches(record: Mapping[str, Any], context_key: str,
                       runtime_instance_id: str) -> bool:
     record_context = _text(record.get("contextKey"))
     record_runtime = _text(record.get("runtimeInstanceId"))
-    return (record_context is None or record_context == context_key) and (
-        record_runtime is None or record_runtime == runtime_instance_id
-    )
+    return record_context == context_key and record_runtime == runtime_instance_id
 
 
 def _base_marker(*, marker_id: str, marker_type: str, timestamp: str,
@@ -90,6 +88,8 @@ def build_paper_execution_markers(engine: Any, *, active_symbol: Any,
     if isinstance(fills, list):
         for record in fills:
             if not isinstance(record, Mapping) or str(record.get("mode", "")).upper() != "PAPER":
+                continue
+            if str(record.get("fillType") or "ENTRY").upper() != "ENTRY":
                 continue
             fill_id = _text(record.get("fillId")); stamp = _timestamp(record.get("filledAt"))
             price = _positive_number(record.get("price")); quantity = _positive_number(record.get("qty"))

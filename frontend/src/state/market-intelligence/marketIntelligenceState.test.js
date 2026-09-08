@@ -502,6 +502,103 @@ test("Provider uses backend activeSymbol for LIVE and keeps requested symbol sep
     delete globalThis.__RUNTIME_MARKET_TELEMETRY__;
 });
 
+
+
+test("formal WebSocket AUTO switch updates provider and rejects late old-market data", async () => {
+    class ProviderWebSocket {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static instances = [];
+
+        constructor() {
+            this.readyState = ProviderWebSocket.CONNECTING;
+            ProviderWebSocket.instances.push(this);
+        }
+
+        close() {
+            this.readyState = 3;
+            queueMicrotask(() => this.onclose?.({ currentTarget: this }));
+        }
+
+        send() {}
+    }
+
+    globalThis.window = { location: { protocol: "http:", host: "localhost" } };
+    globalThis.WebSocket = ProviderWebSocket;
+    const websocketRuntime = await import(
+        `../../runtime/websocketRuntime.js?provider=${Date.now()}`
+    );
+    const telemetry = await import("../../store/telemetryStore.js");
+    const { MarketIntelligenceProvider, useMarketIntelligence } = await getProviderModule();
+    globalThis.__DASHBOARD_MARKET_CONTEXT__ = {
+        marketContext: {
+            exchange: "KUCOIN", marketType: "FUTURES", exchangeSymbol: "BTCUSDTM",
+            normalizedSymbol: "BTCUSDT", displaySymbol: "BTCUSDT",
+            contextKey: "KUCOIN:FUTURES:BTCUSDTM",
+        },
+    };
+
+    const market = (symbol, sequence) => ({
+        exchange: "KUCOIN", marketType: "FUTURES", exchangeSymbol: `${symbol}M`,
+        timestamp: Date.now(), sequence, price: symbol === "ETHUSDT" ? 200 : 100,
+        bestBid: 199, bestAsk: 201, tradeStreamReady: true, markerStatus: "READY",
+        dataQuality: "VALID",
+        orderBook: {
+            timestamp: Date.now(), sequence, depth: 1,
+            bids: [{ price: 199, size: 1 }], asks: [{ price: 201, size: 1 }],
+            dataQuality: "VALID", syncState: "SYNCED",
+        },
+        recentTrades: [{
+            id: `trade-${sequence}`, timestamp: Date.now(), sequence,
+            price: 200, quantity: 1, side: "BUY", exchangeSymbol: `${symbol}M`,
+            contextKey: `KUCOIN:FUTURES:${symbol}M`,
+        }],
+        markers: [{
+            id: `marker-${sequence}`, type: "ENTRY", timestamp: new Date().toISOString(),
+            sequence, price: 200, quantity: 1, side: "BUY",
+            contextKey: `KUCOIN:FUTURES:${symbol}M`,
+        }],
+    });
+    const packet = (marketPayload) => ({
+        status: "RUNNING", activeSymbol: "ETHUSDT", symbol: "ETHUSDT",
+        selectionMode: "AUTO", exchange: "kucoin", orderbookSymbol: "ETHUSDTM",
+        autoMarketSelection: { activeSymbol: "ETHUSDT", lifecycle: "READY" },
+        market: marketPayload,
+    });
+
+    websocketRuntime.startWebSocketRuntime();
+    const socket = ProviderWebSocket.instances.at(-1);
+    socket.readyState = ProviderWebSocket.OPEN;
+    socket.onopen();
+    socket.onmessage({ data: JSON.stringify(packet(market("ETHUSDT", 2))) });
+    globalThis.__RUNTIME_MARKET_TELEMETRY__ = {
+        market: telemetry.getMarketTelemetrySnapshot(),
+        runtime: telemetry.getRuntimeTelemetrySnapshot(),
+    };
+    const Consumer = () => useMarketIntelligence();
+    const renderer = createProviderRenderer(MarketIntelligenceProvider, Consumer);
+    assert.equal(renderer.result.marketContext.displaySymbol, "ETHUSDT");
+    assert.equal(renderer.result.marketContext.contextKey, "KUCOIN:FUTURES:ETHUSDTM");
+    assert.equal(renderer.result.normalizedMarketModel.orderBook.bids.length, 1);
+    assert.equal(renderer.result.normalizedMarketModel.recentTrades.length, 1);
+    assert.equal(renderer.result.normalizedMarketModel.markers.length, 1);
+
+    socket.onmessage({ data: JSON.stringify(packet(market("BTCUSDT", 99))) });
+    globalThis.__RUNTIME_MARKET_TELEMETRY__ = {
+        market: telemetry.getMarketTelemetrySnapshot(),
+        runtime: telemetry.getRuntimeTelemetrySnapshot(),
+    };
+    renderer.render();
+    assert.equal(renderer.result.marketContext.displaySymbol, "ETHUSDT");
+    assert.equal(renderer.result.normalizedMarketModel.status, "WAITING");
+    assert.equal(renderer.result.normalizedMarketModel.orderBook.bids.length, 0);
+    assert.equal(renderer.result.normalizedMarketModel.recentTrades.length, 0);
+    assert.equal(renderer.result.normalizedMarketModel.markers.length, 0);
+
+    websocketRuntime.stopWebSocketRuntime();
+    delete globalThis.__DASHBOARD_MARKET_CONTEXT__;
+    delete globalThis.__RUNTIME_MARKET_TELEMETRY__;
+});
 test("useMarketIntelligence rejects consumers outside the Provider", async () => {
     const { useMarketIntelligence } = await getProviderModule();
     const renderer = createProviderRenderer(
