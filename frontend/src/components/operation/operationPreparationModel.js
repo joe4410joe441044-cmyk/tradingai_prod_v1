@@ -108,6 +108,24 @@ export const pendingOrderAuthorityValue = (status) => {
         : null;
 };
 
+// Effective authoritative MM configuration. Both the standalone
+// configuration (GET /configuration) and the polled status configuration
+// (mmStatus.configuration from GET /status) are already normalized by the
+// SAME frontend contract (normalizeMoneyManagementConfiguration). This merge
+// prefers the standalone source and falls back to the polled authoritative
+// configuration so Final Preparation never blocks on a missing standalone
+// request that the polled status already satisfies. It never fabricates
+// values and never mutates either source.
+export const resolveEffectiveMmConfiguration = (standalone, polled) => {
+    if (standalone && typeof standalone === "object" && !Array.isArray(standalone)) {
+        return standalone;
+    }
+    if (polled && typeof polled === "object" && !Array.isArray(polled)) {
+        return polled;
+    }
+    return null;
+};
+
 export const savedMmConfigurationReadiness = (configuration) => {
     if (!configuration || typeof configuration !== "object") return "BLOCKED";
 

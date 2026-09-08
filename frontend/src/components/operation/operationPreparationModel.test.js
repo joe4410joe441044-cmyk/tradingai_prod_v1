@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     deriveOperationReadiness,
     pendingOrderAuthorityValue,
+    resolveEffectiveMmConfiguration,
 } from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
@@ -414,4 +415,81 @@ test("CASE 9: RUNNING bot with active execution stays fail-closed (START not mad
         realOrderAllowed: false,
     }));
     assert.equal(idling.executionReadiness, "SAFE");
+});
+
+// =========================
+// FINAL PREPARATION MM CONFIG PROPAGATION (CODEX-7)
+// =========================
+
+const polledConfig = Object.freeze({
+    riskPerTradePercent: "0.50",
+    totalExposurePercent: "20",
+    maximumDrawdownPercent: "5",
+    maximumLeverage: "5",
+    compoundingEnabled: false,
+});
+
+test("TEST A: standalone effective config is preferred for Final Preparation", () => {
+    const standalone = Object.freeze({
+        riskPerTradePercent: "0.50",
+        totalExposurePercent: "20",
+        maximumDrawdownPercent: "5",
+        maximumLeverage: "5",
+        compoundingEnabled: false,
+    });
+    const effective = resolveEffectiveMmConfiguration(standalone, polledConfig);
+    assert.equal(effective, standalone);
+    const result = deriveOperationReadiness(readyInputs({ mmConfiguration: effective }));
+    assert.equal(result.savedMmReadiness, "READY");
+    assert.equal(result.startMmReadiness, "READY");
+    assert.equal(result.leverageReadiness, "READY");
+    assert.equal(result.startReady, true);
+});
+
+test("TEST B: standalone null falls back to polled status configuration (PRIMARY regression)", () => {
+    const effective = resolveEffectiveMmConfiguration(null, polledConfig);
+    assert.equal(effective, polledConfig);
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: effective,
+        maximumLeverage: effective?.maximumLeverage,
+        requestedLeverage: 5,
+    }));
+    assert.equal(result.savedMmReadiness, "READY");
+    assert.equal(result.startMmReadiness, "READY");
+    assert.equal(result.leverageReadiness, "READY");
+    assert.equal(result.startReady, true);
+});
+
+test("TEST C: both config sources unavailable fail closed without a fake READY", () => {
+    const effective = resolveEffectiveMmConfiguration(null, null);
+    assert.equal(effective, null);
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: null,
+        maximumLeverage: undefined,
+    }));
+    assert.equal(result.savedMmReadiness, "BLOCKED");
+    assert.equal(result.startMmReadiness, "BLOCKED");
+    assert.equal(result.leverageReadiness, "BLOCKED");
+    assert.equal(result.startReady, false);
+    assert.equal(result.startReadiness, "BLOCKED");
+});
+
+test("TEST E: requested=5 and limit=5 yields READY leverage authority", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: polledConfig,
+        maximumLeverage: 5,
+        requestedLeverage: 5,
+    }));
+    assert.equal(result.leverageReadiness, "READY");
+    assert.equal(result.startReady, true);
+});
+
+test("TEST F: unavailable limit fails closed in the leverage authority model", () => {
+    const result = deriveOperationReadiness(readyInputs({
+        mmConfiguration: { ...polledConfig, maximumLeverage: undefined },
+        maximumLeverage: undefined,
+        requestedLeverage: 3,
+    }));
+    assert.equal(result.leverageReadiness, "BLOCKED");
+    assert.equal(result.startReady, false);
 });

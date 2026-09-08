@@ -336,7 +336,15 @@ export default function OperationPreparation({
         tradeMode: config.tradeMode,
         paperBootstrapEligible: config.paperBootstrapEligible,
     });
-    const summary = operationPreparationSummary(settings, selectedRuntimeSymbol, mmDraft?.riskPerTradePercent);
+    const summary = operationPreparationSummary(
+        settings,
+        selectedRuntimeSymbol,
+        // WF: the read-only Final Preparation summary must show the
+        // authoritative saved configuration even when the local unsaved MM
+        // draft was never populated. An existing operator draft still takes
+        // precedence for display (and is never overwritten).
+        mmDraft?.riskPerTradePercent ?? mmConfiguration?.riskPerTradePercent,
+    );
     const maximumLeverage = authoritativeLeverage(mmConfiguration?.maximumLeverage);
     const effectiveLeverage = authoritativeLeverage(
         leverageAuthority?.effectiveLeverage,
@@ -350,11 +358,17 @@ export default function OperationPreparation({
     // remains authoritative. Presentation only.
     const leverageRequestBlocked = leverageReadiness === "BLOCKED"
         || leverageAuthority?.allowed === false;
+    // WF: a genuinely unavailable MM leverage limit must never be presented
+    // as "leverage over MM limit". It fails closed but with semantically
+    // correct unavailable wording.
+    const leverageLimitAvailable = maximumLeverage !== "UNAVAILABLE";
     const effectiveLeverageDisplay = leverageRequestBlocked
         ? (
-            leverageReason === "MAXIMUM_LEVERAGE"
-                ? "— · MAXIMUM_LEVERAGE"
-                : "— · leverage over MM limit"
+            !leverageLimitAvailable
+                ? "— · MM leverage limit unavailable"
+                : leverageReason === "MAXIMUM_LEVERAGE"
+                    ? "— · MAXIMUM_LEVERAGE"
+                    : "— · leverage over MM limit"
         )
         : effectiveLeverage === "UNAVAILABLE"
             && leverageReason === "MAXIMUM_LEVERAGE"
@@ -498,8 +512,16 @@ export default function OperationPreparation({
     const runtimeLoopValue = botRunning
         ? (loopState ? String(loopState) : (loopChecked ? "ON" : "OFF"))
         : "STOPPED";
-    const mmExposureDisplay = displayPercent(mmExposureValue);
-    const mmDrawdownDisplay = displayPercent(mmDrawdownValue);
+    // WF: read-only Final Preparation exposure/drawdown fall back to the
+    // authoritative effective configuration when the editable draft is
+    // absent. The editable controls below continue to use the draft only, so
+    // an unsaved operator edit is never silently seeded from authority.
+    const mmExposureDisplay = displayPercent(
+        mmDraft?.totalExposurePercent ?? mmConfiguration?.totalExposurePercent,
+    );
+    const mmDrawdownDisplay = displayPercent(
+        mmDraft?.maximumDrawdownPercent ?? mmConfiguration?.maximumDrawdownPercent,
+    );
 
     // START GUARDS: presentation-only aggregate over the authoritative
     // readiness values. Never re-derives or overrides the fail-closed START
@@ -708,13 +730,13 @@ return (
                         </Section>
 
                         <Section number="3" testId="final-prep-money-management" title="MONEY MANAGEMENT">
-                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmAvailable ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmConfiguration ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
                             <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
                             <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
                             <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
-                            <DerivedRow label="MAX EXPOSURE" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} />
-                            <DerivedRow label="MAX DRAWDOWN" source={mmAvailable ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} />
+                            <DerivedRow label="MAX EXPOSURE" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} />
+                            <DerivedRow label="MAX DRAWDOWN" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} />
                             <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
                             <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                             <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />

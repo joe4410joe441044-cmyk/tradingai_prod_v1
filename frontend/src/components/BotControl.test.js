@@ -1362,6 +1362,45 @@ test("START fails closed when saved MM maximumDrawdownPercent is NaN", async () 
     }
 });
 
+test("CODEX-7 Test B: polled status config becomes effective when standalone config is unavailable", async () => {
+    clearMmConfiguration();
+    clearMmDraft();
+    setMmStatus({
+        configuration: {
+            available: true,
+            enabled: true,
+            source: "DEFAULT",
+            revision: 1,
+            riskPerTradePercent: "0.50",
+            totalExposurePercent: "20",
+            maximumDrawdownPercent: "5",
+            maximumLeverage: "5",
+            compoundingEnabled: false,
+        },
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps());
+        const preparation = renderer.componentElements.find((element) => (
+            element.type?.name === "OperationPreparation"
+        ));
+        assert.ok(preparation, "OperationPreparation present");
+        assert.equal(preparation.props.mmConfiguration?.riskPerTradePercent, "0.50");
+        assert.equal(preparation.props.mmConfiguration?.maximumDrawdownPercent, "5");
+        assert.equal(preparation.props.mmConfiguration?.maximumLeverage, "5");
+        assert.equal(preparation.props.mmConfiguration?.compoundingEnabled, false);
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start, "START BOT present");
+        assert.equal(start.props.disabled, false, "START enabled from polled authoritative config");
+        assert.equal(textIncludes(renderer.root, "0.50%"), true);
+        assert.equal(textIncludes(renderer.root, "5x"), true);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        clearMmDraft();
+        clearMmDraftInvalid();
+    }
+});
+
 test("START payload risk_percent, leverage, selection_mode contracts preserved alongside max_drawdown_pct authority", async () => {
     setMmConfiguration({
         riskPerTradePercent: "0.50",

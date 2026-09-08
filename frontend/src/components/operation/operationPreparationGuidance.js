@@ -150,16 +150,27 @@ export const deriveOperationBlockGuidance = ({
         });
     }
     if (!notBlocking(leverageReadiness)) {
+        const rawLimit = mmConfiguration?.maximumLeverage;
+        const parsedLimit = Number(rawLimit);
+        const limitAvailable = Number.isFinite(parsedLimit) && parsedLimit > 0;
         push({
             id: "leverage",
             label: "Leverage Authority（レバレッジ権限）",
             status: leverageReadiness,
             current: `Requested: ${settings.requestedLeverage}x`,
-            required: `MM Limit: ${mmConfiguration?.maximumLeverage ?? "n/a"}x`,
+            required: limitAvailable
+                ? `MM Limit: ${parsedLimit}x`
+                : "MM leverage limit unavailable",
             section: "④ TRADE / EXECUTION",
-            en: "Requested leverage exceeds MM leverage limit.",
-            ja: "要求レバレッジがMM上限を超えています。",
-            fix: "④ TRADE / EXECUTION で Requested Leverage を MM上限以下に変更 / Set Requested Leverage to MM limit or less",
+            en: limitAvailable
+                ? "Requested leverage exceeds MM leverage limit."
+                : "MM leverage limit is unavailable; requested leverage cannot be verified.",
+            ja: limitAvailable
+                ? "要求レバレッジがMM上限を超えています。"
+                : "MMレバレッジ上限が不明なため要求レバレッジを検証できません。",
+            fix: limitAvailable
+                ? "④ TRADE / EXECUTION で Requested Leverage を MM上限以下に変更 / Set Requested Leverage to MM limit or less"
+                : "MM Leverage Limit を取得できるまで待つ / Await a valid MM leverage limit",
         });
     }
 

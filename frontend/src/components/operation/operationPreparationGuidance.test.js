@@ -135,3 +135,39 @@ test("Problem 5/6: EnTRY Permission and Governance never render as START blocker
     assert.equal(guidance.find((item) => item.id === "entryPermission"), undefined);
     assert.equal(guidance.find((item) => item.id === "governance"), undefined);
 });
+
+test("equal requested/limit (5 / 5) does not render leverage over-limit guidance", () => {
+    const guidance = deriveOperationBlockGuidance(readyContext({
+        leverageReadiness: "READY",
+        settings: { ...readySettings, requestedLeverage: 5 },
+        mmConfiguration: { maximumLeverage: "5" },
+    }));
+    assert.equal(guidance.find((item) => item.id === "leverage"), undefined);
+});
+
+test("unavailable MM leverage limit fails closed but never claims over-limit", () => {
+    const guidance = deriveOperationBlockGuidance(readyContext({
+        leverageReadiness: "BLOCKED",
+        mmConfiguration: { maximumLeverage: null },
+        settings: { ...readySettings, requestedLeverage: 3 },
+    }));
+    const leverage = guidance.find((item) => item.id === "leverage");
+    assert.ok(leverage, "leverage guidance present when limit unavailable");
+    assert.equal(leverage.status, "BLOCKED");
+    assert.equal(leverage.required, "MM leverage limit unavailable");
+    assert.equal(leverage.en, "MM leverage limit is unavailable; requested leverage cannot be verified.");
+    assert.equal(leverage.en.includes("exceeds MM leverage limit"), false);
+    assert.equal(leverage.current, "Requested: 3x");
+});
+
+test("missing leverage limit object also fails closed without an over-limit claim", () => {
+    const guidance = deriveOperationBlockGuidance(readyContext({
+        leverageReadiness: "BLOCKED",
+        mmConfiguration: null,
+        settings: { ...readySettings, requestedLeverage: 3 },
+    }));
+    const leverage = guidance.find((item) => item.id === "leverage");
+    assert.ok(leverage, "leverage guidance present when limit missing");
+    assert.equal(leverage.required, "MM leverage limit unavailable");
+    assert.equal(leverage.en.includes("exceeds MM leverage limit"), false);
+});

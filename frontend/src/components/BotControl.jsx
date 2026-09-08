@@ -32,6 +32,7 @@ import OperationPreparation from "./operation/OperationPreparation";
 import {
     createOperationPreparationSettings,
     deriveOperationReadiness,
+    resolveEffectiveMmConfiguration,
 } from "./operation/operationPreparationModel";
 
 const formatLoopError = (
@@ -709,6 +710,15 @@ export default function BotControl({
     );
 
     const startSettings = createOperationPreparationSettings(config);
+    // WF: Final Preparation must stay authoritative even when the one-shot
+    // standalone configuration request has not populated mmConfiguration.
+    // The polled money-management status carries the SAME normalized
+    // configuration (mmStatus.configuration), so it is used as the fallback.
+    // Both sources already share the normalized frontend contract.
+    const effectiveMmConfiguration = resolveEffectiveMmConfiguration(
+        mmConfiguration,
+        mmStatus?.configuration,
+    );
     const effectiveSelectionMode = startSettings.selectionMode;
     const effectiveStartSymbol = effectiveSelectionMode === "AUTO"
         ? config?.displaySymbol
@@ -732,8 +742,8 @@ export default function BotControl({
         recommendedAction,
         riskState,
         requestedLeverage: startSettings.requestedLeverage,
-        maximumLeverage: mmConfiguration?.maximumLeverage,
-        mmConfiguration,
+        maximumLeverage: effectiveMmConfiguration?.maximumLeverage,
+        mmConfiguration: effectiveMmConfiguration,
         mmBlockReasons: mmStatus?.blockReasons || [],
         mmRecoveryRequired: mmStatus?.recoveryRequired || false,
         mmConfigurationError: Boolean(mmConfigurationError),
@@ -742,13 +752,13 @@ export default function BotControl({
         autoTradeOnStart: startSettings.autoTradeOnStart,
     });
     const { startReady } = startReadiness;
-    const startRiskPercent = Number(mmConfiguration?.riskPerTradePercent);
+    const startRiskPercent = Number(effectiveMmConfiguration?.riskPerTradePercent);
     const startRiskAvailable = (
         Number.isFinite(startRiskPercent)
         && startRiskPercent > 0
     );
     const startMaxDrawdownPercent = Number(
-        mmConfiguration?.maximumDrawdownPercent,
+        effectiveMmConfiguration?.maximumDrawdownPercent,
     );
     const startMaxDrawdownAvailable = (
         Number.isFinite(startMaxDrawdownPercent)
@@ -887,7 +897,7 @@ export default function BotControl({
             // payload uses the authoritative saved configuration the user
             // sees in Final Preparation. An invalid draft is never sent;
             // START fails closed rather than diverging from the saved config.
-            const authoritativeConfig = mmConfiguration;
+            const authoritativeConfig = effectiveMmConfiguration;
             if (mmDraft && authoritativeConfig) {
                 const mmFieldsDirty = (
                     String(mmDraft.riskPerTradePercent)
@@ -1356,7 +1366,7 @@ export default function BotControl({
                 autoTradePending={autoTradePending}
                 handleAutoTradeChange={handleAutoTradeChange}
                 mmDraft={mmDraft}
-                mmConfiguration={mmConfiguration}
+                mmConfiguration={effectiveMmConfiguration}
                 mmDraftInvalid={mmDraftInvalid}
                 capitalBasis={capitalBasis}
                 leverageAuthority={config?.leverageAuthority}
