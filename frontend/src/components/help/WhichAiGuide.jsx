@@ -1,29 +1,61 @@
 import HelpDisclosure from "./HelpDisclosure";
 
 const ROUTES = [
-    ["TradingAI全体の現在の運用状態・姿勢・人間注意", "マスター・スーパーバイザー"],
-    [
-        "資金管理の詳細（資本・リスク・ドローダウン・エクスポージャー・容量・複利）",
-        "MMスーパーバイザー",
-    ],
-    [
-        "仕様・設計・原因調査・セカンドオピニオン・「なぜ取引できないか」",
-        "AIアドバイザー",
-    ],
-    ["注文・設定変更・開始/停止・リスク変更", "どのAIも実行できません"],
+    {
+        key: "master",
+        question: "TradingAI全体の現在の運用状態・姿勢・人間注意",
+        answer: "マスター・スーパーバイザー",
+    },
+    {
+        key: "mm",
+        question: "資金管理の詳細（資本・リスク・ドローダウン・エクスポージャー・容量・複利）",
+        answer: "MMスーパーバイザー",
+    },
+    {
+        key: "advisor",
+        question: "仕様・設計・原因調査・セカンドオピニオン・「なぜ取引できないか」",
+        answer: "AIアドバイザー",
+    },
+    {
+        key: "none",
+        question: "注文・設定変更・開始/停止・リスク変更",
+        answer: "どのAIも実行できません",
+    },
 ];
 
-export default function WhichAiGuide() {
+export default function WhichAiGuide({ onNavigate }) {
+    function handleNavigate(targetKey) {
+        if (typeof onNavigate === "function") onNavigate(targetKey);
+    }
+
     return (
         <div className="ai-help-content">
             <p className="ai-help-intro">
                 TradingAIのどのAIに質問すべきかを選ぶための案内です。いずれも「説明・助言」であり、実行はしません。
             </p>
             <dl className="ai-help-which-list">
-                {ROUTES.map(([question, answer]) => (
-                    <div className="ai-help-which-row" key={question}>
+                {ROUTES.map(({ key, question, answer }) => (
+                    <div
+                        className={[
+                            "ai-help-which-row",
+                            key === "none" ? "ai-help-which-row--static" : "",
+                        ].filter(Boolean).join(" ")}
+                        key={question}
+                    >
                         <dt>{question}</dt>
-                        <dd>→ {answer}</dd>
+                        <dd>
+                            {key === "none" ? (
+                                <span className="ai-help-which-static">→ {answer}</span>
+                            ) : (
+                                <button
+                                    className="ai-help-which-action"
+                                    type="button"
+                                    onClick={() => handleNavigate(key)}
+                                >
+                                    → {answer}
+                                </button>
+                            )}
+                        </dd>
                     </div>
                 ))}
             </dl>

@@ -65,3 +65,68 @@ test("Which AI has no network or persistence integration", async () => {
     const source = await readFile(new URL("./WhichAiGuide.jsx", import.meta.url), "utf8");
     assert.doesNotMatch(source, /fetch\(|axios|WebSocket|localStorage|sessionStorage/);
 });
+
+const descendants = (node) => {
+    if (node == null || node === false || node === true) return [];
+    if (Array.isArray(node)) return node.flatMap(descendants);
+    if (typeof node !== "object") return [];
+    if (typeof node.type === "function") return descendants(node.type(node.props));
+    return [node, ...descendants(node.props?.children)];
+};
+
+test("Which AI renders Master, MM, and Advisor as keyboard-operable controls", async () => {
+    const WhichAiGuide = await loadGuide();
+    const guide = WhichAiGuide({ onNavigate: () => {} });
+    const nodes = descendants(guide);
+    const buttons = nodes.filter((node) => node.type === "button");
+
+    assert.equal(buttons.length, 3, "expected exactly three actionable rows");
+
+    const labels = buttons.map((node) => textOf(node).trim().replace(/^→\s*/, ""));
+    assert.deepEqual(
+        labels.slice().sort(),
+        ["AIアドバイザー", "MMスーパーバイザー", "マスター・スーパーバイザー"].sort(),
+    );
+    assert.ok(buttons.every((node) => node.props?.type === "button"));
+    assert.ok(buttons.every((node) => typeof node.props?.onClick === "function"));
+});
+
+test("Which AI keeps どのAIも実行できません as a non-interactive static row", async () => {
+    const WhichAiGuide = await loadGuide();
+    const guide = WhichAiGuide({ onNavigate: () => {} });
+    const nodes = descendants(guide);
+    const text = textOf(guide);
+
+    assert.ok(
+        nodes.some((node) => node.props?.["className"] === "ai-help-which-static"),
+        "static row must render plain text, not a button or link",
+    );
+    assert.match(text, /どのAIも実行できません/);
+    assert.ok(
+        nodes.every(
+            (node) => node.type !== "button" || !textOf(node).includes("どのAIも実行できません"),
+        ),
+        "the no-execution row must expose no clickable control",
+    );
+});
+
+test("clicking Master, MM, and Advisor rows routes the expected target", async () => {
+    const WhichAiGuide = await loadGuide();
+    const calls = [];
+    const guide = WhichAiGuide({ onNavigate: (target) => calls.push(target) });
+    const buttons = descendants(guide).filter((node) => node.type === "button");
+
+    const targetByLabel = {
+        "マスター・スーパーバイザー": "master",
+        "MMスーパーバイザー": "mm",
+        "AIアドバイザー": "advisor",
+    };
+    for (const button of buttons) {
+        const label = textOf(button).trim().replace(/^→\s*/, "");
+        const expected = targetByLabel[label];
+        assert.ok(expected, `unexpected row: ${label}`);
+        button.props.onClick();
+        assert.equal(calls.at(-1), expected);
+    }
+    assert.deepEqual(calls, ["master", "mm", "advisor"]);
+});

@@ -46,7 +46,7 @@ export default function MMSupervisorSection({ onRequestSupervisorHelp }) {
                 <div>
                     <p className="supervisor-page__section-kicker">SPECIALIST SUPERVISOR</p>
                     <div className="supervisor-page__section-heading-text">
-                        <h2 id="mm-supervisor-heading">MM SUPERVISOR</h2>
+                        <h2 id="mm-supervisor-heading" tabIndex={-1}>MM SUPERVISOR</h2>
                         {typeof onRequestSupervisorHelp === "function" && (
                             <button
                                 type="button"

@@ -22,6 +22,7 @@ const loadPage = async () => {
     const operatorLogin = join(temporary, "OperatorLogin.mjs");
     const disclosure = join(temporary, "AdvisorDisclosure.mjs");
     const help = join(temporary, "AiHelp.mjs");
+    const routing = join(temporary, "aiHelpRouting.mjs");
     const react = join(temporary, "react.mjs");
     try {
         await writeFile(hook, [
@@ -59,7 +60,11 @@ const loadPage = async () => {
                 "export const AdvisorGuide=()=>({type:'div',props:{children:'Advisor guide'}});",
             ].join("\n"),
         );
-        await writeFile(react, "export const useState=(value)=>[value,()=>{}];");
+        await writeFile(
+            routing,
+            "export const navigateAiHelp=()=>{};export const consumeAiHelpScrollTarget=()=>null;export const focusAiHelpTarget=()=>{};",
+        );
+        await writeFile(react, "export const useState=(value)=>[value,()=>{}];export const useEffect=()=>{};");
         const code = transformed.code
             .replace('from "react";', `from "${pathToFileURL(react).href}";`)
             .replace(
@@ -89,6 +94,10 @@ const loadPage = async () => {
             .replace(
                 'from "../components/help/AiHelp";',
                 `from "${pathToFileURL(help).href}";`,
+            )
+            .replace(
+                'from "../components/help/aiHelpRouting";',
+                `from "${pathToFileURL(routing).href}";`,
             );
 
         await writeFile(output, code);
@@ -227,4 +236,14 @@ test("AI Advisor source has no direct fetch, mutation, or persistence integratio
     assert.match(source, /AdvisorRuntimeStatus/);
     assert.match(source, /AdvisorConversation/);
     assert.match(source, /AdvisorDisclosure/);
+});
+
+test("AI Advisor wires the shared AI-help routing to the WhichAiDrawer", async () => {
+    const source = await readFile(new URL("./AIAdvisorPage.jsx", import.meta.url), "utf8");
+    assert.match(source, /navigateAiHelp/);
+    assert.match(source, /consumeAiHelpScrollTarget/);
+    assert.match(source, /focusAiHelpTarget/);
+    assert.match(source, /useEffect/);
+    assert.match(source, /WhichAiGuide onNavigate=\{navigateWhichAi\}/);
+    assert.match(source, /onClose: closeHelp/);
 });
