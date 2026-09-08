@@ -10159,6 +10159,122 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             status["accountRuntime"]["realAccount"]["generation"],
         )
 
+    @staticmethod
+    def _unrealized_pnl_engine(value):
+        """Return a live-readiness engine that forwards the authoritative
+        unrealisedPNL captured in its account snapshot."""
+        engine = SimpleNamespace()
+        engine.real_account_snapshot = {
+            "balance": 222.0,
+            "equity": 225.5,
+            "availableBalance": 200.25,
+            "unrealizedPnl": value,
+        }
+        engine.real_balance = 222.0
+        engine.real_equity = 225.5
+        engine.real_available_balance = 200.25
+        engine.real_position = None
+        engine.real_position_state = "FLAT"
+        engine.real_account_last_sync = 1234567890.0
+        engine.build_live_readiness = Mock(
+            return_value={
+                "ready": False,
+                "realOrderAllowed": False,
+                "checks": {},
+                "blockReasons": ["LIVE_NOT_ENABLED", "DRY_RUN_ACTIVE"],
+                "selectedMode": "PAPER",
+                "dryRun": True,
+                "tradeMode": "paper",
+                "allowLive": False,
+                "exchangeClientReady": True,
+                "exchangeAuthReady": True,
+                "balanceCheckOk": True,
+                "positionCheckOk": True,
+                "executionEnabled": False,
+                "emergencyStop": False,
+                "realBalance": engine.real_balance,
+                "realEquity": engine.real_equity,
+                "realAvailableBalance": engine.real_available_balance,
+                "realUnrealizedPnl": engine.real_account_snapshot.get(
+                    "unrealizedPnl"
+                ),
+                "realPosition": engine.real_position,
+                "realPositionState": engine.real_position_state,
+                "realAccountLastSync": engine.real_account_last_sync,
+                "exchangeConnection": "CONNECTED",
+                "apiKeyStatus": "VERIFIED",
+                "permission": "READ_ONLY",
+                "accountType": "KUCOIN_FUTURES",
+                "exchangeAuthReason": "KUCOIN_CREDENTIALS_VERIFIED",
+                "exchangeConnectionReason": "KUCOIN_CLIENT_READY",
+                "accountReason": "KUCOIN_READ_ONLY_SYNC_OK",
+                "balanceReason": "KUCOIN_BALANCE_SYNC_OK",
+                "positionReason": "KUCOIN_POSITION_SYNC_OK",
+                "accountSnapshot": engine.real_account_snapshot,
+            }
+        )
+        return engine
+
+    def _live_readiness_bot(self, engine):
+        bot = BotManager()
+        bot.engine = engine
+        bot.config = {
+            "mode": "paper",
+            "dry_run": True,
+            "symbol": "XRPUSDT",
+            "exchange": "kucoin",
+        }
+        bot.symbol = "XRPUSDT"
+        bot.exchange_name = "kucoin"
+        bot.orderbook_symbol = "XRPUSDTM"
+        bot._running = True
+        return bot
+
+    def test_live_readiness_real_account_forwards_authoritative_unrealized_pnl(self):
+        # The Account Status realAccount is rebuilt from the live-readiness
+        # snapshot once the engine's balance sync has run. That reconstruction
+        # must forward the authoritative unrealisedPNL (raw KuCoin payload
+        # field) or the frontend financial grid would drop it to UNAVAILABLE.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._unrealized_pnl_engine(3.5)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertEqual(real_account["balance"], 222.0)
+        self.assertEqual(real_account["equity"], 225.5)
+        self.assertEqual(real_account["unrealizedPnl"], 3.5)
+
+    def test_live_readiness_real_account_preserves_authoritative_zero_unrealized_pnl(self):
+        # A flat account may return an authoritative zero. Zero is a valid
+        # value and must never be collapsed into None (which presents as
+        # UNAVAILABLE) by the real-account reconstruction.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._unrealized_pnl_engine(0)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertEqual(real_account["unrealizedPnl"], 0)
+        self.assertIsNotNone(real_account["unrealizedPnl"])
+
+    def test_live_readiness_real_account_unknown_unrealized_pnl_stays_none(self):
+        # No authoritative source -> must stay None (frontend renders
+        # UNAVAILABLE), never fabricated to zero.
+        with patch(
+            "backend.bot_manager.bot_manager.KucoinTradeClient"
+        ):
+            status = self._live_readiness_bot(
+                self._unrealized_pnl_engine(None)
+            ).get_status()
+
+        real_account = status["accountRuntime"]["realAccount"]
+        self.assertIsNone(real_account["unrealizedPnl"])
+
     def test_stopped_unconfigured_bot_syncs_kucoin_read_only_account(self):
         bot = BotManager()
         bot._running = False

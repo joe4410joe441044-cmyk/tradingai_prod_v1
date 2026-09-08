@@ -412,6 +412,37 @@ test("negative unrealized PnL is never forced to a positive or neutral zero", as
     assert.match(String(card.props.className), /as-fin-card--negative/);
 });
 
+test("authoritative zero unrealized PnL is a valid value, never UNAVAILABLE", async () => {
+    const { AccountStatusView } = await loadModule();
+    const zero = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                unrealizedPnl: 0,
+            },
+        },
+    };
+    const nodes = walk(AccountStatusView({ botStatus: zero }));
+    // An exchange-returned zero must surface as 0.00 USDT, not as UNAVAILABLE and not as a default.
+    assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-value"), "0.00");
+    assert.equal(readTestIdValue(nodes, "financial-unrealizedPnl-unit"), "USDT");
+    // Missing / unknown still fail closed to UNAVAILABLE on the same card.
+    const missing = {
+        ...READ_ONLY_BOT_STATUS,
+        accountRuntime: {
+            ...READ_ONLY_BOT_STATUS.accountRuntime,
+            realAccount: {
+                ...READ_ONLY_BOT_STATUS.accountRuntime.realAccount,
+                unrealizedPnl: undefined,
+            },
+        },
+    };
+    const missingNodes = walk(AccountStatusView({ botStatus: missing }));
+    assert.equal(findByTestId(missingNodes, "financial-unrealizedPnl-state").props.children, "UNAVAILABLE");
+});
+
 test("POSITION remains always visible in the primary account card", async () => {
     const { AccountStatusView } = await loadModule();
     const nodes = walk(AccountStatusView({ botStatus: READ_ONLY_BOT_STATUS }));

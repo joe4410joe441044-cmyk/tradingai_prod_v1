@@ -683,6 +683,9 @@ class ExecutionEngine:
             "realBalance": self.real_balance,
             "realEquity": self.real_equity,
             "realAvailableBalance": self.real_available_balance,
+            "realUnrealizedPnl": self.real_account_snapshot.get(
+                "unrealizedPnl"
+            ),
             "realPosition": self.real_position,
             "realPositionState": self.real_position_state,
             "realAccountLastSync": self.real_account_last_sync,

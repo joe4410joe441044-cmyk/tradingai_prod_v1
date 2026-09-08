@@ -1552,6 +1552,7 @@ class BotManager:
                 "availableBalance": readiness.get(
                     "realAvailableBalance"
                 ),
+                "unrealizedPnl": readiness.get("realUnrealizedPnl"),
                 "positions": readiness_positions,
                 "positionSummary": (
                     readiness.get("realPositionState")
