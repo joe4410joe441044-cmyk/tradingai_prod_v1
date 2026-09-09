@@ -541,6 +541,10 @@ async def startup_event():
         capital_authority_provider=(
             lambda: get_bot_manager().get_official_mm_capital_authority()
         ),
+        position_sizing_authority_provider=(
+            lambda: get_bot_manager()
+            .get_money_management_position_sizing_authority()
+        ),
     )
     register_money_management_execution_entry_gate(
         app,

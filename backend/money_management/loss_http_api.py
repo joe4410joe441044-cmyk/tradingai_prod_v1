@@ -420,6 +420,19 @@ def _strict_decimal(name, value):
     return result
 
 
+def _optional_nonnegative_decimal(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = (
+            value if isinstance(value, Decimal)
+            else Decimal(str(value).strip())
+        )
+    except (InvalidOperation, ValueError):
+        return None
+    return result if result.is_finite() and result >= 0 else None
+
+
 def _strict_positive_decimal(name, value):
     if isinstance(value, bool) or not isinstance(value, (str, Decimal)):
         raise ValueError(f"{name} must be a decimal string")
@@ -455,6 +468,7 @@ class MoneyManagementHttpBoundary:
         maximum_metrics_age=DEFAULT_MAXIMUM_METRICS_AGE,
         timeline_recorder=None,
         capital_authority_provider=None,
+        position_sizing_authority_provider=None,
     ):
         if dispatcher is not None and not isinstance(
             dispatcher, LossRuntimeUpdateDispatcher
@@ -483,6 +497,15 @@ class MoneyManagementHttpBoundary:
         ):
             raise TypeError("capital authority provider must be callable")
         self._capital_authority_provider = capital_authority_provider
+        if position_sizing_authority_provider is not None and not callable(
+            position_sizing_authority_provider
+        ):
+            raise TypeError(
+                "position sizing authority provider must be callable"
+            )
+        self._position_sizing_authority_provider = (
+            position_sizing_authority_provider
+        )
         self._projection_dispatcher = LossGovernanceProjectionDispatcher(
             timestamp_source=self._timestamp_source
         )
@@ -901,7 +924,7 @@ class MoneyManagementHttpBoundary:
 
     @staticmethod
     def _metrics_response(
-        result, exposure_limit=None, risk_per_trade_percent=None
+        result, exposure_limit=None, risk_per_trade_percent=None, sizing=None
     ):
         status = (
             result.status.value
@@ -998,8 +1021,16 @@ class MoneyManagementHttpBoundary:
             risk_budget.current_risk_amount,
             risk_budget.reserved_risk_amount,
             risk_budget.risk_budget_remaining,
-            None,
-            None,
+            _optional_nonnegative_decimal(
+                sizing.get("recommendedPositionNotional")
+                if isinstance(sizing, Mapping) and sizing.get("available") is True
+                else None
+            ),
+            _optional_nonnegative_decimal(
+                sizing.get("recommendedPositionQuantity")
+                if isinstance(sizing, Mapping) and sizing.get("available") is True
+                else None
+            ),
             metrics.captured_at if metrics else None,
         )
 
@@ -1100,6 +1131,24 @@ class MoneyManagementHttpBoundary:
                     monitoring_capital = candidate
             except Exception:
                 monitoring_capital = None
+        sizing_authority = None
+        if self._position_sizing_authority_provider is not None:
+            try:
+                candidate = self._position_sizing_authority_provider()
+                if isinstance(candidate, Mapping):
+                    sizing_authority = candidate
+            except Exception:
+                sizing_authority = None
+        sizing_complete = bool(
+            isinstance(sizing_authority, Mapping)
+            and sizing_authority.get("available") is True
+            and _optional_nonnegative_decimal(
+                sizing_authority.get("recommendedPositionNotional")
+            ) is not None
+            and _optional_nonnegative_decimal(
+                sizing_authority.get("recommendedPositionQuantity")
+            ) is not None
+        )
         metrics_fresh = bool(
             isinstance(metrics, LossRuntimeMetrics)
             and metrics.data_quality is LossRuntimeDataQuality.COMPLETE
@@ -1188,6 +1237,7 @@ class MoneyManagementHttpBoundary:
             and live_equity_matches_mm_state
             and cash_flow_ready
             and live_projection_valid
+            and sizing_complete
             and base_config is not None
         )
         available = bool(
@@ -1253,6 +1303,11 @@ class MoneyManagementHttpBoundary:
             and not live_projection_valid
         ):
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"
+        elif (
+            actual_runtime_mode is TradingMode.LIVE
+            and not sizing_complete
+        ):
+            safe_reason = "POSITION_SIZE_INPUT_INCOMPLETE"
         elif not projection_fresh or not revisions_match:
             safe_reason = "INTERNAL_STATE_UNAVAILABLE"
         elif base_config is None:
@@ -1282,6 +1337,7 @@ class MoneyManagementHttpBoundary:
             base_config.risk_per_trade_pct
             if base_config is not None
             else None,
+            sizing_authority,
         )
         if metrics_response.exposure_utilization is None:
             diagnostics.append("EXPOSURE_METRICS_INCOMPLETE")
@@ -1311,7 +1367,8 @@ class MoneyManagementHttpBoundary:
             reason for reason in risk_budget.diagnostics
             if reason not in diagnostics
         )
-        diagnostics.append("POSITION_SIZE_INPUT_INCOMPLETE")
+        if not sizing_complete:
+            diagnostics.append("POSITION_SIZE_INPUT_INCOMPLETE")
         blocks = list(
             _values(decision.block_reasons) if decision is not None else ()
         )
@@ -1965,6 +2022,7 @@ def register_money_management_http_boundary(
     timestamp_source=None,
     timeline_directory=None,
     capital_authority_provider=None,
+    position_sizing_authority_provider=None,
 ):
     state = getattr(app, "state", None)
     if state is None:
@@ -1997,6 +2055,7 @@ def register_money_management_http_boundary(
             timestamp_source=timestamp_source,
             timeline_recorder=timeline_recorder,
             capital_authority_provider=capital_authority_provider,
+            position_sizing_authority_provider=position_sizing_authority_provider,
         )
         # Publish the existing official lifecycle snapshot at registration;
         # startup health must not wait for an unrelated bot-runtime event.

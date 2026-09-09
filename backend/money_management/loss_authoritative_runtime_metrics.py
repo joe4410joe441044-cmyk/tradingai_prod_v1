@@ -306,8 +306,8 @@ class AuthoritativeLossRuntimeMetricsState:
     def runtime_instance_id(self):
         return self._runtime_instance_id
 
-    def begin_paper_session(self, session_id, as_of):
-        """Establish a zero-count baseline owned by one new PAPER session."""
+    def begin_runtime_session(self, session_id, as_of):
+        """Establish a zero-count baseline owned by one new runtime session."""
 
         _count("session_id", session_id)
         at = _utc("as_of", as_of)
@@ -324,6 +324,10 @@ class AuthoritativeLossRuntimeMetricsState:
             self._as_of = at
             self._revision += 1
             return self._snapshot_locked()
+
+    def begin_paper_session(self, session_id, as_of):
+        """Backward-compatible alias for the runtime-session baseline."""
+        return self.begin_runtime_session(session_id, as_of)
 
     @staticmethod
     def _period_keys(at):
@@ -411,9 +415,11 @@ class AuthoritativeLossRuntimeMetricsState:
     @staticmethod
     def _position_metrics(position, mark_price):
         if position is None:
-            return Decimal("0"), 0, None, Decimal("0")
+            return None, None, None, None
         positions = position if isinstance(position, (list, tuple)) else (position,)
-        if not positions or any(not isinstance(item, dict) for item in positions):
+        if not positions:
+            return Decimal("0"), 0, None, Decimal("0")
+        if any(not isinstance(item, dict) for item in positions):
             return None, None, None, None
         total = Decimal("0")
         total_risk = Decimal("0")
@@ -503,6 +509,8 @@ class AuthoritativeLossRuntimeMetricsState:
         engine_peak_equity=None,
         close_event_id=None,
         realized_pnl_before=None,
+        daily_realized_pnl=None,
+        daily_realized_pnl_authoritative=False,
         source_state="RUNNING",
     ):
         at = _utc("as_of", as_of)
@@ -510,6 +518,8 @@ class AuthoritativeLossRuntimeMetricsState:
             raise ValueError("session_id invalid")
         if not isinstance(source_state, str) or not source_state:
             raise ValueError("source_state invalid")
+        if type(daily_realized_pnl_authoritative) is not bool:
+            raise TypeError("daily_realized_pnl_authoritative must be bool")
         with self._lock:
             if (
                 self._trade_count_authority_scope == "RUNTIME_SESSION"
@@ -542,6 +552,11 @@ class AuthoritativeLossRuntimeMetricsState:
             self._available_balance = normalized_available
             self._realized_pnl = normalized_realized
             self._unrealized_pnl = normalized_unrealized
+            if daily_realized_pnl_authoritative:
+                normalized_daily = _runtime_decimal(daily_realized_pnl)
+                if daily_realized_pnl is not None and normalized_daily is None:
+                    self._observation_valid = False
+                self._daily_pnl = normalized_daily
             (
                 self._open_exposure,
                 self._position_count,
