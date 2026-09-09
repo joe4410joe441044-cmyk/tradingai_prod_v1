@@ -744,3 +744,90 @@ def test_kucoin_transport_timeout_is_recoverable_warning_not_runtime_error():
     assert "ping/pong timed out" in message
     assert "ERROR" not in message
     assert level == "warning"
+
+
+def test_live_mm_sizing_authority_requires_runtime_market_contract_and_emergency():
+    manager = BotManager()
+    manager._running = True
+    manager._active_symbol = "C98USDT"
+    manager.active_runtime_id = "feed-runtime"
+    manager.market_snapshot = {
+        "timestamp": time.time(),
+        "dataQuality": "VALID",
+    }
+    manager.auto_market_selection_observation = {
+        "liveObservation": {
+            "activeMarketSizing": {
+                "symbol": "C98USDT",
+                "calculationAllowed": True,
+                "positionFeasible": True,
+                "approvedQuantityPreview": "12",
+                "approvedPositionNotional": "0.18",
+                "reasonCodes": [],
+            }
+        }
+    }
+    ready_governance = {"emergency_state": "READY", "emergency_stop": False}
+    with patch("backend.bot_manager.bot_manager.governance_state", ready_governance):
+        authority = manager.get_money_management_position_sizing_authority()
+        assert authority["available"] is True
+        assert authority["recommendedPositionQuantity"] == "12"
+        assert authority["recommendedPositionNotional"] == "0.18"
+
+        manager.active_runtime_id = None
+        assert manager.get_money_management_position_sizing_authority()["available"] is False
+        manager.active_runtime_id = "feed-runtime"
+
+        manager.market_snapshot["timestamp"] = time.time() - 6
+        assert manager.get_money_management_position_sizing_authority()["available"] is False
+        manager.market_snapshot["timestamp"] = time.time()
+
+        manager.auto_market_selection_observation["liveObservation"][
+            "activeMarketSizing"
+        ]["positionFeasible"] = False
+        assert manager.get_money_management_position_sizing_authority()["available"] is False
+
+    manager.auto_market_selection_observation["liveObservation"][
+        "activeMarketSizing"
+    ]["positionFeasible"] = True
+    with patch(
+        "backend.bot_manager.bot_manager.governance_state",
+        {"emergency_state": "LOCKED", "emergency_stop": True},
+    ):
+        assert manager.get_money_management_position_sizing_authority()["available"] is False
+
+
+def test_live_flat_account_observation_produces_complete_truthful_metrics():
+    manager = BotManager()
+    now = datetime.now(timezone.utc)
+    manager.money_management_runtime_metrics.restore(
+        persisted(at=now), StateSource.INITIAL_STATE, now
+    )
+    manager.session_id = 3
+    manager.money_management_runtime_metrics.begin_runtime_session(3, now)
+    manager.lifecycle_state = "RUNNING"
+    manager.engine = SimpleNamespace(mode="live", latest_price=D("0.01488"))
+    manager.real_account_snapshot = {
+        "authenticated": True,
+        "stale": False,
+        "lastSync": time.time(),
+        "balance": D("7.91836966"),
+        "equity": D("7.91836966"),
+        "availableBalance": D("7.91836966"),
+        "realizedPnlToday": D("1.25"),
+        "unrealizedPnl": D("0"),
+        "positions": [],
+    }
+
+    observed = manager._observe_money_management_runtime_metrics(
+        None, "BALANCE_UPDATE", "live-flat"
+    )
+
+    assert observed.is_complete is True
+    assert observed.position_count == 0
+    assert observed.open_exposure == D("0")
+    assert observed.current_risk_amount == D("0")
+    assert observed.realized_pnl == D("1.25")
+    assert observed.daily_realized_pnl == D("1.25")
+    assert observed.unrealized_pnl == D("0")
+    assert observed.session_trade_count == 0

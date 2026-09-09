@@ -107,7 +107,7 @@ def observe(state, at=NOW, **overrides):
         "available_balance": D("1000"),
         "realized_pnl": D("0"),
         "unrealized_pnl": D("0"),
-        "position": None,
+        "position": [],
         "mark_price": D("100"),
         "engine_peak_equity": D("1000"),
         "source_state": "RUNNING",
@@ -538,6 +538,12 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         )
         self.assertIsNone(snapshot.open_exposure)
         self.assertTrue(snapshot.available)
+
+    def test_unknown_position_is_not_coerced_to_known_flat_zero(self):
+        snapshot = observe(self.new_state(), position=None)
+        self.assertIsNone(snapshot.open_exposure)
+        self.assertIsNone(snapshot.position_count)
+        self.assertFalse(snapshot.is_complete)
 
     def test_malformed_close_delta_fails_closed_without_zero(self):
         snapshot = observe(

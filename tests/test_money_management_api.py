@@ -157,6 +157,11 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         boundary = MoneyManagementHttpBoundary(
             app, dispatcher=None, timestamp_source=clock,
             capital_authority_provider=lambda: authority,
+            position_sizing_authority_provider=lambda: {
+                "available": True,
+                "recommendedPositionNotional": "100",
+                "recommendedPositionQuantity": "200",
+            },
         )
         LossGovernanceProjectionDispatcher(timestamp_source=clock).dispatch(app)
 
@@ -168,6 +173,21 @@ class MoneyManagementStatusApiTests(unittest.TestCase):
         self.assertEqual(payload["projectionStatus"], "ALLOW")
         self.assertFalse(payload["recoveryRequired"])
         self.assertNotIn("UNKNOWN_STATE", payload["blockReasons"])
+        self.assertEqual(
+            payload["metrics"]["recommendedPositionNotional"], "100"
+        )
+        self.assertEqual(
+            payload["metrics"]["recommendedPositionQuantity"], "200"
+        )
+
+        without_sizing = MoneyManagementHttpBoundary(
+            app, dispatcher=None, timestamp_source=clock,
+            capital_authority_provider=lambda: authority,
+        ).get_status().to_dict()
+        self.assertFalse(without_sizing["available"])
+        self.assertEqual(
+            without_sizing["safeReason"], "POSITION_SIZE_INPUT_INCOMPLETE"
+        )
 
     def test_live_authority_stays_fail_closed_when_cash_flow_is_stale(self):
         _, app, _, lifecycle, clock = ready_boundary(

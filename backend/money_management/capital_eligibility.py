@@ -149,6 +149,7 @@ class PerMarketEligibilityResult:
     remaining_position_capacity: Optional[int]
     metadata_evaluated_at: datetime
     mm_evaluated_at: datetime
+    approved_position_notional: Optional[Decimal] = None
 
     def to_dict(self):
         return {
@@ -163,6 +164,7 @@ class PerMarketEligibilityResult:
             "remainingPositionCapacity": self.remaining_position_capacity,
             "metadataEvaluatedAt": _value(self.metadata_evaluated_at),
             "mmEvaluatedAt": _value(self.mm_evaluated_at),
+            "approvedPositionNotional": _value(self.approved_position_notional),
             "orderCreated": False,
             "sizingStage": "PRE_SELECTION_ELIGIBILITY",
         }
@@ -247,4 +249,5 @@ def evaluate_market_capital_eligibility(
         capital.risk_budget, capital.remaining_exposure,
         capital.remaining_position_capacity, metadata.metadata_evaluated_at,
         capital.evaluated_at,
+        result.final_position_notional,
     )

@@ -53,6 +53,7 @@ class LiveReadOnlyObservation:
     candidate_score: Optional[str] = None
     active_market_score: Optional[str] = None
     observation_id: Optional[str] = None
+    active_market_sizing: Optional[Mapping[str, object]] = None
 
     def to_dict(self):
         return {
@@ -82,6 +83,10 @@ class LiveReadOnlyObservation:
             "universeEvaluatedAt": self.universe_evaluated_at,
             "tickerEvaluatedAt": self.ticker_evaluated_at,
             "rankingEvaluatedAt": self.ranking_evaluated_at,
+            "activeMarketSizing": (
+                dict(self.active_market_sizing)
+                if self.active_market_sizing is not None else None
+            ),
             "actualSwitch": False, "realOrderCreated": False,
         }
 
@@ -258,6 +263,10 @@ class LiveReadOnlyValidation:
                 if comparison.active_market_score is not None else None
             ),
             observation_id=observation_id,
+            active_market_sizing=(
+                eligibility[active].to_dict()
+                if active in eligibility else None
+            ),
         )
 
     def _preflight(self):

@@ -82,6 +82,7 @@ def _observing_capture(manager):
         "realizedPnl": D("0"),
         "unrealizedPnl": D("0"),
         "position": None,
+        "positions": [],
     }
 
 
@@ -102,7 +103,7 @@ def _complete_snapshot_state(manager, session_id):
         available_balance=D("1000"),
         realized_pnl=D("0"),
         unrealized_pnl=D("0"),
-        position=None,
+        position=[],
         mark_price=D("100"),
         engine_peak_equity=D("1000"),
         source_state="RUNNING",
@@ -131,7 +132,7 @@ def _carried_stopping_state(manager, session_id):
         available_balance=D("1000"),
         realized_pnl=D("0"),
         unrealized_pnl=D("0"),
-        position=None,
+        position=[],
         mark_price=D("100"),
         engine_peak_equity=D("1000"),
         source_state="STOPPING",

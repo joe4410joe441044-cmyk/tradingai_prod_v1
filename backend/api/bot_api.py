@@ -102,6 +102,12 @@ class StatusResponse(BaseModel):
 
     price: float
 
+    runtimeInstanceId: Optional[str] = None
+
+    feedRuntimeId: Optional[str] = None
+
+    market: dict = Field(default_factory=dict)
+
     marketReady: bool
 
     marketStale: bool

@@ -2457,6 +2457,71 @@ class BotManager:
         )
         return capital if isinstance(capital, CapitalEligibilityContract) else None
 
+    def get_money_management_position_sizing_authority(self):
+        """Return read-only sizing evidence for the active feed and symbol."""
+        observation = self.auto_market_selection_observation
+        live = (
+            observation.get("liveObservation")
+            if isinstance(observation, dict) else None
+        )
+        sizing = (
+            live.get("activeMarketSizing")
+            if isinstance(live, dict) else None
+        )
+        with self.market_snapshot_lock:
+            market = (
+                deepcopy(self.market_snapshot)
+                if self.market_snapshot else None
+            )
+        timestamp = market.get("timestamp") if isinstance(market, dict) else None
+        market_fresh = bool(
+            self._running
+            and isinstance(timestamp, (int, float))
+            and not isinstance(timestamp, bool)
+            and math.isfinite(timestamp)
+            and 0 <= time.time() - timestamp <= 5
+            and market.get("dataQuality") == "VALID"
+        )
+        symbol_matches = bool(
+            isinstance(sizing, dict)
+            and sizing.get("symbol") == self.activeSymbol
+        )
+        emergency_ready = bool(
+            governance_state.get("emergency_state") == EMERGENCY_READY
+            and governance_state.get("emergency_stop") is False
+        )
+        available = bool(
+            self.runtime_instance_id
+            and self.active_runtime_id
+            and self.activeSymbol
+            and market_fresh
+            and symbol_matches
+            and sizing.get("calculationAllowed") is True
+            and sizing.get("positionFeasible") is True
+            and sizing.get("approvedQuantityPreview") is not None
+            and sizing.get("approvedPositionNotional") is not None
+            and emergency_ready
+        )
+        return {
+            "available": available,
+            "symbol": self.activeSymbol,
+            "runtimeInstanceId": self.runtime_instance_id,
+            "feedRuntimeId": self.active_runtime_id,
+            "marketDataFresh": market_fresh,
+            "contractDataValid": bool(symbol_matches and sizing),
+            "emergencyReady": emergency_ready,
+            "recommendedPositionQuantity": (
+                sizing.get("approvedQuantityPreview") if symbol_matches else None
+            ),
+            "recommendedPositionNotional": (
+                sizing.get("approvedPositionNotional") if symbol_matches else None
+            ),
+            "reasonCodes": (
+                list(sizing.get("reasonCodes") or ())
+                if symbol_matches else []
+            ),
+        }
+
     def _selected_mode_is_paper(self):
         config = getattr(self, "config", None)
         mode = config.get("mode", "paper") if isinstance(config, dict) else "paper"
@@ -3362,11 +3427,10 @@ class BotManager:
             if self._notify_money_management_lifecycle("STARTING") is not True:
                 raise RuntimeError("MONEY_MANAGEMENT_START_LIFECYCLE_FAILED")
 
-            if requested_mode == "paper":
-                self.money_management_runtime_metrics.begin_paper_session(
-                    current_session,
-                    datetime.now(timezone.utc),
-                )
+            self.money_management_runtime_metrics.begin_runtime_session(
+                current_session,
+                datetime.now(timezone.utc),
+            )
 
             add_log(
                 f"🆕 SESSION: "
@@ -4883,7 +4947,12 @@ class BotManager:
         if mode == "paper":
             snapshot = self._capture_account_snapshot()
             observed_at = datetime.now(timezone.utc)
-            position = snapshot.get("position")
+            position = (
+                snapshot.get("positions")
+                if "positions" in snapshot
+                else [] if snapshot.get("position") is None
+                else snapshot.get("position")
+            )
             realized_pnl = snapshot.get("realizedPnl")
             unrealized_pnl = snapshot.get("unrealizedPnl")
             peak_equity = getattr(engine, "peak_equity", None)
@@ -4909,8 +4978,8 @@ class BotManager:
                 else datetime.now(timezone.utc)
             )
             position = snapshot.get("positions")
-            realized_pnl = None
-            unrealized_pnl = None
+            realized_pnl = snapshot.get("realizedPnlToday")
+            unrealized_pnl = snapshot.get("unrealizedPnl")
             peak_equity = None
             realized_before = None
             observation_source_state = (
@@ -4937,6 +5006,11 @@ class BotManager:
                 else None
             ),
             realized_pnl_before=realized_before,
+            daily_realized_pnl=(
+                snapshot.get("realizedPnlToday")
+                if mode != "paper" else None
+            ),
+            daily_realized_pnl_authoritative=mode != "paper",
             source_state=observation_source_state,
         )
 
@@ -10206,6 +10280,7 @@ class BotManager:
             }
         elif market_stale:
             market_payload["dataQuality"] = "STALE"
+            market_payload["tradeStreamReady"] = False
             market_payload.setdefault("orderBook", {
                 "timestamp": None,
                 "sequence": None,
@@ -10629,6 +10704,8 @@ class BotManager:
             "price": safe_price,
 
             "market": market_payload,
+
+            "feedRuntimeId": self.active_runtime_id,
 
             "marketReady": self.market_ready,
 

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 from fastapi import WebSocketDisconnect
 
+from backend.api.bot_api import StatusResponse
 from backend.api.websocket import websocket_endpoint
 from backend.bot_manager.bot_manager import BotManager
 from backend.market.exchanges.kucoin_market_ws import (
@@ -267,6 +268,60 @@ class BrowserMarketPayloadTest(unittest.TestCase):
             ),
             (100.0, 99, 10.0, 9.0, 11.0, 2.0),
         )
+
+    def test_status_exposes_distinct_canonical_feed_identity_and_market(self):
+        manager = BotManager()
+        manager.runtime_instance_id = "bot-runtime"
+        manager.active_runtime_id = "feed-runtime"
+        result = manager.get_result()
+        response = StatusResponse(**result).model_dump()
+        self.assertEqual(response["runtimeInstanceId"], "bot-runtime")
+        self.assertEqual(response["feedRuntimeId"], "feed-runtime")
+        self.assertNotEqual(
+            response["runtimeInstanceId"], response["feedRuntimeId"]
+        )
+        self.assertIn("tradeStreamReady", response["market"])
+
+    def test_missing_feed_identity_remains_null_for_manual_or_paper_status(self):
+        manager = BotManager()
+        manager.active_runtime_id = None
+        response = StatusResponse(**manager.get_result()).model_dump()
+        self.assertIsNone(response["feedRuntimeId"])
+        self.assertEqual(
+            response["runtimeInstanceId"], manager.runtime_instance_id
+        )
+
+    def test_market_ready_cannot_make_stale_trade_stream_ready(self):
+        manager = BotManager()
+        manager._running = True
+        manager.market_ready = True
+        manager.last_update_time = time.time() - 6
+        with manager.market_snapshot_lock:
+            manager.market_snapshot = {
+                "timestamp": manager.last_update_time,
+                "dataQuality": "VALID",
+                "tradeStreamReady": True,
+                "recentTrades": [],
+                "orderBook": {"dataQuality": "VALID"},
+            }
+        result = manager.get_result()
+        self.assertTrue(result["marketReady"])
+        self.assertTrue(result["marketStale"])
+        self.assertFalse(result["market"]["tradeStreamReady"])
+
+    def test_empty_but_ready_trade_stream_preserves_canonical_ready_state(self):
+        manager = BotManager()
+        manager._running = True
+        manager.last_update_time = time.time()
+        manager._store_market_snapshot({
+            "exchange_symbol": "XRPUSDTM",
+            "market_type": "FUTURES",
+            "market_timestamp": manager.last_update_time,
+            "order_book": {"dataQuality": "VALID"},
+            "recent_trades": [],
+            "trade_stream_ready": True,
+        })
+        self.assertTrue(manager.get_result()["market"]["tradeStreamReady"])
 
     def test_browser_websocket_sends_market_contract_unchanged(self):
         market = {
