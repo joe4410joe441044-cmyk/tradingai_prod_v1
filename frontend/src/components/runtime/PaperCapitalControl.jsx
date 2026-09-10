@@ -9,6 +9,10 @@ import {
     formatAmount,
     isAvailable,
 } from "./accountRuntimeModel";
+import {
+    normalizePaperCapitalPreset,
+    validatePaperCapitalInput,
+} from "./paperCapitalModel";
 
 function PaperCapitalControl({
     paperBalance,
@@ -32,16 +36,9 @@ function PaperCapitalControl({
         }
     }, [capitalDirty, paperBalance]);
 
-    const capitalNumber = Number(capitalInput);
-    const capitalError = !capitalInput.trim()
-        ? "Simulation capital is required."
-        : !/^\d+(?:\.\d{1,2})?$/.test(capitalInput.trim())
-            ? "Enter a valid amount with up to 2 decimal places."
-            : !Number.isFinite(capitalNumber) || capitalNumber < 0.01
-                ? "Simulation capital must be at least 0.01 USDT."
-                : capitalNumber > 1_000_000_000
-                    ? "Simulation capital must not exceed 1,000,000,000.00 USDT."
-                    : null;
+    const capitalValidation = validatePaperCapitalInput(capitalInput);
+    const capitalError = capitalValidation.error;
+    const canonicalCapital = capitalValidation.canonical;
 
     const chooseCapital = (value, source = "DASHBOARD_MANUAL") => {
         setCapitalInput(String(value));
@@ -60,7 +57,7 @@ function PaperCapitalControl({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    capital: capitalInput.trim(),
+                    capital: canonicalCapital,
                     source: capitalSource,
                 }),
             });
@@ -118,7 +115,10 @@ function PaperCapitalControl({
                             type="button"
                             disabled={!realAvailablePresetEnabled}
                             title={realAvailablePresetEnabled ? "Copy current real available balance" : "REAL_ACCOUNT_NOT_SYNCED"}
-                            onClick={() => chooseCapital(realAvailableRaw, "REAL_AVAILABLE_PRESET")}
+                            onClick={() => chooseCapital(
+                                normalizePaperCapitalPreset(realAvailableRaw),
+                                "REAL_AVAILABLE_PRESET",
+                            )}
                         >
                             REAL AVAILABLE（実口座利用可能額）
                         </button>
@@ -143,7 +143,7 @@ function PaperCapitalControl({
                     ) : (
                         <div className="paper-capital-confirm" role="alertdialog" aria-labelledby="paper-capital-confirm-title">
                             <strong id="paper-capital-confirm-title">Reset Paper Account?（ペーパー口座をリセットしますか？）</strong>
-                            <span>New Simulation Capital: {formatAmount(capitalNumber)} USDT</span>
+                            <span>New Simulation Capital: {canonicalCapital} USDT</span>
                             <span>Balance, equity, PnL and paper positions will reset. Real funds are not affected.</span>
                             <div>
                                 <button type="button" disabled={capitalSubmitting} onClick={() => setCapitalConfirming(false)}>Cancel</button>
