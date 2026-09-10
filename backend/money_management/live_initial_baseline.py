@@ -10,7 +10,8 @@ from pathlib import Path
 from .enums import RiskState
 from .loss_persistence_adapter import LoadStatus, SaveStatus, load_loss_state, save_loss_state
 from .loss_persistence_models import (
-    PERSISTENCE_SCHEMA_VERSION, FreshnessStatus, PeriodCode,
+    PERSISTENCE_SCHEMA_VERSION, AccountingRebaseAuthoritySource,
+    FreshnessStatus, PeriodCode,
     PersistedCashFlowState, PersistedDrawdownState, PersistedLossPeriodState,
     PersistedLossState,
 )
@@ -102,6 +103,9 @@ def build_live_initial_loss_state(snapshot, approval, *, captured_at=None):
         PersistedDrawdownState(equity, equity, zero, zero, at),
         PersistedCashFlowState(False, (), zero, None), reason, at,
         freshness=FreshnessStatus.VALID,
+        accounting_authority_source=(
+            AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+        ),
     )
 
 

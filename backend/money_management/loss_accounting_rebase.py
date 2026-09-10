@@ -1,4 +1,4 @@
-"""Explicit MM-owned authority for starting a new PAPER accounting epoch."""
+"""Explicit MM-owned authority for starting a new accounting epoch."""
 
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
@@ -101,8 +101,17 @@ def build_accounting_rebase_update(
     """Validate explicit authority and build, but never apply, a durable rebase."""
     if not isinstance(authorization, AccountingRebaseAuthorization):
         return _rejected("explicit accounting rebase authorization required")
+    try:
+        mode = TradingMode(trading_mode)
+    except (TypeError, ValueError):
+        return _rejected("accounting trading mode invalid")
+    expected_authority = {
+        TradingMode.PAPER: AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY,
+        TradingMode.LIVE: AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY,
+    }[mode]
+    authority_label = "PAPER" if mode is TradingMode.PAPER else "LIVE account"
     if not isinstance(metrics, LossRuntimeMetrics) or metrics.data_quality is not LossRuntimeDataQuality.COMPLETE:
-        return _rejected("authoritative PAPER equity unknown")
+        return _rejected(f"authoritative {authority_label} equity unknown")
     if not isinstance(runtime_snapshot, LossLimitRuntimeSnapshot) or not isinstance(runtime_snapshot.state, PersistedLossState):
         return _rejected("loss runtime state unavailable")
     if not isinstance(requested_at, datetime) or requested_at.tzinfo is None or requested_at.utcoffset() is None:
@@ -110,25 +119,32 @@ def build_accounting_rebase_update(
     requested_at = requested_at.astimezone(timezone.utc)
     if not isinstance(maximum_age, timedelta) or maximum_age.total_seconds() <= 0:
         return _rejected("rebase freshness policy invalid")
-    if TradingMode(trading_mode) is not TradingMode.PAPER:
-        return _rejected("PAPER accounting authority required")
-    if authorization.authority_source is not AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY:
-        return _rejected("PAPER accounting authority required")
+    if authorization.authority_source is not expected_authority:
+        return _rejected(f"{authority_label} accounting authority required")
+    metrics_authority = metrics.accounting_authority_source
+    if (
+        mode is TradingMode.LIVE
+        and metrics_authority != expected_authority.value
+    ) or (
+        mode is TradingMode.PAPER
+        and metrics_authority not in (None, expected_authority.value)
+    ):
+        return _rejected(f"{authority_label} runtime metrics authority required")
     if authorization.authorization_state is not AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED:
         return _rejected("explicit accounting rebase authorization required")
     if authorization.reason is not AccountingRebaseReason.HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE:
         return _rejected("accounting rebase reason invalid")
     state = runtime_snapshot.state
     if metrics.captured_at < state.captured_at:
-        return _rejected("authoritative PAPER equity predates persisted state")
+        return _rejected(f"authoritative {authority_label} equity predates persisted state")
     if authorization.account_scope != state.account_scope:
         return _rejected("account scope mismatch")
     if metrics.runtime_instance_id is None or authorization.runtime_instance_id != metrics.runtime_instance_id:
         return _rejected("runtime scope mismatch")
     if metrics.equity is None or metrics.equity <= 0:
-        return _rejected("authoritative PAPER equity must be positive")
+        return _rejected(f"authoritative {authority_label} equity must be positive")
     if metrics.captured_at > requested_at or requested_at - metrics.captured_at > maximum_age:
-        return _rejected("authoritative PAPER equity is stale")
+        return _rejected(f"authoritative {authority_label} equity is stale")
     if any(item.rebase_id == authorization.rebase_id for item in state.accounting_rebases):
         item = next(item for item in state.accounting_rebases if item.rebase_id == authorization.rebase_id)
         return AccountingRebaseBuildResult(AccountingRebaseStatus.IDEMPOTENT, None, item, ())
@@ -143,9 +159,14 @@ def build_accounting_rebase_update(
         PeriodCode.WEEKLY: state.weekly_state,
         PeriodCode.MONTHLY: state.monthly_state,
     }
-    affected = tuple(code for code in PeriodCode if previous[code].period_id != current[code].period_key)
+    authority_mismatch = state.accounting_authority_source is not expected_authority
+    affected = tuple(
+        code for code in PeriodCode
+        if authority_mismatch
+        or previous[code].period_id != current[code].period_key
+    )
     if not affected:
-        return _rejected("no accounting period mismatch")
+        return _rejected("no accounting period or authority mismatch")
     pnl = {
         PeriodCode.DAILY: metrics.daily_pnl,
         PeriodCode.WEEKLY: metrics.weekly_pnl,
@@ -175,6 +196,7 @@ def build_accounting_rebase_update(
         monthly_state=period_states[PeriodCode.MONTHLY],
         captured_at=metrics.captured_at,
         accounting_rebases=state.accounting_rebases + (record,),
+        accounting_authority_source=authorization.authority_source,
     )
     recovery = LossLimitRecoveryRequirement(False, (), False, False, False, "recovery not required")
     update = LossLimitRuntimeUpdate(

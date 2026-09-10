@@ -149,6 +149,7 @@ def _normalize(raw):
         trade_count_authority_session_id=_count(
             raw, "tradeCountAuthoritySessionId"
         ),
+        accounting_authority_source=raw.get("accountingAuthoritySource"),
     )
     if missing:
         return metrics, LossRuntimeMetricsReadStatus.PARTIAL, "required runtime metrics missing"

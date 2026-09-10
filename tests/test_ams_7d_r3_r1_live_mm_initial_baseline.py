@@ -38,6 +38,9 @@ def test_initial_state_starts_managed_history_at_fresh_approved_equity():
     assert state.daily_state.net_loss == state.weekly_state.net_loss == state.monthly_state.net_loss == 0
     assert state.cash_flow_state.net_cash_flow_amount == 0
     assert state.daily_state.last_updated_at == NOW
+    assert state.accounting_authority_source.value == (
+        "REAL_LIVE_ACCOUNT_EQUITY"
+    )
 
 
 def test_bootstrap_is_atomic_rereadable_and_one_time(tmp_path):
@@ -46,6 +49,9 @@ def test_bootstrap_is_atomic_rereadable_and_one_time(tmp_path):
     assert first.status is BaselineBootstrapStatus.CREATED
     loaded = load_loss_state(tmp_path)
     assert loaded.status is LoadStatus.VALID and loaded.state == first.state
+    assert loaded.state.accounting_authority_source.value == (
+        "REAL_LIVE_ACCOUNT_EQUITY"
+    )
     assert (tmp_path / "loss_limit_state.json").stat().st_mode & 0o777 == 0o600
     second = bootstrap_live_initial_baseline(snapshot("999"), approval(), persistence_directory=tmp_path,
                                              safety_state=safety(), captured_at=NOW)

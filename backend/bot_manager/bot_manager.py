@@ -4928,9 +4928,33 @@ class BotManager:
                 pending_order_count = (
                     self.money_management_maintenance_pending_order_count
                 )
-            return MappingProxyType(
-                metrics.to_runtime_mapping(pending_order_count)
-            )
+            mapping = metrics.to_runtime_mapping(pending_order_count)
+            engine_mode = str(
+                getattr(getattr(self, "engine", None), "mode", "") or ""
+            ).strip().lower()
+            if engine_mode == "paper":
+                mapping["accountingAuthoritySource"] = (
+                    "PAPER_RUNTIME_EQUITY"
+                )
+            elif engine_mode == "live":
+                account = (
+                    getattr(self, "real_account_snapshot", None)
+                    if isinstance(
+                        getattr(self, "real_account_snapshot", None), dict
+                    )
+                    else {}
+                )
+                if (
+                    account.get("authenticated") is True
+                    and account.get("stale") is not True
+                    and account.get("accountSource")
+                    == "KUCOIN_FUTURES_READ_ONLY"
+                    and account.get("equity") is not None
+                ):
+                    mapping["accountingAuthoritySource"] = (
+                        "REAL_LIVE_ACCOUNT_EQUITY"
+                    )
+            return MappingProxyType(mapping)
 
     def _observe_money_management_runtime_metrics(
         self,
