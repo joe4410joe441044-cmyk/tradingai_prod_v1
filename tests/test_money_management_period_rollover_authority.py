@@ -12,16 +12,22 @@ contract. These tests prove the production case now succeeds while every
 fail-closed path remains rejected.
 """
 
+import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 from backend.money_management.enums import RiskState, TradingMode
 from backend.money_management.loss_application_registration import (
     MoneyManagementConfigProvider,
     build_default_money_management_config,
+)
+from backend.money_management.loss_persistence_adapter import (
+    load_loss_state,
+    save_loss_state,
 )
 from backend.money_management.loss_persistence_models import (
     PERSISTENCE_SCHEMA_VERSION,
@@ -512,6 +518,109 @@ class LiveModeIsolationTests(unittest.TestCase):
         kwargs["authority_source"] = self.LIVE.value
         return _metrics_at(at, **kwargs)
 
+    def test_exact_production_paper_hwm_is_not_reused_for_live(self):
+        paper_hwm = D("100.0805801773")
+        live_equity = D("7.91836966")
+        state = _state_at(CUR_DAY, starting_equity=D("100"))
+        state = replace(
+            state,
+            drawdown_state=PersistedDrawdownState(
+                paper_hwm, D("100"), paper_hwm - D("100"),
+                (paper_hwm - D("100")) / paper_hwm * D("100"), CUR_DAY,
+            ),
+        )
+        false_drawdown = (
+            (paper_hwm - live_equity) / paper_hwm * D("100")
+        )
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(
+                CUR_DAY + timedelta(seconds=30),
+                equity=live_equity,
+                peak_equity=paper_hwm,
+                drawdown=false_drawdown,
+            ),
+            _snapshot_for(state),
+            "live:production-drawdown-authority-reset",
+        )
+
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        next_state = result.build_context.next_state
+        self.assertEqual(next_state.drawdown_state.high_water_mark, live_equity)
+        self.assertEqual(next_state.drawdown_state.current_equity, live_equity)
+        self.assertEqual(next_state.drawdown_state.drawdown_percent, D("0"))
+        self.assertNotIn(
+            BlockReason.DRAWDOWN_BLOCK,
+            next_state.last_decision.block_reasons,
+        )
+        self.assertEqual(next_state.risk_state, RiskState.NORMAL)
+
+    def test_same_live_authority_restart_preserves_hwm_and_real_block(self):
+        state = replace(
+            _state_at(CUR_DAY, starting_equity=D("8")),
+            drawdown_state=PersistedDrawdownState(
+                D("10"), D("10"), D("0"), D("0"), CUR_DAY,
+            ),
+            accounting_authority_source=self.LIVE,
+        )
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(
+                CUR_DAY + timedelta(seconds=30),
+                equity=D("9"), peak_equity=D("10"), drawdown=D("10"),
+            ),
+            _snapshot_for(state),
+            "live:same-authority-real-drawdown",
+        )
+
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        next_state = result.build_context.next_state
+        self.assertEqual(next_state.drawdown_state.high_water_mark, D("10"))
+        self.assertEqual(next_state.drawdown_state.drawdown_percent, D("10"))
+        self.assertIn(
+            BlockReason.DRAWDOWN_BLOCK,
+            next_state.last_decision.block_reasons,
+        )
+
+    def test_cross_mode_persistence_restart_remains_authority_consistent(self):
+        state = _state_at(CUR_DAY, starting_equity=D("100"))
+        first = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(
+                CUR_DAY + timedelta(seconds=30),
+                equity=D("8"), peak_equity=D("100"), drawdown=D("92"),
+            ),
+            _snapshot_for(state),
+            "live:persist-authority-reset",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            self.assertEqual(
+                save_loss_state(first.build_context.next_state, path).status.value,
+                "SAVED",
+            )
+            loaded = load_loss_state(path).state
+
+        self.assertIs(loaded.accounting_authority_source, self.LIVE)
+        self.assertEqual(loaded.drawdown_state.high_water_mark, D("8"))
+        restarted = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(
+                CUR_DAY + timedelta(seconds=60),
+                equity=D("7"), peak_equity=D("8"), drawdown=D("12.5"),
+            ),
+            _snapshot_for(loaded),
+            "live:restart-preserves-hwm",
+        )
+        self.assertEqual(
+            restarted.build_context.next_state.drawdown_state.high_water_mark,
+            D("8"),
+        )
+
     def test_paper_previous_period_rebases_from_live_equity(self):
         state = _state_at(PREV_DAY, starting_equity=D("100"))
         result = LossRuntimeEvaluationBridge(
@@ -542,16 +651,24 @@ class LiveModeIsolationTests(unittest.TestCase):
     def test_live_to_paper_rebases_without_live_contamination(self):
         state = replace(
             _state_at(CUR_DAY, starting_equity=D("8")),
+            drawdown_state=PersistedDrawdownState(
+                D("200"), D("8"), D("192"), D("96"), CUR_DAY,
+            ),
             accounting_authority_source=self.LIVE,
         )
         result = LossRuntimeEvaluationBridge(
             trading_mode=TradingMode.PAPER
         ).evaluate(
-            _metrics_at(CUR_DAY + timedelta(seconds=30), equity=D("125")),
+            _metrics_at(
+                CUR_DAY + timedelta(seconds=30), equity=D("125"),
+                peak_equity=D("200"), drawdown=D("37.5"),
+            ),
             _snapshot_for(state), "paper:live-to-paper",
         )
         next_state = result.build_context.next_state
         self.assertEqual(next_state.daily_state.starting_equity, D("125"))
+        self.assertEqual(next_state.drawdown_state.high_water_mark, D("125"))
+        self.assertEqual(next_state.drawdown_state.drawdown_percent, D("0"))
         self.assertIs(
             next_state.accounting_authority_source,
             AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY,
@@ -577,17 +694,27 @@ class LiveModeIsolationTests(unittest.TestCase):
     def test_live_new_period_uses_new_live_equity(self):
         state = replace(
             _state_at(PREV_DAY, starting_equity=D("8")),
+            drawdown_state=PersistedDrawdownState(
+                D("10"), D("8"), D("2"), D("20"), PREV_DAY,
+            ),
             accounting_authority_source=self.LIVE,
         )
         result = LossRuntimeEvaluationBridge(
             trading_mode=TradingMode.LIVE
         ).evaluate(
-            self.live_metrics(CUR_DAY, equity=D("9")),
+            self.live_metrics(
+                CUR_DAY, equity=D("9"), peak_equity=D("10"),
+                drawdown=D("10"),
+            ),
             _snapshot_for(state), "live:new-period",
         )
         self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
         self.assertEqual(
             result.build_context.next_state.daily_state.starting_equity, D("9")
+        )
+        self.assertEqual(
+            result.build_context.next_state.drawdown_state.high_water_mark,
+            D("10"),
         )
 
     def test_live_missing_or_wrong_runtime_authority_fails_closed(self):

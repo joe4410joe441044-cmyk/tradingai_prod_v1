@@ -16,6 +16,7 @@ from .loss_persistence_models import (
     LossBaselineType,
     PeriodCode,
     PersistedAccountingRebaseRecord,
+    PersistedDrawdownState,
     PersistedLossPeriodState,
     PersistedLossState,
 )
@@ -189,11 +190,21 @@ def build_accounting_rebase_update(
     types = {PeriodCode.DAILY: PeriodType.DAILY, PeriodCode.WEEKLY: PeriodType.WEEKLY, PeriodCode.MONTHLY: PeriodType.MONTHLY}
     for code in affected:
         period_states[code] = _rebased_period(code, types[code], metrics.captured_at, metrics.equity)
+    drawdown_state = state.drawdown_state
+    if authority_mismatch:
+        drawdown_state = PersistedDrawdownState(
+            metrics.equity,
+            metrics.equity,
+            Decimal("0"),
+            Decimal("0"),
+            metrics.captured_at,
+        )
     next_state = replace(
         state,
         daily_state=period_states[PeriodCode.DAILY],
         weekly_state=period_states[PeriodCode.WEEKLY],
         monthly_state=period_states[PeriodCode.MONTHLY],
+        drawdown_state=drawdown_state,
         captured_at=metrics.captured_at,
         accounting_rebases=state.accounting_rebases + (record,),
         accounting_authority_source=authorization.authority_source,

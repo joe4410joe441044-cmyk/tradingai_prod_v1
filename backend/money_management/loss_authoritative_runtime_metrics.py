@@ -11,7 +11,10 @@ from enum import Enum
 from threading import RLock
 from typing import Optional
 
-from .loss_persistence_models import PersistedLossState
+from .loss_persistence_models import (
+    AccountingRebaseAuthoritySource,
+    PersistedLossState,
+)
 from .loss_runtime_integration_models import StateSource
 from .period_aggregation import period_for
 from .period_models import PeriodType
@@ -284,6 +287,7 @@ class AuthoritativeLossRuntimeMetricsState:
         self._realized_pnl = None
         self._unrealized_pnl = None
         self._peak_equity = None
+        self._accounting_authority_source = None
         self._daily_pnl = None
         self._weekly_pnl = None
         self._monthly_pnl = None
@@ -363,6 +367,9 @@ class AuthoritativeLossRuntimeMetricsState:
             self._weekly_pnl = state.weekly_state.net_realized_pnl
             self._monthly_pnl = state.monthly_state.net_realized_pnl
             self._peak_equity = state.drawdown_state.high_water_mark
+            self._accounting_authority_source = (
+                state.accounting_authority_source
+            )
             # Only an explicitly supplied initial state proves zero prior
             # close executions. Existing persistence v1 stores PnL, not counts.
             counts_known = source is StateSource.INITIAL_STATE
@@ -511,6 +518,7 @@ class AuthoritativeLossRuntimeMetricsState:
         realized_pnl_before=None,
         daily_realized_pnl=None,
         daily_realized_pnl_authoritative=False,
+        accounting_authority_source=None,
         source_state="RUNNING",
     ):
         at = _utc("as_of", as_of)
@@ -520,6 +528,11 @@ class AuthoritativeLossRuntimeMetricsState:
             raise ValueError("source_state invalid")
         if type(daily_realized_pnl_authoritative) is not bool:
             raise TypeError("daily_realized_pnl_authoritative must be bool")
+        authority = (
+            AccountingRebaseAuthoritySource(accounting_authority_source)
+            if accounting_authority_source is not None
+            else None
+        )
         with self._lock:
             if (
                 self._trade_count_authority_scope == "RUNTIME_SESSION"
@@ -568,12 +581,24 @@ class AuthoritativeLossRuntimeMetricsState:
             )
             if engine_peak_equity is not None and engine_peak is None:
                 self._observation_valid = False
-            candidates = tuple(
-                item
-                for item in (self._peak_equity, engine_peak, self._equity)
-                if item is not None
+            authority_transition = bool(
+                authority is not None
+                and authority is not self._accounting_authority_source
+                and self._observation_valid
+                and self._equity is not None
+                and self._equity > 0
+                and source_state == "RUNNING"
             )
-            self._peak_equity = max(candidates) if candidates else None
+            if authority_transition:
+                self._peak_equity = self._equity
+                self._accounting_authority_source = authority
+            else:
+                candidates = tuple(
+                    item
+                    for item in (self._peak_equity, engine_peak, self._equity)
+                    if item is not None
+                )
+                self._peak_equity = max(candidates) if candidates else None
 
             if close_event_id is not None:
                 if not isinstance(close_event_id, str) or not close_event_id:

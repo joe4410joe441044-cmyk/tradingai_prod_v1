@@ -3,7 +3,7 @@ import math
 import threading
 import unittest
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +16,7 @@ from backend.money_management.loss_authoritative_runtime_metrics import (
 )
 from backend.money_management.loss_persistence_models import (
     PERSISTENCE_SCHEMA_VERSION,
+    AccountingRebaseAuthoritySource,
     FreshnessStatus,
     PeriodCode,
     PersistedCashFlowState,
@@ -588,6 +589,63 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         snapshot = state.snapshot()
         self.assertEqual(snapshot.daily_realized_pnl, D("20"))
         self.assertEqual(snapshot.trade_count_daily, 20)
+
+    def test_drawdown_hwm_is_scoped_to_accounting_authority_in_memory(self):
+        state = AuthoritativeLossRuntimeMetricsState("runtime-1")
+        state.restore(
+            persisted(peak=D("100.0805801773"), equity=D("100")),
+            StateSource.PERSISTED_STATE,
+            NOW,
+        )
+
+        live = observe(
+            state,
+            balance=D("7.91836966"),
+            equity=D("7.91836966"),
+            available_balance=D("7.91836966"),
+            engine_peak_equity=None,
+            accounting_authority_source=(
+                AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+            ),
+        )
+        self.assertEqual(live.peak_equity, D("7.91836966"))
+        self.assertEqual(live.current_drawdown_pct, D("0"))
+
+        observe(
+            state,
+            balance=D("10"),
+            equity=D("10"),
+            available_balance=D("10"),
+            engine_peak_equity=None,
+            accounting_authority_source=(
+                AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+            ),
+        )
+        same_live = observe(
+            state,
+            balance=D("9"),
+            equity=D("9"),
+            available_balance=D("9"),
+            engine_peak_equity=None,
+            accounting_authority_source=(
+                AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+            ),
+        )
+        self.assertEqual(same_live.peak_equity, D("10"))
+        self.assertEqual(same_live.current_drawdown_pct, D("10"))
+
+        paper = observe(
+            state,
+            balance=D("1000"),
+            equity=D("1000"),
+            available_balance=D("1000"),
+            engine_peak_equity=D("2000"),
+            accounting_authority_source=(
+                AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY
+            ),
+        )
+        self.assertEqual(paper.peak_equity, D("1000"))
+        self.assertEqual(paper.current_drawdown_pct, D("0"))
 
 
 if __name__ == "__main__":
