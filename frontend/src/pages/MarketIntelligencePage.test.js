@@ -80,9 +80,12 @@ test("Dashboard no longer renders the standalone Auto Market Selection card", as
     assert.doesNotMatch(dashboard, /data-testid=["']auto-market-selection-card/);
 });
 
-test("Dashboard connects the formal AUTO candidate and readiness to Operation", async () => {
+test("Dashboard uses the canonical runtime ACTIVE symbol authority (not a top candidate)", async () => {
     const dashboard = await readFile(new URL("./Dashboard.jsx", import.meta.url), "utf8");
-    assert.match(dashboard, /displaySymbol: botStatus\?\.autoMarketSelection\?\.topCandidate\?\.symbol/);
+    // FINAL PREPARATION SYMBOL must follow the committed active symbol, never the
+    // AUTO rank-1 candidate. A missing active authority fails closed to a
+    // sentinel rather than promoting topCandidate to the active symbol.
+    assert.match(dashboard, /displaySymbol: botStatus\?\.activeSymbol/);
+    assert.doesNotMatch(dashboard, /displaySymbol: botStatus\?\.autoMarketSelection\?\.topCandidate\?\.symbol/);
     assert.match(dashboard, /autoMarketState: botStatus\?\.autoMarketSelection\?\.productionIntegration\?\.status/);
-    assert.doesNotMatch(dashboard, /displaySymbol: botStatus\?\.activeSymbol/);
 });
