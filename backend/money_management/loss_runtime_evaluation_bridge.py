@@ -334,10 +334,12 @@ class LossRuntimeEvaluationBridge:
             weekly = _aggregate(metrics, PeriodType.WEEKLY, sequence)
             monthly = _aggregate(metrics, PeriodType.MONTHLY, sequence)
             period_rollover = False
+            expected_authority = _authority_for_mode(trading_mode)
             authority_matches = (
                 previous.accounting_authority_source
-                is _authority_for_mode(trading_mode)
+                is expected_authority
             )
+            authority_transition = not authority_matches
             if (
                 not _periods_match(previous, daily, weekly, monthly)
                 or not authority_matches
@@ -355,7 +357,11 @@ class LossRuntimeEvaluationBridge:
             daily = _apply_rebase_pnl_baseline(previous, daily, PeriodCode.DAILY)
             weekly = _apply_rebase_pnl_baseline(previous, weekly, PeriodCode.WEEKLY)
             monthly = _apply_rebase_pnl_baseline(previous, monthly, PeriodCode.MONTHLY)
-            if metrics.peak_equity <= 0:
+            peak_equity = (
+                metrics.equity if authority_transition else metrics.peak_equity
+            )
+            drawdown = Decimal("0") if authority_transition else metrics.drawdown
+            if peak_equity <= 0:
                 return _failure(
                     LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
                     "peak equity unavailable for persisted state",
@@ -366,9 +372,9 @@ class LossRuntimeEvaluationBridge:
                 "USDT",
                 previous.daily_state.starting_equity,
                 metrics.equity,
-                metrics.peak_equity,
-                metrics.peak_equity - metrics.equity,
-                metrics.drawdown,
+                peak_equity,
+                peak_equity - metrics.equity,
+                drawdown,
                 EquitySource.NORMALIZED_EQUITY,
             )
             decision_input = MoneyManagementLossDecisionInput(
@@ -413,10 +419,10 @@ class LossRuntimeEvaluationBridge:
                     metrics.captured_at,
                 ),
                 PersistedDrawdownState(
-                    metrics.peak_equity,
+                    peak_equity,
                     metrics.equity,
-                    metrics.peak_equity - metrics.equity,
-                    metrics.drawdown,
+                    peak_equity - metrics.equity,
+                    drawdown,
                     metrics.captured_at,
                 ),
                 previous.cash_flow_state,

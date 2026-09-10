@@ -5035,6 +5035,17 @@ class BotManager:
                 if mode != "paper" else None
             ),
             daily_realized_pnl_authoritative=mode != "paper",
+            accounting_authority_source=(
+                "PAPER_RUNTIME_EQUITY"
+                if mode == "paper"
+                else "REAL_LIVE_ACCOUNT_EQUITY"
+                if snapshot.get("authenticated") is True
+                and snapshot.get("stale") is not True
+                and snapshot.get("accountSource")
+                == "KUCOIN_FUTURES_READ_ONLY"
+                and snapshot.get("equity") is not None
+                else None
+            ),
             source_state=observation_source_state,
         )
 
