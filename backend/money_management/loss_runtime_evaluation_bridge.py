@@ -174,6 +174,14 @@ def _periods_match(current, daily, weekly, monthly):
     )
 
 
+def _authority_for_mode(trading_mode):
+    return (
+        AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+        if trading_mode is TradingMode.LIVE
+        else AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY
+    )
+
+
 def _attempt_period_rollover(metrics, runtime_snapshot, trading_mode):
     """Roll expired accounting periods forward using authoritative equity.
 
@@ -185,7 +193,7 @@ def _attempt_period_rollover(metrics, runtime_snapshot, trading_mode):
     Fail-closed: authority is never established when the authoritative equity
     is absent, non-positive, stale, predates persisted state, belongs to a
     different runtime/account scope, lacks authoritative period PnL, or when
-    the trading mode is not PAPER.
+    the runtime observation cannot prove the configured mode's authority.
     """
     state = (
         runtime_snapshot.state
@@ -202,15 +210,16 @@ def _attempt_period_rollover(metrics, runtime_snapshot, trading_mode):
         or not state.account_scope.strip()
     ):
         return None
+    authority_source = _authority_for_mode(TradingMode(trading_mode))
     rebase_id = (
-        f"runtime-rollover:{runtime_instance_id}:"
+        f"runtime-rollover:{authority_source.value}:{runtime_instance_id}:"
         f"{metrics.captured_at.isoformat()}"
     )
     authorization = AccountingRebaseAuthorization(
         rebase_id,
         state.account_scope,
         runtime_instance_id,
-        AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY,
+        authority_source,
         AccountingRebaseReason.HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE,
         AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED,
     )
@@ -325,7 +334,14 @@ class LossRuntimeEvaluationBridge:
             weekly = _aggregate(metrics, PeriodType.WEEKLY, sequence)
             monthly = _aggregate(metrics, PeriodType.MONTHLY, sequence)
             period_rollover = False
-            if not _periods_match(previous, daily, weekly, monthly):
+            authority_matches = (
+                previous.accounting_authority_source
+                is _authority_for_mode(trading_mode)
+            )
+            if (
+                not _periods_match(previous, daily, weekly, monthly)
+                or not authority_matches
+            ):
                 rebased = _attempt_period_rollover(
                     metrics, runtime_snapshot, trading_mode
                 )
@@ -408,6 +424,9 @@ class LossRuntimeEvaluationBridge:
                 metrics.captured_at,
                 freshness=FreshnessStatus.VALID,
                 accounting_rebases=previous.accounting_rebases,
+                accounting_authority_source=(
+                    previous.accounting_authority_source
+                ),
             )
             governance = _governance(reason)
             recovery = LossLimitRecoveryRequirement(

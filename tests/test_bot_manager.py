@@ -810,6 +810,7 @@ def test_live_flat_account_observation_produces_complete_truthful_metrics():
     manager.real_account_snapshot = {
         "authenticated": True,
         "stale": False,
+        "accountSource": "KUCOIN_FUTURES_READ_ONLY",
         "lastSync": time.time(),
         "balance": D("7.91836966"),
         "equity": D("7.91836966"),
@@ -831,3 +832,16 @@ def test_live_flat_account_observation_produces_complete_truthful_metrics():
     assert observed.daily_realized_pnl == D("1.25")
     assert observed.unrealized_pnl == D("0")
     assert observed.session_trade_count == 0
+    assert manager.get_runtime_metrics_snapshot()[
+        "accountingAuthoritySource"
+    ] == "REAL_LIVE_ACCOUNT_EQUITY"
+
+    manager.real_account_snapshot["stale"] = True
+    assert "accountingAuthoritySource" not in (
+        manager.get_runtime_metrics_snapshot()
+    )
+    manager.real_account_snapshot["stale"] = False
+    manager.real_account_snapshot["authenticated"] = False
+    assert "accountingAuthoritySource" not in (
+        manager.get_runtime_metrics_snapshot()
+    )

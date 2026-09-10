@@ -25,6 +25,7 @@ from backend.money_management.loss_application_registration import (
 )
 from backend.money_management.loss_persistence_models import (
     PERSISTENCE_SCHEMA_VERSION,
+    AccountingRebaseAuthoritySource,
     FreshnessStatus,
     PeriodCode,
     PersistedCashFlowState,
@@ -138,7 +139,7 @@ def _snapshot_for(state, at=None):
 
 def _metrics_at(at, equity=D("100"), runtime_instance_id="paper-runtime-1",
                 daily_pnl=D("0"), weekly_pnl=D("0"), monthly_pnl=D("0"),
-                peak_equity=None, drawdown=D("0")):
+                peak_equity=None, drawdown=D("0"), authority_source=None):
     peak = peak_equity if peak_equity is not None else equity
     return LossRuntimeMetrics(
         captured_at=at,
@@ -151,6 +152,7 @@ def _metrics_at(at, equity=D("100"), runtime_instance_id="paper-runtime-1",
         source_state="RUNNING",
         data_quality=LossRuntimeDataQuality.COMPLETE,
         runtime_instance_id=runtime_instance_id,
+        accounting_authority_source=authority_source,
     )
 
 
@@ -214,7 +216,7 @@ class PeriodRolloverAuthorityRegressionTests(unittest.TestCase):
         self.assertEqual(record.authoritative_equity, D("100"))
         self.assertTrue(record.rebase_id.startswith("runtime-rollover:"))
 
-    def test_pre_fix_rejection_reason_reproduced_when_rollover_unauthorized(self):
+    def test_live_rollover_accepts_explicit_live_account_authority(self):
         lifecycle = Lifecycle()
         lifecycle.snapshot = production_snapshot()
         app = app_with(lifecycle)
@@ -227,22 +229,25 @@ class PeriodRolloverAuthorityRegressionTests(unittest.TestCase):
         now = OBSERVED + timedelta(seconds=10)
         bridge = LossRuntimeEvaluationBridge(trading_mode=TradingMode.LIVE)
         dispatcher = LossRuntimeUpdateDispatcher(
-            Source([production_metrics()]), evaluation_bridge=bridge
+            Source([replace(
+                production_metrics(),
+                accounting_authority_source="REAL_LIVE_ACCOUNT_EQUITY",
+            )]), evaluation_bridge=bridge
         )
         hook = MoneyManagementRuntimeHook(app, dispatcher, timestamp_source=lambda: now)
         app.state.money_management_runtime_hook = (
             MoneyManagementRuntimeHookRegistration(hook, Bot(), now)
         )
 
-        result = hook.handle("BALANCE_UPDATE", "live-rollover-blocked")
+        result = hook.handle("BALANCE_UPDATE", "live-rollover-authorized")
 
         self.assertEqual(
             result.runtime_dispatch_status,
-            LossRuntimeDispatchStatus.RECOVERY_REQUIRED,
+            LossRuntimeDispatchStatus.APPLIED,
         )
         self.assertEqual(
-            hook.last_dispatch_safe_reasons,
-            ("period rollover requires authoritative starting equity",),
+            lifecycle.get_snapshot().state.accounting_authority_source.value,
+            "REAL_LIVE_ACCOUNT_EQUITY",
         )
 
     def test_registered_hook_uses_bot_runtime_mode_not_default_mm_mode(self):
@@ -266,7 +271,13 @@ class PeriodRolloverAuthorityRegressionTests(unittest.TestCase):
             lifecycle.snapshot = production_snapshot()
             app = app_with(lifecycle)
             bot = RuntimeBot(mode)
-            source = Source([production_metrics()])
+            source = Source([replace(
+                production_metrics(),
+                accounting_authority_source=(
+                    "REAL_LIVE_ACCOUNT_EQUITY"
+                    if mode == "live" else "PAPER_RUNTIME_EQUITY"
+                ),
+            )])
             with patch(
                 "backend.money_management.loss_runtime_hook."
                 "BotManagerLossRuntimeMetricsSource",
@@ -290,8 +301,7 @@ class PeriodRolloverAuthorityRegressionTests(unittest.TestCase):
             paper.runtime_dispatch_status, LossRuntimeDispatchStatus.APPLIED
         )
         self.assertEqual(
-            live.runtime_dispatch_status,
-            LossRuntimeDispatchStatus.RECOVERY_REQUIRED,
+            live.runtime_dispatch_status, LossRuntimeDispatchStatus.APPLIED
         )
 
 
@@ -492,6 +502,121 @@ class RestrictiveGovernanceTests(unittest.TestCase):
         self.assertEqual(
             next_state.monthly_state.net_realized_pnl, D("-50")
         )
+
+
+class LiveModeIsolationTests(unittest.TestCase):
+
+    LIVE = AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+
+    def live_metrics(self, at, **kwargs):
+        kwargs["authority_source"] = self.LIVE.value
+        return _metrics_at(at, **kwargs)
+
+    def test_paper_previous_period_rebases_from_live_equity(self):
+        state = _state_at(PREV_DAY, starting_equity=D("100"))
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(CUR_DAY, equity=D("7.91836966")),
+            _snapshot_for(state), "live:paper-to-live",
+        )
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        next_state = result.build_context.next_state
+        self.assertEqual(next_state.daily_state.starting_equity, D("7.91836966"))
+        self.assertNotEqual(next_state.daily_state.starting_equity, D("100"))
+        self.assertIs(next_state.accounting_authority_source, self.LIVE)
+        self.assertIs(next_state.accounting_rebases[-1].authority_source, self.LIVE)
+
+    def test_same_period_paper_state_is_not_reused_for_live(self):
+        state = _state_at(CUR_DAY, starting_equity=D("100"))
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(CUR_DAY + timedelta(seconds=30), equity=D("8")),
+            _snapshot_for(state), "live:same-period-mode-switch",
+        )
+        next_state = result.build_context.next_state
+        self.assertEqual(next_state.daily_state.starting_equity, D("8"))
+        self.assertEqual(len(next_state.accounting_rebases), 1)
+
+    def test_live_to_paper_rebases_without_live_contamination(self):
+        state = replace(
+            _state_at(CUR_DAY, starting_equity=D("8")),
+            accounting_authority_source=self.LIVE,
+        )
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.PAPER
+        ).evaluate(
+            _metrics_at(CUR_DAY + timedelta(seconds=30), equity=D("125")),
+            _snapshot_for(state), "paper:live-to-paper",
+        )
+        next_state = result.build_context.next_state
+        self.assertEqual(next_state.daily_state.starting_equity, D("125"))
+        self.assertIs(
+            next_state.accounting_authority_source,
+            AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY,
+        )
+
+    def test_same_period_valid_live_state_is_reused(self):
+        state = replace(
+            _state_at(CUR_DAY, starting_equity=D("8")),
+            accounting_authority_source=self.LIVE,
+        )
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(CUR_DAY + timedelta(seconds=30), equity=D("8")),
+            _snapshot_for(state), "live:same-period-restart",
+        )
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        self.assertEqual(len(result.build_context.next_state.accounting_rebases), 0)
+        self.assertEqual(
+            result.build_context.next_state.daily_state.starting_equity, D("8")
+        )
+
+    def test_live_new_period_uses_new_live_equity(self):
+        state = replace(
+            _state_at(PREV_DAY, starting_equity=D("8")),
+            accounting_authority_source=self.LIVE,
+        )
+        result = LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            self.live_metrics(CUR_DAY, equity=D("9")),
+            _snapshot_for(state), "live:new-period",
+        )
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        self.assertEqual(
+            result.build_context.next_state.daily_state.starting_equity, D("9")
+        )
+
+    def test_live_missing_or_wrong_runtime_authority_fails_closed(self):
+        state = _state_at(PREV_DAY)
+        bridge = LossRuntimeEvaluationBridge(trading_mode=TradingMode.LIVE)
+        for authority in (None, "PAPER_RUNTIME_EQUITY"):
+            with self.subTest(authority=authority):
+                result = bridge.evaluate(
+                    _metrics_at(CUR_DAY, authority_source=authority),
+                    _snapshot_for(state), f"live:bad-authority:{authority}",
+                )
+                self.assertEqual(
+                    result.status, LossRuntimeEvaluationStatus.RECOVERY_REQUIRED
+                )
+
+    def test_live_missing_zero_and_nonfinite_equity_fail_closed(self):
+        state = _state_at(PREV_DAY)
+        bridge = LossRuntimeEvaluationBridge(trading_mode=TradingMode.LIVE)
+        for equity, peak in ((None, D("100")), (D("0"), D("0"))):
+            with self.subTest(equity=equity):
+                result = bridge.evaluate(
+                    self.live_metrics(CUR_DAY, equity=equity, peak_equity=peak),
+                    _snapshot_for(state), f"live:bad-equity:{equity}",
+                )
+                self.assertEqual(
+                    result.status, LossRuntimeEvaluationStatus.RECOVERY_REQUIRED
+                )
+        with self.assertRaises(ValueError):
+            self.live_metrics(CUR_DAY, equity=D("NaN"))
 
 
 if __name__ == "__main__":

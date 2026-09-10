@@ -110,6 +110,7 @@ class LossRuntimeMetrics:
     session_trade_count: Optional[int] = None
     trade_count_authority_scope: Optional[str] = None
     trade_count_authority_session_id: Optional[int] = None
+    accounting_authority_source: Optional[str] = None
 
     def __post_init__(self):
         object.__setattr__(
@@ -187,6 +188,10 @@ class LossRuntimeMetrics:
         object.__setattr__(
             self, "data_quality", LossRuntimeDataQuality(self.data_quality)
         )
+        if self.accounting_authority_source not in (
+            None, "PAPER_RUNTIME_EQUITY", "REAL_LIVE_ACCOUNT_EQUITY",
+        ):
+            raise ValueError("accounting authority source invalid")
         if self.trade_count_authority_scope not in (None, "RUNTIME_SESSION"):
             raise ValueError("trade_count_authority_scope invalid")
         session_authoritative = (

@@ -41,6 +41,7 @@ class LossBaselineType(str, Enum):
 
 class AccountingRebaseAuthoritySource(str, Enum):
     PAPER_RUNTIME_EQUITY = "PAPER_RUNTIME_EQUITY"
+    REAL_LIVE_ACCOUNT_EQUITY = "REAL_LIVE_ACCOUNT_EQUITY"
 
 class AccountingRebaseReason(str, Enum):
     HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE = "HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE"
@@ -251,6 +252,9 @@ class PersistedLossState:
     config_schema_version: str = CONFIG_SCHEMA_VERSION
     freshness: FreshnessStatus = FreshnessStatus.VALID
     accounting_rebases: Tuple[PersistedAccountingRebaseRecord, ...] = ()
+    accounting_authority_source: AccountingRebaseAuthoritySource = (
+        AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY
+    )
 
     def __post_init__(self):
         if self.schema_version != PERSISTENCE_SCHEMA_VERSION:
@@ -286,6 +290,11 @@ class PersistedLossState:
         if any(item.observed_at > captured for item in rebases):
             raise ValueError("accounting rebase timestamp exceeds captured_at")
         object.__setattr__(self, "accounting_rebases", rebases)
+        object.__setattr__(
+            self,
+            "accounting_authority_source",
+            AccountingRebaseAuthoritySource(self.accounting_authority_source),
+        )
 
     def to_dict(self):
         return {f.name: _ser(getattr(self, f.name)) for f in fields(self)}
