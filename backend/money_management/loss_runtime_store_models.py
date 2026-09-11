@@ -51,6 +51,7 @@ class LossLimitRuntimeUpdate:
  event_sequence: int
  occurred_at: datetime
  transition_reason: str
+ validated_accounting_rebase_id: Optional[str] = None
  def __post_init__(self):
   if self.next_state is not None and not isinstance(self.next_state,PersistedLossState): raise TypeError("next_state invalid")
   object.__setattr__(self,"governance_projection",GovernanceProjection(self.governance_projection))
@@ -60,6 +61,7 @@ class LossLimitRuntimeUpdate:
   if type(self.expected_revision) is not int or self.expected_revision<1 or type(self.event_sequence) is not int or self.event_sequence<1: raise ValueError("revision and sequence must be positive integers")
   object.__setattr__(self,"occurred_at",_dt(self.occurred_at))
   if not isinstance(self.transition_reason,str) or not self.transition_reason: raise ValueError("transition reason required")
+  if self.validated_accounting_rebase_id is not None and (not isinstance(self.validated_accounting_rebase_id,str) or not self.validated_accounting_rebase_id.strip()): raise ValueError("validated accounting rebase ID invalid")
  def to_dict(self): return {f.name:_ser(getattr(self,f.name)) for f in fields(self)}
 @dataclass(frozen=True)
 class LossLimitRuntimeStoreFailure:
