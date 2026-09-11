@@ -199,6 +199,31 @@ class LossGovernanceProjectionDispatcher:
                     return self._fail_closed(app, "lifecycle status invalid")
                 revision = lifecycle_status.revision
                 sequence = lifecycle_status.sequence
+                if (
+                    lifecycle_status.lifecycle_state
+                    is ApplicationLifecycleState.RECOVERY_REQUIRED
+                ):
+                    generated_at = self._fallback_timestamp(
+                        app, revision, sequence
+                    )
+                    return self._publish(
+                        app,
+                        _recovery_projection(generated_at),
+                        revision,
+                        sequence,
+                        ("loss runtime recovery required",),
+                        True,
+                    )
+                if (
+                    lifecycle_status.lifecycle_state
+                    is not ApplicationLifecycleState.RUNNING
+                ):
+                    return self._fail_closed(
+                        app,
+                        "lifecycle not running",
+                        revision,
+                        sequence,
+                    )
                 hook_registration = getattr(
                     state, "money_management_runtime_hook", None
                 )
@@ -225,31 +250,6 @@ class LossGovernanceProjectionDispatcher:
                             revision,
                             sequence,
                         )
-                if (
-                    lifecycle_status.lifecycle_state
-                    is ApplicationLifecycleState.RECOVERY_REQUIRED
-                ):
-                    generated_at = self._fallback_timestamp(
-                        app, revision, sequence
-                    )
-                    return self._publish(
-                        app,
-                        _recovery_projection(generated_at),
-                        revision,
-                        sequence,
-                        ("loss runtime recovery required",),
-                        True,
-                    )
-                if (
-                    lifecycle_status.lifecycle_state
-                    is not ApplicationLifecycleState.RUNNING
-                ):
-                    return self._fail_closed(
-                        app,
-                        "lifecycle not running",
-                        revision,
-                        sequence,
-                    )
                 runtime_snapshot = lifecycle.get_snapshot()
                 if not isinstance(runtime_snapshot, LossLimitRuntimeSnapshot):
                     return self._fail_closed(
