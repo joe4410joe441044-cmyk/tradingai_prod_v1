@@ -177,6 +177,7 @@ class LossRuntimeUpdateBuildContext:
     recovery_requirement: LossLimitRecoveryRequirement
     save_triggers: Tuple[SaveTrigger, ...]
     transition_reason: str
+    validated_accounting_rebase_id: Optional[str] = None
 
     def __post_init__(self):
         object.__setattr__(self, "event_id", _text("event_id", self.event_id))
@@ -198,6 +199,15 @@ class LossRuntimeUpdateBuildContext:
             "transition_reason",
             _text("transition_reason", self.transition_reason),
         )
+        if self.validated_accounting_rebase_id is not None:
+            object.__setattr__(
+                self,
+                "validated_accounting_rebase_id",
+                _text(
+                    "validated_accounting_rebase_id",
+                    self.validated_accounting_rebase_id,
+                ),
+            )
 
     def to_dict(self):
         return {field.name: _serialize(getattr(self, field.name)) for field in fields(self)}

@@ -2,6 +2,11 @@
 from threading import RLock
 from .enums import RiskState
 from .loss_reason_models import RecommendedAction
+from .loss_persistence_models import (
+ AccountingContinuityStatus, AccountingRebaseAuditMarker,
+ AccountingRebaseAuthorizationState, AccountingRebaseReason, LossBaselineType,
+ PeriodCode,
+)
 from .loss_runtime_integration_models import RuntimeLifecycle,StateSource,GovernanceProjection,SaveTrigger,RecoveryReason,LossLimitRecoveryRequirement,LossLimitRuntimeStartupDecision
 from .loss_runtime_store_models import *
 def _dt(v):
@@ -14,6 +19,46 @@ def _projection(state):
  if a is RecommendedAction.HOLD_NEW_ENTRIES: return GovernanceProjection.HOLD_NEW_ENTRIES
  return GovernanceProjection.CONTINUE
 def _rank(state): return {RiskState.NORMAL:0,RiskState.CAUTION:1,RiskState.DEFENSIVE:2,RiskState.LOCKED:3}[state.last_decision.decision_state]
+def _validated_authority_rebase(current, update):
+ if (current is None or update.next_state is None
+     or update.validated_accounting_rebase_id is None
+     or SaveTrigger.ACCOUNTING_REBASE not in update.save_triggers):
+  return False
+ next_state=update.next_state
+ if current.accounting_authority_source is next_state.accounting_authority_source:
+  return False
+ old_records=current.accounting_rebases; new_records=next_state.accounting_rebases
+ if len(new_records)!=len(old_records)+1 or new_records[:-1]!=old_records:
+  return False
+ record=new_records[-1]
+ if (record.rebase_id!=update.validated_accounting_rebase_id
+     or record.authority_source is not next_state.accounting_authority_source
+     or record.account_scope!=current.account_scope
+     or next_state.account_scope!=current.account_scope
+     or record.authorization_state is not AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED
+     or record.reason is not AccountingRebaseReason.HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE
+     or record.continuity_status is not AccountingContinuityStatus.UNAVAILABLE_REBASED
+     or record.audit_marker is not AccountingRebaseAuditMarker.DURABLE_CHECKPOINT_REQUIRED
+     or record.authoritative_equity<=0):
+  return False
+ periods={PeriodCode.DAILY:(current.daily_state,next_state.daily_state),
+          PeriodCode.WEEKLY:(current.weekly_state,next_state.weekly_state),
+          PeriodCode.MONTHLY:(current.monthly_state,next_state.monthly_state)}
+ if set(record.affected_periods)!=set(PeriodCode):
+  return False
+ for index,code in enumerate(record.affected_periods):
+  old_period,new_period=periods[code]
+  if (record.previous_period_ids[index]!=old_period.period_id
+      or record.new_period_ids[index]!=new_period.period_id
+      or new_period.starting_equity!=record.authoritative_equity
+      or new_period.baseline_type is not LossBaselineType.ACCOUNTING_REBASE_BASELINE
+      or new_period.baseline_observed_at!=record.observed_at):
+   return False
+ drawdown=next_state.drawdown_state
+ return (drawdown.high_water_mark==record.authoritative_equity
+         and drawdown.current_equity==record.authoritative_equity
+         and drawdown.drawdown_amount==0
+         and drawdown.drawdown_percent==0)
 _ALLOWED={(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.READY),(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.READY,RuntimeLifecycle.READY),(RuntimeLifecycle.READY,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.READY,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.READY,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.RECOVERY_REQUIRED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.RECOVERY_REQUIRED,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.STOPPED,RuntimeLifecycle.STOPPED)}
 def _failure(code,msg): return LossLimitRuntimeStoreResult(StoreResultStatus.FAILED,None,LossLimitRuntimeStoreFailure(code,msg),False,False)
 class LossLimitRuntimeStateStore:
@@ -46,7 +91,7 @@ class LossLimitRuntimeStateStore:
     return LossLimitRuntimeStoreResult(StoreResultStatus.SUCCEEDED,self._snapshot,None,True,startup_decision.save_required)
    except (TypeError,ValueError): return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INPUT_INVALID,"invalid initialization")
  def _event_signature(self,u):
-  return (u.next_state.to_dict() if u.next_state else None,u.governance_projection.value,u.recovery_requirement.to_dict(),tuple(x.value for x in u.save_triggers),u.transition_reason)
+  return (u.next_state.to_dict() if u.next_state else None,u.governance_projection.value,u.recovery_requirement.to_dict(),tuple(x.value for x in u.save_triggers),u.transition_reason,u.validated_accounting_rebase_id)
  def apply_update(self,update):
   with self._lock:
    try:
@@ -62,9 +107,10 @@ class LossLimitRuntimeStateStore:
     if update.event_sequence==cur.sequence: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_EVENT_CONFLICT,"event conflict")
     if cur.lifecycle is RuntimeLifecycle.RECOVERY_REQUIRED and not update.recovery_requirement.required: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_RECOVERY_REQUIRED,"recovery required")
     next_l=RuntimeLifecycle.RECOVERY_REQUIRED if update.recovery_requirement.required else (RuntimeLifecycle.RESTRICTED if update.governance_projection in (GovernanceProjection.HOLD_NEW_ENTRIES,GovernanceProjection.BLOCK_EXECUTION) else RuntimeLifecycle.READY)
-    if (cur.lifecycle,next_l) not in _ALLOWED: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"invalid lifecycle transition")
     if update.next_state is not None and _projection(update.next_state) is not update.governance_projection: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_STATE_CONFLICT,"projection mismatch")
-    if cur.state is not None and update.next_state is not None and _rank(update.next_state)<_rank(cur.state): return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"automatic relaxation forbidden")
+    authority_rebase=_validated_authority_rebase(cur.state,update)
+    if (cur.lifecycle,next_l) not in _ALLOWED and not (authority_rebase and cur.lifecycle is RuntimeLifecycle.RESTRICTED and next_l is RuntimeLifecycle.READY): return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"invalid lifecycle transition")
+    if cur.state is not None and update.next_state is not None and _rank(update.next_state)<_rank(cur.state) and not authority_rebase: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"automatic relaxation forbidden")
     at=_dt(update.occurred_at)
     if at<cur.updated_at: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INPUT_INVALID,"event timestamp is stale")
     self._snapshot=LossLimitRuntimeSnapshot(next_l,update.next_state,StateSource.CURRENT_RUNTIME_STATE,update.governance_projection,update.recovery_requirement,update.save_triggers,cur.revision+1,update.event_sequence,cur.initialized_at,at,update.transition_reason)

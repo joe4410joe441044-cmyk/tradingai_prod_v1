@@ -61,6 +61,7 @@ def build_loss_runtime_update_request(event, runtime_snapshot, build_context):
         event.sequence,
         event.occurred_at,
         build_context.transition_reason,
+        build_context.validated_accounting_rebase_id,
     )
 
 

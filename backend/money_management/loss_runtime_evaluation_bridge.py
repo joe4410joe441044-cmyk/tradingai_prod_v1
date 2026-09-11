@@ -133,7 +133,7 @@ def _apply_rebase_pnl_baseline(previous, aggregate, code):
     return aggregate
 
 
-def _period_state(code, aggregate, starting_equity, cash_flow_amount, captured_at):
+def _period_state(code, aggregate, previous, captured_at):
     pnl = aggregate.net_realized_pnl
     loss = max(Decimal("0"), -pnl)
     return PersistedLossPeriodState(
@@ -141,12 +141,14 @@ def _period_state(code, aggregate, starting_equity, cash_flow_amount, captured_a
         aggregate.period.period_key,
         aggregate.period.start_at,
         aggregate.period.end_at,
-        starting_equity,
+        previous.starting_equity,
         pnl,
         loss,
-        loss / starting_equity * Decimal("100"),
-        cash_flow_amount,
+        loss / previous.starting_equity * Decimal("100"),
+        previous.cash_flow_amount,
         captured_at,
+        previous.baseline_type,
+        previous.baseline_observed_at,
     )
 
 
@@ -235,7 +237,7 @@ def _attempt_period_rollover(metrics, runtime_snapshot, trading_mode):
     update = result.update
     if update is None or not isinstance(update.next_state, PersistedLossState):
         return None
-    return update.next_state
+    return update.next_state, result.record
 
 
 def _save_triggers(previous, next_state):
@@ -340,6 +342,7 @@ class LossRuntimeEvaluationBridge:
                 is expected_authority
             )
             authority_transition = not authority_matches
+            validated_accounting_rebase_id = None
             if (
                 not _periods_match(previous, daily, weekly, monthly)
                 or not authority_matches
@@ -352,7 +355,9 @@ class LossRuntimeEvaluationBridge:
                         LossRuntimeEvaluationStatus.RECOVERY_REQUIRED,
                         "period rollover requires authoritative starting equity",
                     )
-                previous = rebased
+                previous, rebase_record = rebased
+                if authority_transition:
+                    validated_accounting_rebase_id = rebase_record.rebase_id
                 period_rollover = True
             daily = _apply_rebase_pnl_baseline(previous, daily, PeriodCode.DAILY)
             weekly = _apply_rebase_pnl_baseline(previous, weekly, PeriodCode.WEEKLY)
@@ -400,22 +405,19 @@ class LossRuntimeEvaluationBridge:
                 _period_state(
                     PeriodCode.DAILY,
                     daily,
-                    previous.daily_state.starting_equity,
-                    previous.daily_state.cash_flow_amount,
+                    previous.daily_state,
                     metrics.captured_at,
                 ),
                 _period_state(
                     PeriodCode.WEEKLY,
                     weekly,
-                    previous.weekly_state.starting_equity,
-                    previous.weekly_state.cash_flow_amount,
+                    previous.weekly_state,
                     metrics.captured_at,
                 ),
                 _period_state(
                     PeriodCode.MONTHLY,
                     monthly,
-                    previous.monthly_state.starting_equity,
-                    previous.monthly_state.cash_flow_amount,
+                    previous.monthly_state,
                     metrics.captured_at,
                 ),
                 PersistedDrawdownState(
@@ -446,6 +448,11 @@ class LossRuntimeEvaluationBridge:
             triggers = _save_triggers(previous, next_state)
             if period_rollover and SaveTrigger.PERIOD_ROLLOVER not in triggers:
                 triggers = (SaveTrigger.PERIOD_ROLLOVER,) + triggers
+            if (
+                validated_accounting_rebase_id is not None
+                and SaveTrigger.ACCOUNTING_REBASE not in triggers
+            ):
+                triggers = (SaveTrigger.ACCOUNTING_REBASE,) + triggers
             context = LossRuntimeUpdateBuildContext(
                 event_id,
                 next_state,
@@ -453,6 +460,7 @@ class LossRuntimeEvaluationBridge:
                 recovery,
                 triggers,
                 f"runtime metrics evaluated: {reason.primary_reason.value}",
+                validated_accounting_rebase_id,
             )
             return LossRuntimeEvaluationResult(
                 LossRuntimeEvaluationStatus.SUCCEEDED,

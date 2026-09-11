@@ -215,5 +215,6 @@ def build_accounting_rebase_update(
         (SaveTrigger.ACCOUNTING_REBASE,), runtime_snapshot.revision,
         runtime_snapshot.sequence + 1, requested_at,
         "EXPLICIT_ACCOUNTING_REBASE",
+        record.rebase_id,
     )
     return AccountingRebaseBuildResult(AccountingRebaseStatus.ACCEPTED, update, record, ())
