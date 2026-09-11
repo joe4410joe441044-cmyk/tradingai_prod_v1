@@ -43,7 +43,7 @@ import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from dotenv import load_dotenv
 
@@ -1193,11 +1193,19 @@ class BotManager:
 
         with self.paper_capital_lock:
             snapshot = self._capture_account_snapshot()
-            previous = normalize_capital(
+            previous_value = (
                 snapshot.get("balance")
                 if snapshot.get("balance") is not None
                 else self.paper_account_state.get("capital", "1000.00")
             )
+            try:
+                previous = Decimal(str(previous_value))
+            except (InvalidOperation, ValueError, TypeError):
+                previous = Decimal("NaN")
+            if not previous.is_finite():
+                previous = normalize_capital(
+                    self.paper_account_state.get("capital", "1000.00")
+                )
 
             def reject(reason):
                 self.paper_account_store.append_event({

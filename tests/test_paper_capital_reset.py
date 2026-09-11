@@ -111,6 +111,32 @@ def test_reset_persists_across_store_restart_and_writes_audit_event(tmp_path):
     assert event["result"] == "SUCCESS"
 
 
+def test_reset_accepts_canonical_request_when_existing_runtime_balance_has_exchange_precision(tmp_path):
+    manager = make_manager(tmp_path)
+    manager.account_snapshot.update({
+        "balance": 7.91836966,
+        "equity": 7.91836966,
+        "availableBalance": 7.91836966,
+    })
+
+    response = manager.reset_paper_capital(Decimal("100.00"))
+
+    assert response["success"] is True
+    assert response["paperBalance"] == 100.0
+    event = json.loads(
+        (tmp_path / "paper-history.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert event["previousCapital"] == "7.92"
+    assert event["newCapital"] == "100.00"
+
+
+def test_reset_keeps_new_capital_precision_policy_strict_with_exchange_precision_snapshot(tmp_path):
+    manager = make_manager(tmp_path)
+    manager.account_snapshot["balance"] = 7.91836966
+
+    with pytest.raises(ValueError, match="INVALID_PAPER_CAPITAL_PRECISION"):
+        manager.reset_paper_capital(Decimal("100.001"))
+
 def test_saved_500_restores_stopped_loop_off_runtime_snapshot(tmp_path):
     store = PaperAccountStore(str(tmp_path / "paper-state.json"))
     saved = store.build_state("500", "DASHBOARD_MANUAL", 1234.5)
