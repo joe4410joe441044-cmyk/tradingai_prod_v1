@@ -127,6 +127,37 @@ def ready_boundary(*, publish=True, runtime_metrics=None, runtime_mode="paper"):
 
 
 class MoneyManagementStatusApiTests(unittest.TestCase):
+    def test_actual_runtime_mode_projection(self):
+        for mode, expected in (("paper", "PAPER"), ("live", "LIVE"), (None, None), ("invalid", None)):
+            with self.subTest(mode=mode):
+                boundary, _, _, _, _ = ready_boundary(runtime_mode=mode)
+                status = boundary.get_status()
+                payload = status.to_dict()
+                self.assertEqual(status.mode, expected)
+                self.assertEqual(payload["mode"], expected)
+                self.assertEqual(payload["available"], mode == "paper")
+                self.assertEqual(payload["executionEntryAllowed"], mode == "paper")
+                self.assertEqual(payload["metricsStatus"], "AVAILABLE")
+                self.assertEqual(payload["riskState"], "NORMAL" if mode == "paper" else "UNKNOWN")
+
+    def test_mode_projection_keeps_missing_runtime_metrics_fail_closed(self):
+        for mode, expected in (("paper", "PAPER"), ("live", "LIVE"), (None, None)):
+            with self.subTest(mode=mode):
+                _, app, _, _, clock = ready_boundary(runtime_mode=mode)
+                boundary = MoneyManagementHttpBoundary(
+                    app, dispatcher=None, timestamp_source=clock,
+                    capital_authority_provider=lambda: ams_capital(evaluated_at=clock()),
+                )
+                status = boundary.get_status()
+                payload = status.to_dict()
+                self.assertEqual(status.mode, expected)
+                self.assertEqual(payload["mode"], expected)
+                self.assertFalse(payload["available"])
+                self.assertFalse(payload["executionEntryAllowed"])
+                self.assertEqual(payload["metricsStatus"], "UNAVAILABLE")
+                self.assertEqual(payload["riskState"], "UNKNOWN")
+                self.assertIn("TRADING_RUNTIME_METRICS_UNAVAILABLE", payload["blockReasons"])
+
     @staticmethod
     def _ready_cash_flow(app, *, fresh=True):
         app.state.money_management.lifecycle_adapter.cash_flow_runtime = (

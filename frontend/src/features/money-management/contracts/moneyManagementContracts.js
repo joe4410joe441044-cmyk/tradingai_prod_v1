@@ -445,6 +445,7 @@ export function normalizeMoneyManagementStatus(raw) {
   );
   return Object.freeze({
     schemaVersion: text(value.schemaVersion, "status.schemaVersion"),
+    mode: ["PAPER", "LIVE"].includes(value.mode) ? value.mode : null,
     available,
     enabled,
     lifecycleState,

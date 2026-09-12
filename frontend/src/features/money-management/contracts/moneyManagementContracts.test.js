@@ -259,3 +259,28 @@ test("update and recovery response contracts distinguish no-op recovery", () => 
   );
   assert.equal(noOp.outcome, "ALREADY_EVALUATED");
 });
+
+for (const mode of ["PAPER", "LIVE", undefined, null, "invalid", "paper", " LIVE ", 0, {}]) {
+  test(`strict runtime mode normalization: ${JSON.stringify(mode)}`, () => {
+    const expected = ["PAPER", "LIVE"].includes(mode) ? mode : null;
+    const raw = validStatus(mode === undefined ? {} : { mode });
+    const normalized = normalizeMoneyManagementStatus(raw);
+    assert.equal(normalized.mode, expected);
+    assert.deepEqual(normalized, { ...normalizeMoneyManagementStatus(validStatus()), mode: expected });
+    const safe = createSafeMoneyManagementStatus(normalizeMoneyManagementStatus({
+      ...raw,
+      available: false,
+      riskState: "UNKNOWN",
+      executionEntryAllowed: false,
+      metricsStatus: "UNAVAILABLE",
+      metrics: { ...raw.metrics, status: "UNAVAILABLE" },
+      blockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+    }), { pollingState: "RUNNING" });
+    assert.equal(safe.mode, expected);
+    assert.equal(safe.available, false);
+    assert.equal(safe.riskState, "UNKNOWN");
+    assert.equal(safe.executionEntryAllowed, false);
+    assert.equal(safe.metricsStatus, "UNAVAILABLE");
+    assert.ok(safe.blockReasons.includes("TRADING_RUNTIME_METRICS_UNAVAILABLE"));
+  });
+}

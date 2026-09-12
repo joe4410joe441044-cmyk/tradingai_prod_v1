@@ -394,3 +394,30 @@ test("null Consecutive Losses remains unavailable, not zero", () => {
   assert.equal(consecutiveLosses.value.text, "—");
   assert.equal(consecutiveLosses.value.unavailable, true);
 });
+
+for (const mode of ["PAPER", "LIVE", undefined, null, "invalid"]) {
+  test(`mode badge remains independent of unavailable runtime: ${mode}`, () => {
+    const expected = ["PAPER", "LIVE"].includes(mode) ? mode : "UNKNOWN MODE";
+    const modeFields = mode === undefined ? {} : { mode };
+    const ready = createMoneyManagementViewModel(readyInput({ status: status(modeFields) }));
+    assert.equal(ready.header.mode.text, expected);
+    const model = createMoneyManagementViewModel(readyInput({
+      status: status({
+        ...modeFields,
+        available: false,
+        metricsStatus: "UNAVAILABLE",
+        metrics: { ...status().metrics, status: "UNAVAILABLE" },
+        riskState: "UNKNOWN",
+        executionEntryAllowed: false,
+        recommendedAction: "UNKNOWN",
+        blockReasons: ["TRADING_RUNTIME_METRICS_UNAVAILABLE"],
+      }),
+    }));
+    assert.equal(model.header.mode.text, expected);
+    assert.equal(model.runtime.find((row) => row.label === "Health").value.text, "UNAVAILABLE");
+    assert.equal(model.riskState.state.text, "UNKNOWN");
+    assert.equal(model.riskState.entryPermission.text, "ENTRY BLOCKED");
+    assert.equal(model.riskState.protectionLevel, "FAIL CLOSED");
+    assert.equal(model.riskState.primaryReason, "TRADING_RUNTIME_METRICS_UNAVAILABLE");
+  });
+}

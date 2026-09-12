@@ -300,10 +300,12 @@ class MoneyManagementStatusResponse:
     runtime_instance_id: object = None
     baseline_session_id: object = None
     baseline_complete: bool = False
+    mode: Optional[str] = None
 
     def to_dict(self):
         return {
             "schemaVersion": HTTP_BOUNDARY_SCHEMA_VERSION,
+            "mode": self.mode,
             "available": self.available,
             "enabled": self.enabled,
             "lifecycleState": self.lifecycle_state,
@@ -1500,6 +1502,7 @@ class MoneyManagementHttpBoundary:
             correlation_runtime,
             correlation_baseline,
             correlation_complete,
+            mode=actual_runtime_mode.value if actual_runtime_mode is not None else None,
         )
 
     def _normalize_update(self, payload):
