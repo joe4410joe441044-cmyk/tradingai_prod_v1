@@ -196,6 +196,7 @@ def build_trading_decision_snapshot(
     real_order_allowed=False,
     execution_authority=None,
     emergency_state=None,
+    close_state=None,
 ):
     """Project one runtime cycle into an entry-readiness contract.
 
@@ -384,6 +385,22 @@ def build_trading_decision_snapshot(
     normalized_position_state = str(
         position_state or ("OPEN" if position_active else "FLAT")
     ).upper()
+    close_confirmed = bool(
+        isinstance(close_state, dict)
+        and close_state.get("confirmed") is True
+        and close_state.get("closed") is True
+        and close_state.get("positionState") == "FLAT"
+        and close_state.get("openOrderState") == "FLAT"
+        and not position_active
+        and not pending_order
+    )
+
+    if close_confirmed:
+        current_stage = "READY FOR NEXT TRADE"
+        current_stage_index = 14
+        current_activity = "READY_FOR_NEXT_TRADE"
+        next_stage = None
+        current_state = "POSITION CLOSED"
 
     entry_readiness = deepcopy(strategy.get("entryReadiness"))
     if not isinstance(entry_readiness, dict):
@@ -420,6 +437,17 @@ def build_trading_decision_snapshot(
         "nextStage": next_stage,
         "selectedSymbol": symbol,
         "cycleProgressUpdatedAt": timestamp,
+        "closeState": (
+            {
+                key: deepcopy(close_state.get(key))
+                for key in (
+                    "status", "confirmed", "closed", "reason",
+                    "positionState", "openOrderState",
+                    "reconciliationAttempts", "order_id",
+                )
+            }
+            if isinstance(close_state, dict) else None
+        ),
         "stages": {
             "market": {"reached": bool(market_ready), "status": "PASS" if market_ready else "NOT READY", "reason": None if market_ready else "MARKET_DATA_MISSING_OR_STALE"},
             "pythonStrategy": {"evaluated": strategy_reached, "reached": strategy_reached, "status": strategy_decision, "decision": strategy_decision, "confidence": strategy.get("confidence", result.get("strategyConfidence")), "executionAllowed": strategy.get("executionAllowed"), "reason": strategy_reason, "suppressionReason": strategy.get("suppressionReason"), "evaluatedAt": timestamp if strategy_reached else None},
