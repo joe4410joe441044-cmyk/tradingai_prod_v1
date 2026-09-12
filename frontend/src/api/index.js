@@ -87,6 +87,12 @@ export const API = {
   loopStop: () =>
     join("/bot/loop/stop"),
 
+  liveOrderEntryArm: () =>
+    join("/bot/live-order-entry/arm"),
+
+  liveOrderEntryDisarm: () =>
+    join("/bot/live-order-entry/disarm"),
+
   paperAccountCapital: () =>
     join("/bot/paper-account/capital"),
 

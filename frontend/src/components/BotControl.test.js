@@ -155,6 +155,8 @@ const loadBotControl = async () => {
                 "  botStop: () => '/api/bot/stop',",
                 "  loopStart: () => '/api/bot/loop/start',",
                 "  loopStop: () => '/api/bot/loop/stop',",
+                "  liveOrderEntryArm: () => '/api/bot/live-order-entry/arm',",
+                "  liveOrderEntryDisarm: () => '/api/bot/live-order-entry/disarm',",
                 "};",
             ].join("\n"),
         );
@@ -2151,18 +2153,26 @@ test("all trade/execution controls send distinct nondefault values through the s
 });
 
 
-test("LIVE DISARMED confirm sends one START and forces Loop/Auto OFF", async () => {
+test("LIVE confirm performs START, ARM, Loop, and Auto Trade in canonical order", async () => {
     setMmStatus({ executionEntryAllowed: false });
     setMmConfiguration();
     const mock = installFetchMock((url) => {
-        assert.equal(url, "/api/bot/start");
-        return jsonResponse({
-            body: {
-                status: "started",
-                loopState: "STOPPED",
-                autoTradeEnabled: false,
-            },
-        });
+        if (url === "/api/bot/start") {
+            return jsonResponse({ body: { status: "started", loopState: "STOPPED", autoTradeEnabled: false } });
+        }
+        if (url === "/api/bot/live-order-entry/arm") {
+            return jsonResponse({ body: {
+                success: true, armed: true, liveOrderEntryAllowed: true,
+                realOrderAllowed: true, executionEntryAllowed: true,
+            } });
+        }
+        if (url === "/api/bot/loop/start") {
+            return jsonResponse({ body: { status: "started", success: true, loopState: "RUNNING" } });
+        }
+        if (url === "/api/governance/execution") {
+            return jsonResponse({ body: { success: true, execution_enabled: true } });
+        }
+        throw new Error(`Unexpected request: ${url}`);
     });
     try {
         const renderer = await renderBotControl(readyStartProps({
@@ -2175,18 +2185,64 @@ test("LIVE DISARMED confirm sends one START and forces Loop/Auto OFF", async () 
             },
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
-        assert.equal(textIncludes(renderer.root, "LIVE runtimeをDISARMEDで開始します。"), true);
-        assert.equal(textIncludes(renderer.root, "Real Order Authority: DISABLED"), true);
-        assert.equal(textIncludes(renderer.root, "Loop / Auto Trade: OFF / OFF"), true);
+        assert.equal(textIncludes(renderer.root, "fresh safety validation後に注文権限をARMします。"), true);
+        assert.equal(textIncludes(renderer.root, "Real Order Authority: 確認後にARM"), true);
+        assert.equal(textIncludes(renderer.root, "Loop / Auto Trade: 確認後にON / ON"), true);
         const confirm = findButton(renderer.root, "LIVEを開始");
         assert.equal(confirm.props.disabled, false);
         await clickAndRender(renderer, confirm);
-        assert.equal(mock.requests.length, 1);
+        assert.deepEqual(mock.requests.map(({ url }) => url), [
+            "/api/bot/start",
+            "/api/bot/live-order-entry/arm",
+            "/api/bot/loop/start",
+            "/api/governance/execution",
+        ]);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.mode, "live");
         assert.equal(payload.dry_run, false);
         assert.equal(payload.loop_on_start, false);
         assert.equal(payload.auto_trade_on_start, false);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("LIVE ARM rejection fails closed before Loop or Auto Trade", async () => {
+    setMmStatus({ executionEntryAllowed: false });
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") {
+            return jsonResponse({ body: { status: "started" } });
+        }
+        if (url === "/api/bot/live-order-entry/arm") {
+            return jsonResponse({
+                ok: false,
+                status: 409,
+                body: { detail: { reason: "BALANCE_CHECK_FAILED" } },
+            });
+        }
+        if (url === "/api/bot/live-order-entry/disarm") {
+            return jsonResponse({ body: { success: true, armed: false } });
+        }
+        if (url === "/api/governance/execution") {
+            return jsonResponse({ body: { success: true, execution_enabled: false } });
+        }
+        throw new Error(`No later lifecycle step is allowed: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await clickAndRender(renderer, findButton(renderer.root, "LIVEを開始"));
+        assert.deepEqual(mock.requests.map(({ url }) => url), [
+            "/api/bot/start",
+            "/api/bot/live-order-entry/arm",
+            "/api/governance/execution",
+            "/api/bot/live-order-entry/disarm",
+        ]);
     } finally {
         clearMmStatus();
         clearMmConfiguration();
