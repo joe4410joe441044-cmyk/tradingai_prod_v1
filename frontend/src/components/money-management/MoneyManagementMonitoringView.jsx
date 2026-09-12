@@ -12,9 +12,15 @@ export default function MoneyManagementMonitoringView({ viewAuthority, onSelect,
         <section aria-label="Monitoring View" className="mm-monitoring-view">
             <div className="mm-analytics-header">
                 <h2 className="mm-section-title">Monitoring View（監視対象）</h2>
-                <div role="group" aria-label="Monitoring View authority" className="mm-analytics-periods">
+                <div role="group" aria-label="Monitoring View authority" className="operation-prep-segmented">
                     {VIEW_AUTHORITIES.map((authority) => (
-                        <button type="button" key={authority} aria-pressed={viewAuthority === authority} onClick={() => onSelect(authority)}>
+                        <button
+                            type="button"
+                            key={authority}
+                            aria-pressed={viewAuthority === authority}
+                            className={viewAuthority === authority ? "is-selected" : ""}
+                            onClick={() => onSelect(authority)}
+                        >
                             {authority}
                         </button>
                     ))}
