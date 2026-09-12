@@ -60,6 +60,9 @@ def _exchange(flatten_result=None):
     exchange.api_secret = "s"
     exchange.passphrase = "p"
     exchange.place_order.return_value = {"success": True}
+    exchange.get_open_orders.return_value = {
+        "success": True, "count": 0, "orders": [], "timestamp": time.time(),
+    }
     if flatten_result is not None:
         exchange.flatten_current_position.return_value = flatten_result
     return exchange
@@ -399,7 +402,11 @@ def test_j_no_unrelated_transition_silently_rearms():
 CONFIRMED = {
     "success": True, "accepted": True, "confirmed": True, "closed": True,
     "skipped": False, "symbol": "XRPUSDTM", "order_id": "close-1",
-    "raw_order": {"code": "200000"}, "final_position": {"found": False},
+    "raw_order": {"code": "200000"},
+    "final_position": {
+        "success": True, "found": False, "quantity": 0,
+        "signed_quantity": 0, "timestamp": time.time(),
+    },
 }
 REJECTED = {
     "success": False, "accepted": False, "confirmed": False, "closed": False,
@@ -417,6 +424,7 @@ PARTIAL = {
 
 def _close_engine(flatten_result):
     engine = _ready_engine(exchange=_exchange(flatten_result))
+    engine.LIVE_CLOSE_RECONCILIATION_INTERVAL_SECONDS = 0
     engine.actual_position = _position("long")
     return engine
 
@@ -478,7 +486,7 @@ def test_o_live_close_unknown_or_timeout_does_not_mark_flat():
     ), _patch_live_globals():
         result = engine.close_position(101.0, "SL")
     assert result["confirmed"] is False
-    assert result["status"] == "UNKNOWN"
+    assert result["status"] == "RECONCILIATION_FAILED"
     assert engine.actual_position is not None
     assert engine.live_close_in_flight is True
 

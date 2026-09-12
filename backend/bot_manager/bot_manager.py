@@ -10631,6 +10631,10 @@ class BotManager:
             real_order_allowed=real_order_allowed,
             execution_authority=("ENABLED" if real_order_allowed else "BLOCKED"),
             emergency_state=emergency_state,
+            close_state=(
+                getattr(self.engine, "live_close_state", None)
+                if self.engine is not None else None
+            ),
         )
         decision_signature = (
             trading_decision.get("finalDecision"),

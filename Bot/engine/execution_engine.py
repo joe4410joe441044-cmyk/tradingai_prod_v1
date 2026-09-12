@@ -35,6 +35,13 @@ def adjust_qty_to_step(qty, step_size):
 
 class ExecutionEngine:
 
+    # Match BotRuntimeState's existing two-second reconciliation cadence.  A
+    # normal LIVE close gets three read-only follow-up observations after the
+    # exchange adapter's immediate post-submit position check.
+    LIVE_CLOSE_RECONCILIATION_ATTEMPTS = 3
+    LIVE_CLOSE_RECONCILIATION_INTERVAL_SECONDS = 2
+    LIVE_CLOSE_EVIDENCE_MAX_AGE_SECONDS = 30
+
     def __init__(
         self,
         exchange=None,
@@ -2358,6 +2365,12 @@ class ExecutionEngine:
 
                     self.actual_position = pos
 
+                    if pos:
+                        # A newly observed exchange position begins a new
+                        # lifecycle; do not carry the previous close marker.
+                        self.live_close_state = None
+                        self.live_close_in_flight = False
+
                     add_log("📦 LIVE POSITION OPENED")
 
                 except Exception as e:
@@ -2389,6 +2402,196 @@ class ExecutionEngine:
     # =====================================
     # CLOSE
     # =====================================
+
+    def _live_close_evidence_fresh(self, value):
+        if not isinstance(value, dict):
+            return False
+        timestamp = value.get("timestamp")
+        if isinstance(timestamp, bool):
+            return False
+        try:
+            age = time.time() - float(timestamp)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return (
+            math.isfinite(age)
+            and 0 <= age <= self.LIVE_CLOSE_EVIDENCE_MAX_AGE_SECONDS
+        )
+
+    def _live_close_position_state(self, position):
+        """Classify only the authenticated KuCoin position response shape."""
+        if (
+            not isinstance(position, dict)
+            or position.get("success") is not True
+            or type(position.get("found")) is not bool
+            or not self._live_close_evidence_fresh(position)
+        ):
+            return "UNKNOWN"
+
+        quantity = position.get("quantity")
+        signed_quantity = position.get("signed_quantity")
+        if isinstance(quantity, bool) or isinstance(signed_quantity, bool):
+            return "UNKNOWN"
+        try:
+            quantity = float(quantity)
+            signed_quantity = float(signed_quantity)
+        except (TypeError, ValueError, OverflowError):
+            return "UNKNOWN"
+        if not math.isfinite(quantity) or not math.isfinite(signed_quantity):
+            return "UNKNOWN"
+
+        if position["found"] is False:
+            return "FLAT" if quantity == 0 and signed_quantity == 0 else "UNKNOWN"
+        return "NON_FLAT" if quantity > 0 and signed_quantity != 0 else "UNKNOWN"
+
+    def _live_close_open_order_state(self, orders):
+        if (
+            not isinstance(orders, dict)
+            or orders.get("success") is not True
+            or not self._live_close_evidence_fresh(orders)
+        ):
+            return "UNKNOWN"
+        count = orders.get("count")
+        entries = orders.get("orders")
+        if (
+            type(count) is not int
+            or count < 0
+            or not isinstance(entries, list)
+            or len(entries) != count
+        ):
+            return "UNKNOWN"
+        return "FLAT" if count == 0 else "REMAINING"
+
+    def _read_live_close_authority(self, symbol):
+        exchange = self.exchange
+        try:
+            position = exchange.get_current_position(symbol)
+        except Exception:
+            position = None
+        try:
+            orders = exchange.get_open_orders(symbol)
+        except Exception:
+            orders = None
+        return {
+            "position": position,
+            "positionState": self._live_close_position_state(position),
+            "openOrders": orders,
+            "openOrderState": self._live_close_open_order_state(orders),
+        }
+
+    def _reconcile_live_close(self, symbol, flatten):
+        """Poll position/order authority without ever resubmitting a close."""
+        accepted = flatten.get("accepted") is True
+        skipped = flatten.get("skipped") is True
+        order_id = flatten.get("order_id")
+        final_position = flatten.get("final_position")
+        position_state = self._live_close_position_state(final_position)
+        last_authority = {
+            "position": final_position,
+            "positionState": position_state,
+            "openOrders": None,
+            "openOrderState": "UNKNOWN",
+        }
+
+        # Adapter-level FLAT evidence is not complete until the symbol's active
+        # order collection is authoritatively empty.
+        if position_state == "FLAT":
+            try:
+                orders = self.exchange.get_open_orders(symbol)
+            except Exception:
+                orders = None
+            last_authority.update({
+                "openOrders": orders,
+                "openOrderState": self._live_close_open_order_state(orders),
+            })
+            if last_authority["openOrderState"] == "FLAT":
+                return {
+                    "success": True,
+                    "status": "CONFIRMED",
+                    "confirmed": True,
+                    "closed": True,
+                    "accepted": accepted,
+                    "skipped": skipped,
+                    "reason": "EXCHANGE_CLOSE_CONFIRMED",
+                    "reconciliationAttempts": 0,
+                    "positionAuthority": final_position,
+                    "openOrderAuthority": orders,
+                    "positionState": "FLAT",
+                    "openOrderState": "FLAT",
+                    "order_id": order_id,
+                }
+
+        if not accepted and not skipped:
+            return {
+                "success": False,
+                "status": "REJECTED",
+                "confirmed": False,
+                "closed": False,
+                "accepted": False,
+                "reason": "EXCHANGE_CLOSE_REJECTED",
+                "reconciliationAttempts": 0,
+                "positionAuthority": final_position,
+                "openOrderAuthority": last_authority["openOrders"],
+                "positionState": last_authority["positionState"],
+                "openOrderState": last_authority["openOrderState"],
+                "order_id": order_id,
+            }
+
+        for attempt in range(1, self.LIVE_CLOSE_RECONCILIATION_ATTEMPTS + 1):
+            self.live_close_state = {
+                "success": False,
+                "status": "RECONCILING",
+                "confirmed": False,
+                "closed": False,
+                "accepted": accepted,
+                "reason": "CLOSE_ACCEPTED_PENDING_RECONCILIATION",
+                "reconciliationAttempts": attempt - 1,
+                "order_id": order_id,
+            }
+            time.sleep(self.LIVE_CLOSE_RECONCILIATION_INTERVAL_SECONDS)
+            last_authority = self._read_live_close_authority(symbol)
+            if (
+                last_authority["positionState"] == "FLAT"
+                and last_authority["openOrderState"] == "FLAT"
+            ):
+                return {
+                    "success": True,
+                    "status": "CONFIRMED",
+                    "confirmed": True,
+                    "closed": True,
+                    "accepted": accepted,
+                    "skipped": skipped,
+                    "reason": "EXCHANGE_CLOSE_CONFIRMED",
+                    "reconciliationAttempts": attempt,
+                    "positionAuthority": last_authority["position"],
+                    "openOrderAuthority": last_authority["openOrders"],
+                    "positionState": "FLAT",
+                    "openOrderState": "FLAT",
+                    "order_id": order_id,
+                }
+
+        if last_authority["positionState"] == "NON_FLAT":
+            failure_reason = "EXCHANGE_CLOSE_PARTIAL"
+        elif last_authority["positionState"] == "UNKNOWN":
+            failure_reason = "EXCHANGE_POSITION_UNKNOWN"
+        elif last_authority["openOrderState"] == "REMAINING":
+            failure_reason = "OPEN_CLOSE_ORDER_REMAINS"
+        else:
+            failure_reason = "OPEN_ORDER_STATE_UNKNOWN"
+        return {
+            "success": False,
+            "status": "RECONCILIATION_FAILED",
+            "confirmed": False,
+            "closed": False,
+            "accepted": accepted,
+            "reason": failure_reason,
+            "reconciliationAttempts": self.LIVE_CLOSE_RECONCILIATION_ATTEMPTS,
+            "positionAuthority": last_authority["position"],
+            "openOrderAuthority": last_authority["openOrders"],
+            "positionState": last_authority["positionState"],
+            "openOrderState": last_authority["openOrderState"],
+            "order_id": order_id,
+        }
 
     def _live_close_via_exchange(self, symbol):
         """Submit and classify a normal (non-emergency) LIVE close.
@@ -2442,42 +2645,23 @@ class ExecutionEngine:
         result["final_position"] = flatten.get("final_position")
         result["error_code"] = flatten.get("error_code")
 
-        confirmed = bool(flatten.get("confirmed"))
-        closed = bool(flatten.get("closed"))
-        skipped = bool(flatten.get("skipped"))
         accepted = bool(flatten.get("accepted"))
         error_code = flatten.get("error_code")
+        result["accepted"] = accepted
 
-        if confirmed and (closed or skipped):
-            result.update({
-                "success": True,
-                "status": "CONFIRMED",
-                "confirmed": True,
-                "closed": True,
-                "reason": "EXCHANGE_CLOSE_CONFIRMED",
-            })
-        elif error_code == "POSITION_REMAINS":
-            result.update({
-                "status": "PARTIAL",
-                "reason": "EXCHANGE_CLOSE_PARTIAL",
-                "accepted": accepted,
-            })
-        elif error_code == "TIMEOUT":
-            result.update({
-                "status": "UNKNOWN",
-                "reason": "EXCHANGE_CLOSE_UNKNOWN",
-                "accepted": accepted,
-            })
-        elif not accepted:
+        if not accepted and not (
+            flatten.get("confirmed") is True
+            and flatten.get("skipped") is True
+        ):
             result.update({
                 "status": "REJECTED",
                 "reason": "EXCHANGE_CLOSE_REJECTED",
             })
         else:
-            result.update({
-                "status": "UNKNOWN",
-                "reason": "EXCHANGE_CLOSE_UNKNOWN",
-            })
+            result.update(self._reconcile_live_close(symbol, flatten))
+            result["raw_order"] = flatten.get("raw_order")
+            result["final_position"] = result.get("positionAuthority")
+            result["error_code"] = error_code
 
         self.live_close_state = dict(result)
         return result
@@ -2508,6 +2692,7 @@ class ExecutionEngine:
                     "closed": False,
                     "reason": "EXCHANGE_CLOSE_PENDING",
                 })
+            self.pending_order = True
             live_close = self._live_close_via_exchange(self.symbol)
             if live_close.get("confirmed") is not True:
                 self.live_close_state = dict(live_close)
@@ -2710,12 +2895,17 @@ class ExecutionEngine:
                 "closed": True,
                 "exchangeClose": {
                     k: live_close.get(k)
-                    for k in ("order_id", "raw_order", "final_position", "symbol")
+                    for k in (
+                        "order_id", "raw_order", "final_position", "symbol",
+                        "openOrderAuthority", "positionState", "openOrderState",
+                        "reconciliationAttempts",
+                    )
                 },
                 **identity,
             }
             self.trade_history.append(live_record)
             self.live_close_state = {
+                **live_close,
                 "status": "CONFIRMED",
                 "confirmed": True,
                 "closed": True,
@@ -2737,6 +2927,7 @@ class ExecutionEngine:
 
         if self.mode == "live":
             return {
+                **(live_close or {}),
                 "success": True,
                 "confirmed": True,
                 "closed": True,
@@ -2953,4 +3144,5 @@ class ExecutionEngine:
             "paper_orders": copy.deepcopy(self.paper_orders),
             "paper_fills": copy.deepcopy(self.paper_fills),
             "trade_history": copy.deepcopy(self.trade_history),
+            "live_close_state": copy.deepcopy(self.live_close_state),
         }
