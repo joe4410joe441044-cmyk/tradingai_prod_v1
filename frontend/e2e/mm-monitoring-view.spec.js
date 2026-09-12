@@ -161,3 +161,52 @@ test("manual refresh keeps selected View and preserves the header result contrac
     expect(requests.filter(r => r.path.endsWith("/monitoring")).at(-1).query.viewAuthority).toBe("LIVE");
     expect(requests.every(r => r.method === "GET")).toBeTruthy();
 });
+
+for (const authority of ["PAPER", "LIVE"]) {
+    test(`stopped runtime retains inspectable ${authority} observations`, async ({ page }) => {
+        const { requests } = await setup(page, { mode: "UNKNOWN" });
+        await selector(page).getByRole("button", { name: authority, exact: true }).click();
+        await expect(summary(page)).toContainText(authority === "PAPER" ? "101.25" : "202.50");
+        await expect(page.getByRole("region", { name: "Monitoring View", exact: true })).toContainText("UNKNOWN / STOPPED");
+        expect(requests.every(r => r.method === "GET")).toBeTruthy();
+    });
+}
+
+test("obsolete refresh completion cannot schedule a second monitoring poll chain", async ({ page }) => {
+    const { requests } = await setup(page);
+    await expect(summary(page)).toContainText("101.25");
+    let held;
+    let intercept = true;
+    await page.route("**/api/money-management/monitoring?*", async route => {
+        if (intercept) {
+            intercept = false;
+            held = route;
+            return;
+        }
+        await route.fallback();
+    });
+    await page.locator(".mm-header__refresh").click();
+    await expect.poll(() => Boolean(held)).toBeTruthy();
+    // Changing authority cancels the held refresh and starts the active chain.
+    await selector(page).getByRole("button", { name: "LIVE", exact: true }).click();
+    await expect(summary(page)).toContainText("202.50");
+    const before = requests.filter(r => r.path.endsWith("/monitoring")).length;
+    await held.fulfill({ contentType: "application/json", body: JSON.stringify(monitoringFixture("PAPER")) }).catch(() => {});
+    await page.waitForTimeout(3500);
+    const subsequent = requests.filter(r => r.path.endsWith("/monitoring")).slice(before);
+    expect(subsequent).toHaveLength(1);
+    expect(subsequent[0].query.viewAuthority).toBe("LIVE");
+    await expect(summary(page)).toContainText("202.50");
+    await expect(summary(page)).not.toContainText("101.25");
+});
+
+test("history request failure clears graphs without opposite-authority fallback", async ({ page }) => {
+    await setup(page);
+    await expect(summary(page)).toContainText("101.25");
+    await page.route("**/api/money-management/history?*", route => route.fulfill({ status: 503, body: "{}" }));
+    await selector(page).getByRole("button", { name: "LIVE", exact: true }).click();
+    const graphs = page.getByRole("region", { name: "Capital / Performance Graphs", exact: true });
+    await expect(graphs.getByRole("alert")).toBeVisible();
+    await expect(graphs.locator(".recharts-line")).toHaveCount(0);
+    await expect(summary(page)).toContainText("202.50");
+});
