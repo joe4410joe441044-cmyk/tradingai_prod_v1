@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import { validStatus, validConfiguration } from "../src/features/money-management/contracts/moneyManagementFixtures.js";
 import { monitoringFixture, historyFixture, legacyFixture } from "../src/features/money-management/contracts/moneyManagementMonitoringFixtures.js";
 
-async function setup(page, { mode = "PAPER", freshness = "LAST_KNOWN", unavailable = null, delayed = false, statusError = false, monitoringError = false, emptyHistory = false } = {}) {
+async function setup(page, { mode = "PAPER", freshness = "LAST_KNOWN", unavailable = null, delayed = false, statusError = false, monitoringError = false, emptyHistory = false, graphMetrics = false } = {}) {
     const requests = [];
-    const settings = { mode, freshness, unavailable, delayed, statusError, monitoringError, emptyHistory };
+    const settings = { mode, freshness, unavailable, delayed, statusError, monitoringError, emptyHistory, graphMetrics };
     await page.route(url => url.pathname.startsWith("/api/"), async route => {
         const request = route.request();
         const url = new URL(request.url());
@@ -23,6 +23,7 @@ async function setup(page, { mode = "PAPER", freshness = "LAST_KNOWN", unavailab
         } else if (url.pathname.endsWith("/history")) {
             const authority = url.searchParams.get("authority") ?? "ALL";
             const events = [historyFixture("PAPER", 1, new Date().toISOString()), historyFixture("LIVE", 2, new Date().toISOString()), legacyFixture];
+            if (settings.graphMetrics) events.forEach(e => { e.metrics.riskUtilization = "5"; e.metrics.exposureUtilization = "8"; });
             body = { events: settings.emptyHistory ? [] : authority === "ALL" ? events : events.filter(e => e.authority === authority), hasMore: false, nextCursor: null };
         } else return route.fulfill({ status: 404, body: "{}" });
         await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
@@ -209,4 +210,68 @@ test("history request failure clears graphs without opposite-authority fallback"
     await expect(graphs.getByRole("alert")).toBeVisible();
     await expect(graphs.locator(".recharts-line")).toHaveCount(0);
     await expect(summary(page)).toContainText("202.50");
+});
+
+const graphs = page => page.getByRole("region", { name: "Capital / Performance Graphs", exact: true });
+async function observeGraphs(page) {
+    await graphs(page).evaluate(element => {
+        const original = [...element.querySelectorAll("svg.recharts-surface")];
+        window.graphContinuity = { counts: [original.length], removed: false, loading: false };
+        window.graphObserver = new MutationObserver(records => {
+            const result = window.graphContinuity;
+            result.counts.push(element.querySelectorAll("svg.recharts-surface").length);
+            result.loading ||= [...element.querySelectorAll(".mm-card__placeholder")].some(e => /Loading/i.test(e.textContent));
+            result.removed ||= records.some(record => [...record.removedNodes].some(node => original.some(svg => node === svg || node.contains?.(svg))));
+        });
+        window.graphObserver.observe(element, { subtree: true, childList: true });
+    });
+}
+for (const authority of ["PAPER", "LIVE"]) {
+    test(`${authority} repeated delayed background polls never remove any of four chart SVGs`, async ({ page }) => {
+        await setup(page, { mode: authority, graphMetrics: true });
+        await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(4);
+        await observeGraphs(page);
+        const pending = [];
+        await page.route("**/api/money-management/history?*", route => { pending.push(route); });
+        let previousSvg = await graphs(page).locator("svg.recharts-surface").first().innerHTML();
+        for (let cycle = 0; cycle < 3; cycle += 1) {
+            // Let the real hook timer initiate each poll; hold history across renders.
+            await expect.poll(() => pending.length).toBe(cycle + 1);
+            await page.waitForTimeout(300);
+            await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(4);
+            expect(await graphs(page).locator("svg.recharts-surface").first().innerHTML()).toBe(previousSvg);
+            await expect(summary(page)).toContainText(authority === "PAPER" ? "101.25" : "202.50");
+            const event = historyFixture(authority, cycle + 2, new Date().toISOString());
+            event.metrics = { ...event.metrics, equity: String(400 + cycle * 100), peakEquity: String(500 + cycle * 100), riskUtilization: "5", exposureUtilization: "8" };
+            await pending[cycle].fulfill({ contentType: "application/json", body: JSON.stringify({ events: [event, legacyFixture], hasMore: false }) });
+            await expect.poll(() => graphs(page).locator("svg.recharts-surface").first().innerHTML()).not.toBe(previousSvg);
+            previousSvg = await graphs(page).locator("svg.recharts-surface").first().innerHTML();
+            await expect(graphs(page)).not.toContainText("92.088");
+        }
+        const result = await page.evaluate(() => { window.graphObserver.disconnect(); return window.graphContinuity; });
+        expect(result.counts.every(count => count === 4)).toBeTruthy();
+        expect(result.removed).toBe(false);
+        expect(result.loading).toBe(false);
+    });
+}
+test("PAPER LIVE PAPER clears chart subtrees while each new authority is pending", async ({ page }) => {
+    const { requests } = await setup(page, { graphMetrics: true });
+    await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(4);
+    const held = [];
+    await page.route(/\/api\/money-management\/(history|monitoring)\?/, route => { held.push(route); });
+    for (const authority of ["LIVE", "PAPER"]) {
+        const oldValue = authority === "LIVE" ? "101.25" : "202.50";
+        await selector(page).getByRole("button", { name: authority, exact: true }).click();
+        await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(0);
+        await expect(summary(page)).not.toContainText(oldValue);
+        await expect.poll(() => held.length).toBe(2);
+        await page.waitForTimeout(200);
+        await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(0);
+        for (const route of held.splice(0)) await route.fallback();
+        await expect(graphs(page).locator("svg.recharts-surface")).toHaveCount(4);
+        await expect(summary(page)).toContainText(authority === "PAPER" ? "101.25" : "202.50");
+        await expect(summary(page)).not.toContainText(oldValue);
+        await expect(page.getByRole("region", { name: "Monitoring View", exact: true })).toContainText("Actual Runtime（実稼働）: PAPER");
+    }
+    expect(requests.every(r => r.method === "GET")).toBeTruthy();
 });
