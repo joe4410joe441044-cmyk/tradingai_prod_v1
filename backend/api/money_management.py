@@ -28,6 +28,7 @@ def get_money_management_history(
     after: str = None,
     eventType: str = None,
     state: str = None,
+    authority: str = "ALL",
 ):
     boundary = _boundary(request)
     if boundary is None:
@@ -44,6 +45,7 @@ def get_money_management_history(
             after=after,
             event_type=eventType,
             state=state,
+            authority=authority,
         ).to_dict()
     except MoneyManagementApiBoundaryException as error:
         return _boundary_error(error)
@@ -54,6 +56,19 @@ def get_money_management_history(
             "Money Management history is unavailable.",
             True,
         )
+
+
+@router.get("/monitoring")
+def get_money_management_monitoring(request: Request, viewAuthority: str):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(503, "MONEY_MANAGEMENT_UNAVAILABLE", "Money Management monitoring is unavailable.", True)
+    try:
+        return boundary.get_monitoring(view_authority=viewAuthority)
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(503, "INTERNAL_STATE_UNAVAILABLE", "Money Management monitoring is unavailable.", True)
 
 
 def _safe_error(status_code, code, message, retryable=False):

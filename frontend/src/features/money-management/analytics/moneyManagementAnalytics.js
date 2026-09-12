@@ -39,7 +39,7 @@ export async function loadMoneyManagementAnalyticsHistory({
     const next = response.nextCursor;
     if (
       typeof next !== "string" ||
-      !/^[1-9][0-9]*$/u.test(next) ||
+      !/^[1-9][0-9]*(?::[^\s]+)?$/u.test(next) ||
       cursors.has(next)
     ) {
       throw new TypeError("history cursor is invalid");

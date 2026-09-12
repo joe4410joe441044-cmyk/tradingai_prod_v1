@@ -534,6 +534,7 @@ class MoneyManagementRuntimeHook:
                                 + hold_reasons
                                 + warning_reasons
                             ),
+                            observation_state=getattr(snapshot, "state", None),
                             reason_groups={
                                 "block": block_reasons,
                                 "hold": hold_reasons,

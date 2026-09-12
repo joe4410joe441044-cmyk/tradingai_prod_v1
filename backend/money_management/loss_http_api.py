@@ -555,6 +555,15 @@ class MoneyManagementHttpBoundary:
                 "History query is invalid.",
             )
 
+    def get_monitoring(self, *, view_authority):
+        from .monitoring import monitoring_response
+        if view_authority not in ("PAPER", "LIVE"):
+            self._error(422, "VIEW_AUTHORITY_INVALID", "View authority must be PAPER or LIVE.")
+        store = self._timeline_recorder.store.monitoring if self._timeline_recorder else None
+        # Durable observations are last-known, never a claim of active runtime.
+        # This path deliberately needs no runtime, capital or execution provider.
+        return monitoring_response(store, view_authority, self._now())
+
     @property
     def configuration_revision(self):
         with self._lock:

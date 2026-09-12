@@ -112,3 +112,20 @@ test("history loader fails closed on repeated or malformed cursors", async () =>
   );
   assert.equal(calls, 2);
 });
+
+test("history loader preserves composite cursors at duplicate sequence boundaries", async () => {
+  const calls = [];
+  const cursor = "52:mm-52-durable-event-b";
+  const pages = [
+    { events: [{ sequence: 52, eventId: "b" }], hasMore: true, nextCursor: cursor },
+    { events: [{ sequence: 52, eventId: "a" }], hasMore: false, nextCursor: null },
+  ];
+  const loaded = await loadMoneyManagementAnalyticsHistory({
+    client: async (query) => {
+      calls.push(query);
+      return pages[calls.length - 1];
+    },
+  });
+  assert.deepEqual(loaded.map(({ eventId }) => eventId), ["b", "a"]);
+  assert.deepEqual(calls[1], { limit: 500, before: cursor });
+});

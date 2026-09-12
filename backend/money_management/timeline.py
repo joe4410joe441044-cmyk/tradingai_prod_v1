@@ -15,6 +15,7 @@ from uuid import uuid4
 from .loss_runtime_metrics_models import LossRuntimeMetrics
 from .models import MoneyManagementConfig
 from .position_risk import calculate_risk_budget
+from .monitoring import MonitoringSnapshotStore, observation_identity, normalize_identity
 
 
 TIMELINE_FILENAME = "money_management_timeline.jsonl"
@@ -97,6 +98,7 @@ class MoneyManagementTimelineEvent:
     diagnostics: Tuple[str, ...]
     correlation_id: Optional[str]
     changes: Mapping[str, object]
+    observation: Optional[Mapping[str, object]] = None
 
     def __post_init__(self):
         if not isinstance(self.event_id, str) or not self.event_id:
@@ -146,6 +148,7 @@ class MoneyManagementTimelineEvent:
             "diagnostics": list(self.diagnostics),
             "correlationId": self.correlation_id,
             "changes": _serialized(self.changes),
+            **normalize_identity(self.observation),
         }
 
 
@@ -183,7 +186,8 @@ def _event_from_dict(value):
         "previousState", "reasonCodes", "metrics", "configurationVersion",
         "diagnostics", "correlationId", "changes",
     }
-    if not isinstance(value, dict) or set(value) != expected:
+    identity_keys = set(normalize_identity(None))
+    if not isinstance(value, dict) or not expected <= set(value) or set(value) - expected - identity_keys:
         raise ValueError("event shape invalid")
     metrics = value["metrics"]
     if not isinstance(metrics, dict):
@@ -200,7 +204,7 @@ def _event_from_dict(value):
         value["source"], value["state"], value["previousState"],
         tuple(value["reasonCodes"]), metrics,
         value["configurationVersion"], tuple(value["diagnostics"]),
-        value["correlationId"], value["changes"],
+        value["correlationId"], value["changes"], normalize_identity(value),
     )
 
 
@@ -216,6 +220,7 @@ class MoneyManagementTimelineStore:
         self._events = []
         self._corrupt_lines = 0
         self._load()
+        self.monitoring = MonitoringSnapshotStore(directory)
 
     @property
     def corrupt_lines(self):
@@ -267,6 +272,7 @@ class MoneyManagementTimelineStore:
         diagnostics=(),
         correlation_id=None,
         changes=None,
+        observation=None,
     ):
         with self._lock:
             sequence = self._events[-1].sequence + 1 if self._events else 1
@@ -284,6 +290,7 @@ class MoneyManagementTimelineStore:
                 tuple(diagnostics),
                 correlation_id,
                 changes or {},
+                normalize_identity(observation),
             )
             if (
                 self._events
@@ -365,22 +372,32 @@ class MoneyManagementTimelineStore:
             os.close(directory_fd)
 
     def query(self, *, limit=DEFAULT_HISTORY_LIMIT, before=None,
-              after=None, event_type=None, state=None):
+              after=None, event_type=None, state=None, authority="ALL"):
         if type(limit) is not int or limit < 1 or limit > MAX_HISTORY_LIMIT:
             raise ValueError("history limit invalid")
-        for name, cursor in (("before", before), ("after", after)):
-            if cursor is not None and (
-                not isinstance(cursor, str)
-                or not cursor.isascii()
-                or not cursor.isdigit()
-                or int(cursor) < 1
-            ):
-                raise ValueError(f"{name} cursor invalid")
-        selected = list(self._events)
-        if before is not None:
-            selected = [event for event in selected if event.sequence < int(before)]
-        if after is not None:
-            selected = [event for event in selected if event.sequence > int(after)]
+        if authority not in ("ALL", "PAPER", "LIVE", "UNKNOWN"):
+            raise ValueError("authority filter invalid")
+        def cursor_key(cursor):
+            if not isinstance(cursor, str):
+                raise ValueError("cursor invalid")
+            parts = cursor.split(":", 1)
+            if not parts[0].isascii() or not parts[0].isdigit() or int(parts[0]) < 1:
+                raise ValueError("cursor invalid")
+            if len(parts) == 2 and not parts[1]:
+                raise ValueError("cursor invalid")
+            return int(parts[0]), parts[1] if len(parts) == 2 else None
+        with self._lock:
+            selected = list(self._events)
+        if authority != "ALL":
+            selected = [e for e in selected if normalize_identity(e.observation)["authority"] == authority]
+        for cursor, is_before in ((before, True), (after, False)):
+            if cursor is not None:
+                sequence, event_id = cursor_key(cursor)
+                def matches(e):
+                    left = (e.sequence, e.event_id) if event_id is not None else e.sequence
+                    right = (sequence, event_id) if event_id is not None else sequence
+                    return left < right if is_before else left > right
+                selected = [e for e in selected if matches(e)]
         if event_type is not None:
             normalized = MoneyManagementTimelineEventType(event_type)
             selected = [event for event in selected if event.event_type is normalized]
@@ -388,13 +405,15 @@ class MoneyManagementTimelineStore:
             if not isinstance(state, str) or not state:
                 raise ValueError("state filter invalid")
             selected = [event for event in selected if event.state == state]
-        selected.sort(key=lambda event: event.sequence, reverse=True)
+        selected.sort(key=lambda event: (event.sequence, event.event_id), reverse=True)
         page = selected[:limit]
-        return MoneyManagementHistoryResult(
-            tuple(page),
-            len(selected) > limit,
-            str(page[-1].sequence) if len(selected) > limit and page else None,
-        )
+        # Numeric cursors remain accepted; composite cursors disambiguate old
+        # duplicate sequences without rewriting any historical record.
+        next_cursor = None
+        if len(selected) > limit and page:
+            last = page[-1]
+            next_cursor = f"{last.sequence}:{last.event_id}"
+        return MoneyManagementHistoryResult(tuple(page), len(selected) > limit, next_cursor)
 
 
 def timeline_metrics(metrics, config):
@@ -472,11 +491,13 @@ class MoneyManagementTimelineRecorder:
             raise TypeError("timeline store required")
         self.store = store
         self._now = timestamp_source or (lambda: datetime.now(timezone.utc))
+        self._last_observation = normalize_identity(None)
         self._last_metrics = None
         self._last_state = None
         self._last_diagnostics = ()
         latest = store.query(limit=1).events
         if latest:
+            self._last_observation = normalize_identity(latest[0].observation)
             self._last_metrics = dict(latest[0].metrics)
             self._last_state = latest[0].state
             self._last_diagnostics = latest[0].diagnostics
@@ -489,13 +510,16 @@ class MoneyManagementTimelineRecorder:
 
     def record_runtime(self, metrics, config, state, diagnostics=(),
                        correlation_id=None, configuration_version=0,
-                       reason_codes=(), reason_groups=None):
+                       reason_codes=(), reason_groups=None, observation_state=None):
         snapshot = timeline_metrics(metrics, config)
+        identity = observation_identity(metrics, observation_state)
+        self.store.monitoring.record(metrics, snapshot, identity, state, self._now())
         previous_metrics = self._last_metrics
         previous_state = self._last_state
         events = []
         common = {
             "timestamp": self._now(),
+            "observation": identity,
             "source": "LOSS_RUNTIME",
             "state": state,
             "previous_state": previous_state,
@@ -505,7 +529,7 @@ class MoneyManagementTimelineRecorder:
             "reason_codes": tuple(reason_codes),
             "correlation_id": correlation_id,
         }
-        if previous_metrics != snapshot:
+        if previous_metrics != snapshot or identity != self._last_observation:
             events.append(self.store.append(
                 event_type=MoneyManagementTimelineEventType.RUNTIME_METRICS_UPDATED,
                 changes={
@@ -559,6 +583,7 @@ class MoneyManagementTimelineRecorder:
                 event_type=MoneyManagementTimelineEventType.DIAGNOSTIC_CLEARED,
                 changes={"cleared": cleared}, **common,
             ))
+        self._last_observation = identity
         self._last_metrics = snapshot
         self._last_state = state
         self._last_diagnostics = tuple(diagnostics)
@@ -588,6 +613,7 @@ class MoneyManagementTimelineRecorder:
             state=self._last_state or "UNKNOWN",
             previous_state=self._last_state,
             metrics=self._last_metrics or {key: None for key in METRIC_FIELDS},
+            observation=self._last_observation,
             configuration_version=version,
             correlation_id=correlation_id,
             changes=changes,
@@ -601,6 +627,7 @@ class MoneyManagementTimelineRecorder:
             state=current_state,
             previous_state=previous_state,
             metrics=self._last_metrics or {key: None for key in METRIC_FIELDS},
+            observation=self._last_observation,
             configuration_version=version,
             correlation_id=correlation_id,
             changes={"from": previous_state, "to": current_state},
