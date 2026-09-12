@@ -447,7 +447,7 @@ export function createMoneyManagementViewModel(input = {}) {
     ]),
     statistics: Object.freeze([
       row(
-        "Maximum Drawdown",
+        "Maximum Drawdown Limit",
         displayDecimal(
           status?.configuration?.maximumDrawdownPercent,
           "%",

@@ -10,7 +10,7 @@ export default function MoneyManagementMainSection({
     return (
         <section aria-labelledby="mm-operation-heading" className="mm-section-group">
             <h2 className="mm-section-title" id="mm-operation-heading">
-                Operation / Decision
+                Operation / Decision — Actual Runtime（実稼働）
             </h2>
             <div className="mm-main">
                 <MoneyManagementRiskStateCard viewModel={viewModel} />

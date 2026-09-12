@@ -1,6 +1,6 @@
 export const MONEY_MANAGEMENT_TOP_GRAPH_CARDS = Object.freeze([
     "Equity / Peak Equity",
-    "Cumulative Realized P&L",
+    "Realized PnL",
     "Drawdown",
     "Risk / Exposure",
 ]);

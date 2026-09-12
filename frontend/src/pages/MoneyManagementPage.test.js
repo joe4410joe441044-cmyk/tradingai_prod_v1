@@ -25,7 +25,7 @@ test("Money Management shell defines the complete R1 card layout", () => {
     assert.equal(MONEY_MANAGEMENT_CARD_TITLES.length, 17);
     assert.deepEqual(MONEY_MANAGEMENT_CARD_TITLES, [
         "Equity / Peak Equity",
-        "Cumulative Realized P&L",
+        "Realized PnL",
         "Drawdown",
         "Risk / Exposure",
         "Capital",
@@ -89,6 +89,7 @@ test("page render keeps Header, Graph, Summary, Runtime, Main, Lower order (R1/R
     let code = transformed.code;
     for (const [name, label] of [
         ["MoneyManagementHeader", "HEADER"],
+        ["MoneyManagementMonitoringView", "VIEW"],
         ["MoneyManagementCapitalDrawdownSection", "GRAPH"],
         ["MoneyManagementTopSummarySection", "SUMMARY"],
         ["MoneyManagementRuntimeSummarySection", "RUNTIME"],
@@ -107,6 +108,14 @@ test("page render keeps Header, Graph, Summary, Runtime, Main, Lower order (R1/R
         'from "../features/money-management/view/moneyManagementViewModel";',
         `from "${viewModelStub}";`,
     );
+    code = code.replace('from "react";', `from "${moduleUrl('export const useState=()=>[null,()=>{}];export const useEffect=()=>{};')}";`);
+    for (const [path, stub] of [
+        ["contracts/moneyManagementMonitoringContracts.js", 'export const initialViewAuthority=()=>"PAPER";export const requireViewAuthority=x=>x;'],
+        ["hooks/useMoneyManagementMonitoring.js", 'export const useMoneyManagementMonitoring=()=>({});'],
+        ["view/moneyManagementMonitoringViewModel.js", 'export const createMonitoringViewModel=()=>({});'],
+    ]) {
+        code = code.replace(`from "../features/money-management/${path}";`, `from "${moduleUrl(stub)}";`);
+    }
     const temporary = await mkdtemp(
         join(dirname(fileURLToPath(import.meta.url)), ".mm-page-test-"),
     );
@@ -117,7 +126,7 @@ test("page render keeps Header, Graph, Summary, Runtime, Main, Lower order (R1/R
         const text = textOf(module.default());
         assert.equal(
             text.replace(/\s+/gu, " ").trim(),
-            "HEADER GRAPH SUMMARY RUNTIME MAIN BOTTOM",
+            "HEADER VIEW GRAPH SUMMARY RUNTIME MAIN BOTTOM",
         );
     } finally {
         await rm(temporary, { recursive: true, force: true });

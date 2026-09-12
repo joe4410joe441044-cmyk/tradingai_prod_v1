@@ -23,7 +23,7 @@ export default function MoneyManagementBottomSection({
                 className="mm-section-group"
             >
                 <h2 className="mm-section-title" id="mm-analysis-heading">
-                    Configuration / Analysis
+                    Configuration / Analysis — Actual Runtime（実稼働）
                 </h2>
                 <StatisticsCard viewModel={viewModel} />
                 <details className="mm-disclosure">

@@ -1,3 +1,5 @@
+import { requireViewAuthority, MONITORING_SOURCES, REALIZED_PNL_SEMANTICS } from "../contracts/moneyManagementMonitoringContracts.js";
+
 const HISTORY_PAGE_LIMIT = 500;
 const MAX_HISTORY_PAGES = 10;
 
@@ -15,10 +17,12 @@ const PERIOD_DAYS = Object.freeze({
 export async function loadMoneyManagementAnalyticsHistory({
   client,
   signal,
+  authority,
 } = {}) {
   if (typeof client !== "function") {
     throw new TypeError("history client is required");
   }
+  if (authority !== undefined) requireViewAuthority(authority);
   const events = [];
   const cursors = new Set();
   let before = null;
@@ -27,6 +31,7 @@ export async function loadMoneyManagementAnalyticsHistory({
     const response = await client(
       {
         limit: HISTORY_PAGE_LIMIT,
+        ...(authority === undefined ? {} : { authority }),
         ...(before === null ? {} : { before }),
       },
       { signal },
@@ -34,7 +39,11 @@ export async function loadMoneyManagementAnalyticsHistory({
     if (!response || !Array.isArray(response.events)) {
       throw new TypeError("history response is invalid");
     }
-    events.push(...response.events);
+    // Keep audit-only legacy records out even if a server returns a mixed page.
+    events.push(...response.events.filter((event) => authority === undefined || (
+      event.authority === authority && event.accountingAuthoritySource === MONITORING_SOURCES[authority]
+    )).map((event) => authority === undefined || event.realizedPnlSemantics === REALIZED_PNL_SEMANTICS[authority]
+      ? event : { ...event, metrics: { ...event.metrics, realizedPnl: null } }));
     if (response.hasMore !== true) return events;
     const next = response.nextCursor;
     if (

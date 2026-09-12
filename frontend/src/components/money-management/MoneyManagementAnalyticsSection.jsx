@@ -1,3 +1,4 @@
+import { realizedPnlLabel } from "../../features/money-management/contracts/moneyManagementMonitoringContracts.js";
 import { useEffect, useMemo, useState } from "react";
 import {
     CartesianGrid,
@@ -81,7 +82,11 @@ function AnalyticsChart({ data, lines, loading, title, unit = null }) {
     );
 }
 
-export default function MoneyManagementAnalyticsSection() {
+export default function MoneyManagementAnalyticsSection({ viewAuthority }) {
+    return <AuthorityAnalytics key={viewAuthority} viewAuthority={viewAuthority} />;
+}
+function AuthorityAnalytics({ viewAuthority }) {
+    const pnlLabel = realizedPnlLabel(viewAuthority);
     const [events, setEvents] = useState([]);
     const [period, setPeriod] = useState(
         MONEY_MANAGEMENT_ANALYTICS_PERIOD.THIRTY_DAYS,
@@ -95,6 +100,7 @@ export default function MoneyManagementAnalyticsSection() {
             try {
                 const history = await loadMoneyManagementAnalyticsHistory({
                     client: getMoneyManagementHistory,
+                    authority: viewAuthority,
                     signal: controller.signal,
                 });
                 if (!controller.signal.aborted) {
@@ -110,7 +116,7 @@ export default function MoneyManagementAnalyticsSection() {
         };
         void load();
         return () => controller.abort();
-    }, []);
+    }, [viewAuthority]);
 
     const filteredEvents = useMemo(
         () => filterMoneyManagementAnalyticsEvents(events, period),
@@ -176,7 +182,7 @@ export default function MoneyManagementAnalyticsSection() {
             )}
             {!error && !loading && !hasAnalytics && (
                 <p className="mm-card__placeholder">
-                    No runtime analytics yet
+                    No {viewAuthority} MM history available
                 </p>
             )}
             {!error && (loading || hasAnalytics) && (
@@ -193,9 +199,9 @@ export default function MoneyManagementAnalyticsSection() {
                         loading={loading}
                         lines={[{
                             metric: "realizedPnl",
-                            name: "Cumulative Realized P&L",
+                            name: pnlLabel,
                         }]}
-                        title="Cumulative Realized P&L"
+                        title={pnlLabel}
                         unit=" USDT"
                     />
                     <AnalyticsChart

@@ -1,3 +1,4 @@
+import { requireViewAuthority, requireHistoryAuthority } from "../contracts/moneyManagementMonitoringContracts.js";
 import { API } from "../../../api/index.js";
 
 import {
@@ -185,6 +186,7 @@ export function simulateMoneyManagement(payload, options = {}) {
 }
 
 export function getMoneyManagementHistory(query = {}, options = {}) {
+  if (query.authority !== undefined) requireHistoryAuthority(query.authority);
   const parameters = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== null && value !== undefined && value !== "") {
@@ -195,5 +197,15 @@ export function getMoneyManagementHistory(query = {}, options = {}) {
   return requestJson(`${API.moneyManagementHistory()}${suffix}`, {
     ...options,
     operation: "GET_HISTORY",
+    method: "GET",
+  });
+}
+
+export function getMoneyManagementMonitoring(viewAuthority, options = {}) {
+  requireViewAuthority(viewAuthority);
+  return requestJson(`${API.moneyManagementMonitoring()}?viewAuthority=${viewAuthority}`, {
+    ...options,
+    operation: "GET_MONITORING",
+    method: "GET",
   });
 }

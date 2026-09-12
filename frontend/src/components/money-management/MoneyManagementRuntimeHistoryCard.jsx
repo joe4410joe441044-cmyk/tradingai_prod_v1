@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { HISTORY_AUTHORITIES } from "../../features/money-management/contracts/moneyManagementMonitoringContracts.js";
+import { useEffect, useRef, useState } from "react";
 
 import { getMoneyManagementHistory } from "../../features/money-management";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
@@ -33,6 +34,7 @@ function EventRow({ event }) {
         <li>
             <time dateTime={event.timestamp}>{event.timestamp}</time>
             <strong>{event.eventType}</strong>
+            <span>{event.authority === "UNKNOWN" ? "UNKNOWN / LEGACY" : event.authority ?? "UNKNOWN / LEGACY"}</span>
             <span>{event.previousState ?? "—"} → {event.state}</span>
             <span>{metricChange}</span>
             {["block", "hold", "warning"].map((kind) => (
@@ -51,6 +53,20 @@ function EventRow({ event }) {
 }
 
 export default function MoneyManagementRuntimeHistoryCard() {
+    const [authority, setAuthority] = useState("ALL");
+    return <div>
+        <div role="group" aria-label="Runtime History authority" className="mm-analytics-periods mm-history-authorities">
+            {HISTORY_AUTHORITIES.map((value) => <button type="button" key={value} aria-pressed={authority === value} onClick={() => setAuthority(value)}>
+                {value === "UNKNOWN" ? "UNKNOWN / LEGACY" : value}
+            </button>)}
+        </div>
+        <RuntimeHistory key={authority} authority={authority} />
+    </div>;
+}
+
+function RuntimeHistory({ authority }) {
+    const requestRef = useRef(0);
+    const controllerRef = useRef(null);
     const [events, setEvents] = useState([]);
     const [eventType, setEventType] = useState("");
     const [state, setState] = useState("");
@@ -61,15 +77,22 @@ export default function MoneyManagementRuntimeHistoryCard() {
     const [error, setError] = useState(null);
 
     const load = async ({ append = false } = {}) => {
+        const requestId = ++requestRef.current;
+        controllerRef.current?.abort();
+        const controller = new AbortController();
+        controllerRef.current = controller;
         setLoading(true);
+        if (!append) setEvents([]);
         setError(null);
         try {
             const response = await getMoneyManagementHistory({
+                authority,
                 limit,
                 eventType,
                 state,
                 ...(append && nextCursor ? { before: nextCursor } : {}),
-            });
+            }, { signal: controller.signal });
+            if (controller.signal.aborted || requestId !== requestRef.current) return;
             const incoming = Array.isArray(response.events)
                 ? response.events
                 : [];
@@ -79,15 +102,17 @@ export default function MoneyManagementRuntimeHistoryCard() {
             setNextCursor(response.nextCursor ?? null);
             setHasMore(response.hasMore === true);
         } catch (failure) {
+            if (controller.signal.aborted || requestId !== requestRef.current) return;
             setError(failure?.code ?? "HISTORY_UNAVAILABLE");
         } finally {
-            setLoading(false);
+            if (!controller.signal.aborted && requestId === requestRef.current) setLoading(false);
         }
     };
 
     useEffect(() => {
-        load();
-    }, [eventType, state, limit]);
+        void load();
+        return () => { requestRef.current += 1; controllerRef.current?.abort(); };
+    }, [authority, eventType, state, limit]);
 
     return (
         <MoneyManagementCardShell
@@ -95,7 +120,7 @@ export default function MoneyManagementRuntimeHistoryCard() {
             title="Runtime History"
         >
             <p className="mm-card__data-note">
-                Runtime events only（実行イベントのみ）— Simulation excluded.
+                監査履歴: {authority} — Monitoring View とは独立しています。UNKNOWN / LEGACY を含む実行イベント。Simulation excluded.
             </p>
             <div className="mm-action-row mm-history-toolbar">
                 <label className="mm-configuration-field mm-history-filter">

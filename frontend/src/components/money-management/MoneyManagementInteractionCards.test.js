@@ -100,7 +100,7 @@ test("runtime history focuses on filters, pagination, and event state", async ()
   }
   assert.match(
     source,
-    /Runtime events only（実行イベントのみ）— Simulation excluded\./,
+    /Monitoring View とは独立しています/,
   );
   assert.doesNotMatch(source, /LineChart|ResponsiveContainer|hasChartData/);
 });
@@ -148,11 +148,11 @@ test("legacy analytics component retains reusable history-backed charts", async 
   for (const label of [
     "Analytics",
     "Equity Curve",
-    "Cumulative Realized P&L",
+    "realizedPnlLabel",
     "Drawdown",
     "Risk / Exposure",
     "No data",
-    "No runtime analytics yet",
+    "MM history available",
     "Analytics unavailable",
     "7D",
     "30D",

@@ -870,3 +870,19 @@
         transition: none;
     }
 }
+
+.market-intelligence .mm-monitoring-view {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--mi-border);
+    background: var(--mi-surface);
+    overflow-wrap: anywhere;
+}
+.market-intelligence .mm-monitoring-view p {
+    color: var(--mi-text-muted);
+    margin: 8px 0;
+}
+.market-intelligence .mm-monitoring-view .mm-analytics-header {
+    flex-wrap: wrap;
+    gap: 12px;
+}

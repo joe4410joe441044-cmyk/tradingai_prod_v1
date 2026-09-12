@@ -122,6 +122,9 @@ export const API = {
   moneyManagementSimulation: () =>
     join("/money-management/simulation"),
 
+  moneyManagementMonitoring: () =>
+    join("/money-management/monitoring"),
+
   moneyManagementHistory: () =>
     join("/money-management/history"),
 

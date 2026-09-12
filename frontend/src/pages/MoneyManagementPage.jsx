@@ -1,3 +1,8 @@
+import { useEffect, useState } from "react";
+import MoneyManagementMonitoringView from "../components/money-management/MoneyManagementMonitoringView";
+import { initialViewAuthority, requireViewAuthority } from "../features/money-management/contracts/moneyManagementMonitoringContracts.js";
+import { useMoneyManagementMonitoring } from "../features/money-management/hooks/useMoneyManagementMonitoring.js";
+import { createMonitoringViewModel } from "../features/money-management/view/moneyManagementMonitoringViewModel.js";
 import MoneyManagementBottomSection from "../components/money-management/MoneyManagementBottomSection";
 import MoneyManagementCapitalDrawdownSection from "../components/money-management/MoneyManagementCapitalDrawdownSection";
 import MoneyManagementHeader from "../components/money-management/MoneyManagementHeader";
@@ -14,6 +19,20 @@ import {
 
 export default function MoneyManagementPage() {
     const moneyManagement = useMoneyManagement();
+    const [selection, setSelection] = useState(null);
+    const viewAuthority = selection ?? "PAPER";
+    useEffect(() => {
+        if (moneyManagement.rawStatus || moneyManagement.statusError || !moneyManagement.isInitialLoading) {
+            setSelection((current) => current ?? initialViewAuthority(moneyManagement.rawStatus?.mode));
+        }
+    }, [moneyManagement.rawStatus, moneyManagement.statusError, moneyManagement.isInitialLoading]);
+    const monitoring = useMoneyManagementMonitoring(viewAuthority, selection !== null);
+    const monitoringViewModel = createMonitoringViewModel(monitoring);
+    const selectView = (authority) => setSelection(requireViewAuthority(authority));
+    const refresh = async () => {
+        const [runtimeResult] = await Promise.all([moneyManagement.refresh(), monitoring.refresh()]);
+        return runtimeResult;
+    };
     const viewModel = createMoneyManagementViewModel(moneyManagement);
     const interaction =
         createMoneyManagementInteractionViewModel(moneyManagement);
@@ -22,7 +41,7 @@ export default function MoneyManagementPage() {
         <main className="mi-page mm-page">
             <MoneyManagementHeader
                 header={viewModel.header}
-                onRefresh={moneyManagement.refresh}
+                onRefresh={refresh}
                 refresh={interaction.refresh}
             />
 
@@ -38,8 +57,9 @@ export default function MoneyManagementPage() {
                 </p>
             )}
 
-            <MoneyManagementCapitalDrawdownSection />
-            <MoneyManagementTopSummarySection viewModel={viewModel} />
+            <MoneyManagementMonitoringView viewAuthority={viewAuthority} onSelect={selectView} data={monitoring} runtime={moneyManagement.status} />
+            <MoneyManagementCapitalDrawdownSection viewAuthority={viewAuthority} history={monitoring} />
+            <MoneyManagementTopSummarySection viewModel={monitoringViewModel} />
             <MoneyManagementRuntimeSummarySection viewModel={viewModel} />
             <MoneyManagementMainSection
                 interaction={interaction}

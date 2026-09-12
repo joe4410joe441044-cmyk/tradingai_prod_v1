@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
     CartesianGrid,
     Line,
@@ -10,10 +10,9 @@ import {
     YAxis,
 } from "recharts";
 
-import { getMoneyManagementHistory } from "../../features/money-management";
+import { realizedPnlLabel } from "../../features/money-management/contracts/moneyManagementMonitoringContracts.js";
 import {
     filterMoneyManagementAnalyticsEvents,
-    loadMoneyManagementAnalyticsHistory,
     MONEY_MANAGEMENT_ANALYTICS_PERIOD,
 } from "../../features/money-management/analytics/moneyManagementAnalytics.js";
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
@@ -21,7 +20,7 @@ import { formatMoneyManagementAxisTimestamp } from "./moneyManagementChartFormat
 
 const PERIODS = Object.values(MONEY_MANAGEMENT_ANALYTICS_PERIOD);
 
-function PerformanceChart({ data, lines, loading, title, unit = null }) {
+function PerformanceChart({ data, lines, loading, title, authority, unit = null }) {
     if (loading) {
         return (
             <MoneyManagementCardShell loading title={title} />
@@ -36,7 +35,7 @@ function PerformanceChart({ data, lines, loading, title, unit = null }) {
                 className="mm-card--top-graph"
                 title={title}
             >
-                <p className="mm-card__placeholder">No data</p>
+                <p className="mm-card__placeholder">No {authority} MM history available（履歴データなし）</p>
             </MoneyManagementCardShell>
         );
     }
@@ -86,36 +85,12 @@ function PerformanceChart({ data, lines, loading, title, unit = null }) {
     );
 }
 
-export default function MoneyManagementCapitalDrawdownSection() {
-    const [events, setEvents] = useState([]);
-    const [period, setPeriod] = useState(
-        MONEY_MANAGEMENT_ANALYTICS_PERIOD.THIRTY_DAYS,
-    );
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        const load = async () => {
-            try {
-                const history = await loadMoneyManagementAnalyticsHistory({
-                    client: getMoneyManagementHistory,
-                    signal: controller.signal,
-                });
-                if (!controller.signal.aborted) {
-                    setEvents(history);
-                }
-            } catch {
-                if (!controller.signal.aborted) {
-                    setError(true);
-                }
-            } finally {
-                if (!controller.signal.aborted) setLoading(false);
-            }
-        };
-        void load();
-        return () => controller.abort();
-    }, []);
+export default function MoneyManagementCapitalDrawdownSection({ viewAuthority, history }) {
+    const [period, setPeriod] = useState(MONEY_MANAGEMENT_ANALYTICS_PERIOD.THIRTY_DAYS);
+    const events = history.authority === viewAuthority ? history.history : [];
+    const loading = history.authority !== viewAuthority || history.historyState === "LOADING";
+    const error = history.authority === viewAuthority && history.historyState === "ERROR";
+    const pnlLabel = realizedPnlLabel(viewAuthority);
 
     const filteredEvents = useMemo(
         () => filterMoneyManagementAnalyticsEvents(events, period),
@@ -146,7 +121,7 @@ export default function MoneyManagementCapitalDrawdownSection() {
     return (
         <section aria-label="Capital / Performance Graphs" className="mm-top-graph-section">
             <div className="mm-analytics-header">
-                <h2 className="mm-section-title">Capital / Performance</h2>
+                <h2 className="mm-section-title">{viewAuthority} Capital / Performance</h2>
                 <div
                     aria-label="Graph period"
                     className="mm-analytics-periods"
@@ -169,12 +144,13 @@ export default function MoneyManagementCapitalDrawdownSection() {
                     className="mm-operation-notice mm-operation-notice--danger"
                     role="alert"
                 >
-                    Capital / Performance history unavailable
+                    {viewAuthority} Capital / Performance history request error（取得失敗）
                 </p>
             )}
             {!error && (
                 <div className="mm-top-graph">
                     <PerformanceChart
+                        authority={viewAuthority}
                         data={data}
                         loading={loading}
                         lines={[
@@ -185,16 +161,18 @@ export default function MoneyManagementCapitalDrawdownSection() {
                         unit=" USDT"
                     />
                     <PerformanceChart
+                        authority={viewAuthority}
                         data={data}
                         loading={loading}
                         lines={[{
                             metric: "realizedPnl",
-                            name: "Cumulative Realized P&L",
+                            name: pnlLabel,
                         }]}
-                        title="Cumulative Realized P&L"
+                        title={pnlLabel}
                         unit=" USDT"
                     />
                     <PerformanceChart
+                        authority={viewAuthority}
                         data={data}
                         loading={loading}
                         lines={[{
@@ -205,6 +183,7 @@ export default function MoneyManagementCapitalDrawdownSection() {
                         unit="%"
                     />
                     <PerformanceChart
+                        authority={viewAuthority}
                         data={data}
                         loading={loading}
                         lines={[

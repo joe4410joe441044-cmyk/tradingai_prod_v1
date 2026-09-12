@@ -350,7 +350,7 @@ test("Statistics retains only non-duplicate fields: Maximum Drawdown, Loss Perio
   const model = createMoneyManagementViewModel(readyInput());
   const labels = model.statistics.map((r) => r.label);
   assert.deepEqual(labels, [
-    "Maximum Drawdown",
+    "Maximum Drawdown Limit",
     "Loss Period",
     "Metric Quality",
   ]);
