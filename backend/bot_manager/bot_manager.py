@@ -4177,6 +4177,9 @@ class BotManager:
                                 self.money_management_runtime_baseline_session = (
                                     current_session
                                 )
+                                self._synchronize_live_execution_risk_authority(
+                                    money_management_metrics
+                                )
 
                     signal = None
 
@@ -4931,7 +4934,40 @@ class BotManager:
             None,
         ) in ("DISPATCHED", "DUPLICATE"):
             self.money_management_runtime_baseline_session = current_session
+            self._synchronize_live_execution_risk_authority(metrics)
         return hook_result
+
+    def _synchronize_live_execution_risk_authority(self, metrics=None):
+        """Bridge canonical LIVE MM equity/HWM into the local risk gate."""
+
+        engine = self.engine
+        if (
+            engine is None
+            or str(getattr(engine, "mode", "")).strip().lower() != "live"
+            or self.lifecycle_state != "RUNNING"
+        ):
+            return False
+        current = metrics or self.money_management_runtime_metrics.snapshot()
+        authority = getattr(current, "accounting_authority_source", None)
+        authority_value = getattr(authority, "value", authority)
+        if (
+            getattr(current, "runtime_instance_id", None)
+            != self.runtime_instance_id
+            or getattr(current, "session_id", None) != self.session_id
+            or getattr(current, "is_complete", False) is not True
+            or authority_value != "REAL_LIVE_ACCOUNT_EQUITY"
+        ):
+            return False
+        apply_authority = getattr(
+            engine, "apply_live_risk_equity_authority", None
+        )
+        if not callable(apply_authority):
+            return False
+        return apply_authority(
+            initial_equity=getattr(current, "equity", None),
+            peak_equity=getattr(current, "peak_equity", None),
+            authority_source=authority_value,
+        ) is True
 
     def _money_management_runtime_event_signature(self):
 

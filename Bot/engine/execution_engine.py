@@ -380,6 +380,40 @@ class ExecutionEngine:
         self.risk_trading_disabled = False
         self.risk_block_reason = None
 
+    def apply_live_risk_equity_authority(
+        self,
+        *,
+        initial_equity,
+        peak_equity,
+        authority_source,
+    ):
+        """Apply validated canonical LIVE equity/HWM to local risk state."""
+
+        if self.mode != "live":
+            return False
+        if authority_source != "REAL_LIVE_ACCOUNT_EQUITY":
+            return False
+        try:
+            initial = float(initial_equity)
+            peak = float(peak_equity)
+        except (TypeError, ValueError):
+            return False
+        if (
+            not math.isfinite(initial)
+            or not math.isfinite(peak)
+            or initial <= 0
+            or peak <= 0
+            or peak < initial
+        ):
+            return False
+
+        self.initial_equity = initial
+        self.peak_equity = peak
+        self.risk_trading_disabled = False
+        self.risk_block_reason = None
+        self.update_drawdown_state(self._current_equity())
+        return True
+
     def update_drawdown_state(self, equity=None):
 
         if equity is None:

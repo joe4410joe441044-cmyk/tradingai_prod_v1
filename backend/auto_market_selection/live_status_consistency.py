@@ -51,7 +51,7 @@ def derive_live_readiness(readiness, real_account=None, *, reported_reasons=None
     position_valid = bool(
         fresh
         and account.get("positionSource") in REAL_ACCOUNT_SOURCES
-        and position_state in ("FLAT", "OPEN")
+        and position_state in ("FLAT", "NO_OPEN_POSITION", "OPEN")
     )
     checks.update({
         "exchangeAuthReady": authenticated if has_account_authority else bool(checks.get("exchangeAuthReady")),
