@@ -150,6 +150,7 @@ class PerMarketEligibilityResult:
     metadata_evaluated_at: datetime
     mm_evaluated_at: datetime
     approved_position_notional: Optional[Decimal] = None
+    effective_leverage: Optional[Decimal] = None
 
     def to_dict(self):
         return {
@@ -165,6 +166,7 @@ class PerMarketEligibilityResult:
             "metadataEvaluatedAt": _value(self.metadata_evaluated_at),
             "mmEvaluatedAt": _value(self.mm_evaluated_at),
             "approvedPositionNotional": _value(self.approved_position_notional),
+            "effectiveLeverage": _value(self.effective_leverage),
             "orderCreated": False,
             "sizingStage": "PRE_SELECTION_ELIGIBILITY",
         }
@@ -172,7 +174,8 @@ class PerMarketEligibilityResult:
 
 def evaluate_market_capital_eligibility(
     metadata, capital, *, stop_loss_percent, effective_cost_percent,
-    risk_percent, evaluated_at, maximum_metadata_age_seconds=900,
+    risk_percent, evaluated_at, effective_leverage=Decimal("1"),
+    maximum_metadata_age_seconds=900,
 ):
     if not isinstance(metadata, FuturesContractMetadata):
         raise TypeError("FuturesContractMetadata required")
@@ -186,6 +189,12 @@ def evaluate_market_capital_eligibility(
         raise TypeError("evaluated_at must be timezone-aware")
     evaluated_at = evaluated_at.astimezone(timezone.utc)
     reasons = []
+    if (
+        not isinstance(effective_leverage, Decimal)
+        or not effective_leverage.is_finite()
+        or effective_leverage <= 0
+    ):
+        reasons.append("LEVERAGE_AUTHORITY_INVALID")
     metadata_age = evaluated_at - metadata.metadata_evaluated_at
     if (
         maximum_metadata_age_seconds <= 0
@@ -220,7 +229,7 @@ def evaluate_market_capital_eligibility(
             metadata.canonical_symbol, False, False, False, None, tuple(reasons),
             capital.capital_authority, capital.risk_budget, capital.remaining_exposure,
             capital.remaining_position_capacity, metadata.metadata_evaluated_at,
-            capital.evaluated_at,
+            capital.evaluated_at, effective_leverage=effective_leverage,
         )
     result = calculate_position_size(PositionSizingInput(
         entry_price=metadata.last_price,
@@ -250,4 +259,5 @@ def evaluate_market_capital_eligibility(
         capital.remaining_position_capacity, metadata.metadata_evaluated_at,
         capital.evaluated_at,
         result.final_position_notional,
+        effective_leverage,
     )

@@ -99,6 +99,7 @@ class LiveReadOnlyValidation:
         safety_provider, position_provider, pending_order_provider,
         emergency_provider, stop_loss_percent=Decimal("1"),
         effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
+        effective_leverage=Decimal("1"),
         scanner=None, ranking_engine=None, clock=None,
     ):
         if not isinstance(public_client, KucoinFuturesPublicClient):
@@ -119,6 +120,7 @@ class LiveReadOnlyValidation:
         self.stop_loss_percent = stop_loss_percent
         self.effective_cost_percent = effective_cost_percent
         self.risk_percent = risk_percent
+        self.effective_leverage = effective_leverage
         self.scanner = scanner or MarketScanner()
         self.ranking = ranking_engine or CandidateRankingEngine()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -144,6 +146,7 @@ class LiveReadOnlyValidation:
                 item, capital, stop_loss_percent=self.stop_loss_percent,
                 effective_cost_percent=self.effective_cost_percent,
                 risk_percent=self.risk_percent,
+                effective_leverage=self.effective_leverage,
                 evaluated_at=now,
             ) for item in contracts
         }
