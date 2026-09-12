@@ -65,6 +65,12 @@ def test_live_production_projection_exposes_account_mm_scanner_and_ranking():
             "executionEntryAllowed": True,
         },
         production_integration={"status": "READY", "readOnly": True},
+        executability_settings={
+            "riskPercent": "0.10",
+            "stopLossPercent": "0.50",
+            "effectiveLeverage": "1",
+            "source": "CANONICAL_RUNTIME_CONFIG",
+        },
         lifecycle={"amsRuntimeState": "STOPPED", "lifecycleRevision": 10},
         live_auto_runtime={
             "configurationVersion": "ams-live-auto/v1",
@@ -88,6 +94,12 @@ def test_live_production_projection_exposes_account_mm_scanner_and_ranking():
     assert status["liveAccountAuthority"]["pendingOrderState"] == "NONE"
     assert status["liveAccountAuthority"]["snapshotConsistent"] is True
     assert status["productionIntegration"]["readOnly"] is True
+    assert status["executabilitySettings"] == {
+        "riskPercent": "0.10",
+        "stopLossPercent": "0.50",
+        "effectiveLeverage": "1",
+        "source": "CANONICAL_RUNTIME_CONFIG",
+    }
     assert status["liveReadOnly"]["observationId"] == (
         "ams-observation-production-1"
     )

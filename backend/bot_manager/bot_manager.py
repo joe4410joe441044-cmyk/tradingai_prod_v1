@@ -2382,6 +2382,47 @@ class BotManager:
             raise TypeError("Money Management config provider required")
         self.money_management_config_provider = config_provider
 
+    def _production_ams_executability_settings(self):
+        """Resolve candidate-sizing inputs from canonical runtime authority.
+
+        Defaults remain available only before a canonical LIVE runtime exists.
+        Once LIVE runtime configuration is installed, missing or malformed
+        values fail closed instead of silently evaluating candidates with
+        constructor defaults. Leverage is validated START authority and audit
+        context; the MM-owned sizing formula remains unchanged.
+        """
+        config = self.config if isinstance(self.config, dict) else {}
+        live_runtime = bool(
+            str(config.get("mode", "paper")).strip().lower() == "live"
+            and config.get("liveRuntimeStartAllowed") is True
+        )
+
+        def positive_decimal(field, default):
+            value = config.get(field)
+            if value is None:
+                if live_runtime:
+                    raise RuntimeError(
+                        f"AUTO_EXECUTABILITY_{field.upper()}_UNAVAILABLE"
+                    )
+                value = default
+            try:
+                number = Decimal(str(value))
+            except Exception:
+                raise RuntimeError(
+                    f"AUTO_EXECUTABILITY_{field.upper()}_INVALID"
+                ) from None
+            if not number.is_finite() or number <= 0:
+                raise RuntimeError(
+                    f"AUTO_EXECUTABILITY_{field.upper()}_INVALID"
+                )
+            return number
+
+        return {
+            "risk_percent": positive_decimal("risk_percent", "0.5"),
+            "stop_loss_percent": positive_decimal("sl_percent", "1"),
+            "effective_leverage": positive_decimal("effective_leverage", "1"),
+        }
+
     def _resolve_leverage_authority(self, config):
         """Resolve requested leverage against the active MM maximum (fail-closed).
 
@@ -2654,6 +2695,7 @@ class BotManager:
             capital = authority.build_capital_eligibility(
                 account, policy=provider(),
             )
+            executability = self._production_ams_executability_settings()
             validation = LiveReadOnlyValidation(
                 KucoinFuturesPublicClient(), capital_provider=lambda: capital,
                 active_symbol_provider=lambda: self.activeSymbol,
@@ -2666,6 +2708,9 @@ class BotManager:
                 emergency_provider=lambda: not bool(
                     governance_state.get("emergency_stop", False)
                 ),
+                risk_percent=executability["risk_percent"],
+                stop_loss_percent=executability["stop_loss_percent"],
+                effective_leverage=executability["effective_leverage"],
                 clock=lambda: account.evaluated_at,
             )
             live = validation.observe()
@@ -2673,6 +2718,16 @@ class BotManager:
                 "liveObservation": live.to_dict(),
                 "liveAccountAuthority": account.to_dict(),
                 "capitalEligibility": capital.to_dict(),
+                "executabilitySettings": {
+                    "riskPercent": format(executability["risk_percent"], "f"),
+                    "stopLossPercent": format(
+                        executability["stop_loss_percent"], "f"
+                    ),
+                    "effectiveLeverage": format(
+                        executability["effective_leverage"], "f"
+                    ),
+                    "source": "CANONICAL_RUNTIME_CONFIG",
+                },
                 "capitalEligibilityContract": capital,
                 "productionIntegration": {
                     "status": "READY", "evaluatedAt": live.timestamp,
@@ -10739,6 +10794,7 @@ class BotManager:
             live_account_authority=observation.get("liveAccountAuthority"),
             capital_eligibility=observation.get("capitalEligibility"),
             production_integration=observation.get("productionIntegration"),
+            executability_settings=observation.get("executabilitySettings"),
             live_auto_runtime=self.live_auto_selection_runtime.get_status(),
         )
 

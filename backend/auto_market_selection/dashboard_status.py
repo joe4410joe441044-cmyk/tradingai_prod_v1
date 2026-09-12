@@ -19,6 +19,7 @@ def build_auto_market_selection_status(
     audit_event=None, proposal=None, switch_result=None, cycle=None, lifecycle=None,
     live_observation=None, live_auto_runtime=None, live_account_authority=None,
     capital_eligibility=None, production_integration=None,
+    executability_settings=None,
 ):
     audit = _mapping(audit_event.to_dict() if hasattr(audit_event, "to_dict") else audit_event)
     proposal_data = _mapping(proposal.to_dict() if hasattr(proposal, "to_dict") else proposal)
@@ -32,6 +33,7 @@ def build_auto_market_selection_status(
     live_auto_data = _mapping(live_auto_runtime)
     account_data = _mapping(live_account_authority)
     integration_data = _mapping(production_integration)
+    executability_data = _mapping(executability_settings)
     scanner = _mapping(audit.get("scannerSummary"))
     ranking = _mapping(audit.get("rankingSummary"))
     capital = _mapping(audit.get("capitalSnapshot")) or _mapping(capital_eligibility)
@@ -104,6 +106,7 @@ def build_auto_market_selection_status(
         "liveReadOnly": deepcopy(live_data) if live_data else None,
         "liveAuto": live_auto,
         "productionIntegration": deepcopy(integration_data),
+        "executabilitySettings": deepcopy(executability_data),
         "liveAccountAuthority": deepcopy(account_data) if account_data else None,
         "scanner": {
             "status": scanner_status,
