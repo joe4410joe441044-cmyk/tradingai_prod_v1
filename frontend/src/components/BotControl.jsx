@@ -335,6 +335,10 @@ export default function BotControl({
 
     position,
 
+    controlAuthority,
+
+    controlRevision,
+
     runtimeHealth,
 
     onStatusRefresh,
@@ -368,6 +372,14 @@ export default function BotControl({
         setAutoTradeError,
     ] = useState(null);
     const [
+        controlPending,
+        setControlPending,
+    ] = useState(false);
+    const [
+        controlError,
+        setControlError,
+    ] = useState(null);
+    const [
         emergencyPending,
         setEmergencyPending,
     ] = useState(false);
@@ -396,6 +408,8 @@ export default function BotControl({
         useRef(false);
     const botPendingRef = useRef(false);
     const autoTradePendingRef =
+        useRef(false);
+    const controlPendingRef =
         useRef(false);
     const armPendingRef = useRef(false);
     const emergencyPendingRef =
@@ -1242,6 +1256,95 @@ export default function BotControl({
         }
     };
 
+    const controlAuthorityValue = String(
+        controlAuthority || "BOT"
+    ).trim().toUpperCase();
+
+    const handleExecutionControlChange = async (
+        nextAuthority
+    ) => {
+        const normalized = String(
+            nextAuthority || ""
+        ).trim().toUpperCase();
+
+        if (
+            controlPendingRef.current
+            || normalized === controlAuthorityValue
+            || (normalized !== "BOT" && normalized !== "MANUAL")
+        ) {
+            return;
+        }
+
+        controlPendingRef.current = true;
+        setControlPending(true);
+        setControlError(null);
+
+        try {
+            const response = await authenticatedControlRequest(
+                API.botControl(),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        authority: normalized,
+                        expectedRevision: Number.isInteger(controlRevision)
+                            ? controlRevision
+                            : undefined,
+                    }),
+                }
+            );
+
+            const data = await response.json().catch(() => null);
+
+            if (!response.ok || !data || data.success !== true) {
+                const code = (
+                    data?.detail?.reason
+                    || data?.reason
+                    || `HTTP_${response.status}`
+                );
+                const error = new Error(code);
+                error.code = code;
+                error.status = response.status;
+                error.data = data;
+                throw error;
+            }
+
+            if (data.controlAuthority !== normalized) {
+                const error = new Error(
+                    "CONTROL_AUTHORITY_STATE_MISMATCH"
+                );
+                error.code = "CONTROL_AUTHORITY_STATE_MISMATCH";
+                error.status = 200;
+                error.data = data;
+                throw error;
+            }
+
+            if (typeof data.execution_enabled === "boolean") {
+                setExecutionEnabledState(data.execution_enabled);
+            }
+
+            setControlError(null);
+        } catch (error) {
+            if (isAuthErrorStatus(error?.status)) {
+                setControlError(authErrorMessage(error.status));
+            } else {
+                setControlError(
+                    error?.message
+                    || "Execution control switch failed."
+                );
+            }
+        } finally {
+            controlPendingRef.current = false;
+            setControlPending(false);
+
+            if (typeof onStatusRefresh === "function") {
+                onStatusRefresh();
+            }
+        }
+    };
+
     const openEmergencyConfirm = () => {
         if (
             emergencyPendingRef.current
@@ -1426,6 +1529,11 @@ export default function BotControl({
                 autoTradeDisabled={autoTradeDisabled}
                 autoTradePending={autoTradePending}
                 handleAutoTradeChange={handleAutoTradeChange}
+                controlAuthority={controlAuthorityValue}
+                controlRevision={controlRevision}
+                controlPending={controlPending}
+                controlError={controlError}
+                handleExecutionControlChange={handleExecutionControlChange}
                 mmDraft={mmDraft}
                 mmConfiguration={effectiveMmConfiguration}
                 mmDraftInvalid={mmDraftInvalid}

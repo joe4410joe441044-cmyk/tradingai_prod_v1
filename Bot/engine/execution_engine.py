@@ -97,6 +97,13 @@ class ExecutionEngine:
         self.execution_entry_guard = None
         self.execution_entry_admission_lock = threading.RLock()
         self.execution_entry_admission_in_progress = False
+        # Manager-owned shared authority boundary callback. It is consulted at
+        # the entry commit boundary (after MM preflight and Governance) so the
+        # final BOT/MANUAL authority and stale-intent revalidation cannot be
+        # bypassed by a pre-approved MM admission.
+        self.execution_authority_guard_lock = threading.RLock()
+        self.execution_authority_guard = None
+        self.last_execution_authority_guard = None
         self.last_money_management_guard = None
         # One short-lived, exact-order MM admission lets the mainline evaluate
         # Money Management before Governance without evaluating the same entry
@@ -1310,6 +1317,54 @@ class ExecutionEngine:
 
         return True
 
+    def set_execution_authority_guard(self, callback):
+
+        if callback is not None and not callable(callback):
+            return False
+
+        with self.execution_authority_guard_lock:
+            self.execution_authority_guard = callback
+
+        return True
+
+    def _evaluate_execution_authority_guard(self, signal):
+
+        with self.execution_authority_guard_lock:
+            callback = self.execution_authority_guard
+
+        if callback is None:
+            self.last_execution_authority_guard = None
+            return True, None
+
+        try:
+            result = callback(signal)
+        except Exception:
+            self.last_execution_authority_guard = {
+                "allowed": False,
+                "reason": "EXECUTION_AUTHORITY_UNKNOWN",
+            }
+            return False, self._entry_rejection(
+                "EXECUTION_AUTHORITY_UNKNOWN"
+            )
+
+        if not isinstance(result, dict):
+            self.last_execution_authority_guard = {
+                "allowed": False,
+                "reason": "EXECUTION_AUTHORITY_UNKNOWN",
+            }
+            return False, self._entry_rejection(
+                "EXECUTION_AUTHORITY_UNKNOWN"
+            )
+
+        self.last_execution_authority_guard = dict(result)
+
+        if result.get("allowed") is True:
+            return True, None
+
+        return False, self._entry_rejection(
+            result.get("reason") or "EXECUTION_AUTHORITY_DENIED"
+        )
+
     @staticmethod
     def _entry_rejection(reason, guard_result=None):
 
@@ -1875,6 +1930,11 @@ class ExecutionEngine:
             self.execution_entry_admission_in_progress = True
 
         try:
+            authority_allowed, authority_rejection = (
+                self._evaluate_execution_authority_guard(signal)
+            )
+            if not authority_allowed:
+                return authority_rejection
             return self._try_entry_candidate(signal)
         finally:
             with self.execution_entry_admission_lock:

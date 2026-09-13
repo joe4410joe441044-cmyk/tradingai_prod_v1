@@ -130,6 +130,11 @@ export default function OperationPreparation({
     autoTradeStateText,
     autoTradeDisabled,
     handleAutoTradeChange,
+    controlAuthority = "BOT",
+    controlRevision = 0,
+    controlPending = false,
+    controlError = null,
+    handleExecutionControlChange = () => {},
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
@@ -674,6 +679,20 @@ return (
                         <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
                         <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
                         <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                        <span className="operation-prep-label">EXECUTION CONTROL / 実行操作</span>
+                        <SegmentedControl
+                            disabled={controlPending}
+                            label="Execution control authority"
+                            onChange={handleExecutionControlChange}
+                            options={["BOT", "MANUAL"]}
+                            value={controlAuthority}
+                        />
+                        <div className="operation-prep-derived-list">
+                            <DerivedRow hideSource label="BOT TRADING" source="RUNTIME" status value={controlAuthority === "BOT" ? "ACTIVE" : "LOCKED"} />
+                            <DerivedRow hideSource label="MANUAL TRADING" source="RUNTIME" status value={controlAuthority === "MANUAL" ? "ACTIVE" : "LOCKED"} />
+                            <DerivedRow hideSource label="MANUAL BUY / SELL" source="D2" status value="LOCKED_NOT_IMPLEMENTED" />
+                        </div>
+                        {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
@@ -721,6 +740,8 @@ return (
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="CURRENT EXECUTION" source={executionSource} value={executionMode} />
                             <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                            <DerivedRow label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
+                            <DerivedRow label="CONTROL REVISION" source="RUNTIME" value={String(controlRevision)} />
                             {requestedModeDiffersFromExecution && (
                                 <p className="operation-prep-mode-divergence__note" data-testid="mode-divergence">
                                     LIVE is selected for the next START. Real-order authority is not active.（LIVEは次のSTARTに選択されています。実注文権限は有効ではありません）

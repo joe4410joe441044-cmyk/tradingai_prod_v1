@@ -81,6 +81,9 @@ export const API = {
   botStop: () =>
     join("/bot/stop"),
 
+  botControl: () =>
+    join("/bot/control"),
+
   loopStart: () =>
     join("/bot/loop/start"),
 

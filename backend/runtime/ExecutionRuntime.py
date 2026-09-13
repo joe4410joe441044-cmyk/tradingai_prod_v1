@@ -426,6 +426,29 @@ class ExecutionRuntime:
             }
 
         # ----------------------------------------------------
+        # Execution Control Authority (BOT/MANUAL)
+        # ----------------------------------------------------
+        # The mainline pipeline only produces automatic BOT entries in D2.
+        # When a human holds execution control, automatic BOT new-entry is
+        # denied here as a second, defense-in-depth boundary (the manager-owned
+        # authority guard is the primary gate). Runtime, monitoring, and auto
+        # exit are unaffected.
+
+        control_authority = governance_state.get(
+            "control_authority",
+            "BOT",
+        )
+
+        if control_authority != "BOT":
+
+            return {
+                "executionAllowed": False,
+                "reason": (
+                    "BOT_ENTRY_LOCKED_MANUAL_CONTROL"
+                ),
+            }
+
+        # ----------------------------------------------------
         # Engine Risk Halt
         # ----------------------------------------------------
 

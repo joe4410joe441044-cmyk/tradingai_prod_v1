@@ -25,6 +25,9 @@ from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
     build_trading_decision_snapshot,
 )
+from backend.runtime.runtime_symbol_context import (
+    symbol_context_matches,
+)
 from backend import config as backend_config
 from backend.auto_market_selection.live_status_consistency import (
     derive_live_readiness,
@@ -97,6 +100,21 @@ from Bot.engine.execution_engine import (
 load_dotenv()
 
 # =========================
+# EXECUTION CONTROL AUTHORITY
+# =========================
+
+# The BotManager backend is the sole authority owner for execution control.
+# ``BOT`` preserves the existing automatic strategy entry behavior; ``MANUAL``
+# hands entry decision authority to a human while keeping the runtime running.
+CONTROL_AUTHORITY_BOT = "BOT"
+CONTROL_AUTHORITY_MANUAL = "MANUAL"
+CONTROL_AUTHORITY_VALUES = (
+    CONTROL_AUTHORITY_BOT,
+    CONTROL_AUTHORITY_MANUAL,
+)
+CONTROL_AUTHORITY_OWNER = "BOT_MANAGER_BACKEND"
+
+# =========================
 # BOT MANAGER
 # =========================
 
@@ -131,6 +149,36 @@ class BotManager:
         self.money_management_execution_guard_lock = threading.RLock()
         self.money_management_execution_guard = None
         self.money_management_runtime_baseline_session = None
+
+        # ============================================
+        # EXECUTION CONTROL AUTHORITY
+        # ============================================
+        #
+        # Single manager-owned authority boundary. It serializes the control
+        # switch, BOT automatic entry admission, and symbol switching so no
+        # engine-instance lock is the only guard. The backend BotManager is the
+        # authority owner; the frontend only requests changes.
+        self.execution_authority_lock = threading.RLock()
+        existing_control_authority = governance_state.get(
+            "control_authority"
+        )
+        self.control_authority = (
+            existing_control_authority
+            if existing_control_authority in CONTROL_AUTHORITY_VALUES
+            else CONTROL_AUTHORITY_BOT
+        )
+        try:
+            existing_control_revision = int(
+                governance_state.get("control_revision", 0) or 0
+            )
+        except (TypeError, ValueError):
+            existing_control_revision = 0
+        self.control_revision = max(0, existing_control_revision)
+        self.control_switch_in_progress = False
+        self.execution_admission_sequence = 0
+        self.execution_admission_reservation = None
+        governance_state["control_authority"] = self.control_authority
+        governance_state["control_revision"] = self.control_revision
 
         # ============================================
         # COOLDOWN
@@ -2115,6 +2163,412 @@ class BotManager:
         governance_state["execution_enabled"] = enabled
         return {"success": True, "execution_enabled": enabled}
 
+    # ============================================
+    # EXECUTION CONTROL AUTHORITY
+    # ============================================
+
+    @staticmethod
+    def _normalize_control_authority(value):
+
+        normalized = str(value or "").strip().upper()
+
+        if normalized in CONTROL_AUTHORITY_VALUES:
+            return normalized
+
+        return None
+
+    def _mirror_control_authority(self):
+
+        governance_state["control_authority"] = self.control_authority
+        governance_state["control_revision"] = self.control_revision
+
+    def get_execution_control_state(self):
+
+        with self.execution_authority_lock:
+            return {
+                "owner": CONTROL_AUTHORITY_OWNER,
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+                "controlAuthorityValues": list(
+                    CONTROL_AUTHORITY_VALUES
+                ),
+                "controlSwitchInProgress": bool(
+                    self.control_switch_in_progress
+                ),
+                "entryAdmissionActive": isinstance(
+                    self.execution_admission_reservation,
+                    dict,
+                ),
+            }
+
+    def _execution_control_position_state(self):
+
+        engine = self.engine
+
+        if engine is not None:
+            actual_position = getattr(
+                engine, "actual_position", None
+            )
+            if actual_position is not None:
+                if not isinstance(actual_position, dict):
+                    return "UNKNOWN"
+                side = str(
+                    actual_position.get("side") or ""
+                ).strip().upper()
+                if side in ("BUY", "LONG"):
+                    return "LONG"
+                if side in ("SELL", "SHORT"):
+                    return "SHORT"
+                return "UNKNOWN"
+
+        state = getattr(self, "state", None)
+        position_state = (
+            str(
+                getattr(state, "position_state", "") or ""
+            ).strip().upper()
+            if state is not None
+            else ""
+        )
+
+        if position_state in ("LONG", "SHORT"):
+            return position_state
+        if position_state in ("OPEN", "UNKNOWN"):
+            return "UNKNOWN"
+        if position_state in ("", "FLAT", "NONE"):
+            return "FLAT"
+        return "UNKNOWN"
+
+    def _execution_control_pending_state(self):
+
+        try:
+            pending = self.get_authoritative_pending_order_state()
+        except Exception:
+            return {
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+            }
+
+        if not isinstance(pending, dict):
+            return {
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+            }
+
+        return pending
+
+    def _execution_control_entry_admission_idle(self):
+
+        if isinstance(
+            self.execution_admission_reservation, dict
+        ):
+            return False
+
+        engine = self.engine
+
+        if engine is not None:
+            if getattr(
+                engine,
+                "execution_entry_admission_in_progress",
+                False,
+            ):
+                return False
+            if getattr(engine, "pending_order", False):
+                return False
+
+        return True
+
+    def _evaluate_control_switch_guard(self):
+
+        reasons = []
+
+        mode = str(self.config.get("mode", "")).strip().lower()
+        if mode not in ("paper", "live"):
+            reasons.append("RUNTIME_MODE_UNKNOWN")
+
+        if self.lifecycle_state not in (
+            "STOPPED",
+            "STARTING",
+            "RUNNING",
+            "STOPPING",
+        ):
+            reasons.append("RUNTIME_STATE_UNKNOWN")
+
+        if self.loop_state not in (
+            "STOPPED",
+            "STARTING",
+            "RUNNING",
+            "STOPPING",
+        ):
+            reasons.append("RUNTIME_LOOP_STATE_UNKNOWN")
+
+        if (
+            governance_state.get("emergency_state")
+            != EMERGENCY_READY
+            or governance_state.get("emergency_stop") is not False
+        ):
+            reasons.append("EMERGENCY_STOP_ACTIVE")
+
+        if (
+            self.symbol_switch_transaction_id is not None
+            or self._symbol_switch_entry_paused
+        ):
+            reasons.append("SYMBOL_SWITCH_IN_PROGRESS")
+
+        position_state = (
+            self._execution_control_position_state()
+        )
+        if position_state != "FLAT":
+            reasons.append(
+                f"POSITION_{position_state}_BLOCKS_CONTROL_SWITCH"
+            )
+
+        pending = self._execution_control_pending_state()
+        if pending.get("known") is not True:
+            reasons.append(
+                pending.get("reason")
+                or "PENDING_ORDER_UNKNOWN"
+            )
+        elif pending.get("pending") is True:
+            reasons.append("PENDING_ORDER_REMAINING")
+
+        if not self._execution_control_entry_admission_idle():
+            reasons.append("ENTRY_ADMISSION_IN_PROGRESS")
+
+        if getattr(self, "close_reservation", None) is not None:
+            reasons.append("CLOSE_RESERVATION_ACTIVE")
+
+        return reasons
+
+    def set_execution_control(
+        self, authority, expected_revision=None
+    ):
+        """Switch the backend-authoritative execution control.
+
+        ``BOT`` keeps automatic strategy entry eligible. ``MANUAL`` denies
+        automatic BOT new-entry while leaving the runtime, market feed,
+        monitoring, money management lifecycle, and auto-exit running.  A
+        successful switch increments the monotonic control revision; a denied
+        switch never increments it.
+        """
+
+        normalized = self._normalize_control_authority(authority)
+
+        if normalized is None:
+            return {
+                "success": False,
+                "changed": False,
+                "reason": "INVALID_CONTROL_AUTHORITY",
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+            }
+
+        with self.execution_authority_lock:
+            if expected_revision is not None:
+                try:
+                    expected = int(expected_revision)
+                except (TypeError, ValueError):
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": (
+                            "INVALID_EXPECTED_CONTROL_REVISION"
+                        ),
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                    }
+                if expected != self.control_revision:
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": "DENY_STALE_CONTROL_REVISION",
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                        "expectedControlRevision": expected,
+                    }
+
+            if normalized == self.control_authority:
+                return {
+                    "success": True,
+                    "changed": False,
+                    "reason": "NO_CONTROL_CHANGE",
+                    "controlAuthority": self.control_authority,
+                    "controlRevision": self.control_revision,
+                    "execution_enabled": governance_state.get(
+                        "execution_enabled", False
+                    ),
+                }
+
+            self.control_switch_in_progress = True
+
+            try:
+                reasons = self._evaluate_control_switch_guard()
+
+                if reasons:
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": reasons[0],
+                        "blockReasons": reasons,
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                    }
+
+                self.control_authority = normalized
+                self.control_revision += 1
+
+                if normalized == CONTROL_AUTHORITY_MANUAL:
+                    # Moving entry authority to a human never stops the
+                    # runtime. Auto trade (BOT new entry) is forced off.
+                    governance_state["execution_enabled"] = False
+
+                self._mirror_control_authority()
+
+                return {
+                    "success": True,
+                    "changed": True,
+                    "reason": "CONTROL_AUTHORITY_SWITCHED",
+                    "controlAuthority": self.control_authority,
+                    "controlRevision": self.control_revision,
+                    "execution_enabled": governance_state.get(
+                        "execution_enabled", False
+                    ),
+                }
+            finally:
+                self.control_switch_in_progress = False
+
+    def _authorize_bot_execution_entry(self, signal):
+        """Manager-owned final authority revalidation for BOT entry."""
+
+        with self.execution_authority_lock:
+            authority = self.control_authority
+            revision = self.control_revision
+
+            if authority != CONTROL_AUTHORITY_BOT:
+                return {
+                    "allowed": False,
+                    "reason": "BOT_ENTRY_LOCKED_MANUAL_CONTROL",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reservation = self.execution_admission_reservation
+
+            if (
+                not isinstance(reservation, dict)
+                or reservation.get("source") != "BOT"
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EXECUTION_ADMISSION_NOT_RESERVED",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if reservation.get("controlRevision") != revision:
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_CONTROL_REVISION",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if (
+                governance_state.get("emergency_state")
+                != EMERGENCY_READY
+                or governance_state.get("emergency_stop") is not False
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EMERGENCY_STOP_ACTIVE",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            signal_context = (
+                signal.get("runtimeSymbolContext")
+                if isinstance(signal, dict)
+                else None
+            )
+            engine_symbol = getattr(self.engine, "symbol", None)
+
+            if not symbol_context_matches(
+                signal_context, engine_symbol
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reserved_symbol = str(
+                reservation.get("symbol") or ""
+            ).strip().upper()
+            if reserved_symbol and reserved_symbol != str(
+                engine_symbol or ""
+            ).strip().upper():
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            return {
+                "allowed": True,
+                "reason": "BOT_ENTRY_AUTHORIZED",
+                "controlAuthority": authority,
+                "controlRevision": revision,
+            }
+
+    def _dispatch_execution_authority_guard(self, signal):
+
+        try:
+            return self._authorize_bot_execution_entry(signal)
+        except Exception:
+            logger.warning("Execution authority guard failed")
+            return {
+                "allowed": False,
+                "reason": "EXECUTION_AUTHORITY_UNKNOWN",
+            }
+
+    def _begin_execution_admission(self, source):
+        """Reserve one shared entry admission. Caller holds the lock."""
+
+        self.execution_admission_sequence += 1
+        reservation = {
+            "source": source,
+            "reservationId": self.execution_admission_sequence,
+            "controlAuthority": self.control_authority,
+            "controlRevision": self.control_revision,
+            "symbol": self.activeSymbol,
+            "runtimeId": self.active_runtime_id,
+            "startedAt": time.time(),
+        }
+        self.execution_admission_reservation = reservation
+        return reservation
+
+    def _end_execution_admission(self, reservation):
+
+        if self.execution_admission_reservation is reservation:
+            self.execution_admission_reservation = None
+
+    def _process_runtime_with_bot_admission(self, *args, **kwargs):
+        """Serialize BOT automatic entry through the shared boundary."""
+
+        with self.execution_authority_lock:
+            reservation = self._begin_execution_admission("BOT")
+            try:
+                return runtime_registry.trading_runtime.process_runtime(
+                    *args, **kwargs
+                )
+            finally:
+                self._end_execution_admission(reservation)
+
     def set_live_order_entry_authority(self, armed):
         """Operator-gated ARM/DISARM of LIVE real-order entry authority.
 
@@ -3706,6 +4160,9 @@ class BotManager:
             self.engine.set_execution_entry_guard(
                 self._dispatch_money_management_execution_entry_guard
             )
+            self.engine.set_execution_authority_guard(
+                self._dispatch_execution_authority_guard
+            )
 
             if runtime_registry.trading_runtime:
 
@@ -4031,7 +4488,7 @@ class BotManager:
                                 and not self._symbol_switch_entry_paused):
 
                             self.latest_runtime_result = (
-                                runtime_registry.trading_runtime.process_runtime(
+                                self._process_runtime_with_bot_admission(
                                     micro_state,
                                     active_symbol=self.activeSymbol,
                                     runtime_id=runtime_id,
@@ -4745,6 +5202,19 @@ class BotManager:
         return True
 
     def _dispatch_money_management_execution_entry_guard(self, intent):
+
+        # Shared authority boundary (pre-MM). The manager-owned dispatcher is
+        # invoked at the start of BOT entry admission, before the real MM gate
+        # evaluates. While a human holds execution control, automatic BOT new
+        # entry fails closed here without consuming MM admission state.
+        with self.execution_authority_lock:
+            authority = self.control_authority
+
+        if authority != CONTROL_AUTHORITY_BOT:
+            logger.warning(
+                "BOT entry blocked by MANUAL control authority"
+            )
+            return None
 
         with self.money_management_execution_guard_lock:
             callback = self.money_management_execution_guard
@@ -10961,6 +11431,12 @@ class BotManager:
             "botState": self.lifecycle_state,
 
             "autoTradeEnabled": auto_trade_enabled,
+
+            "controlAuthority": self.control_authority,
+
+            "controlRevision": self.control_revision,
+
+            "executionControl": self.get_execution_control_state(),
 
             "emergencyStop": live_readiness.get(
                 "emergencyStop",

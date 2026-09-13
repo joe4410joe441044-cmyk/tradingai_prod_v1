@@ -56,6 +56,13 @@ class LiveAutoApprovalRequest(BaseModel):
     ttlSeconds: int = Field(600, ge=30, le=900)
 
 
+class ExecutionControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    authority: str = Field(..., min_length=1, max_length=16)
+    expectedRevision: Optional[int] = Field(None, ge=0)
+
+
 # =========================
 # CONFIG（仕様書）
 # =========================
@@ -281,6 +288,12 @@ class StatusResponse(BaseModel):
 
     autoTradeEnabled: bool = False
 
+    controlAuthority: str = "BOT"
+
+    controlRevision: int = 0
+
+    executionControl: dict = Field(default_factory=dict)
+
     emergencyStop: bool = False
 
     emergencyLocked: bool = False
@@ -495,6 +508,27 @@ def disarm_live_order_entry(
     _operator: str = Depends(require_operator_session),
 ):
     return get_bot_manager().set_live_order_entry_authority(False)
+
+
+# =========================
+# EXECUTION CONTROL AUTHORITY
+# =========================
+# The backend BotManager is the authority owner. The frontend requests a
+# BOT/MANUAL switch; the manager validates the strict V1 switch guard and only
+# then commits a monotonic control revision. A denied switch never increments
+# the revision and never stops the runtime.
+@router.post("/control")
+def set_execution_control(
+    request: ExecutionControlRequest,
+    _operator: str = Depends(require_operator_session),
+):
+    result = get_bot_manager().set_execution_control(
+        request.authority,
+        expected_revision=request.expectedRevision,
+    )
+    if result.get("success") is not True:
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 # =========================
