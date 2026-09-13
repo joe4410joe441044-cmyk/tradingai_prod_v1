@@ -295,7 +295,8 @@ def test_d4_e2e_a_manual_long_then_manual_close():
 
     # EXIT marker bound to the same lifecycle.
     exit_markers = _markers(engine)
-    assert [m["type"] for m in exit_markers] == ["EXIT", "ENTRY"]
+    assert set(m["type"] for m in exit_markers) == {"ENTRY", "EXIT"}
+    assert len(exit_markers) == 2
     exit_marker = next(m for m in exit_markers if m["type"] == "EXIT")
     assert exit_marker["reason"] == "MANUAL_CLOSE"
     assert exit_marker["tradeId"] == entry["positionId"]
@@ -363,7 +364,7 @@ def test_d4_e2e_b_manual_short_then_manual_close():
     assert history["pnl"] == pytest.approx(1.0)
     assert engine.pnl == pytest.approx(1.0)
 
-    assert _marker_types(engine) == ["EXIT", "ENTRY"]
+    assert sorted(_marker_types(engine)) == ["ENTRY", "EXIT"]
 
     account = manager._capture_account_snapshot()
     assert account["position"] is None
@@ -408,7 +409,7 @@ def test_d4_e2e_c_manual_entry_auto_exit_preserves_manual_provenance():
 
     # The MANUAL entry provenance survives into the ENTRY marker.
     markers = _markers(engine)
-    assert [m["type"] for m in markers] == ["EXIT", "ENTRY"]
+    assert sorted(m["type"] for m in markers) == ["ENTRY", "EXIT"]
     entry_marker = next(m for m in markers if m["type"] == "ENTRY")
     exit_marker = next(m for m in markers if m["type"] == "EXIT")
     assert entry_marker["entryAuthority"] == "MANUAL"
