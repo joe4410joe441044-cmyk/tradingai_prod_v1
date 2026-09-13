@@ -352,6 +352,7 @@ export default function BotControl({
         setLoopPending,
     ] = useState(false);
     const [botPending, setBotPending] = useState(false);
+    const [armPending, setArmPending] = useState(false);
     const [botError, setBotError] = useState(null);
     const [, setLoopPendingAction] = useState(null);
     const [
@@ -396,6 +397,7 @@ export default function BotControl({
     const botPendingRef = useRef(false);
     const autoTradePendingRef =
         useRef(false);
+    const armPendingRef = useRef(false);
     const emergencyPendingRef =
         useRef(false);
     const unlockPendingRef =
@@ -676,10 +678,24 @@ export default function BotControl({
         autoTradePending
         || emergencyBlocksOperations
         || Boolean(autoTradeDisabledReason);
+    const liveOrderEntryArmed = (
+        config?.liveOrderEntryAllowed === true
+        && config?.realOrderAllowed === true
+        && config?.executionEntryAllowed === true
+    );
+    const armDisabled = (
+        armPending
+        || botRunning !== true
+        || String(config?.mode || "").toUpperCase() !== "LIVE"
+        || emergencyBlocksOperations
+    );
     const loopDisabled = (
         loopPending
         || botRunning !== true
         || emergencyBlocksOperations
+        || (String(config?.mode || "").toUpperCase() === "LIVE"
+            && !liveOrderEntryArmed
+            && !loopChecked)
     );
     const unlockAllowed = (
         emergencyStateCode !== "READY"
@@ -892,8 +908,6 @@ export default function BotControl({
 
         let riskPercentValue = startRiskPercent;
         let maxDrawdownValue = startMaxDrawdownPercent;
-        let liveArmAttempted = false;
-        let liveLoopStarted = false;
         try {
             // Problem 1/9: flush any pending VALID MM draft so the START
             // payload uses the authoritative saved configuration the user
@@ -965,51 +979,10 @@ export default function BotControl({
                 throw new Error(result?.reason || result?.detail || "BOT lifecycle request was rejected.");
             }
 
-            // LIVE confirmation is the explicit operator authorization for the
-            // canonical production sequence. Each boundary is independently
-            // authenticated and must confirm success before the next begins.
-            // START itself remains DISARMED and can never submit an order.
-            if (isLiveMode) {
-                liveArmAttempted = true;
-                const armResponse = await authenticatedControlRequest(
-                    API.liveOrderEntryArm(),
-                    { method: "POST" },
-                );
-                const armResult = await armResponse.json().catch(() => null);
-                if (!armResponse.ok) {
-                    if (isAuthErrorStatus(armResponse.status)) {
-                        throw new Error(authErrorMessage(armResponse.status));
-                    }
-                    throw new Error(
-                        armResult?.reason
-                        || armResult?.detail?.reason
-                        || armResult?.detail
-                        || "LIVE order-entry authorization was rejected.",
-                    );
-                }
-                if (
-                    armResult?.success !== true
-                    || armResult?.armed !== true
-                    || armResult?.liveOrderEntryAllowed !== true
-                    || armResult?.realOrderAllowed !== true
-                    || armResult?.executionEntryAllowed !== true
-                ) {
-                    throw new Error("LIVE order-entry authorization was not confirmed.");
-                }
-                await startLoop();
-                liveLoopStarted = true;
-
-                const executionResult = await setExecutionEnabled(true);
-                if (executionResult?.execution_enabled !== true) {
-                    throw new Error("Auto Trade enablement was not confirmed.");
-                }
-                updateExecutionRuntimeTelemetry({
-                    executionAllowed: true,
-                    governanceReason: "LIVE_START_AUTHORIZED",
-                    suppressionReason: "NONE",
-                });
-                setExecutionEnabledState(true);
-            }
+            // LIVE confirmation authorizes START only. Order-entry ARM, Loop,
+            // and Auto Trade remain separate authenticated operator actions.
+            // The refreshed backend snapshot is the sole authority for the
+            // resulting RUNNING / DISARMED UI state.
 
             if (result?.loopState === "RUNNING") {
                 setLoopError(null);
@@ -1025,31 +998,6 @@ export default function BotControl({
 
             await refreshStatusSafely();
         } catch (error) {
-            // A partial LIVE sequence converges back to monitoring-only. This
-            // cleanup never cancels orders or closes positions; it only revokes
-            // new-entry authority and disables lifecycle controls.
-            if (isLiveMode && liveArmAttempted) {
-                try {
-                    await setExecutionEnabled(false);
-                } catch (cleanupError) {
-                    console.error("LIVE AUTO TRADE ROLLBACK ERROR", cleanupError);
-                }
-                if (liveLoopStarted) {
-                    try {
-                        await stopLoop();
-                    } catch (cleanupError) {
-                        console.error("LIVE LOOP ROLLBACK ERROR", cleanupError);
-                    }
-                }
-                try {
-                    await authenticatedControlRequest(
-                        API.liveOrderEntryDisarm(),
-                        { method: "POST" },
-                    );
-                } catch (cleanupError) {
-                    console.error("LIVE DISARM ROLLBACK ERROR", cleanupError);
-                }
-            }
             setBotError(`START failed: ${error?.message || "UNKNOWN ERROR"}`);
         } finally {
             botPendingRef.current = false;
@@ -1157,6 +1105,43 @@ export default function BotControl({
         forceUpdate(v => v + 1);
 
         return result;
+    };
+
+    const handleLiveOrderEntryChange = async (nextArmed) => {
+        if (armPendingRef.current || armDisabled) return;
+
+        armPendingRef.current = true;
+        setArmPending(true);
+        setBotError(null);
+        try {
+            const response = await authenticatedControlRequest(
+                nextArmed ? API.liveOrderEntryArm() : API.liveOrderEntryDisarm(),
+                { method: "POST" },
+            );
+            const result = await response.json().catch(() => null);
+            if (!response.ok) {
+                if (isAuthErrorStatus(response.status)) {
+                    throw new Error(authErrorMessage(response.status));
+                }
+                const detail = result && result.detail;
+                throw new Error(
+                    (result && result.reason)
+                    || (detail && detail.reason)
+                    || detail
+                    || "LIVE order-entry authority was rejected."
+                );
+            }
+            if (!result || result.success !== true || result.armed !== nextArmed) {
+                throw new Error("LIVE order-entry authority was not confirmed.");
+            }
+            await refreshStatusSafely();
+        } catch (error) {
+            const message = error && error.message ? error.message : "UNKNOWN ERROR";
+            setBotError("ARM failed: " + message);
+        } finally {
+            armPendingRef.current = false;
+            setArmPending(false);
+        }
     };
 
     const handleLoopChange = async (
@@ -1427,6 +1412,9 @@ export default function BotControl({
                 pendingOrder={pendingOrder}
                 position={position}
                 realOrderAllowed={config?.realOrderAllowed === true}
+                liveOrderEntryArmed={liveOrderEntryArmed}
+                armDisabled={armDisabled}
+                handleLiveOrderEntryChange={handleLiveOrderEntryChange}
                 loopChecked={loopChecked}
                 loopState={loopStateText}
                 loopStateTone={loopStateTone}
@@ -1517,9 +1505,9 @@ export default function BotControl({
 
                         <div className="operation-live-confirm__body">
                             <p>
-                                LIVE runtimeを開始し、fresh safety validation後に注文権限をARMします。
-                                続いてRuntime LoopとAuto Tradeを正規順序で開始します。
-                                STARTだけを理由に注文は行われず、通常Trading Cycleの全安全ゲートを通ります。
+                                LIVE runtimeを監視専用のDISARMED状態で開始します。
+                                注文権限のARM、Runtime Loop、Auto Tradeは開始後に個別の操作が必要です。
+                                この確認だけでは注文権限は有効にならず、注文も行われません。
                             </p>
 
                             <div className="operation-live-confirm__details">
@@ -1549,17 +1537,17 @@ export default function BotControl({
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Execution Authority:</span>
-                                    <strong>確認後にARM</strong>
+                                    <strong>DISARMED</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Real Order Authority:</span>
                                     <strong className="operation-live-confirm__danger">
-                                        確認後にARM
+                                        DISARMED
                                     </strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Loop / Auto Trade:</span>
-                                    <strong>確認後にON / ON</strong>
+                                    <strong>OFF / OFF</strong>
                                 </div>
                             </div>
                             {!liveConfirmAllowed && (

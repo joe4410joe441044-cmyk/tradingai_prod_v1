@@ -1494,6 +1494,41 @@ test("running BOT exposes Loop and Auto Trade controls in AUTOMATION section", a
     assert.equal(textIncludes(renderer.root, "EMERGENCY STOP"), true);
 });
 
+test("running LIVE BOT exposes separately callable ARM before Loop", async () => {
+    let refreshCount = 0;
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/live-order-entry/arm");
+        return jsonResponse({ body: {
+            success: true, armed: true, liveOrderEntryAllowed: true,
+            realOrderAllowed: true, executionEntryAllowed: true,
+        } });
+    });
+
+    try {
+        const renderer = await renderBotControl({
+            botRunning: true, loopEnabled: false, loopState: "STOPPED",
+            config: {
+                mode: "live", allowLive: true, tradeMode: "live",
+                liveOrderEntryAllowed: false, realOrderAllowed: false,
+                executionEntryAllowed: false,
+            },
+            onStatusRefresh: async () => { refreshCount += 1; },
+        });
+        const arm = findGroupButton(renderer.root, "Live order entry", "ON");
+        const loop = findGroupButton(renderer.root, "Runtime loop", "ON");
+        assert.ok(arm);
+        assert.equal(arm.props.disabled, false);
+        assert.ok(loop);
+        assert.equal(loop.props.disabled, true);
+
+        await clickAndRender(renderer, arm);
+        assert.deepEqual(mock.requests.map(({ url }) => url), ["/api/bot/live-order-entry/arm"]);
+        assert.equal(refreshCount, 1);
+    } finally {
+        mock.restore();
+    }
+});
+
 test("running BOT Runtime Loop control reaches the existing loop handler", async () => {
     const mock = installFetchMock((url) => {
         assert.equal(url, "/api/bot/loop/start");
@@ -1643,7 +1678,7 @@ test("PAPER runtime-only MM wait starts Bot without starting automation", async 
     setMmConfiguration();
     const mock = installFetchMock((url) => {
         if (url === "/api/bot/start") {
-            return jsonResponse({ body: { status: "started" } });
+            return jsonResponse({ ok: false, status: 400, body: { reason: "START_REJECTED" } });
         }
         throw new Error(`Unexpected request: ${url}`);
     });
@@ -2153,12 +2188,16 @@ test("all trade/execution controls send distinct nondefault values through the s
 });
 
 
-test("LIVE confirm performs START, ARM, Loop, and Auto Trade in canonical order", async () => {
+test("LIVE confirm performs exactly one START and preserves the DISARMED boundary", async () => {
     setMmStatus({ executionEntryAllowed: false });
     setMmConfiguration();
+    let refreshCount = 0;
     const mock = installFetchMock((url) => {
         if (url === "/api/bot/start") {
-            return jsonResponse({ body: { status: "started", loopState: "STOPPED", autoTradeEnabled: false } });
+            return jsonResponse({ body: {
+                status: "started", loopState: "STOPPED", autoTradeEnabled: false,
+                liveOrderEntryAllowed: false, realOrderAllowed: false, executionEntryAllowed: false,
+            } });
         }
         if (url === "/api/bot/live-order-entry/arm") {
             return jsonResponse({ body: {
@@ -2183,20 +2222,25 @@ test("LIVE confirm performs START, ARM, Loop, and Auto Trade in canonical order"
                 loopOnStart: false,
                 autoTradeOnStart: false,
             },
+            onStatusRefresh: async () => {
+                refreshCount += 1;
+                return {
+                    status: "RUNNING", selectedMode: "LIVE",
+                    liveOrderEntryAllowed: false, realOrderAllowed: false,
+                    executionEntryAllowed: false, loopEnabled: false,
+                    autoTradeEnabled: false,
+                };
+            },
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
-        assert.equal(textIncludes(renderer.root, "fresh safety validation後に注文権限をARMします。"), true);
-        assert.equal(textIncludes(renderer.root, "Real Order Authority: 確認後にARM"), true);
-        assert.equal(textIncludes(renderer.root, "Loop / Auto Trade: 確認後にON / ON"), true);
+        assert.equal(textIncludes(renderer.root, "監視専用のDISARMED状態で開始します。"), true);
+        assert.equal(textIncludes(renderer.root, "Real Order Authority: DISARMED"), true);
+        assert.equal(textIncludes(renderer.root, "Loop / Auto Trade: OFF / OFF"), true);
         const confirm = findButton(renderer.root, "LIVEを開始");
         assert.equal(confirm.props.disabled, false);
         await clickAndRender(renderer, confirm);
-        assert.deepEqual(mock.requests.map(({ url }) => url), [
-            "/api/bot/start",
-            "/api/bot/live-order-entry/arm",
-            "/api/bot/loop/start",
-            "/api/governance/execution",
-        ]);
+        assert.deepEqual(mock.requests.map(({ url }) => url), ["/api/bot/start"]);
+        assert.equal(refreshCount, 1);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.mode, "live");
         assert.equal(payload.dry_run, false);
@@ -2209,12 +2253,12 @@ test("LIVE confirm performs START, ARM, Loop, and Auto Trade in canonical order"
     }
 });
 
-test("LIVE ARM rejection fails closed before Loop or Auto Trade", async () => {
+test("LIVE START failure never triggers ARM, Loop, Auto Trade, or DISARM", async () => {
     setMmStatus({ executionEntryAllowed: false });
     setMmConfiguration();
     const mock = installFetchMock((url) => {
         if (url === "/api/bot/start") {
-            return jsonResponse({ body: { status: "started" } });
+            return jsonResponse({ ok: false, status: 400, body: { reason: "START_REJECTED" } });
         }
         if (url === "/api/bot/live-order-entry/arm") {
             return jsonResponse({
@@ -2237,12 +2281,9 @@ test("LIVE ARM rejection fails closed before Loop or Auto Trade", async () => {
         }));
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         await clickAndRender(renderer, findButton(renderer.root, "LIVEを開始"));
-        assert.deepEqual(mock.requests.map(({ url }) => url), [
-            "/api/bot/start",
-            "/api/bot/live-order-entry/arm",
-            "/api/governance/execution",
-            "/api/bot/live-order-entry/disarm",
-        ]);
+        renderer.render();
+        assert.deepEqual(mock.requests.map(({ url }) => url), ["/api/bot/start"]);
+        assert.equal(textIncludes(renderer.root, "START failed"), true);
     } finally {
         clearMmStatus();
         clearMmConfiguration();
