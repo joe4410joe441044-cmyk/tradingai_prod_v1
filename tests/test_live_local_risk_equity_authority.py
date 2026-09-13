@@ -22,7 +22,7 @@ def engine(mode="live", balance=LIVE_EQUITY):
 def metrics(*, equity=LIVE_EQUITY, peak=LIVE_EQUITY, session=3,
             runtime="runtime-1", complete=True, authority=LIVE_AUTHORITY):
     return SimpleNamespace(
-        equity=equity,
+        current_equity=equity,
         peak_equity=peak,
         session_id=session,
         runtime_instance_id=runtime,

@@ -104,6 +104,9 @@ class AuthoritativeLossRuntimeMetrics:
     session_trade_count: Optional[int] = None
     trade_count_authority_scope: Optional[str] = None
     trade_count_authority_session_id: Optional[int] = None
+    accounting_authority_source: Optional[
+        AccountingRebaseAuthoritySource
+    ] = None
 
     def __post_init__(self):
         for name in (
@@ -325,6 +328,10 @@ class AuthoritativeLossRuntimeMetricsState:
             self._session_trade_count = 0
             self._trade_count_authority_scope = "RUNTIME_SESSION"
             self._trade_count_authority_session_id = session_id
+            # Values carried from persistence or the previous session are
+            # context only.  A new runtime session must earn availability
+            # from its own observation before its baseline may be dispatched.
+            self._observed = False
             self._as_of = at
             self._revision += 1
             return self._snapshot_locked()
@@ -761,6 +768,7 @@ class AuthoritativeLossRuntimeMetricsState:
             self._session_trade_count,
             self._trade_count_authority_scope,
             self._trade_count_authority_session_id,
+            self._accounting_authority_source,
         )
 
     def snapshot(self):
