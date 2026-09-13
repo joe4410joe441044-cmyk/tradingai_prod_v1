@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildAutoMarketSelectionModel, displayAmsValue } from "./autoMarketSelectionModel.js";
+import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, displayAmsValue } from "./autoMarketSelectionModel.js";
 
 test("active symbol never falls back to requested symbol or top candidate", () => {
     const status = { selectionMode: "MANUAL", activeSymbol: "ETHUSDT",
@@ -31,6 +31,58 @@ test("failed, stale, no-eligible and no-rankable states remain intact", () => {
     assert.equal(model.ranking.status, "NO_RANKABLE_MARKET");
     assert.equal(model.switch.state, "FAILED");
     assert.equal(model.freshness.scanner, "STALE");
+});
+
+test("historical last-cycle reasons never leak into current snapshot reasons", () => {
+    const model = buildAutoMarketSelectionModel({
+        activeSymbol: "XRPUSDTM",
+        topCandidate: { symbol: "ETHUSDT" },
+        autoRuntime: {
+            mode: "AUTO_PAPER", runtimeState: "OBSERVING", status: "IDLE", cycleId: null,
+            lastCycleStatus: "COMPLETED_BLOCKED", lastCycleId: "ams-cycle-9",
+            reasonCodes: ["MM_STALE", "ELIGIBILITY_STALE", "CAPITAL_INELIGIBLE"],
+        },
+        switch: { state: "IDLE", reasonCodes: [] },
+        reasons: [],
+        capitalEligibility: { status: "ELIGIBLE", mmRegime: "FRESH" },
+        freshness: { mm: "FRESH" },
+    });
+    const reasons = buildAutoMarketSelectionReasons(model);
+    assert.deepEqual(reasons.historical, ["MM_STALE", "ELIGIBILITY_STALE", "CAPITAL_INELIGIBLE"]);
+    assert.deepEqual(reasons.current, []);
+    assert.equal(model.autoRuntime.lastCycleStatus, "COMPLETED_BLOCKED");
+    assert.equal(model.autoRuntime.lastCycleId, "ams-cycle-9");
+    // current snapshot semantics are untouched by historical reasons
+    assert.equal(model.capitalEligibility.status, "ELIGIBLE");
+    assert.equal(model.freshness.mm, "FRESH");
+});
+
+test("current switch and snapshot reasons stay distinct from historical reasons", () => {
+    const model = buildAutoMarketSelectionModel({
+        autoRuntime: { status: "IDLE", reasonCodes: ["MM_STALE"] },
+        switch: { state: "IDLE", reasonCodes: ["POSITION_NOT_FLAT"] },
+        reasons: ["NO_ELIGIBLE_MARKET", "POSITION_NOT_FLAT"],
+    });
+    const reasons = buildAutoMarketSelectionReasons(model);
+    assert.deepEqual(reasons.historical, ["MM_STALE"]);
+    assert.deepEqual(reasons.current, ["POSITION_NOT_FLAT", "NO_ELIGIBLE_MARKET"]);
+});
+
+test("missing last-cycle payload stays explicit instead of inferred", () => {
+    const model = buildAutoMarketSelectionModel({ activeSymbol: "BTCUSDT" });
+    assert.equal(model.autoRuntime.lastCycleStatus, null);
+    assert.equal(model.autoRuntime.lastCycleId, null);
+});
+
+test("active symbol and top candidate preview keep separate authority", () => {
+    const model = buildAutoMarketSelectionModel({
+        selectionMode: "AUTO", activeSymbol: "XRPUSDTM",
+        requestedSymbol: "SOLUSDT", topCandidate: { symbol: "ETHUSDT" },
+    });
+    assert.equal(model.activeSymbol, "XRPUSDTM");
+    assert.equal(model.requestedSymbol, "SOLUSDT");
+    assert.equal(model.topCandidate.symbol, "ETHUSDT");
+    assert.notEqual(model.activeSymbol, model.topCandidate.symbol);
 });
 
 test("model is read-only and contains no action surface", () => {

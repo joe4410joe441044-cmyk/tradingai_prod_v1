@@ -332,8 +332,9 @@ export function buildReplayMarketViewModel(replayEngine, normalizedMarketModel =
     const projectionBook = bookPayload.orderBook && typeof bookPayload.orderBook === "object"
         && !Array.isArray(bookPayload.orderBook) ? bookPayload.orderBook : bookPayload;
     const normalizedBook = normalizedMarketModel?.orderBook;
-    const useLiveBook = normalizedMarketModel?.source?.mode === "LIVE"
-        && !replayEngine?.dataset
+    const useLiveMarket = normalizedMarketModel?.source?.mode === "LIVE"
+        && !replayEngine?.dataset;
+    const useLiveBook = useLiveMarket
         && normalizedBook && typeof normalizedBook === "object" && !Array.isArray(normalizedBook);
     const book = useLiveBook ? normalizedBook : projectionBook;
     const asks = normalizeBookSide(book.asks, "ASK");
@@ -357,7 +358,12 @@ export function buildReplayMarketViewModel(replayEngine, normalizedMarketModel =
     const totalDepth = totalAsk + totalBid;
 
     let invalidTrades = 0;
-    const allTrades = events.flatMap((event, eventIndex) => tradeCandidates(event).map((trade, index) => {
+    const tradeEvents = useLiveMarket ? [{
+        id: "live-market-trades",
+        eventType: "MARKET_SNAPSHOT",
+        payload: { trades: normalizedMarketModel.recentTrades },
+    }] : events;
+    const allTrades = tradeEvents.flatMap((event, eventIndex) => tradeCandidates(event).map((trade, index) => {
         const normalized = normalizeTrade(trade, event, index);
         if (!normalized) invalidTrades += 1;
         return normalized ? { ...normalized, inputIndex: eventIndex * 100000 + index } : null;
@@ -471,12 +477,21 @@ export function buildReplayMarketViewModel(replayEngine, normalizedMarketModel =
         price: formatMarketPrice(trade.numericPrice, source),
         size: formatMarketQuantity(trade.numericSize, source),
     }));
-    const tradeDataReceived = events.some((event) => Array.isArray(payloadOf(event).trades)
-        || ["RECENT_TRADE", "TRADE"].includes(event?.eventType));
+    const liveTradeIssues = normalizedMarketModel?.dataQuality?.issues ?? [];
+    const liveTradeWaiting = useLiveMarket && liveTradeIssues.includes("TRADES_UNAVAILABLE");
+    const liveTradeUnavailable = useLiveMarket && (
+        liveTradeIssues.includes("TRADES_INVALID")
+        || liveTradeIssues.includes("CONTEXT_MISMATCH")
+    );
+    const tradeDataReceived = useLiveMarket
+        ? normalizedMarketModel?.dataQuality?.tradesValid === true
+        : events.some((event) => Array.isArray(payloadOf(event).trades)
+            || ["RECENT_TRADE", "TRADE"].includes(event?.eventType));
     const tradeState = !hasContext ? "NO MARKET SELECTED"
         : machineState === "REPLAY_LOADING" || machineState === "LOADING" ? "LOADING"
-            : machineState === "REPLAY_ERROR" || quality === "INVALID" ? "UNAVAILABLE"
-                : tradeRows.length > 0 ? "AVAILABLE"
+            : machineState === "REPLAY_ERROR" || quality === "INVALID" || liveTradeUnavailable ? "UNAVAILABLE"
+                : liveTradeWaiting ? "WAITING"
+                    : tradeRows.length > 0 ? "AVAILABLE"
                     : invalidTrades > 0 ? "UNAVAILABLE" : tradeDataReceived ? "NO TRADES" : "WAITING";
     const metrics = {
         buyPressure, sellPressure, pressureBalance,
@@ -543,7 +558,8 @@ export function buildReplayMarketViewModel(replayEngine, normalizedMarketModel =
         quality: {
             market: marketDisplayValue(projection.dataQuality) === DASH ? UNKNOWN : projection.dataQuality,
             orderBook: qualityOf(bookEvent, book),
-            trades: qualityOf(events.findLast((event) => tradeCandidates(event).length > 0), null),
+            trades: useLiveMarket ? (tradeDataReceived ? "VALID" : "UNAVAILABLE")
+                : qualityOf(events.findLast((event) => tradeCandidates(event).length > 0), null),
             metrics: qualityOf(metric.sourceEvent, null),
         },
         diagnostics: {

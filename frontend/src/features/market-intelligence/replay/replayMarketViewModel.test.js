@@ -4,6 +4,7 @@ import test from "node:test";
 import { applyReplayCommand, createInitialReplayEngineState, REPLAY_ENGINE_COMMANDS as C } from "./replayEngine.js";
 import { XRP_REPLAY_FIXTURE } from "./replayFixtures.js";
 import { buildOrderBookDomDisplay, buildRecentTradesDisplay, buildReplayMarketViewModel, marketContextKey, marketDisplayValue, marketTimestamp, normalizedTradeTime, normalizeMarketSide } from "./replayMarketViewModel.js";
+import { normalizeLiveMarketModel } from "../market/liveMarketAdapter.js";
 
 const load = () => applyReplayCommand(createInitialReplayEngineState(), {
     type: C.LOAD_DATASET, payload: { dataset: XRP_REPLAY_FIXTURE },
@@ -32,7 +33,7 @@ const liveModel = (overrides = {}) => ({
     },
     recentTrades: [],
     markers: [],
-    dataQuality: { issues: [], isStale: false },
+    dataQuality: { issues: [], isStale: false, tradesValid: true },
     ...overrides,
 });
 
@@ -53,6 +54,68 @@ test("LIVE normalized order book is the final DOM authority with formal cumulati
     assert.equal(model.orderBook.sourceDepth, 2);
     assert.equal(model.orderBook.dataQuality, "VALID");
     assert.equal(model.orderBook.syncState, "SYNCED");
+});
+
+test("LIVE normalized trades drive Recent Trades without changing DOM", () => {
+    const normalized = liveModel({
+        recentTrades: [
+            {
+                tradeId: "older", timestamp: "2026-07-24T00:00:01.000Z",
+                price: 100, quantity: 2, side: "SELL",
+            },
+            {
+                tradeId: "newer", timestamp: "2026-07-24T00:00:02.000Z",
+                price: 101, quantity: 3, side: "BUY",
+            },
+        ],
+    });
+    const model = buildReplayMarketViewModel(null, normalized);
+    assert.equal(model.recentTrades.state, "AVAILABLE");
+    assert.deepEqual(model.recentTrades.rows.map(({ tradeId }) => tradeId), ["newer", "older"]);
+    assert.deepEqual(model.recentTrades.rows.map(({ side }) => side), ["BUY", "SELL"]);
+    assert.equal(model.orderBook.bestBid, "99");
+    assert.equal(model.orderBook.bestAsk, "101");
+});
+
+test("LIVE trade readiness controls WAITING, NO TRADES, and UNAVAILABLE", () => {
+    assert.equal(buildReplayMarketViewModel(null, liveModel({
+        dataQuality: { issues: ["TRADES_UNAVAILABLE"], tradesValid: false },
+    })).recentTrades.state, "WAITING");
+    assert.equal(buildReplayMarketViewModel(null, liveModel()).recentTrades.state, "NO TRADES");
+    assert.equal(buildReplayMarketViewModel(null, liveModel({
+        dataQuality: { issues: ["TRADES_INVALID"], tradesValid: false },
+    })).recentTrades.state, "UNAVAILABLE");
+});
+
+test("Replay trades remain authoritative when a LIVE model is also provided", () => {
+    const model = buildReplayMarketViewModel(load(), liveModel({
+        recentTrades: [{ tradeId: "live-only", timestamp: "2026-07-24T00:00:02Z",
+            price: 999, quantity: 1, side: "BUY" }],
+    }));
+    assert.equal(model.recentTrades.rows.some(({ tradeId }) => tradeId === "live-only"), false);
+    assert.ok(model.recentTrades.rows.length > 0);
+});
+
+test("LIVE wrong-context trades fail closed and never mislabel the active symbol", () => {
+    const normalized = normalizeLiveMarketModel({
+        context: { exchange: "KUCOIN", marketType: "FUTURES", exchangeSymbol: "XRPUSDTM" },
+        market: {
+            timestamp: "2026-07-24T00:00:00Z", price: 0.6,
+            orderBook: { asks: [[0.7, 2]], bids: [[0.5, 3]] },
+            tradeStreamReady: true,
+            recentTrades: [{
+                tradeId: "old-symbol", contextKey: "KUCOIN:FUTURES:BTCUSDT",
+                timestamp: "2026-07-24T00:00:01Z", price: 60000, quantity: 1, side: "BUY",
+            }],
+        },
+        runtime: { websocketConnected: true },
+    });
+    assert.deepEqual(normalized.recentTrades, []);
+    assert.ok(normalized.dataQuality.issues.includes("CONTEXT_MISMATCH"));
+    const model = buildReplayMarketViewModel(null, normalized);
+    assert.equal(model.source.exchangeSymbol, "XRPUSDTM");
+    assert.equal(model.recentTrades.rows.length, 0);
+    assert.equal(model.recentTrades.state, "UNAVAILABLE");
 });
 
 test("Replay Projection book stays authoritative while a LIVE book exists", () => {

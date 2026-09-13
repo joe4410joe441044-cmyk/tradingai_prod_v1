@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { buildAutoMarketSelectionModel, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
+import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
 
 const statusClass = (value) => {
     const status = String(value || "").toUpperCase();
@@ -24,9 +24,7 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
     const capital = model.capitalEligibility;
     const switching = model.switch;
     const autoRuntime = model.autoRuntime;
-    const primaryReasons = [...(autoRuntime.reasonCodes || []), ...(switching.reasonCodes || []), ...model.reasons]
-        .filter((value, index, values) => value && values.indexOf(value) === index)
-        .slice(0, 3);
+    const { historical: lastCycleReasons, current: currentReasons } = buildAutoMarketSelectionReasons(model);
 
     return (
         <section className={`panel-card ams-card${collapsible ? " ams-card--collapsible" : ""}`} aria-labelledby="ams-card-title" data-testid="auto-market-selection-card">
@@ -68,6 +66,8 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
                 <Field label="RUNTIME STATE" value={autoRuntime.runtimeState} className={statusClass(autoRuntime.runtimeState)} />
                 <Field label="CYCLE STATUS" value={autoRuntime.status} className={statusClass(autoRuntime.status)} />
                 <Field label="CYCLE ID" value={autoRuntime.cycleId} />
+                <Field label="LAST CYCLE STATUS" value={autoRuntime.lastCycleStatus} className={statusClass(autoRuntime.lastCycleStatus)} />
+                <Field label="LAST CYCLE ID" value={autoRuntime.lastCycleId} />
                 <Field label="LAST EVALUATED" value={autoRuntime.evaluatedAt} />
             </div>
 
@@ -119,9 +119,13 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
                         <span key={key} className={statusClass(value)}>{key.toUpperCase()}: {displayAmsValue(value)}</span>
                     ))}
                 </div>
-                <div className="ams-reasons" aria-label="Selection reasons">
-                    <span>REASONS</span>
-                    <strong>{primaryReasons.length ? primaryReasons.join(" · ") : "—"}</strong>
+                <div className="ams-reasons" aria-label="Last cycle reasons">
+                    <span>LAST CYCLE REASONS</span>
+                    <strong>{lastCycleReasons.length ? lastCycleReasons.join(" · ") : "—"}</strong>
+                </div>
+                <div className="ams-reasons" aria-label="Current reasons">
+                    <span>CURRENT REASONS</span>
+                    <strong>{currentReasons.length ? currentReasons.join(" · ") : "—"}</strong>
                 </div>
             </div>
             </div>}
