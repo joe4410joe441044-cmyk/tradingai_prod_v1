@@ -58,8 +58,9 @@ def _base_marker(*, marker_id: str, marker_type: str, timestamp: str,
                  sequence: int, price: float, quantity: float, side: str,
                  symbol: str, context_key: str, runtime_instance_id: str,
                  order_id: str | None, trade_id: str | None,
-                 reason: str | None) -> dict[str, Any]:
-    return {
+                 reason: str | None,
+                 entry_authority: str | None = None) -> dict[str, Any]:
+    marker = {
         "id": marker_id, "markerId": marker_id, "type": marker_type,
         "timestamp": timestamp, "sequence": sequence, "price": price,
         "quantity": quantity, "side": side, "reason": reason,
@@ -70,6 +71,9 @@ def _base_marker(*, marker_id: str, marker_type: str, timestamp: str,
         "dataQuality": "VALID", "symbol": symbol, "contextKey": context_key,
         "runtimeInstanceId": runtime_instance_id,
     }
+    if entry_authority is not None:
+        marker["entryAuthority"] = entry_authority
+    return marker
 
 
 def build_paper_execution_markers(engine: Any, *, active_symbol: Any,
@@ -104,6 +108,7 @@ def build_paper_execution_markers(engine: Any, *, active_symbol: Any,
                 price=price, quantity=quantity, side=side, symbol=symbol, context_key=context,
                 runtime_instance_id=runtime_id, order_id=_text(record.get("orderId")),
                 trade_id=None, reason=None,
+                entry_authority=_text(record.get("entryAuthority")),
             )
 
     history = getattr(engine, "trade_history", None)

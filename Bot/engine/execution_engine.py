@@ -105,6 +105,12 @@ class ExecutionEngine:
         self.execution_authority_guard = None
         self.last_execution_authority_guard = None
         self.last_money_management_guard = None
+        # Shared close boundary. One authoritative position may commit at most
+        # one close. Manual close, SL, TP, trailing, natural/time exit and
+        # emergency flatten all funnel through ``close_position`` so the
+        # reservation serializes them and prevents a double close commit.
+        self.close_authority_lock = threading.RLock()
+        self.close_reservation = None
         # One short-lived, exact-order MM admission lets the mainline evaluate
         # Money Management before Governance without evaluating the same entry
         # twice. It is consumed by the normal engine entry boundary.
@@ -1365,6 +1371,22 @@ class ExecutionEngine:
             result.get("reason") or "EXECUTION_AUTHORITY_DENIED"
         )
 
+    def _entry_preapproval_matches(self, order):
+        """Return True only for an unconsumed exact-order MM admission."""
+
+        with self.execution_entry_guard_lock:
+            preapproval = self.execution_entry_preapproval
+
+        if not isinstance(preapproval, dict):
+            return False
+
+        return bool(
+            preapproval.get("traceId") == order.get("traceId")
+            and preapproval.get("side") == order.get("side")
+            and preapproval.get("quantity") == str(order.get("qty"))
+            and preapproval.get("expiresAt", 0) >= time.time()
+        )
+
     @staticmethod
     def _entry_rejection(reason, guard_result=None):
 
@@ -2074,13 +2096,43 @@ class ExecutionEngine:
         # PREVIEW
         # =====================================
 
+        entry_authority = (
+            str(signal.get("entryAuthority") or "").strip().upper()
+            if isinstance(signal, dict)
+            else ""
+        )
+
         preview = self.get_result()["preview"]
 
         runtime_debug("ExecutionEngine preview=%s", preview)
 
-        qty = preview.get("qty", 0)
+        if entry_authority == "MANUAL":
+            # Manual entry binds the exact quantity approved by the Money
+            # Management admission.  It is never silently recalculated here.
+            # A changed context (invalidated preview) fails closed instead of
+            # submitting a different quantity than the one that was approved.
+            bound_quantity = (
+                signal.get("boundQuantity")
+                if isinstance(signal, dict)
+                else None
+            )
+            if (
+                isinstance(bound_quantity, bool)
+                or not isinstance(bound_quantity, (int, float))
+                or not math.isfinite(float(bound_quantity))
+                or float(bound_quantity) <= 0
+            ):
+                return self._entry_rejection(
+                    "INVALID_MANUAL_QUANTITY"
+                )
+            if preview.get("valid") is not True:
+                return self._entry_rejection("DENY_STALE_INTENT")
+            qty = bound_quantity
+            valid = True
+        else:
+            qty = preview.get("qty", 0)
 
-        valid = preview.get("valid", False)
+            valid = preview.get("valid", False)
 
         # =====================================
         # PREVIEW VALIDATION
@@ -2119,6 +2171,14 @@ class ExecutionEngine:
             "price": price,
             "traceId": signal.get("traceId"),
         }
+
+        # A manual entry may only commit the exact MM admission that was
+        # reserved for this request.  An expired or mismatched admission must
+        # never fall through to a fresh Money Management recalculation.
+        if entry_authority == "MANUAL" and not (
+            self._entry_preapproval_matches(order)
+        ):
+            return self._entry_rejection("DENY_STALE_INTENT")
 
         add_log(f"🟡 ORDER: {order}")
 
@@ -2339,6 +2399,8 @@ class ExecutionEngine:
                     "signalId": signal.get("id"),
                     "traceId": signal.get("traceId"),
                     "createdAt": filled_at,
+                    "entryAuthority": entry_authority or None,
+                    "requestId": signal.get("requestId"),
                     **source_identity,
                 })
                 self.paper_fills.append({
@@ -2353,6 +2415,8 @@ class ExecutionEngine:
                     "filledAt": filled_at,
                     "fillType": "ENTRY",
                     "tradeId": paper_order_id,
+                    "entryAuthority": entry_authority or None,
+                    "requestId": signal.get("requestId"),
                     **source_identity,
                 })
 
@@ -2407,6 +2471,10 @@ class ExecutionEngine:
                     "signal_id": signal.get("id"),
 
                     "trace_id": signal.get("traceId"),
+
+                    "entry_authority": entry_authority or None,
+
+                    "request_id": signal.get("requestId"),
 
                     "runtimeSymbolContext": signal.get("runtimeSymbolContext"),
 
@@ -2761,6 +2829,49 @@ class ExecutionEngine:
         return result
 
     def close_position(self, price, reason):
+        """Shared close boundary. Exactly one close may commit per position.
+
+        Manual close, SL, TP, trailing, natural/time exit and emergency flatten
+        all pass through here.  A concurrent or repeated close is rejected as
+        ``CLOSE_IN_PROGRESS`` / ``ALREADY_CLOSED`` instead of producing a second
+        fill, history record or PnL commit.
+        """
+
+        with self.close_authority_lock:
+
+            if self.close_reservation is not None:
+                return {
+                    "success": False,
+                    "status": "ALREADY_CLOSED",
+                    "reason": "CLOSE_IN_PROGRESS",
+                    "closed": False,
+                    "confirmed": False,
+                    "closedBy": self.close_reservation.get("reason"),
+                }
+
+            if not self.actual_position:
+                return None
+
+            position_before = copy.deepcopy(self.actual_position)
+
+            reservation = {
+                "positionId": (
+                    position_before.get("position_id")
+                    or position_before.get("order_id")
+                ),
+                "side": position_before.get("side"),
+                "reason": reason,
+                "startedAt": time.time(),
+            }
+            self.close_reservation = reservation
+
+            try:
+                return self._close_position_body(price, reason)
+            finally:
+                if self.close_reservation is reservation:
+                    self.close_reservation = None
+
+    def _close_position_body(self, price, reason):
 
         add_log(f"🚪 CLOSE ({reason})")
 

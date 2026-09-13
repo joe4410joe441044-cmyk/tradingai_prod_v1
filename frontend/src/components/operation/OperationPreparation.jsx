@@ -135,6 +135,9 @@ export default function OperationPreparation({
     controlPending = false,
     controlError = null,
     handleExecutionControlChange = () => {},
+    manualTradePending = false,
+    manualTradeError = null,
+    handleManualTrade = () => {},
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
@@ -383,6 +386,40 @@ export default function OperationPreparation({
             ? "— · MAXIMUM_LEVERAGE"
             : effectiveLeverage;
     const controlsDisabled = botRunning === true;
+
+    const positionSide = String(
+        position?.side || position?.positionSide || ""
+    ).trim().toUpperCase();
+    const manualPositionState = (
+        positionSide === "BUY" || positionSide === "LONG"
+            ? "LONG"
+            : positionSide === "SELL" || positionSide === "SHORT"
+                ? "SHORT"
+                : "FLAT"
+    );
+    const manualPendingState = Boolean(pendingOrder);
+    const manualControlActive = controlAuthority === "MANUAL";
+    const manualBusy = manualTradePending || controlPending;
+    const manualBuyLocked = (
+        !manualControlActive
+        || manualPendingState
+        || manualPositionState === "LONG"
+    );
+    const manualSellLocked = (
+        !manualControlActive
+        || manualPendingState
+        || manualPositionState === "SHORT"
+    );
+    const manualBuyLabel = (
+        manualPositionState === "SHORT"
+            ? "BUY / CLOSE SHORT"
+            : "BUY / LONG"
+    );
+    const manualSellLabel = (
+        manualPositionState === "LONG"
+            ? "SELL / CLOSE LONG"
+            : "SELL / SHORT"
+    );
 
     const mmAvailable = Boolean(mmDraft);
     const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
@@ -690,8 +727,28 @@ return (
                         <div className="operation-prep-derived-list">
                             <DerivedRow hideSource label="BOT TRADING" source="RUNTIME" status value={controlAuthority === "BOT" ? "ACTIVE" : "LOCKED"} />
                             <DerivedRow hideSource label="MANUAL TRADING" source="RUNTIME" status value={controlAuthority === "MANUAL" ? "ACTIVE" : "LOCKED"} />
-                            <DerivedRow hideSource label="MANUAL BUY / SELL" source="D2" status value="LOCKED_NOT_IMPLEMENTED" />
+                            <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
                         </div>
+                        <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">
+                            <button
+                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--buy"
+                                disabled={manualBuyLocked || manualBusy}
+                                onClick={() => handleManualTrade("BUY")}
+                                type="button"
+                            >
+                                {manualBuyLabel}
+                            </button>
+                            <button
+                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--sell"
+                                disabled={manualSellLocked || manualBusy}
+                                onClick={() => handleManualTrade("SELL")}
+                                type="button"
+                            >
+                                {manualSellLabel}
+                            </button>
+                        </div>
+                        {manualTradePending && <p className="operation-prep-note" role="status">REQUESTING…</p>}
+                        {manualTradeError && <p className="operation-prep-error" role="alert">{manualTradeError}</p>}
                         {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
                     </Section>
 

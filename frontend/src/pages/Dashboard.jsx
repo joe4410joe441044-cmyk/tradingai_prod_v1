@@ -280,6 +280,16 @@ useEffect(() => {
                                 ?? 0
                             }
 
+                            activeSymbol={
+                                botStatus?.activeSymbol
+                                || botStatus?.symbol
+                            }
+
+                            executionMode={
+                                botStatus?.executionMode
+                                || botStatus?.mode
+                            }
+
                             runtimeHealth={runtimeHealth}
 
                             onStatusRefresh={

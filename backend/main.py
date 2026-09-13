@@ -672,6 +672,7 @@ if _auth_configured:
         "/api/bot/live-order-entry/arm",
         "/api/bot/live-order-entry/disarm",
         "/api/bot/control",
+        "/api/bot/manual-trade",
         "/api/bot/set_mode",
         "/api/bot/paper-account/capital",
         "/api/money-management/configuration",

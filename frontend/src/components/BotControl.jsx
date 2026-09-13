@@ -339,6 +339,10 @@ export default function BotControl({
 
     controlRevision,
 
+    activeSymbol,
+
+    executionMode,
+
     runtimeHealth,
 
     onStatusRefresh,
@@ -380,6 +384,14 @@ export default function BotControl({
         setControlError,
     ] = useState(null);
     const [
+        manualTradePending,
+        setManualTradePending,
+    ] = useState(false);
+    const [
+        manualTradeError,
+        setManualTradeError,
+    ] = useState(null);
+    const [
         emergencyPending,
         setEmergencyPending,
     ] = useState(false);
@@ -410,6 +422,8 @@ export default function BotControl({
     const autoTradePendingRef =
         useRef(false);
     const controlPendingRef =
+        useRef(false);
+    const manualTradePendingRef =
         useRef(false);
     const armPendingRef = useRef(false);
     const emergencyPendingRef =
@@ -1345,6 +1359,94 @@ export default function BotControl({
         }
     };
 
+    const handleManualTrade = async (action) => {
+        const normalized = String(
+            action || ""
+        ).trim().toUpperCase();
+
+        if (
+            manualTradePendingRef.current
+            || (normalized !== "BUY" && normalized !== "SELL")
+            || controlAuthorityValue !== "MANUAL"
+        ) {
+            return;
+        }
+
+        manualTradePendingRef.current = true;
+        setManualTradePending(true);
+        setManualTradeError(null);
+
+        try {
+            const positionId = (
+                position?.position_id
+                || position?.order_id
+                || undefined
+            );
+
+            const response = await authenticatedControlRequest(
+                API.botManualTrade(),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        action: normalized,
+                        requestId: [
+                            "manual",
+                            Date.now(),
+                            Math.random().toString(36).slice(2, 10),
+                        ].join("-"),
+                        expectedControlRevision: (
+                            Number.isInteger(controlRevision)
+                                ? controlRevision
+                                : undefined
+                        ),
+                        expectedSymbol: activeSymbol || undefined,
+                        expectedMode: executionMode || undefined,
+                        expectedPositionId: positionId,
+                    }),
+                }
+            );
+
+            const data = await response.json().catch(() => null);
+
+            if (!response.ok || !data || data.success !== true) {
+                const code = (
+                    data?.detail?.reason
+                    || data?.reason
+                    || `HTTP_${response.status}`
+                );
+                const error = new Error(code);
+                error.code = code;
+                error.status = response.status;
+                error.data = data;
+                throw error;
+            }
+
+            // No optimistic position update: the authoritative status refresh
+            // below is the only source of the new position state.
+            setManualTradeError(null);
+        } catch (error) {
+            if (isAuthErrorStatus(error?.status)) {
+                setManualTradeError(authErrorMessage(error.status));
+            } else {
+                setManualTradeError(
+                    error?.message
+                    || "Manual trade failed."
+                );
+            }
+        } finally {
+            manualTradePendingRef.current = false;
+            setManualTradePending(false);
+
+            if (typeof onStatusRefresh === "function") {
+                onStatusRefresh();
+            }
+        }
+    };
+
+
     const openEmergencyConfirm = () => {
         if (
             emergencyPendingRef.current
@@ -1534,6 +1636,9 @@ export default function BotControl({
                 controlPending={controlPending}
                 controlError={controlError}
                 handleExecutionControlChange={handleExecutionControlChange}
+                manualTradePending={manualTradePending}
+                manualTradeError={manualTradeError}
+                handleManualTrade={handleManualTrade}
                 mmDraft={mmDraft}
                 mmConfiguration={effectiveMmConfiguration}
                 mmDraftInvalid={mmDraftInvalid}
