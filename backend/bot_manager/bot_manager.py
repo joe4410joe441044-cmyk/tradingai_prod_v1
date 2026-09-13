@@ -25,6 +25,9 @@ from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
     build_trading_decision_snapshot,
 )
+from backend.runtime.runtime_symbol_context import (
+    symbol_context_matches,
+)
 from backend import config as backend_config
 from backend.auto_market_selection.live_status_consistency import (
     derive_live_readiness,
@@ -97,6 +100,52 @@ from Bot.engine.execution_engine import (
 load_dotenv()
 
 # =========================
+# EXECUTION CONTROL AUTHORITY
+# =========================
+
+# The BotManager backend is the sole authority owner for execution control.
+# ``BOT`` preserves the existing automatic strategy entry behavior; ``MANUAL``
+# hands entry decision authority to a human while keeping the runtime running.
+CONTROL_AUTHORITY_BOT = "BOT"
+CONTROL_AUTHORITY_MANUAL = "MANUAL"
+CONTROL_AUTHORITY_VALUES = (
+    CONTROL_AUTHORITY_BOT,
+    CONTROL_AUTHORITY_MANUAL,
+)
+CONTROL_AUTHORITY_OWNER = "BOT_MANAGER_BACKEND"
+
+# =========================
+# MANUAL PAPER TRADING
+# =========================
+
+# Human BUY/SELL is a second entry authority for the existing trading cycle,
+# never a second trading system. The backend classifies the immutable
+# operation from the authoritative position and the human side.
+MANUAL_OPERATION_ENTRY_LONG = "ENTRY_LONG"
+MANUAL_OPERATION_ENTRY_SHORT = "ENTRY_SHORT"
+MANUAL_OPERATION_CLOSE_LONG = "CLOSE_LONG"
+MANUAL_OPERATION_CLOSE_SHORT = "CLOSE_SHORT"
+MANUAL_OPERATION_DENY = "DENY"
+MANUAL_OPERATION_DENY_SAME_SIDE = "DENY_SAME_SIDE"
+MANUAL_OPERATION_VALUES = (
+    MANUAL_OPERATION_ENTRY_LONG,
+    MANUAL_OPERATION_ENTRY_SHORT,
+    MANUAL_OPERATION_CLOSE_LONG,
+    MANUAL_OPERATION_CLOSE_SHORT,
+)
+MANUAL_ENTRY_OPERATIONS = (
+    MANUAL_OPERATION_ENTRY_LONG,
+    MANUAL_OPERATION_ENTRY_SHORT,
+)
+MANUAL_CLOSE_OPERATIONS = (
+    MANUAL_OPERATION_CLOSE_LONG,
+    MANUAL_OPERATION_CLOSE_SHORT,
+)
+MANUAL_CLOSE_REASON = "MANUAL_CLOSE"
+MANUAL_ENTRY_AUTHORITY = "MANUAL"
+MANUAL_TRADE_REQUEST_LIMIT = 256
+
+# =========================
 # BOT MANAGER
 # =========================
 
@@ -131,6 +180,42 @@ class BotManager:
         self.money_management_execution_guard_lock = threading.RLock()
         self.money_management_execution_guard = None
         self.money_management_runtime_baseline_session = None
+
+        # ============================================
+        # EXECUTION CONTROL AUTHORITY
+        # ============================================
+        #
+        # Single manager-owned authority boundary. It serializes the control
+        # switch, BOT automatic entry admission, and symbol switching so no
+        # engine-instance lock is the only guard. The backend BotManager is the
+        # authority owner; the frontend only requests changes.
+        self.execution_authority_lock = threading.RLock()
+        existing_control_authority = governance_state.get(
+            "control_authority"
+        )
+        self.control_authority = (
+            existing_control_authority
+            if existing_control_authority in CONTROL_AUTHORITY_VALUES
+            else CONTROL_AUTHORITY_BOT
+        )
+        try:
+            existing_control_revision = int(
+                governance_state.get("control_revision", 0) or 0
+            )
+        except (TypeError, ValueError):
+            existing_control_revision = 0
+        self.control_revision = max(0, existing_control_revision)
+        self.control_switch_in_progress = False
+        self.execution_admission_sequence = 0
+        self.execution_admission_reservation = None
+        # D3 Manual PAPER trading state. The manager owns the close
+        # reservation and the per-request idempotency ledger. The engine owns
+        # the cross-path close boundary that serializes manual and auto exits.
+        self.close_reservation = None
+        self.manual_trade_requests = {}
+        self.manual_trade_sequence = 0
+        governance_state["control_authority"] = self.control_authority
+        governance_state["control_revision"] = self.control_revision
 
         # ============================================
         # COOLDOWN
@@ -2115,6 +2200,1363 @@ class BotManager:
         governance_state["execution_enabled"] = enabled
         return {"success": True, "execution_enabled": enabled}
 
+    # ============================================
+    # EXECUTION CONTROL AUTHORITY
+    # ============================================
+
+    @staticmethod
+    def _normalize_control_authority(value):
+
+        normalized = str(value or "").strip().upper()
+
+        if normalized in CONTROL_AUTHORITY_VALUES:
+            return normalized
+
+        return None
+
+    def _mirror_control_authority(self):
+
+        governance_state["control_authority"] = self.control_authority
+        governance_state["control_revision"] = self.control_revision
+
+    def get_execution_control_state(self):
+
+        with self.execution_authority_lock:
+            return {
+                "owner": CONTROL_AUTHORITY_OWNER,
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+                "controlAuthorityValues": list(
+                    CONTROL_AUTHORITY_VALUES
+                ),
+                "controlSwitchInProgress": bool(
+                    self.control_switch_in_progress
+                ),
+                "entryAdmissionActive": isinstance(
+                    self.execution_admission_reservation,
+                    dict,
+                ),
+            }
+
+    def _execution_control_position_state(self):
+
+        engine = self.engine
+
+        if engine is not None:
+            actual_position = getattr(
+                engine, "actual_position", None
+            )
+            if actual_position is not None:
+                if not isinstance(actual_position, dict):
+                    return "UNKNOWN"
+                side = str(
+                    actual_position.get("side") or ""
+                ).strip().upper()
+                if side in ("BUY", "LONG"):
+                    return "LONG"
+                if side in ("SELL", "SHORT"):
+                    return "SHORT"
+                return "UNKNOWN"
+
+        state = getattr(self, "state", None)
+        position_state = (
+            str(
+                getattr(state, "position_state", "") or ""
+            ).strip().upper()
+            if state is not None
+            else ""
+        )
+
+        if position_state in ("LONG", "SHORT"):
+            return position_state
+        if position_state in ("OPEN", "UNKNOWN"):
+            return "UNKNOWN"
+        if position_state in ("", "FLAT", "NONE"):
+            return "FLAT"
+        return "UNKNOWN"
+
+    def _execution_control_pending_state(self):
+
+        try:
+            pending = self.get_authoritative_pending_order_state()
+        except Exception:
+            return {
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+            }
+
+        if not isinstance(pending, dict):
+            return {
+                "known": False,
+                "pending": None,
+                "safe": False,
+                "reason": "PENDING_ORDER_UNKNOWN",
+            }
+
+        return pending
+
+    def _execution_control_entry_admission_idle(self):
+
+        if isinstance(
+            self.execution_admission_reservation, dict
+        ):
+            return False
+
+        engine = self.engine
+
+        if engine is not None:
+            if getattr(
+                engine,
+                "execution_entry_admission_in_progress",
+                False,
+            ):
+                return False
+            if getattr(engine, "pending_order", False):
+                return False
+
+        return True
+
+    def _evaluate_control_switch_guard(self):
+
+        reasons = []
+
+        mode = str(self.config.get("mode", "")).strip().lower()
+        if mode not in ("paper", "live"):
+            reasons.append("RUNTIME_MODE_UNKNOWN")
+
+        if self.lifecycle_state not in (
+            "STOPPED",
+            "STARTING",
+            "RUNNING",
+            "STOPPING",
+        ):
+            reasons.append("RUNTIME_STATE_UNKNOWN")
+
+        if self.loop_state not in (
+            "STOPPED",
+            "STARTING",
+            "RUNNING",
+            "STOPPING",
+        ):
+            reasons.append("RUNTIME_LOOP_STATE_UNKNOWN")
+
+        if (
+            governance_state.get("emergency_state")
+            != EMERGENCY_READY
+            or governance_state.get("emergency_stop") is not False
+        ):
+            reasons.append("EMERGENCY_STOP_ACTIVE")
+
+        if (
+            self.symbol_switch_transaction_id is not None
+            or self._symbol_switch_entry_paused
+        ):
+            reasons.append("SYMBOL_SWITCH_IN_PROGRESS")
+
+        position_state = (
+            self._execution_control_position_state()
+        )
+        if position_state != "FLAT":
+            reasons.append(
+                f"POSITION_{position_state}_BLOCKS_CONTROL_SWITCH"
+            )
+
+        pending = self._execution_control_pending_state()
+        if pending.get("known") is not True:
+            reasons.append(
+                pending.get("reason")
+                or "PENDING_ORDER_UNKNOWN"
+            )
+        elif pending.get("pending") is True:
+            reasons.append("PENDING_ORDER_REMAINING")
+
+        if not self._execution_control_entry_admission_idle():
+            reasons.append("ENTRY_ADMISSION_IN_PROGRESS")
+
+        if getattr(self, "close_reservation", None) is not None:
+            reasons.append("CLOSE_RESERVATION_ACTIVE")
+
+        return reasons
+
+    def set_execution_control(
+        self, authority, expected_revision=None
+    ):
+        """Switch the backend-authoritative execution control.
+
+        ``BOT`` keeps automatic strategy entry eligible. ``MANUAL`` denies
+        automatic BOT new-entry while leaving the runtime, market feed,
+        monitoring, money management lifecycle, and auto-exit running.  A
+        successful switch increments the monotonic control revision; a denied
+        switch never increments it.
+        """
+
+        normalized = self._normalize_control_authority(authority)
+
+        if normalized is None:
+            return {
+                "success": False,
+                "changed": False,
+                "reason": "INVALID_CONTROL_AUTHORITY",
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+            }
+
+        with self.execution_authority_lock:
+            if expected_revision is not None:
+                try:
+                    expected = int(expected_revision)
+                except (TypeError, ValueError):
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": (
+                            "INVALID_EXPECTED_CONTROL_REVISION"
+                        ),
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                    }
+                if expected != self.control_revision:
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": "DENY_STALE_CONTROL_REVISION",
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                        "expectedControlRevision": expected,
+                    }
+
+            if normalized == self.control_authority:
+                return {
+                    "success": True,
+                    "changed": False,
+                    "reason": "NO_CONTROL_CHANGE",
+                    "controlAuthority": self.control_authority,
+                    "controlRevision": self.control_revision,
+                    "execution_enabled": governance_state.get(
+                        "execution_enabled", False
+                    ),
+                }
+
+            self.control_switch_in_progress = True
+
+            try:
+                reasons = self._evaluate_control_switch_guard()
+
+                if reasons:
+                    return {
+                        "success": False,
+                        "changed": False,
+                        "reason": reasons[0],
+                        "blockReasons": reasons,
+                        "controlAuthority": self.control_authority,
+                        "controlRevision": self.control_revision,
+                    }
+
+                self.control_authority = normalized
+                self.control_revision += 1
+
+                if normalized == CONTROL_AUTHORITY_MANUAL:
+                    # Moving entry authority to a human never stops the
+                    # runtime. Auto trade (BOT new entry) is forced off.
+                    governance_state["execution_enabled"] = False
+
+                self._mirror_control_authority()
+
+                return {
+                    "success": True,
+                    "changed": True,
+                    "reason": "CONTROL_AUTHORITY_SWITCHED",
+                    "controlAuthority": self.control_authority,
+                    "controlRevision": self.control_revision,
+                    "execution_enabled": governance_state.get(
+                        "execution_enabled", False
+                    ),
+                }
+            finally:
+                self.control_switch_in_progress = False
+
+    def _authorize_bot_execution_entry(self, signal):
+        """Manager-owned final authority revalidation for BOT entry."""
+
+        if (
+            isinstance(signal, dict)
+            and str(
+                signal.get("entryAuthority") or ""
+            ).strip().upper() == MANUAL_ENTRY_AUTHORITY
+        ):
+            return self._authorize_manual_execution_entry(signal)
+
+        with self.execution_authority_lock:
+            authority = self.control_authority
+            revision = self.control_revision
+
+            if authority != CONTROL_AUTHORITY_BOT:
+                return {
+                    "allowed": False,
+                    "reason": "BOT_ENTRY_LOCKED_MANUAL_CONTROL",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reservation = self.execution_admission_reservation
+
+            if (
+                not isinstance(reservation, dict)
+                or reservation.get("source") != "BOT"
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EXECUTION_ADMISSION_NOT_RESERVED",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if reservation.get("controlRevision") != revision:
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_CONTROL_REVISION",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if (
+                governance_state.get("emergency_state")
+                != EMERGENCY_READY
+                or governance_state.get("emergency_stop") is not False
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EMERGENCY_STOP_ACTIVE",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            signal_context = (
+                signal.get("runtimeSymbolContext")
+                if isinstance(signal, dict)
+                else None
+            )
+            engine_symbol = getattr(self.engine, "symbol", None)
+
+            if not symbol_context_matches(
+                signal_context, engine_symbol
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reserved_symbol = str(
+                reservation.get("symbol") or ""
+            ).strip().upper()
+            if reserved_symbol and reserved_symbol != str(
+                engine_symbol or ""
+            ).strip().upper():
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            return {
+                "allowed": True,
+                "reason": "BOT_ENTRY_AUTHORIZED",
+                "controlAuthority": authority,
+                "controlRevision": revision,
+            }
+
+    def _authorize_manual_execution_entry(self, signal):
+        """Final authority revalidation for a human MANUAL entry."""
+
+        with self.execution_authority_lock:
+            authority = self.control_authority
+            revision = self.control_revision
+
+            if authority != CONTROL_AUTHORITY_MANUAL:
+                return {
+                    "allowed": False,
+                    "reason": "MANUAL_ENTRY_REQUIRES_MANUAL_CONTROL",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reservation = self.execution_admission_reservation
+
+            if (
+                not isinstance(reservation, dict)
+                or reservation.get("source") != "MANUAL"
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EXECUTION_ADMISSION_NOT_RESERVED",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if reservation.get("controlRevision") != revision:
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_CONTROL_REVISION",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if reservation.get("requestId") != (
+                signal.get("requestId")
+                if isinstance(signal, dict)
+                else None
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if (
+                governance_state.get("emergency_state")
+                != EMERGENCY_READY
+                or governance_state.get("emergency_stop") is not False
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "EMERGENCY_STOP_ACTIVE",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            engine_symbol = getattr(self.engine, "symbol", None)
+
+            if not symbol_context_matches(
+                signal.get("runtimeSymbolContext")
+                if isinstance(signal, dict)
+                else None,
+                engine_symbol,
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            reserved_symbol = str(
+                reservation.get("symbol") or ""
+            ).strip().upper()
+            if reserved_symbol and reserved_symbol != str(
+                engine_symbol or ""
+            ).strip().upper():
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            if self._execution_control_position_state() != "FLAT":
+                return {
+                    "allowed": False,
+                    "reason": "DENY_STALE_INTENT",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
+            return {
+                "allowed": True,
+                "reason": "MANUAL_ENTRY_AUTHORIZED",
+                "controlAuthority": authority,
+                "controlRevision": revision,
+            }
+
+    def _dispatch_execution_authority_guard(self, signal):
+
+        try:
+            return self._authorize_bot_execution_entry(signal)
+        except Exception:
+            logger.warning("Execution authority guard failed")
+            return {
+                "allowed": False,
+                "reason": "EXECUTION_AUTHORITY_UNKNOWN",
+            }
+
+    def _begin_execution_admission(self, source):
+        """Reserve one shared entry admission. Caller holds the lock."""
+
+        self.execution_admission_sequence += 1
+        reservation = {
+            "source": source,
+            "reservationId": self.execution_admission_sequence,
+            "controlAuthority": self.control_authority,
+            "controlRevision": self.control_revision,
+            "symbol": self.activeSymbol,
+            "runtimeId": self.active_runtime_id,
+            "startedAt": time.time(),
+        }
+        self.execution_admission_reservation = reservation
+        return reservation
+
+    def _end_execution_admission(self, reservation):
+
+        if self.execution_admission_reservation is reservation:
+            self.execution_admission_reservation = None
+
+    def _process_runtime_with_bot_admission(self, *args, **kwargs):
+        """Serialize BOT automatic entry through the shared boundary."""
+
+        with self.execution_authority_lock:
+            reservation = self._begin_execution_admission("BOT")
+            try:
+                return runtime_registry.trading_runtime.process_runtime(
+                    *args, **kwargs
+                )
+            finally:
+                self._end_execution_admission(reservation)
+
+    # ============================================
+    # MANUAL PAPER TRADING
+    # ============================================
+    #
+    # Human BUY/SELL is a second entry authority for the existing trading
+    # cycle. The backend owns the immutable operation classification, the
+    # common entry reservation, the approved-quantity binding and the shared
+    # close boundary. The frontend never sends quantity or operation type.
+
+    @staticmethod
+    def _manual_trade_deny(
+        reason,
+        *,
+        operation=None,
+        request_id=None,
+        **extra,
+    ):
+
+        result = {
+            "success": False,
+            "denied": True,
+            "reason": str(reason),
+            "operation": operation,
+            "requestId": request_id,
+        }
+        result.update(extra)
+        return result
+
+    @staticmethod
+    def _classify_manual_operation(position_state, action):
+
+        action = str(action or "").strip().upper()
+        state = str(position_state or "").strip().upper()
+
+        if state == "FLAT":
+            if action == "BUY":
+                return MANUAL_OPERATION_ENTRY_LONG
+            if action == "SELL":
+                return MANUAL_OPERATION_ENTRY_SHORT
+            return MANUAL_OPERATION_DENY
+
+        if state == "LONG":
+            if action == "BUY":
+                return MANUAL_OPERATION_DENY_SAME_SIDE
+            if action == "SELL":
+                return MANUAL_OPERATION_CLOSE_LONG
+            return MANUAL_OPERATION_DENY
+
+        if state == "SHORT":
+            if action == "BUY":
+                return MANUAL_OPERATION_CLOSE_SHORT
+            if action == "SELL":
+                return MANUAL_OPERATION_DENY_SAME_SIDE
+            return MANUAL_OPERATION_DENY
+
+        return MANUAL_OPERATION_DENY
+
+    def _manual_trade_mode(self):
+
+        engine_mode = str(
+            getattr(self.engine, "mode", "") or ""
+        ).strip().lower()
+        config_mode = str(
+            self.config.get("mode", "") if isinstance(
+                self.config, dict
+            ) else ""
+        ).strip().lower()
+        modes = {mode for mode in (engine_mode, config_mode) if mode}
+        if modes == {"paper"}:
+            return "paper"
+        if modes:
+            return sorted(modes)[0]
+        return ""
+
+    def _manual_runtime_symbol_context(self, active_symbol):
+
+        from backend.runtime.runtime_symbol_context import (
+            build_runtime_symbol_context,
+        )
+
+        context = build_runtime_symbol_context(
+            active_symbol,
+            self.active_runtime_id,
+            exchange=self.exchange_name,
+            market_type=self.market_type,
+            exchange_symbol=(
+                self.orderbook_symbol or active_symbol
+            ),
+            runtime_instance_id=self.active_runtime_id,
+        )
+        return context.to_dict() if context is not None else None
+
+    def _manual_entry_quantity_validation(self, engine, approved):
+
+        try:
+            quantity = float(approved)
+        except (TypeError, ValueError):
+            return "INVALID_MANUAL_QUANTITY"
+
+        if not math.isfinite(quantity) or quantity <= 0:
+            return "INVALID_MANUAL_QUANTITY"
+
+        exchange = getattr(engine, "exchange", None)
+        if exchange is None or not hasattr(
+            exchange, "get_symbol_rules"
+        ):
+            return True
+
+        try:
+            rules = exchange.get_symbol_rules(
+                getattr(engine, "symbol", None)
+            ) or {}
+        except Exception:
+            return "CONTRACT_RULES_UNAVAILABLE"
+
+        try:
+            multiplier = float(rules.get("multiplier") or 0)
+        except (TypeError, ValueError):
+            return "CONTRACT_RULES_INVALID"
+        if not math.isfinite(multiplier) or multiplier <= 0:
+            return "CONTRACT_RULES_INVALID"
+
+        min_size = rules.get("min_size")
+        if min_size is not None:
+            try:
+                minimum_contracts = float(min_size)
+            except (TypeError, ValueError):
+                return "CONTRACT_RULES_INVALID"
+            contracts = quantity / multiplier
+            tolerance = max(1e-9, minimum_contracts * 1e-9)
+            if contracts + tolerance < minimum_contracts:
+                return "INVALID_MANUAL_QUANTITY"
+
+        return True
+
+    def _reconcile_manual_close_quantity(self, engine, position):
+
+        if str(getattr(engine, "mode", "")).strip().lower() != "paper":
+            return "MANUAL_CLOSE_PAPER_ONLY"
+
+        portfolio = getattr(engine, "portfolio", None)
+        symbol = getattr(engine, "symbol", None)
+        if portfolio is None or not symbol:
+            return "PORTFOLIO_UNAVAILABLE"
+
+        try:
+            positions = (
+                portfolio.get_positions()
+                if hasattr(portfolio, "get_positions")
+                else {}
+            )
+        except Exception:
+            return "PORTFOLIO_UNAVAILABLE"
+        portfolio_position = (
+            positions.get(symbol)
+            if isinstance(positions, dict)
+            else None
+        )
+        if not isinstance(portfolio_position, dict):
+            return "PORTFOLIO_POSITION_MISSING"
+
+        try:
+            coin_qty = float(position.get("coin_qty"))
+        except (TypeError, ValueError):
+            coin_qty = 0.0
+        try:
+            contracts = float(position.get("qty"))
+        except (TypeError, ValueError):
+            contracts = 0.0
+        try:
+            multiplier = float(position.get("multiplier"))
+        except (TypeError, ValueError):
+            multiplier = 0.0
+
+        engine_coin_qty = (
+            coin_qty if coin_qty > 0 else contracts * multiplier
+        )
+        if (
+            not math.isfinite(engine_coin_qty)
+            or engine_coin_qty <= 0
+        ):
+            return "POSITION_QUANTITY_INVALID"
+
+        try:
+            portfolio_qty = float(portfolio_position.get("size"))
+        except (TypeError, ValueError):
+            return "PORTFOLIO_QUANTITY_INVALID"
+
+        tolerance = max(1e-9, abs(engine_coin_qty) * 1e-6)
+        if abs(engine_coin_qty - portfolio_qty) > tolerance:
+            return "POSITION_PORTFOLIO_QUANTITY_MISMATCH"
+
+        engine_side = str(position.get("side") or "").strip().upper()
+        portfolio_side = str(
+            portfolio_position.get("side") or ""
+        ).strip().upper()
+        if (
+            engine_side
+            and portfolio_side
+            and engine_side != portfolio_side
+        ):
+            return "POSITION_PORTFOLIO_SIDE_MISMATCH"
+
+        return True
+
+    def _finalize_manual_close_money_management(self, before, event_key):
+
+        after = self._money_management_runtime_event_signature()
+        event_type = self._classify_money_management_runtime_event(
+            before, after
+        )
+        if event_type is None:
+            event_type = "TRADE_CLOSE"
+        try:
+            self._observe_money_management_runtime_metrics(
+                before, event_type, event_key
+            )
+        except Exception:
+            logger.warning(
+                "Manual close Money Management observation failed"
+            )
+        self._notify_money_management_runtime_event(
+            event_type, event_key
+        )
+
+    def _manual_entry_authority_snapshot(
+        self, engine, active_symbol, preflight
+    ):
+
+        config = engine.config if isinstance(
+            getattr(engine, "config", None), dict
+        ) else {}
+
+        return {
+            "mode": "paper",
+            "symbol": active_symbol,
+            "runtimeInstanceId": self.runtime_instance_id,
+            "runtimeId": self.active_runtime_id,
+            "feedRuntimeId": self.active_runtime_id,
+            "controlAuthority": self.control_authority,
+            "controlRevision": self.control_revision,
+            "price": engine.get_price(),
+            "priceTimestamp": time.time(),
+            "settingsRevision": {
+                key: config.get(key)
+                for key in (
+                    "risk_percent",
+                    "position_size",
+                    "leverage",
+                    "sl_percent",
+                    "tp_percent",
+                    "max_drawdown_pct",
+                )
+            },
+            "capitalContext": {
+                "balance": getattr(engine, "balance", None),
+                "equity": getattr(engine, "initial_equity", None),
+            },
+            "mmRevision": preflight.get("revision"),
+            "mmSequence": preflight.get("sequence"),
+            "emergencyState": governance_state.get("emergency_state"),
+            "emergencyStop": governance_state.get("emergency_stop"),
+            "positionState": "FLAT",
+            "pendingState": "NONE",
+        }
+
+    def _manual_entry_locked(
+        self, request_id, action, operation, active_symbol
+    ):
+
+        engine = self.engine
+        reservation = self._begin_execution_admission("MANUAL")
+        reservation["requestId"] = request_id
+        reservation["operation"] = operation
+        reservation["entryAuthority"] = MANUAL_ENTRY_AUTHORITY
+        trace_id = f"manual-{request_id}"
+        reservation["traceId"] = trace_id
+
+        try:
+            preflight = engine.preflight_execution_entry(
+                action, trace_id
+            )
+            if (
+                not isinstance(preflight, dict)
+                or preflight.get("allowed") is not True
+            ):
+                reason = (
+                    preflight.get("reason")
+                    if isinstance(preflight, dict)
+                    else None
+                ) or "MANUAL_ENTRY_PREFLIGHT_BLOCKED"
+                return self._manual_trade_deny(
+                    reason,
+                    operation=operation,
+                    request_id=request_id,
+                )
+
+            approved = preflight.get("approvedQuantity")
+            validation = self._manual_entry_quantity_validation(
+                engine, approved
+            )
+            if validation is not True:
+                engine.clear_execution_entry_preflight(trace_id)
+                return self._manual_trade_deny(
+                    validation,
+                    operation=operation,
+                    request_id=request_id,
+                )
+
+            reservation["snapshot"] = (
+                self._manual_entry_authority_snapshot(
+                    engine, active_symbol, preflight
+                )
+            )
+
+            signal = {
+                "id": f"manual-{request_id}",
+                "side": action,
+                "traceId": trace_id,
+                "entryAuthority": MANUAL_ENTRY_AUTHORITY,
+                "boundQuantity": approved,
+                "requestId": request_id,
+                "runtimeSymbolContext": (
+                    self._manual_runtime_symbol_context(
+                        active_symbol
+                    )
+                ),
+            }
+
+            try:
+                entry_result = engine.try_entry(signal)
+            finally:
+                engine.clear_execution_entry_preflight(trace_id)
+
+            position = getattr(engine, "actual_position", None)
+            if not (
+                isinstance(position, dict)
+                and str(
+                    position.get("entry_authority") or ""
+                ).strip().upper() == MANUAL_ENTRY_AUTHORITY
+                and position.get("request_id") == request_id
+            ):
+                reason = (
+                    entry_result.get("reason")
+                    if isinstance(entry_result, dict)
+                    else None
+                ) or "MANUAL_ENTRY_NOT_FILLED"
+                return self._manual_trade_deny(
+                    reason,
+                    operation=operation,
+                    request_id=request_id,
+                )
+
+            return {
+                "success": True,
+                "denied": False,
+                "reason": "MANUAL_ENTRY_FILLED",
+                "operation": operation,
+                "requestId": request_id,
+                "entryAuthority": MANUAL_ENTRY_AUTHORITY,
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+                "symbol": active_symbol,
+                "mode": "paper",
+                "side": action,
+                "approvedQuantity": approved,
+                "quantity": approved,
+                "quantityUnit": "coin",
+                "positionId": (
+                    position.get("position_id")
+                    or position.get("order_id")
+                ),
+                "position": deepcopy(position),
+                "authoritySnapshot": reservation.get("snapshot"),
+            }
+        finally:
+            self._end_execution_admission(reservation)
+
+    def _manual_close_locked(
+        self, request_id, operation, expected_position_id
+    ):
+
+        engine = self.engine
+        position = getattr(engine, "actual_position", None)
+        if not isinstance(position, dict):
+            return self._manual_trade_deny(
+                "ALREADY_CLOSED",
+                operation=operation,
+                request_id=request_id,
+            )
+
+        position_id = (
+            position.get("position_id")
+            or position.get("order_id")
+        )
+        if (
+            expected_position_id is not None
+            and str(expected_position_id) != str(position_id)
+        ):
+            return self._manual_trade_deny(
+                "DENY_STALE_INTENT",
+                operation=operation,
+                request_id=request_id,
+            )
+
+        reconciliation = self._reconcile_manual_close_quantity(
+            engine, position
+        )
+        if reconciliation is not True:
+            return self._manual_trade_deny(
+                reconciliation,
+                operation=operation,
+                request_id=request_id,
+            )
+
+        if self.close_reservation is not None:
+            return self._manual_trade_deny(
+                "DENY_CLOSE_IN_PROGRESS",
+                operation=operation,
+                request_id=request_id,
+            )
+
+        price = engine.get_price()
+        if not price or price <= 0:
+            return self._manual_trade_deny(
+                "INVALID_CLOSE_PRICE",
+                operation=operation,
+                request_id=request_id,
+            )
+
+        self.close_reservation = {
+            "positionId": position_id,
+            "source": "MANUAL",
+            "requestId": request_id,
+            "operation": operation,
+            "startedAt": time.time(),
+        }
+
+        before = self._money_management_runtime_event_signature()
+        before_history = (
+            len(engine.trade_history)
+            if isinstance(getattr(engine, "trade_history", None), list)
+            else 0
+        )
+
+        try:
+            close_result = engine.close_position(
+                price, MANUAL_CLOSE_REASON
+            )
+        finally:
+            self.close_reservation = None
+
+        remaining = getattr(engine, "actual_position", None)
+        if remaining is not None:
+            reason = "MANUAL_CLOSE_UNCONFIRMED"
+            if (
+                isinstance(close_result, dict)
+                and close_result.get("reason")
+                == "CLOSE_IN_PROGRESS"
+            ):
+                reason = "DENY_CLOSE_IN_PROGRESS"
+            return self._manual_trade_deny(
+                reason,
+                operation=operation,
+                request_id=request_id,
+            )
+
+        history_list = getattr(engine, "trade_history", None)
+        committed = bool(
+            isinstance(history_list, list)
+            and len(history_list) > before_history
+            and isinstance(history_list[-1], dict)
+            and history_list[-1].get("tradeId") == position_id
+            and history_list[-1].get("reason") == MANUAL_CLOSE_REASON
+        )
+        if not committed:
+            # Another close path (auto exit / emergency) committed first.
+            return self._manual_trade_deny(
+                "ALREADY_CLOSED",
+                operation=operation,
+                request_id=request_id,
+            )
+
+        event_key = (
+            f"{self.runtime_instance_id}:"
+            f"{self.session_id}:MANUAL_CLOSE:{request_id}"
+        )
+        self._finalize_manual_close_money_management(
+            before, event_key
+        )
+
+        history = (
+            engine.trade_history[-1]
+            if getattr(engine, "trade_history", None)
+            else {}
+        )
+
+        return {
+            "success": True,
+            "denied": False,
+            "reason": "MANUAL_CLOSE_FILLED",
+            "operation": operation,
+            "requestId": request_id,
+            "controlAuthority": self.control_authority,
+            "controlRevision": self.control_revision,
+            "symbol": self.activeSymbol,
+            "mode": "paper",
+            "closeReason": MANUAL_CLOSE_REASON,
+            "positionId": position_id,
+            "quantity": position.get("coin_qty"),
+            "quantityUnit": "coin",
+            "exitPrice": price,
+            "closed": True,
+            "tradeId": (
+                history.get("tradeId")
+                if isinstance(history, dict)
+                else None
+            ),
+        }
+
+    def execute_manual_trade(self, request):
+        """Execute one human-intent PAPER BUY/SELL.
+
+        The backend owns the operation classification, entry admission,
+        approved-quantity binding and close serialization. Denials are
+        returned as structured results; the caller never receives a mutation
+        from a denied request.
+        """
+
+        if not isinstance(request, dict):
+            return self._manual_trade_deny("INVALID_MANUAL_REQUEST")
+
+        request_id = str(request.get("requestId") or "").strip()
+        action = str(request.get("action") or "").strip().upper()
+
+        if not request_id or len(request_id) > 128:
+            return self._manual_trade_deny("INVALID_REQUEST_ID")
+        if action not in ("BUY", "SELL"):
+            return self._manual_trade_deny(
+                "INVALID_MANUAL_ACTION", request_id=request_id
+            )
+
+        expected_symbol = request.get("expectedSymbol")
+        expected_mode = request.get("expectedMode")
+        expected_revision = request.get("expectedControlRevision")
+        expected_position_id = request.get("expectedPositionId")
+
+        signature = (
+            action,
+            (
+                str(expected_symbol).strip().upper()
+                if expected_symbol is not None
+                else None
+            ),
+            (
+                str(expected_mode).strip().lower()
+                if expected_mode is not None
+                else None
+            ),
+            (
+                str(expected_position_id)
+                if expected_position_id is not None
+                else None
+            ),
+        )
+
+        with self.execution_authority_lock:
+            prior = self.manual_trade_requests.get(request_id)
+            if isinstance(prior, dict):
+                if prior.get("signature") == signature:
+                    return dict(prior["result"])
+                return self._manual_trade_deny(
+                    "REQUEST_ID_REUSED",
+                    request_id=request_id,
+                )
+
+            mode = self._manual_trade_mode()
+            if mode != "paper":
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "MANUAL_TRADE_PAPER_ONLY",
+                        request_id=request_id,
+                        mode=mode,
+                    ),
+                )
+
+            if (
+                expected_mode is not None
+                and str(expected_mode).strip().lower() != mode
+            ):
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "DENY_STALE_INTENT",
+                        request_id=request_id,
+                        mode=mode,
+                    ),
+                )
+
+            if self.control_authority != CONTROL_AUTHORITY_MANUAL:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "MANUAL_CONTROL_REQUIRED",
+                        request_id=request_id,
+                    ),
+                )
+
+            if expected_revision is not None:
+                try:
+                    expected = int(expected_revision)
+                except (TypeError, ValueError):
+                    return self._record_manual_trade(
+                        request_id,
+                        signature,
+                        self._manual_trade_deny(
+                            "INVALID_EXPECTED_CONTROL_REVISION",
+                            request_id=request_id,
+                        ),
+                    )
+                if expected != self.control_revision:
+                    return self._record_manual_trade(
+                        request_id,
+                        signature,
+                        self._manual_trade_deny(
+                            "DENY_STALE_CONTROL_REVISION",
+                            request_id=request_id,
+                        ),
+                    )
+
+            engine = self.engine
+            if engine is None:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "ENGINE_UNAVAILABLE",
+                        request_id=request_id,
+                    ),
+                )
+
+            if self.lifecycle_state != "RUNNING":
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "RUNTIME_NOT_READY",
+                        request_id=request_id,
+                    ),
+                )
+
+            active_symbol = self.activeSymbol
+            if not active_symbol:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "CANONICAL_SYMBOL_UNAVAILABLE",
+                        request_id=request_id,
+                    ),
+                )
+
+            if (
+                expected_symbol is not None
+                and str(expected_symbol).strip().upper()
+                != active_symbol
+            ):
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "DENY_STALE_INTENT",
+                        request_id=request_id,
+                        symbol=active_symbol,
+                    ),
+                )
+
+            if (
+                str(
+                    getattr(engine, "symbol", "") or ""
+                ).strip().upper() != active_symbol
+            ):
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "DENY_STALE_INTENT",
+                        request_id=request_id,
+                        symbol=active_symbol,
+                    ),
+                )
+
+            if (
+                governance_state.get("emergency_state")
+                != EMERGENCY_READY
+                or governance_state.get("emergency_stop") is not False
+            ):
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "EMERGENCY_STOP_ACTIVE",
+                        request_id=request_id,
+                    ),
+                )
+
+            pending = self._execution_control_pending_state()
+            if pending.get("known") is not True:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        pending.get("reason")
+                        or "PENDING_ORDER_UNKNOWN",
+                        request_id=request_id,
+                    ),
+                )
+            if pending.get("pending") is True:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "PENDING_ORDER_REMAINING",
+                        request_id=request_id,
+                    ),
+                )
+
+            position_state = self._execution_control_position_state()
+            operation = self._classify_manual_operation(
+                position_state, action
+            )
+
+            if operation == MANUAL_OPERATION_DENY_SAME_SIDE:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "MANUAL_SAME_SIDE_DENIED",
+                        operation=operation,
+                        request_id=request_id,
+                        positionState=position_state,
+                    ),
+                )
+
+            if operation == MANUAL_OPERATION_DENY:
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "MANUAL_POSITION_UNKNOWN",
+                        operation=operation,
+                        request_id=request_id,
+                        positionState=position_state,
+                    ),
+                )
+
+            if operation in MANUAL_ENTRY_OPERATIONS:
+                result = self._manual_entry_locked(
+                    request_id, action, operation, active_symbol
+                )
+            elif operation in MANUAL_CLOSE_OPERATIONS:
+                result = self._manual_close_locked(
+                    request_id, operation, expected_position_id
+                )
+            else:
+                result = self._manual_trade_deny(
+                    "MANUAL_OPERATION_UNKNOWN",
+                    request_id=request_id,
+                )
+
+            return self._record_manual_trade(
+                request_id, signature, result
+            )
+
+    def _record_manual_trade(self, request_id, signature, result):
+
+        if len(self.manual_trade_requests) >= MANUAL_TRADE_REQUEST_LIMIT:
+            oldest = next(iter(self.manual_trade_requests))
+            self.manual_trade_requests.pop(oldest, None)
+        self.manual_trade_requests[request_id] = {
+            "signature": signature,
+            "result": dict(result),
+        }
+        return result
+
+    def get_manual_trade_preparation(self):
+        """Read-only context-bound manual candidate. No MM preflight."""
+
+        with self.execution_authority_lock:
+            engine = self.engine
+            mode = self._manual_trade_mode()
+            active_symbol = self.activeSymbol
+            position_state = self._execution_control_position_state()
+            pending = self._execution_control_pending_state()
+
+            result = {
+                "symbol": active_symbol,
+                "mode": mode,
+                "controlAuthority": self.control_authority,
+                "controlRevision": self.control_revision,
+                "positionState": position_state,
+                "pending": pending.get("pending"),
+                "candidate": None,
+                "valid": False,
+                "reason": None,
+            }
+
+            if engine is None:
+                result["reason"] = "ENGINE_UNAVAILABLE"
+                return result
+
+            try:
+                preview = engine.get_result().get("preview", {})
+            except Exception:
+                preview = {}
+
+            if preview.get("valid") is True and preview.get("qty"):
+                result["candidate"] = {
+                    "state": "CANDIDATE",
+                    "quantity": preview.get("qty"),
+                    "quantityUnit": "coin",
+                    "notional": preview.get("position_size"),
+                    "requiredMargin": preview.get("required_margin"),
+                    "sizingMode": preview.get("sizing_mode"),
+                    "price": engine.get_price(),
+                    "priceTimestamp": time.time(),
+                    "valid": True,
+                }
+                result["valid"] = True
+            else:
+                result["reason"] = (
+                    preview.get("reason") or "ENTRY_PREVIEW_INVALID"
+                )
+
+            return result
+
     def set_live_order_entry_authority(self, armed):
         """Operator-gated ARM/DISARM of LIVE real-order entry authority.
 
@@ -3706,6 +5148,9 @@ class BotManager:
             self.engine.set_execution_entry_guard(
                 self._dispatch_money_management_execution_entry_guard
             )
+            self.engine.set_execution_authority_guard(
+                self._dispatch_execution_authority_guard
+            )
 
             if runtime_registry.trading_runtime:
 
@@ -4031,7 +5476,7 @@ class BotManager:
                                 and not self._symbol_switch_entry_paused):
 
                             self.latest_runtime_result = (
-                                runtime_registry.trading_runtime.process_runtime(
+                                self._process_runtime_with_bot_admission(
                                     micro_state,
                                     active_symbol=self.activeSymbol,
                                     runtime_id=runtime_id,
@@ -4745,6 +6190,28 @@ class BotManager:
         return True
 
     def _dispatch_money_management_execution_entry_guard(self, intent):
+
+        # Shared authority boundary (pre-MM). The manager-owned dispatcher is
+        # invoked at the start of BOT entry admission, before the real MM gate
+        # evaluates. While a human holds execution control, automatic BOT new
+        # entry fails closed here without consuming MM admission state. A
+        # MANUAL reservation is the only non-BOT caller allowed through, so a
+        # human entry reuses the exact same Money Management gate.
+        with self.execution_authority_lock:
+            authority = self.control_authority
+            reservation = self.execution_admission_reservation
+
+        manual_reserved = bool(
+            authority == CONTROL_AUTHORITY_MANUAL
+            and isinstance(reservation, dict)
+            and reservation.get("source") == "MANUAL"
+        )
+
+        if authority != CONTROL_AUTHORITY_BOT and not manual_reserved:
+            logger.warning(
+                "BOT entry blocked by MANUAL control authority"
+            )
+            return None
 
         with self.money_management_execution_guard_lock:
             callback = self.money_management_execution_guard
@@ -10961,6 +12428,12 @@ class BotManager:
             "botState": self.lifecycle_state,
 
             "autoTradeEnabled": auto_trade_enabled,
+
+            "controlAuthority": self.control_authority,
+
+            "controlRevision": self.control_revision,
+
+            "executionControl": self.get_execution_control_state(),
 
             "emergencyStop": live_readiness.get(
                 "emergencyStop",

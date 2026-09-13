@@ -335,6 +335,14 @@ export default function BotControl({
 
     position,
 
+    controlAuthority,
+
+    controlRevision,
+
+    activeSymbol,
+
+    executionMode,
+
     runtimeHealth,
 
     onStatusRefresh,
@@ -368,6 +376,22 @@ export default function BotControl({
         setAutoTradeError,
     ] = useState(null);
     const [
+        controlPending,
+        setControlPending,
+    ] = useState(false);
+    const [
+        controlError,
+        setControlError,
+    ] = useState(null);
+    const [
+        manualTradePending,
+        setManualTradePending,
+    ] = useState(false);
+    const [
+        manualTradeError,
+        setManualTradeError,
+    ] = useState(null);
+    const [
         emergencyPending,
         setEmergencyPending,
     ] = useState(false);
@@ -396,6 +420,10 @@ export default function BotControl({
         useRef(false);
     const botPendingRef = useRef(false);
     const autoTradePendingRef =
+        useRef(false);
+    const controlPendingRef =
+        useRef(false);
+    const manualTradePendingRef =
         useRef(false);
     const armPendingRef = useRef(false);
     const emergencyPendingRef =
@@ -1242,6 +1270,183 @@ export default function BotControl({
         }
     };
 
+    const controlAuthorityValue = String(
+        controlAuthority || "BOT"
+    ).trim().toUpperCase();
+
+    const handleExecutionControlChange = async (
+        nextAuthority
+    ) => {
+        const normalized = String(
+            nextAuthority || ""
+        ).trim().toUpperCase();
+
+        if (
+            controlPendingRef.current
+            || normalized === controlAuthorityValue
+            || (normalized !== "BOT" && normalized !== "MANUAL")
+        ) {
+            return;
+        }
+
+        controlPendingRef.current = true;
+        setControlPending(true);
+        setControlError(null);
+
+        try {
+            const response = await authenticatedControlRequest(
+                API.botControl(),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        authority: normalized,
+                        expectedRevision: Number.isInteger(controlRevision)
+                            ? controlRevision
+                            : undefined,
+                    }),
+                }
+            );
+
+            const data = await response.json().catch(() => null);
+
+            if (!response.ok || !data || data.success !== true) {
+                const code = (
+                    data?.detail?.reason
+                    || data?.reason
+                    || `HTTP_${response.status}`
+                );
+                const error = new Error(code);
+                error.code = code;
+                error.status = response.status;
+                error.data = data;
+                throw error;
+            }
+
+            if (data.controlAuthority !== normalized) {
+                const error = new Error(
+                    "CONTROL_AUTHORITY_STATE_MISMATCH"
+                );
+                error.code = "CONTROL_AUTHORITY_STATE_MISMATCH";
+                error.status = 200;
+                error.data = data;
+                throw error;
+            }
+
+            if (typeof data.execution_enabled === "boolean") {
+                setExecutionEnabledState(data.execution_enabled);
+            }
+
+            setControlError(null);
+        } catch (error) {
+            if (isAuthErrorStatus(error?.status)) {
+                setControlError(authErrorMessage(error.status));
+            } else {
+                setControlError(
+                    error?.message
+                    || "Execution control switch failed."
+                );
+            }
+        } finally {
+            controlPendingRef.current = false;
+            setControlPending(false);
+
+            if (typeof onStatusRefresh === "function") {
+                onStatusRefresh();
+            }
+        }
+    };
+
+    const handleManualTrade = async (action) => {
+        const normalized = String(
+            action || ""
+        ).trim().toUpperCase();
+
+        if (
+            manualTradePendingRef.current
+            || (normalized !== "BUY" && normalized !== "SELL")
+            || controlAuthorityValue !== "MANUAL"
+        ) {
+            return;
+        }
+
+        manualTradePendingRef.current = true;
+        setManualTradePending(true);
+        setManualTradeError(null);
+
+        try {
+            const positionId = (
+                position?.position_id
+                || position?.order_id
+                || undefined
+            );
+
+            const response = await authenticatedControlRequest(
+                API.botManualTrade(),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        action: normalized,
+                        requestId: [
+                            "manual",
+                            Date.now(),
+                            Math.random().toString(36).slice(2, 10),
+                        ].join("-"),
+                        expectedControlRevision: (
+                            Number.isInteger(controlRevision)
+                                ? controlRevision
+                                : undefined
+                        ),
+                        expectedSymbol: activeSymbol || undefined,
+                        expectedMode: executionMode || undefined,
+                        expectedPositionId: positionId,
+                    }),
+                }
+            );
+
+            const data = await response.json().catch(() => null);
+
+            if (!response.ok || !data || data.success !== true) {
+                const code = (
+                    data?.detail?.reason
+                    || data?.reason
+                    || `HTTP_${response.status}`
+                );
+                const error = new Error(code);
+                error.code = code;
+                error.status = response.status;
+                error.data = data;
+                throw error;
+            }
+
+            // No optimistic position update: the authoritative status refresh
+            // below is the only source of the new position state.
+            setManualTradeError(null);
+        } catch (error) {
+            if (isAuthErrorStatus(error?.status)) {
+                setManualTradeError(authErrorMessage(error.status));
+            } else {
+                setManualTradeError(
+                    error?.message
+                    || "Manual trade failed."
+                );
+            }
+        } finally {
+            manualTradePendingRef.current = false;
+            setManualTradePending(false);
+
+            if (typeof onStatusRefresh === "function") {
+                onStatusRefresh();
+            }
+        }
+    };
+
+
     const openEmergencyConfirm = () => {
         if (
             emergencyPendingRef.current
@@ -1426,6 +1631,14 @@ export default function BotControl({
                 autoTradeDisabled={autoTradeDisabled}
                 autoTradePending={autoTradePending}
                 handleAutoTradeChange={handleAutoTradeChange}
+                controlAuthority={controlAuthorityValue}
+                controlRevision={controlRevision}
+                controlPending={controlPending}
+                controlError={controlError}
+                handleExecutionControlChange={handleExecutionControlChange}
+                manualTradePending={manualTradePending}
+                manualTradeError={manualTradeError}
+                handleManualTrade={handleManualTrade}
                 mmDraft={mmDraft}
                 mmConfiguration={effectiveMmConfiguration}
                 mmDraftInvalid={mmDraftInvalid}

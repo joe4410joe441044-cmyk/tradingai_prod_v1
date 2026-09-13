@@ -49,6 +49,8 @@ SUPPORTED_PROTECTED_PATHS = frozenset({
     "/api/bot/live-auto/stop",
     "/api/bot/live-order-entry/arm",
     "/api/bot/live-order-entry/disarm",
+    "/api/bot/control",
+    "/api/bot/manual-trade",
     "/api/bot/paper-account/capital",
     "/api/governance/mode",
     "/api/governance/execution",
@@ -175,6 +177,14 @@ class FakeBotManager:
         self._record("refresh_stopped_paper_safety_authority")
         return {"success": True}
 
+    def execute_manual_trade(self, request):
+        self._record("execute_manual_trade")
+        return {
+            "success": True,
+            "operation": "ENTRY_LONG",
+            "requestId": request.get("requestId"),
+        }
+
 
 def _build_control_app(session_ttl=3600):
     config = OperatorAuthConfig(
@@ -247,6 +257,9 @@ ROUTE_CASES = [
      "set_live_order_entry_authority"),
     ("/api/bot/live-order-entry/disarm", "POST", None,
      "set_live_order_entry_authority"),
+    ("/api/bot/manual-trade", "POST",
+     {"action": "BUY", "requestId": "auth-manual-1"},
+     "execute_manual_trade"),
     ("/api/bot/paper-account/capital", "POST", {"capital": "100"},
      "reset_paper_capital"),
     ("/api/governance/mode", "POST", {"mode": "SAFE"}, "GOVERNANCE_STATE"),

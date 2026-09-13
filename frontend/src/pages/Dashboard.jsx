@@ -267,6 +267,28 @@ useEffect(() => {
 
                             position={position}
 
+                            controlAuthority={
+                                botStatus?.controlAuthority
+                                || botStatus?.executionControl?.controlAuthority
+                                || "BOT"
+                            }
+
+                            controlRevision={
+                                botStatus?.controlRevision
+                                ?? botStatus?.executionControl?.controlRevision
+                                ?? 0
+                            }
+
+                            activeSymbol={
+                                botStatus?.activeSymbol
+                                || botStatus?.symbol
+                            }
+
+                            executionMode={
+                                botStatus?.executionMode
+                                || botStatus?.mode
+                            }
+
                             runtimeHealth={runtimeHealth}
 
                             onStatusRefresh={

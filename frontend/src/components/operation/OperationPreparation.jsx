@@ -130,6 +130,14 @@ export default function OperationPreparation({
     autoTradeStateText,
     autoTradeDisabled,
     handleAutoTradeChange,
+    controlAuthority = "BOT",
+    controlRevision = 0,
+    controlPending = false,
+    controlError = null,
+    handleExecutionControlChange = () => {},
+    manualTradePending = false,
+    manualTradeError = null,
+    handleManualTrade = () => {},
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
@@ -378,6 +386,51 @@ export default function OperationPreparation({
             ? "— · MAXIMUM_LEVERAGE"
             : effectiveLeverage;
     const controlsDisabled = botRunning === true;
+
+    // D4: the Dashboard passes the authoritative position side as a plain
+    // string (an object is also tolerated). Any unrecognized non-flat value
+    // must resolve to explicit UNKNOWN and fail closed, never silently FLAT.
+    const positionStateCandidate = (
+        position && typeof position === "object"
+            ? (position.side || position.positionSide || position.state || "")
+            : position
+    );
+    const positionSide = String(positionStateCandidate ?? "").trim().toUpperCase();
+    const manualPositionState = (
+        positionSide === "BUY" || positionSide === "LONG"
+            ? "LONG"
+            : positionSide === "SELL" || positionSide === "SHORT"
+                ? "SHORT"
+                : ["", "FLAT", "NONE", "CLOSED", "NO POSITION"].includes(positionSide)
+                    ? "FLAT"
+                    : "UNKNOWN"
+    );
+    const manualPositionUnknown = manualPositionState === "UNKNOWN";
+    const manualPendingState = Boolean(pendingOrder);
+    const manualControlActive = controlAuthority === "MANUAL";
+    const manualBusy = manualTradePending || controlPending;
+    const manualBuyLocked = (
+        !manualControlActive
+        || manualPendingState
+        || manualPositionUnknown
+        || manualPositionState === "LONG"
+    );
+    const manualSellLocked = (
+        !manualControlActive
+        || manualPendingState
+        || manualPositionUnknown
+        || manualPositionState === "SHORT"
+    );
+    const manualBuyLabel = (
+        manualPositionState === "SHORT"
+            ? "BUY / CLOSE SHORT"
+            : "BUY / LONG"
+    );
+    const manualSellLabel = (
+        manualPositionState === "LONG"
+            ? "SELL / CLOSE LONG"
+            : "SELL / SHORT"
+    );
 
     const mmAvailable = Boolean(mmDraft);
     const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
@@ -674,6 +727,40 @@ return (
                         <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
                         <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
                         <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                        <span className="operation-prep-label">EXECUTION CONTROL / 実行操作</span>
+                        <SegmentedControl
+                            disabled={controlPending}
+                            label="Execution control authority"
+                            onChange={handleExecutionControlChange}
+                            options={["BOT", "MANUAL"]}
+                            value={controlAuthority}
+                        />
+                        <div className="operation-prep-derived-list">
+                            <DerivedRow hideSource label="BOT TRADING" source="RUNTIME" status value={controlAuthority === "BOT" ? "ACTIVE" : "LOCKED"} />
+                            <DerivedRow hideSource label="MANUAL TRADING" source="RUNTIME" status value={controlAuthority === "MANUAL" ? "ACTIVE" : "LOCKED"} />
+                            <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
+                        </div>
+                        <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">
+                            <button
+                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--buy"
+                                disabled={manualBuyLocked || manualBusy}
+                                onClick={() => handleManualTrade("BUY")}
+                                type="button"
+                            >
+                                {manualBuyLabel}
+                            </button>
+                            <button
+                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--sell"
+                                disabled={manualSellLocked || manualBusy}
+                                onClick={() => handleManualTrade("SELL")}
+                                type="button"
+                            >
+                                {manualSellLabel}
+                            </button>
+                        </div>
+                        {manualTradePending && <p className="operation-prep-note" role="status">REQUESTING…</p>}
+                        {manualTradeError && <p className="operation-prep-error" role="alert">{manualTradeError}</p>}
+                        {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
@@ -721,6 +808,8 @@ return (
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="CURRENT EXECUTION" source={executionSource} value={executionMode} />
                             <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                            <DerivedRow label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
+                            <DerivedRow label="CONTROL REVISION" source="RUNTIME" value={String(controlRevision)} />
                             {requestedModeDiffersFromExecution && (
                                 <p className="operation-prep-mode-divergence__note" data-testid="mode-divergence">
                                     LIVE is selected for the next START. Real-order authority is not active.（LIVEは次のSTARTに選択されています。実注文権限は有効ではありません）

@@ -81,6 +81,15 @@ export const API = {
   botStop: () =>
     join("/bot/stop"),
 
+  botControl: () =>
+    join("/bot/control"),
+
+  botManualTrade: () =>
+    join("/bot/manual-trade"),
+
+  botManualTradePreparation: () =>
+    join("/bot/manual-trade/preparation"),
+
   loopStart: () =>
     join("/bot/loop/start"),
 
