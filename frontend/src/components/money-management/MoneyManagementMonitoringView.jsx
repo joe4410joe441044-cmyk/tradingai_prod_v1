@@ -26,15 +26,18 @@ export default function MoneyManagementMonitoringView({ viewAuthority, onSelect,
                     ))}
                 </div>
             </div>
-            <p>Actual Runtime（実稼働）: {runtime?.mode ?? "UNKNOWN"} / {runtime?.lifecycleState ?? "UNKNOWN"}</p>
-            <div role={data.monitoringState === "ERROR" ? "alert" : "status"}>
-                <strong>{viewAuthority} Monitoring — {LABELS[data.monitoringState]}</strong>
-                <p>Source: {data.monitoring?.source ?? "—"} / {data.monitoring?.snapshot?.accountingAuthoritySource ?? "—"}</p>
-                <p>As of（記録時刻）: {data.monitoring?.asOf ?? "—"}</p>
-            </div>
             <details className="mm-disclosure">
                 <summary>Monitoring View の説明（使い方・表示の意味）</summary>
                 <div className="mm-disclosure__content">
+                    <h3>現在の状態</h3>
+                    <div role={data.monitoringState === "ERROR" ? "alert" : "status"}>
+                        <p>Actual Runtime（実稼働）: {runtime?.mode ?? "UNKNOWN"} / {runtime?.lifecycleState ?? "UNKNOWN"}</p>
+                        <p>Monitoring View: {viewAuthority}</p>
+                        <p>Monitoring Status: {viewAuthority} Monitoring — {LABELS[data.monitoringState]}</p>
+                        <p>Source: {data.monitoring?.source ?? "—"} / {data.monitoring?.snapshot?.accountingAuthoritySource ?? "—"}</p>
+                        <p>As of（記録時刻）: {data.monitoring?.asOf ?? "—"}</p>
+                    </div>
+
                     <h3>Monitoring Viewについて</h3>
                     <p>Monitoring View は、MONEY MANAGEMENTで表示する監視・履歴データをPAPERまたはLIVEに切り替える機能です。このPAPER / LIVEボタンは「取引モードを変更するボタン」ではありません。切り替わるのは、MMで表示する監視・履歴データだけです。</p>
 
