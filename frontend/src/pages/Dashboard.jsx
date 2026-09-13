@@ -23,6 +23,7 @@ import BotControl from "../components/BotControl";
 import OperationAuthGate from "../components/auth/OperationAuthGate";
 import {
     pendingOrderAuthorityValue,
+    resolveOperationDisplaySymbol,
 } from "../components/operation/operationPreparationModel";
 
 
@@ -214,9 +215,7 @@ useEffect(() => {
                                     leverage: firstAvailable(botStatus?.leverage, botStatus?.tradeSettings?.leverage, tradeSettings.leverage),
                                 } : {}),
                                 selectionMode: tradeSettings.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
-                                displaySymbol: botStatus?.activeSymbol
-                                    ?? botStatus?.autoMarketSelection?.activeSymbol
-                                    ?? "NOT AVAILABLE",
+                                displaySymbol: resolveOperationDisplaySymbol(botStatus),
                                 autoMarketState: botStatus?.autoMarketSelection?.productionIntegration?.status || "NOT AVAILABLE",
                                 executionMode: botStatus?.executionMode || botStatus?.execution_mode,
                                 realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,

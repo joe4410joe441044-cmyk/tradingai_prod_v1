@@ -15,6 +15,10 @@ import {
     pathToFileURL,
 } from "node:url";
 
+import {
+    resolveOperationDisplaySymbol,
+} from "./operation/operationPreparationModel.js";
+
 import * as React from "react";
 import {
     transformWithOxc,
@@ -1082,6 +1086,44 @@ test("polling rerender keeps AUTO display, runtime symbol, and START payload ali
         assert.equal(payload.selection_mode, "AUTO");
         assert.equal(payload.symbol, "YGGUSDT");
         assert.notEqual(payload.symbol, "XRPUSDTM");
+    } finally { clearMmConfiguration(); mock.restore(); }
+});
+
+test("STOPPED AUTO restart shape resolves the START payload bootstrap symbol from the AUTO candidate", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    setMmConfiguration();
+    try {
+        const botStatus = {
+            status: "STOPPED",
+            activeSymbol: null,
+            autoMarketSelection: {
+                activeSymbol: null,
+                productionIntegration: { status: "READY" },
+                topCandidate: { symbol: "SAGAUSDT" },
+            },
+        };
+        const displaySymbol = resolveOperationDisplaySymbol(botStatus);
+        assert.equal(displaySymbol, "SAGAUSDT");
+
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                selectionMode: "AUTO",
+                displaySymbol,
+                autoMarketState: botStatus.autoMarketSelection.productionIntegration.status,
+                positionSize: 0,
+            },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.selection_mode, "AUTO");
+        assert.equal(payload.symbol, "SAGAUSDT");
+        assert.equal(payload.position_size, 0);
+        assert.equal(payload.loop_on_start, false);
+        assert.equal(payload.auto_trade_on_start, false);
     } finally { clearMmConfiguration(); mock.restore(); }
 });
 

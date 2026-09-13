@@ -80,12 +80,14 @@ test("Dashboard no longer renders the standalone Auto Market Selection card", as
     assert.doesNotMatch(dashboard, /data-testid=["']auto-market-selection-card/);
 });
 
-test("Dashboard uses the canonical runtime ACTIVE symbol authority (not a top candidate)", async () => {
+test("Dashboard keeps the canonical active symbol authoritative and reuses the AUTO bootstrap authority", async () => {
     const dashboard = await readFile(new URL("./Dashboard.jsx", import.meta.url), "utf8");
-    // FINAL PREPARATION SYMBOL must follow the committed active symbol, never the
-    // AUTO rank-1 candidate. A missing active authority fails closed to a
-    // sentinel rather than promoting topCandidate to the active symbol.
-    assert.match(dashboard, /displaySymbol: botStatus\?\.activeSymbol/);
+    // FINAL PREPARATION SYMBOL follows the shared single authority: the
+    // committed canonical runtime symbol wins when present, and only a fresh,
+    // production-ready AUTO candidate may bootstrap while the BOT is STOPPED.
+    // The resolver is never bypassed with an inline symbol value.
+    assert.match(dashboard, /displaySymbol: resolveOperationDisplaySymbol\(botStatus\)/);
+    assert.match(dashboard, /resolveOperationDisplaySymbol/);
     assert.doesNotMatch(dashboard, /displaySymbol: botStatus\?\.autoMarketSelection\?\.topCandidate\?\.symbol/);
     assert.match(dashboard, /autoMarketState: botStatus\?\.autoMarketSelection\?\.productionIntegration\?\.status/);
 });
