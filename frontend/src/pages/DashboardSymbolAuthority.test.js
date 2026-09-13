@@ -6,25 +6,24 @@ import {
     createOperationPreparationSettings,
     deriveOperationReadiness,
     operationPreparationSummary,
+    resolveOperationDisplaySymbol,
 } from "../components/operation/operationPreparationModel.js";
 
-// Mirror of the Dashboard FINAL PREPARATION SYMBOL feed (frontend/src/pages/Dashboard.jsx):
-// primary authority = botStatus.activeSymbol (canonical committed runtime symbol),
-// AUTO consistency fallback = botStatus.autoMarketSelection.activeSymbol,
-// fail closed to "NOT AVAILABLE" when the active authority is absent.
-// topCandidate.symbol is NEVER promoted to the active symbol.
-const dashboardDisplaySymbol = (botStatus) => (
-    botStatus?.activeSymbol
-    ?? botStatus?.autoMarketSelection?.activeSymbol
-    ?? "NOT AVAILABLE"
-);
-
-const summarySymbolFor = (botStatus, autoMarketState = "READY") => {
+// Mirrors the Dashboard FINAL PREPARATION SYMBOL feed
+// (frontend/src/pages/Dashboard.jsx). The Dashboard delegates to the single
+// shared resolver, so Operation display, START readiness, the LIVE confirmation
+// symbol, and the START payload bootstrap symbol all share one authority:
+//
+//   POST-START : canonical committed runtime symbol (activeSymbol) always wins.
+//   PRE-START  : canonical active symbol wins when present; otherwise a fresh,
+//                production-ready AUTO top candidate is the bootstrap symbol.
+//   FAIL CLOSED: no valid authority -> "NOT AVAILABLE".
+const evaluate = (botStatus, autoMarketState = "READY") => {
     const config = {
         mode: "PAPER",
         selectionMode: "AUTO",
         autoMarketState,
-        displaySymbol: dashboardDisplaySymbol(botStatus),
+        displaySymbol: resolveOperationDisplaySymbol(botStatus),
     };
     const settings = createOperationPreparationSettings(config);
     const readiness = deriveOperationReadiness({
@@ -54,88 +53,154 @@ const summarySymbolFor = (botStatus, autoMarketState = "READY") => {
         allowLive: false,
         tradeMode: "paper",
     });
-    return operationPreparationSummary(
+    const summary = operationPreparationSummary(
         settings,
         readiness.selectedRuntimeSymbol,
         0.5,
-    ).symbol;
+    );
+    return { config, settings, readiness, summary };
 };
 
-test("Dashboard SYMBOL uses the canonical active symbol, never the top candidate", async () => {
+const stoppedAutoStatus = (overrides = {}) => ({
+    status: "STOPPED",
+    activeSymbol: null,
+    autoMarketSelection: {
+        activeSymbol: null,
+        productionIntegration: { status: "READY" },
+        topCandidate: { symbol: "SAGAUSDT" },
+    },
+    ...overrides,
+});
+
+test("Dashboard delegates the display/bootstrap symbol to the shared resolver", async () => {
     const dashboard = await readFile(
         new URL("./Dashboard.jsx", import.meta.url),
         "utf8",
     );
-    assert.match(dashboard, /displaySymbol: botStatus\?\.activeSymbol/);
+    assert.match(dashboard, /displaySymbol: resolveOperationDisplaySymbol\(botStatus\)/);
+    assert.match(dashboard, /resolveOperationDisplaySymbol/);
+    // No inline symbol derivation / competing symbol values inside BotControl's
+    // config payload.
     assert.doesNotMatch(dashboard, /displaySymbol: botStatus\?\.autoMarketSelection\?\.topCandidate\?\.symbol/);
 });
 
-// CASE A — candidate differs from the active symbol. The FINAL PREPARATION
-// SYMBOL must be the committed active symbol, and must legitimately differ
-// from topCandidate.
+// CASE 1 / CASE 8 — restart-shaped STOPPED AUTO state: the canonical runtime
+// symbol is null but a fresh, production-ready candidate exists. The candidate
+// is the pre-start bootstrap/display symbol and START becomes READY.
+test("CASE 1/8: STOPPED AUTO with a valid ready candidate unlocks START", () => {
+    const { summary, readiness } = evaluate(stoppedAutoStatus());
+    assert.equal(summary.symbol, "SAGAUSDT");
+    assert.equal(readiness.selectedRuntimeSymbol, "SAGAUSDT");
+    assert.equal(readiness.startReady, true);
+});
+
+// CASE A — candidate differs from the committed active symbol. The committed
+// active symbol stays authoritative and must legitimately differ from the
+// topCandidate.
 test("CASE A: candidate differs from active symbol", () => {
     const botStatus = {
+        status: "STOPPED",
         activeSymbol: "NOMUSDT",
         autoMarketSelection: {
             activeSymbol: "NOMUSDT",
+            productionIntegration: { status: "READY" },
             topCandidate: { symbol: "C98USDT" },
         },
     };
-    const summarySymbol = summarySymbolFor(botStatus);
-    assert.equal(summarySymbol, "NOMUSDT");
-    assert.notEqual(summarySymbol, botStatus.autoMarketSelection.topCandidate.symbol);
+    const { summary } = evaluate(botStatus);
+    assert.equal(summary.symbol, "NOMUSDT");
+    assert.notEqual(summary.symbol, botStatus.autoMarketSelection.topCandidate.symbol);
 });
 
-// CASE B — candidate changes without a committed safe switch. The active
-// symbol and the displayed FINAL PREPARATION SYMBOL must remain unchanged.
+// CASE B — candidate changes without a committed safe switch. The active symbol
+// and displayed FINAL PREPARATION SYMBOL must remain unchanged.
 test("CASE B: candidate change without a committed switch does not move the active symbol", () => {
     const initial = {
+        status: "STOPPED",
         activeSymbol: "NOMUSDT",
         autoMarketSelection: {
             activeSymbol: "NOMUSDT",
+            productionIntegration: { status: "READY" },
             topCandidate: { symbol: "C98USDT" },
         },
     };
     const afterRankingUpdate = {
+        status: "STOPPED",
         activeSymbol: "NOMUSDT",
         autoMarketSelection: {
             activeSymbol: "NOMUSDT",
+            productionIntegration: { status: "READY" },
             topCandidate: { symbol: "PIXELUSDT" },
         },
     };
-    assert.equal(summarySymbolFor(initial), "NOMUSDT");
-    assert.equal(summarySymbolFor(afterRankingUpdate), "NOMUSDT");
+    assert.equal(evaluate(initial).summary.symbol, "NOMUSDT");
+    assert.equal(evaluate(afterRankingUpdate).summary.symbol, "NOMUSDT");
 });
 
 // CASE C — committed safe switch. The active symbol and displayed SYMBOL both
 // move to the newly committed symbol.
 test("CASE C: committed safe switch drives the active symbol", () => {
     const afterSwitch = {
+        status: "STOPPED",
         activeSymbol: "C98USDT",
         autoMarketSelection: {
             activeSymbol: "C98USDT",
+            productionIntegration: { status: "READY" },
             topCandidate: { symbol: "C98USDT" },
         },
     };
-    assert.equal(summarySymbolFor(afterSwitch), "C98USDT");
+    assert.equal(evaluate(afterSwitch).summary.symbol, "C98USDT");
 });
 
-// CASE D — missing active authority. Must fail closed (never display the
-// top candidate as the active symbol).
-test("CASE D: missing active authority fails closed without promoting the top candidate", () => {
-    const botStatus = {
-        activeSymbol: null,
-        autoMarketSelection: {
-            activeSymbol: null,
-            topCandidate: { symbol: "C98USDT" },
-        },
-    };
-    const summarySymbol = summarySymbolFor(botStatus);
-    assert.notEqual(summarySymbol, "C98USDT");
-    assert.equal(summarySymbol, "AUTO SELECT");
-    // The fail-closed sentinel feeds the readiness model; it is never treated
-    // as a real runtime symbol.
-    assert.equal(dashboardDisplaySymbol(botStatus), "NOT AVAILABLE");
+// CASE 2 — candidate missing. START must fail closed.
+test("CASE 2: STOPPED AUTO with a missing candidate fails closed", () => {
+    const botStatus = stoppedAutoStatus();
+    botStatus.autoMarketSelection.topCandidate = { symbol: null };
+    const { summary, readiness } = evaluate(botStatus);
+    assert.equal(summary.symbol, "AUTO SELECT");
+    assert.equal(readiness.selectedRuntimeSymbol, null);
+    assert.equal(readiness.startReady, false);
+    assert.equal(resolveOperationDisplaySymbol(botStatus), "NOT AVAILABLE");
+});
+
+// CASE 3 / 29 — production integration not READY. A present candidate must NOT
+// unlock START (the old AUTO READY false positive is not reintroduced).
+test("CASE 3: production integration not READY does not unlock START", () => {
+    const botStatus = stoppedAutoStatus();
+    botStatus.autoMarketSelection.productionIntegration = { status: "BLOCKED" };
+    const { summary, readiness } = evaluate(botStatus, "BLOCKED");
+    assert.equal(summary.symbol, "AUTO SELECT");
+    assert.equal(readiness.selectedRuntimeSymbol, null);
+    assert.equal(readiness.startReady, false);
+    assert.equal(resolveOperationDisplaySymbol(botStatus), "NOT AVAILABLE");
+});
+
+// CASE 4 — candidate blank. START must fail closed.
+test("CASE 4: STOPPED AUTO with a blank candidate fails closed", () => {
+    const botStatus = stoppedAutoStatus();
+    botStatus.autoMarketSelection.topCandidate = { symbol: "   " };
+    const { summary, readiness } = evaluate(botStatus);
+    assert.equal(summary.symbol, "AUTO SELECT");
+    assert.equal(readiness.startReady, false);
+    assert.equal(resolveOperationDisplaySymbol(botStatus), "NOT AVAILABLE");
+});
+
+// CASE 6 — runtime active symbol present. The canonical committed symbol keeps
+// priority over the candidate.
+test("CASE 6: runtime active symbol keeps canonical priority", () => {
+    const botStatus = stoppedAutoStatus({
+        activeSymbol: "ETHUSDT",
+    });
+    assert.equal(resolveOperationDisplaySymbol(botStatus), "ETHUSDT");
+    assert.equal(evaluate(botStatus).summary.symbol, "ETHUSDT");
+});
+
+// CASE 7 — post-START (RUNNING) the pre-start candidate must never be promoted
+// to the runtime execution symbol when the canonical symbol is absent.
+test("CASE 7: RUNNING without canonical symbol never promotes the candidate", () => {
+    const botStatus = stoppedAutoStatus({ status: "RUNNING" });
+    assert.equal(resolveOperationDisplaySymbol(botStatus), "NOT AVAILABLE");
+    assert.equal(evaluate(botStatus).summary.symbol, "AUTO SELECT");
 });
 
 // MANUAL mode regression — the FINAL PREPARATION SYMBOL must continue to use
@@ -145,7 +210,7 @@ test("MANUAL mode: operator symbol contract is preserved", () => {
         mode: "PAPER",
         selectionMode: "MANUAL",
         symbol: "ETHUSDTM",
-        displaySymbol: "NOMUSDT",
+        displaySymbol: resolveOperationDisplaySymbol(stoppedAutoStatus()),
     };
     const settings = createOperationPreparationSettings(config);
     const readiness = deriveOperationReadiness({
@@ -181,4 +246,5 @@ test("MANUAL mode: operator symbol contract is preserved", () => {
         0.5,
     );
     assert.equal(summary.symbol, "ETHUSDTM");
+    assert.equal(readiness.startReady, true);
 });

@@ -5,6 +5,7 @@ import {
     deriveOperationReadiness,
     pendingOrderAuthorityValue,
     resolveEffectiveMmConfiguration,
+    resolveOperationDisplaySymbol,
 } from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
@@ -492,4 +493,66 @@ test("TEST F: unavailable limit fails closed in the leverage authority model", (
     }));
     assert.equal(result.leverageReadiness, "BLOCKED");
     assert.equal(result.startReady, false);
+});
+
+const stoppedAutoStatus = (overrides = {}) => ({
+    status: "STOPPED",
+    activeSymbol: null,
+    autoMarketSelection: {
+        activeSymbol: null,
+        productionIntegration: { status: "READY" },
+        topCandidate: { symbol: "SAGAUSDT" },
+    },
+    ...overrides,
+});
+
+test("resolveOperationDisplaySymbol: STOPPED AUTO uses the ready candidate as bootstrap", () => {
+    assert.equal(resolveOperationDisplaySymbol(stoppedAutoStatus()), "SAGAUSDT");
+});
+
+test("resolveOperationDisplaySymbol: committed canonical symbol wins over candidate", () => {
+    assert.equal(
+        resolveOperationDisplaySymbol(stoppedAutoStatus({ activeSymbol: "ETHUSDT" })),
+        "ETHUSDT",
+    );
+    assert.equal(
+        resolveOperationDisplaySymbol(stoppedAutoStatus({
+            autoMarketSelection: {
+                activeSymbol: "ETHUSDT",
+                productionIntegration: { status: "READY" },
+                topCandidate: { symbol: "SAGAUSDT" },
+            },
+        })),
+        "ETHUSDT",
+    );
+});
+
+test("resolveOperationDisplaySymbol: missing candidate fails closed", () => {
+    const status = stoppedAutoStatus();
+    status.autoMarketSelection.topCandidate = { symbol: null };
+    assert.equal(resolveOperationDisplaySymbol(status), "NOT AVAILABLE");
+});
+
+test("resolveOperationDisplaySymbol: blank candidate fails closed", () => {
+    const status = stoppedAutoStatus();
+    status.autoMarketSelection.topCandidate = { symbol: "  " };
+    assert.equal(resolveOperationDisplaySymbol(status), "NOT AVAILABLE");
+});
+
+test("resolveOperationDisplaySymbol: not-ready production integration fails closed", () => {
+    const status = stoppedAutoStatus();
+    status.autoMarketSelection.productionIntegration = { status: "BLOCKED" };
+    assert.equal(resolveOperationDisplaySymbol(status), "NOT AVAILABLE");
+});
+
+test("resolveOperationDisplaySymbol: RUNNING never promotes the candidate", () => {
+    assert.equal(
+        resolveOperationDisplaySymbol(stoppedAutoStatus({ status: "RUNNING" })),
+        "NOT AVAILABLE",
+    );
+});
+
+test("resolveOperationDisplaySymbol: no authority at all fails closed", () => {
+    assert.equal(resolveOperationDisplaySymbol(), "NOT AVAILABLE");
+    assert.equal(resolveOperationDisplaySymbol({ status: "STOPPED" }), "NOT AVAILABLE");
 });

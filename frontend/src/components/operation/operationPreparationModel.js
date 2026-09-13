@@ -108,6 +108,57 @@ export const pendingOrderAuthorityValue = (status) => {
         : null;
 };
 
+const ABSENT_SYMBOL_VALUES = new Set([
+    "",
+    "UNKNOWN",
+    "NOT AVAILABLE",
+    "NONE",
+    "NULL",
+]);
+const READY_INTEGRATION_STATES = new Set(["READY", "RUNNING", "AVAILABLE"]);
+
+const validAuthoritySymbol = (value) => {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    if (!text || ABSENT_SYMBOL_VALUES.has(text.toUpperCase())) return null;
+    return text;
+};
+
+// Single Operation display/bootstrap symbol authority. This does NOT create a
+// new symbol authority: it only selects from the existing backend read model.
+//
+// POST-START (BOT RUNNING): the committed canonical runtime symbol
+// (botStatus.activeSymbol / autoMarketSelection.activeSymbol) is authoritative.
+//
+// PRE-START (BOT STOPPED): after a backend restart the canonical runtime symbol
+// is reset to null while a fresh, production-ready AUTO candidate may still
+// exist. That candidate is the existing pre-start bootstrap authority used for
+// Dashboard display, START readiness, the LIVE confirmation symbol, and the
+// START payload bootstrap symbol. It never becomes final execution authority:
+// after START the runtime AUTO selection / safe-switch remains canonical.
+//
+// Fails closed to "NOT AVAILABLE" when no valid authority exists.
+export const resolveOperationDisplaySymbol = (botStatus = {}) => {
+    const canonical = validAuthoritySymbol(botStatus?.activeSymbol)
+        || validAuthoritySymbol(botStatus?.autoMarketSelection?.activeSymbol);
+    if (canonical) return canonical;
+
+    const running = botStatus?.running === true
+        || String(botStatus?.status || "").trim().toUpperCase() === "RUNNING";
+    if (running) return "NOT AVAILABLE";
+
+    const integrationStatus = String(
+        botStatus?.autoMarketSelection?.productionIntegration?.status || "",
+    ).trim().toUpperCase();
+    if (!READY_INTEGRATION_STATES.has(integrationStatus)) {
+        return "NOT AVAILABLE";
+    }
+
+    return validAuthoritySymbol(
+        botStatus?.autoMarketSelection?.topCandidate?.symbol,
+    ) || "NOT AVAILABLE";
+};
+
 // Effective authoritative MM configuration. Both the standalone
 // configuration (GET /configuration) and the polled status configuration
 // (mmStatus.configuration from GET /status) are already normalized by the
