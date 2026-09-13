@@ -4964,7 +4964,7 @@ class BotManager:
         if not callable(apply_authority):
             return False
         return apply_authority(
-            initial_equity=getattr(current, "equity", None),
+            initial_equity=getattr(current, "current_equity", None),
             peak_equity=getattr(current, "peak_equity", None),
             authority_source=authority_value,
         ) is True

@@ -25,9 +25,13 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("TEST_MODE", "1")
 
 from backend.bot_manager.bot_manager import BotManager
+from Bot.engine.execution_engine import ExecutionEngine
+from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.money_management.enums import (
     MoneyManagementProfile,
     TradingMode,
@@ -37,6 +41,9 @@ from backend.money_management.loss_authoritative_runtime_metrics import (
 )
 from backend.money_management.models import MoneyManagementConfig
 from backend.money_management.loss_runtime_integration_models import StateSource
+from backend.money_management.loss_persistence_models import (
+    AccountingRebaseAuthoritySource,
+)
 from tests.test_money_management_loss_authoritative_runtime_metrics import persisted
 
 
@@ -387,6 +394,86 @@ def test_carried_stopping_state_is_reobserved_at_next_session():
     assert fresh.source_state == "RUNNING"
     assert fresh.available is True
     assert fresh.is_complete is True
+
+
+def test_complete_paper_snapshot_is_reobserved_for_live_session_baseline():
+    """A complete carried PAPER value cannot become a LIVE baseline by re-key."""
+    manager = BotManager()
+    state = AuthoritativeLossRuntimeMetricsState(manager.runtime_instance_id)
+    state.restore(
+        persisted(at=NOW),
+        StateSource.INITIAL_STATE,
+        NOW,
+    )
+    state.begin_runtime_session(1, NOW + _tick(1))
+    state.observe(
+        as_of=NOW + _tick(2),
+        session_id=1,
+        balance=D("100"),
+        equity=D("100"),
+        available_balance=D("100"),
+        realized_pnl=D("0"),
+        unrealized_pnl=D("0"),
+        position=[],
+        mark_price=D("100"),
+        engine_peak_equity=D("100"),
+        accounting_authority_source="PAPER_RUNTIME_EQUITY",
+        source_state="RUNNING",
+    )
+    assert state.snapshot().is_complete is True
+
+    state.begin_runtime_session(2, NOW + _tick(3))
+    carried = state.snapshot()
+    assert carried.current_equity == D("100")
+    assert carried.is_complete is False
+
+    manager.money_management_runtime_metrics = state
+    manager.session_id = 2
+    manager.lifecycle_state = "RUNNING"
+    manager.money_management_runtime_baseline_session = None
+    manager.real_account_snapshot = {
+        "authenticated": True,
+        "stale": False,
+        "accountSource": "KUCOIN_FUTURES_READ_ONLY",
+        "balance": D("7.91836966"),
+        "equity": D("7.91836966"),
+        "availableBalance": D("7.91836966"),
+        "realizedPnlToday": D("0"),
+        "unrealizedPnl": D("0"),
+        "positions": [],
+        "lastSync": (NOW + _tick(4)).timestamp(),
+    }
+    manager.engine = ExecutionEngine(
+        portfolio=PortfolioManager(initial_balance=100.0)
+    )
+    manager.engine.mode = "live"
+    manager.engine.config.update({
+        "max_drawdown_pct": 5.0,
+        "position_size": 0,
+    })
+    manager.engine.balance = float(D("7.91836966"))
+    manager.engine.portfolio.balance = float(D("7.91836966"))
+    manager._notify_money_management_runtime_event = (
+        lambda event_type, event_key: _dispatch_result()
+    )
+
+    result = manager._handoff_money_management_runtime_baseline(2)
+
+    assert result.status.value == "DISPATCHED"
+    live = state.snapshot()
+    assert live.current_equity == D("7.91836966")
+    assert live.peak_equity == D("7.91836966")
+    assert live.current_drawdown_pct == D("0")
+    assert live.accounting_authority_source is (
+        AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+    )
+    assert manager.engine.initial_equity == pytest.approx(7.91836966)
+    assert manager.engine._current_equity() == pytest.approx(7.91836966)
+    assert manager.engine.peak_equity == pytest.approx(7.91836966)
+    assert manager.engine.current_drawdown_pct == pytest.approx(0)
+    assert manager.engine.risk_trading_disabled is False
+    assert manager.engine.risk_block_reason is None
+    assert manager.engine.config["position_size"] == 0
 
 
 def test_fresh_observation_remaining_incomplete_never_dispatches_baseline():
