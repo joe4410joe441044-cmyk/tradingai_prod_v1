@@ -171,7 +171,7 @@ test("recent trades render formal columns, row limits, and explicit empty states
     const nodes = descendants(ReplayMarketViewContent({ model: buildReplayMarketViewModel(engine) }));
     const tradeTable = nodes.filter(({ type }) => type === "table")[2];
     const tableText = textOf(tradeTable);
-    assert.match(tableText, /TIMEPRICESIZESIDE/);
+    assert.match(tableText, /TIME \(LOCAL\)PRICESIZESIDE/);
     assert.match(tableText, /BUY|SELL/);
     const tradeSelect = nodes.filter(({ type }) => type === "select")[1];
     assert.deepEqual(descendants(tradeSelect).filter(({ type }) => type === "option").map(({ props }) => props.value), [10, 20, 50]);

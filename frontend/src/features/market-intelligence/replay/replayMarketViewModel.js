@@ -134,12 +134,20 @@ const scopeEventsToMarketContext = (events) => {
     return { activeContext, events: scoped, contextChanged };
 };
 
-export const normalizedTradeTime = (value) => {
+export const normalizedTradeTime = (value, timeZone) => {
     const normalized = finite(value) ? new Date(value).toISOString() : value;
     if (typeof normalized !== "string" || !normalized.trim() || !Number.isFinite(Date.parse(normalized))) return "TIME UNKNOWN";
-    const match = normalized.match(/T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
-    if (!match) return "TIME UNKNOWN";
-    return match[2] ? `${match[1]}.${match[2].slice(0, 3).padEnd(Math.min(3, match[2].length), "0")}` : match[1];
+    const fractional = normalized.match(/T\d{2}:\d{2}:\d{2}\.(\d+)/)?.[1];
+    const options = {
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+        ...(fractional ? { fractionalSecondDigits: 3 } : {}),
+        ...(timeZone ? { timeZone } : {}),
+    };
+    try {
+        return new Intl.DateTimeFormat("en-GB", options).format(new Date(normalized));
+    } catch {
+        return "TIME UNKNOWN";
+    }
 };
 
 const payloadOf = (event) => event?.payload && typeof event.payload === "object"

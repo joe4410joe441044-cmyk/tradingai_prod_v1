@@ -211,7 +211,7 @@ export function ReplayMarketViewContent({
                     ) : model.recentTrades.state === "WAITING" ? (
                         <div className="mi-market-view__empty"><strong>WAITING FOR TRADE DATA</strong></div>
                     ) : <div className="mi-market-view__table-wrap"><table>
-                        <thead><tr><th>TIME</th><th>PRICE</th><th>SIZE</th><th>SIDE</th><th>MARKER</th></tr></thead>
+                        <thead><tr><th>TIME (LOCAL)</th><th>PRICE</th><th>SIZE</th><th>SIDE</th><th>MARKER</th></tr></thead>
                         <tbody>{trades.rows.map((trade) => (
                             <tr key={`${trade.id}-${trade.inputIndex}`} aria-label={trade.isCurrent ? "Current trade" : undefined}
                                 className={`mi-market-view__trade--${trade.side.toLowerCase()}${trade.isCurrent ? " mi-market-view__trade--current" : ""}`}>

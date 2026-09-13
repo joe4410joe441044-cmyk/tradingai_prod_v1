@@ -491,8 +491,11 @@ test("trade display uses formal identities, visible intensity, summary, and exac
     assert.equal(display.rows.every(({ intensity }) => intensity >= 0 && intensity <= 100), true);
     assert.equal(display.count, display.buyCount + display.sellCount + display.unknownCount);
     assert.equal(Math.round(display.buyRatio + display.sellRatio), 100);
-    assert.equal(normalizedTradeTime("2026-01-01T01:02:03Z"), "01:02:03");
+    assert.equal(normalizedTradeTime("2026-09-13T04:59:48.884Z", "Asia/Tokyo"), "13:59:48.884");
+    assert.equal(normalizedTradeTime("2026-09-13T15:30:00.884Z", "Asia/Tokyo"), "00:30:00.884");
+    assert.equal(normalizedTradeTime("2026-01-01T01:02:03Z", "Asia/Tokyo"), "10:02:03");
     assert.equal(normalizedTradeTime("bad"), "TIME UNKNOWN");
+    assert.equal(normalizedTradeTime(null, "Asia/Tokyo"), "TIME UNKNOWN");
 });
 
 test("recent trades use formal time order and shared price and quantity precision", () => {
@@ -510,7 +513,7 @@ test("recent trades use formal time order and shared price and quantity precisio
     assert.deepEqual(model.recentTrades.rows.map(({ price }) => price), ["12.00", "11.00", "10.00"]);
     assert.deepEqual(model.recentTrades.rows.map(({ size }) => size), ["3.000", "2.000", "1.000"]);
     assert.deepEqual(model.recentTrades.rows.map(({ side }) => side), ["BUY", "SELL", "BUY"]);
-    assert.equal(model.recentTrades.rows[0].time, "00:00:02");
+    assert.equal(model.recentTrades.rows[0].time, normalizedTradeTime("2026-01-01T00:00:02Z"));
     assert.equal(model.recentTrades.state, "AVAILABLE");
 });
 
@@ -537,7 +540,7 @@ test("recent trade validation and empty states never infer malformed trades", ()
     assert.equal(invalid.recentTrades.state, "UNAVAILABLE");
     assert.equal(invalid.recentTrades.count, 0);
     assert.equal(invalid.diagnostics.invalidTradeRows, 6);
-    assert.equal(normalizedTradeTime(Date.parse("2026-01-01T12:30:05Z")), "12:30:05.000");
+    assert.equal(normalizedTradeTime(Date.parse("2026-01-01T12:30:05Z"), "Asia/Tokyo"), "21:30:05.000");
 });
 
 test("recent trade row limits are display-only and capped at fifty", () => {
