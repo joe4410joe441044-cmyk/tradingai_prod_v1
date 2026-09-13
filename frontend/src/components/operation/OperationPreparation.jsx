@@ -119,6 +119,9 @@ export default function OperationPreparation({
     pendingOrder,
     position,
     realOrderAllowed = false,
+    liveOrderEntryArmed = false,
+    armDisabled = true,
+    handleLiveOrderEntryChange,
     loopChecked,
     loopState,
     loopDisabled,
@@ -680,6 +683,8 @@ return (
                         <ToggleControl disabled={controlsDisabled} label="Auto Trade on start" onChange={(value) => changeSetting("autoTradeOnStart", value)} value={settings.autoTradeOnStart} />
                         {botRunning && (
                             <div className="operation-prep-runtime-controls">
+                                <span className="operation-prep-label">LIVE ORDER ENTRY（注文権限）</span>
+                                <ToggleControl disabled={armDisabled} label="Live order entry" onChange={handleLiveOrderEntryChange} value={liveOrderEntryArmed} />
                                 <span className="operation-prep-label">RUNTIME LOOP（実行中ループ）</span>
                                 <ToggleControl disabled={loopDisabled} label="Runtime loop" onChange={handleLoopChange} value={loopChecked} />
                                 <span className="operation-prep-label">RUNTIME AUTO TRADE（実行中自動取引）</span>
