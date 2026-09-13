@@ -387,27 +387,38 @@ export default function OperationPreparation({
             : effectiveLeverage;
     const controlsDisabled = botRunning === true;
 
-    const positionSide = String(
-        position?.side || position?.positionSide || ""
-    ).trim().toUpperCase();
+    // D4: the Dashboard passes the authoritative position side as a plain
+    // string (an object is also tolerated). Any unrecognized non-flat value
+    // must resolve to explicit UNKNOWN and fail closed, never silently FLAT.
+    const positionStateCandidate = (
+        position && typeof position === "object"
+            ? (position.side || position.positionSide || position.state || "")
+            : position
+    );
+    const positionSide = String(positionStateCandidate ?? "").trim().toUpperCase();
     const manualPositionState = (
         positionSide === "BUY" || positionSide === "LONG"
             ? "LONG"
             : positionSide === "SELL" || positionSide === "SHORT"
                 ? "SHORT"
-                : "FLAT"
+                : ["", "FLAT", "NONE", "CLOSED", "NO POSITION"].includes(positionSide)
+                    ? "FLAT"
+                    : "UNKNOWN"
     );
+    const manualPositionUnknown = manualPositionState === "UNKNOWN";
     const manualPendingState = Boolean(pendingOrder);
     const manualControlActive = controlAuthority === "MANUAL";
     const manualBusy = manualTradePending || controlPending;
     const manualBuyLocked = (
         !manualControlActive
         || manualPendingState
+        || manualPositionUnknown
         || manualPositionState === "LONG"
     );
     const manualSellLocked = (
         !manualControlActive
         || manualPendingState
+        || manualPositionUnknown
         || manualPositionState === "SHORT"
     );
     const manualBuyLabel = (

@@ -1787,3 +1787,79 @@ test("FINAL PREPARATION remains simplified and unchanged by the Trade Settings b
     assert.equal(summaryText.includes("REAL ORDER DISABLED"), true, "REAL ORDER DISABLED row preserved");
 });
 
+// D4: manual BUY/SELL buttons must reflect the authoritative position and
+// fail closed on UNKNOWN. Dashboard passes `position` as a plain side string
+// (e.g. "BUY"/"LONG"/"UNKNOWN"), never silently as FLAT.
+const manualTradeButtons = (root) => {
+    const block = findTestId(root, "manual-trade-buttons");
+    assert.ok(block, "manual trade buttons present");
+    return descendants(block).filter((node) => node.type === "button");
+};
+
+test("D4: FLAT manual position enables both BUY and SELL", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons.length, 2);
+    assert.equal(normalizedText(buttons[0]), "BUY / LONG");
+    assert.equal(buttons[0].props.disabled, false);
+    assert.equal(normalizedText(buttons[1]), "SELL / SHORT");
+    assert.equal(buttons[1].props.disabled, false);
+});
+
+test("D4: LONG manual position locks BUY and offers SELL / CLOSE LONG", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "LONG",
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(normalizedText(buttons[0]), "BUY / LONG");
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(normalizedText(buttons[1]), "SELL / CLOSE LONG");
+    assert.equal(buttons[1].props.disabled, false);
+});
+
+test("D4: SHORT manual position locks SELL and offers BUY / CLOSE SHORT", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "SHORT",
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(normalizedText(buttons[0]), "BUY / CLOSE SHORT");
+    assert.equal(buttons[0].props.disabled, false);
+    assert.equal(normalizedText(buttons[1]), "SELL / SHORT");
+    assert.equal(buttons[1].props.disabled, true);
+});
+
+test("D4: UNKNOWN manual position locks BUY and SELL and is shown as UNKNOWN", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "UNKNOWN",
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("MANUAL POSITION UNKNOWN"), true);
+});
+
+test("D4: PENDING order locks BUY and SELL", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        pendingOrder: true,
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("MANUAL POSITION PENDING"), true);
+});
+
