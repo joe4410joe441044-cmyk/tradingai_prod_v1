@@ -1252,7 +1252,6 @@ class KucoinTradeClient(BaseClient):
             "type": "market",
             "size": str(size),
             "reduceOnly": True,
-            "leverage": "10",
             "marginMode": "ISOLATED",
         }
         body = json.dumps(body_dict)
@@ -2120,12 +2119,32 @@ class KucoinTradeClient(BaseClient):
     # ORDER
     # =========================
 
+    @staticmethod
+    def _order_leverage_authority(leverage):
+        """Validate the canonical effective leverage for a LIVE order.
+
+        Returns the normalized string form of the canonical effective
+        leverage, or ``None`` when the authority is missing, non-numeric,
+        zero, negative or non-finite.  The KuCoin order payload must never
+        silently fall back to a hard-coded leverage.
+        """
+        if leverage is None or isinstance(leverage, bool):
+            return None
+        try:
+            value = Decimal(str(leverage))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+        if not value.is_finite() or value <= 0:
+            return None
+        return format(value.normalize(), "f")
+
     def create_order(
         self,
         symbol,
         side,
         qty,
-        price=None
+        price=None,
+        leverage=None
     ):
 
         if not self.live_order_allowed:
@@ -2160,6 +2179,34 @@ class KucoinTradeClient(BaseClient):
         try:
 
             symbol = self.normalize_symbol(symbol)
+
+            # =====================================
+            # CANONICAL LEVERAGE AUTHORITY (fail-closed)
+            # =====================================
+            # The LIVE order payload leverage is the canonical effective
+            # leverage resolved by the Money Management / runtime authority
+            # at the START boundary.  It must never be replaced by a
+            # hard-coded value.  A missing / invalid authority fails closed
+            # and no exchange order is constructed.
+
+            order_leverage = self._order_leverage_authority(leverage)
+
+            if order_leverage is None:
+
+                result = {
+                    "success": False,
+                    "exchange": "kucoin",
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty,
+                    "blockedReason": "LEVERAGE_AUTHORITY_UNAVAILABLE",
+                    "error": "LEVERAGE_AUTHORITY_UNAVAILABLE",
+                    "timestamp": time.time(),
+                }
+
+                runtime_debug("KuCoin order blocked result=%s", result)
+
+                return result
 
             # =====================================
             # BTC QTY -> CONTRACT SIZE
@@ -2260,92 +2307,7 @@ class KucoinTradeClient(BaseClient):
                 "side": side.lower(),
                 "type": "market",
                 "size": str(qty),
-                "leverage": "10",
-                "marginMode": "ISOLATED"
-            }
-
-            body = json.dumps(body_dict)
-
-            headers = self._headers(
-                "POST",
-                endpoint,
-                body
-            )
-
-            res = self.session.post(
-                self.base_url + endpoint,
-                headers=headers,
-                data=body
-            )
-
-            data = res.json()
-
-            if data.get("code") != "200000":
-
-                result = {
-                    "success": False,
-                    "exchange": "kucoin",
-                    "symbol": symbol,
-                    "side": side,
-                    "qty": qty,
-                    "error": str(data),
-                    "raw": data,
-                    "timestamp": time.time(),
-                }
-
-                runtime_debug("KuCoin normalized result=%s", result)
-
-                return result
-
-            self.logger.info("ORDER SENT: KuCoin response=%s", data)
-
-            result = {
-                "success": True,
-                "exchange": "kucoin",
-                "symbol": symbol,
-                "side": side,
-                "qty": qty,
-                "order_id": (
-                    data.get("data", {})
-                    .get("orderId")
-                ),
-                "raw": data,
-                "timestamp": time.time(),
-            }
-
-            runtime_debug("KuCoin normalized result=%s", result)
-
-            return result
-
-        except Exception as e:
-
-            self.logger.exception("KUCOIN ORDER EXCEPTION")
-
-            result = {
-                "success": False,
-                "exchange": "kucoin",
-                "symbol": symbol,
-                "side": side,
-                "qty": qty,
-                "error": str(e),
-                "timestamp": time.time(),
-            }
-
-            runtime_debug("KuCoin normalized result=%s", result)
-
-            return result
-
-            endpoint = "/api/v1/orders"
-
-            body_dict = {
-                "clientOid": str(
-                    int(time.time() * 1000)
-                ),
-                "symbol": symbol,
-                "side": side.lower(),
-                "type": "market",
-                "size": str(qty),
-                "leverage": "10",
+                "leverage": order_leverage,
                 "marginMode": "ISOLATED"
             }
 
@@ -2425,14 +2387,16 @@ class KucoinTradeClient(BaseClient):
         symbol,
         side,
         qty,
-        price=None
+        price=None,
+        leverage=None
     ):
 
         return self.create_order(
             symbol,
             side,
             qty,
-            price
+            price,
+            leverage
         )
 
     # =========================
@@ -2441,7 +2405,8 @@ class KucoinTradeClient(BaseClient):
 
     def close_position(
         self,
-        symbol
+        symbol,
+        leverage=None
     ):
 
         pos = self.get_positions(symbol)
@@ -2486,5 +2451,6 @@ class KucoinTradeClient(BaseClient):
         return self.create_order(
             symbol=symbol,
             side=side,
-            qty=coin_qty
+            qty=coin_qty,
+            leverage=leverage
         )

@@ -877,6 +877,16 @@ class ExecutionEngine:
                 type(self.config["leverage"]).__name__,
             )
 
+            # The canonical effective leverage resolved by the Money
+            # Management / runtime authority at START is carried separately
+            # from the legacy display/config leverage.  The LIVE order
+            # construction path consumes only this canonical authority and
+            # fails closed when it is absent.
+            if safe_config.get("effective_leverage") is not None:
+                self.config["effective_leverage"] = safe_config.get(
+                    "effective_leverage"
+                )
+
             self.config["timeframe"] = str(
                 safe_config.get(
                     "timeframe",
@@ -2188,7 +2198,8 @@ class ExecutionEngine:
                     symbol=order["symbol"],
                     side=order["side"],
                     qty=order["qty"],
-                    price=order["price"]
+                    price=order["price"],
+                    leverage=self.config.get("effective_leverage"),
                 )
 
                 runtime_debug("Live execution raw result=%s", raw_res)
