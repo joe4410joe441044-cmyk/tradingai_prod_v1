@@ -9905,7 +9905,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 self.assertEqual(body["type"], "market")
                 self.assertEqual(body["size"], size)
                 self.assertIs(body["reduceOnly"], True)
-                self.assertEqual(body["leverage"], "10")
+                self.assertNotIn("leverage", body)
                 self.assertEqual(body["marginMode"], "ISOLATED")
                 self.assertEqual(
                     headers.call_args.args,
