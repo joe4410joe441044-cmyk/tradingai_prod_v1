@@ -1243,6 +1243,13 @@ class KucoinTradeClient(BaseClient):
 
         size = int(size_value)
         endpoint = "/api/v1/orders"
+        # ReduceOnly close intentionally carries no order-level leverage.
+        # KuCoin Futures Add Order contract: `leverage` is "Optional for type
+        # is 'isolated margin' order ... If you are to close the position, or
+        # add 'cross margin' order, this parameter is not required."  Required
+        # fields are clientOid/symbol/side.  A reduceOnly close applies the
+        # existing position leverage, so hard-coding 10 here was both
+        # unnecessary and an unauthorized leverage authority.
         body_dict = {
             "clientOid": str(
                 int(time.time() * 1000)

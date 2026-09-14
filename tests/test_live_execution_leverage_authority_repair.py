@@ -384,3 +384,151 @@ def test_set_config_propagates_canonical_effective_leverage():
     engine.set_config({"mode": "paper", "leverage": 5, "effective_leverage": 5})
     assert engine.config["effective_leverage"] == 5
     assert engine.config["leverage"] == 5
+
+
+# =========================
+# K. End-to-end: canonical effective_leverage -> engine -> adapter -> HTTP body
+# =========================
+
+def _engine_with_real_kucoin(
+    monkeypatch, effective_leverage, legacy_leverage=None
+):
+    client = KucoinTradeClient(
+        api_key="key",
+        api_secret="secret",
+        passphrase="passphrase",
+    )
+    client.get_symbol_rules = lambda symbol: {
+        "min_size": 1,
+        "multiplier": 1.0,
+    }
+    client.get_price = lambda symbol: 100.0
+    client.get_positions = lambda symbol: {
+        "state": "OPEN",
+        "side": "BUY",
+        "qty": 1,
+    }
+    captured = {"bodies": [], "posts": 0}
+
+    def fake_post(url, headers=None, data=None, **kwargs):
+        captured["posts"] += 1
+        captured["bodies"].append(json.loads(data))
+        return _FakeResponse(
+            {"code": "200000", "data": {"orderId": "order-1"}}
+        )
+
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    engine = ExecutionEngine(
+        exchange=client,
+        portfolio=PortfolioManager(1000.0),
+    )
+    engine.mode = "live"
+    engine.symbol = "XRPUSDT"
+    engine.price_ready = True
+    engine.last_market_update = time.time()
+    engine.latest_price = 100
+    engine.config["dry_run"] = False
+    if legacy_leverage is not None:
+        engine.config["leverage"] = legacy_leverage
+    if effective_leverage is not None:
+        engine.config["effective_leverage"] = effective_leverage
+    engine.config["realOrderAllowed"] = True
+    engine.config["executionEntryAllowed"] = True
+    engine.config["liveOrderEntryAllowed"] = True
+    engine.get_price = lambda: 100
+    engine.get_result = lambda: {"preview": {"qty": 1, "valid": True}}
+    engine.refresh_balance = lambda: None
+    engine._live_order_allowed = lambda: True
+    engine._evaluate_execution_entry_guard = lambda order: (True, None)
+    return engine, client, captured
+
+
+def test_e2e_effective_5x_reaches_kucoin_request_body(monkeypatch):
+    engine, _client, captured = _engine_with_real_kucoin(monkeypatch, 5)
+
+    engine.try_entry({"id": "e2e-5", "side": "BUY", "qty": 1})
+
+    assert captured["posts"] == 1
+    assert captured["bodies"][0]["leverage"] == "5"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(3, "3"), (4, "4"), (Decimal("2.5"), "2.5")],
+)
+def test_e2e_non_5_effective_reaches_kucoin_request_body(
+    monkeypatch, value, expected
+):
+    engine, _client, captured = _engine_with_real_kucoin(monkeypatch, value)
+
+    engine.try_entry({"id": f"e2e-{expected}", "side": "BUY", "qty": 1})
+
+    assert captured["posts"] == 1
+    assert captured["bodies"][0]["leverage"] == expected
+
+
+@pytest.mark.parametrize(
+    "authority",
+    [None, "abc", 0, -1, float("inf"), float("nan")],
+)
+def test_e2e_missing_or_invalid_authority_never_submits(
+    monkeypatch, authority
+):
+    engine, _client, captured = _engine_with_real_kucoin(
+        monkeypatch, authority
+    )
+
+    engine.try_entry({"id": "e2e-bad", "side": "BUY", "qty": 1})
+
+    assert captured["posts"] == 0
+    assert engine.actual_position is None
+
+
+def test_e2e_effective_wins_over_requested_legacy_value(monkeypatch):
+    # Legacy/requested display leverage 10 while the canonical effective
+    # leverage is 5: the canonical effective value must win.
+    engine, _client, captured = _engine_with_real_kucoin(
+        monkeypatch, 5, legacy_leverage=10
+    )
+
+    engine.try_entry({"id": "e2e-effective-wins", "side": "BUY", "qty": 1})
+
+    assert captured["posts"] == 1
+    assert captured["bodies"][0]["leverage"] == "5"
+
+
+# =========================
+# L. Legacy close_position() caller audit
+# =========================
+
+def test_legacy_close_position_without_authority_fails_closed(monkeypatch):
+    client = _live_client()
+    client.get_positions = lambda symbol: {
+        "side": "BUY",
+        "qty": 2,
+        "symbol": "XRPUSDTM",
+    }
+    captured = _capture_post(monkeypatch, client)
+
+    result = client.close_position("XRPUSDT")
+
+    assert result["success"] is False
+    assert result["error"] == "LEVERAGE_AUTHORITY_UNAVAILABLE"
+    assert captured["posts"] == 0
+
+
+def test_legacy_close_position_with_authority_posts(monkeypatch):
+    client = _live_client()
+    client.get_positions = lambda symbol: {
+        "side": "BUY",
+        "qty": 2,
+        "symbol": "XRPUSDTM",
+    }
+    captured = _capture_post(monkeypatch, client)
+
+    result = client.close_position("XRPUSDT", leverage=5)
+
+    assert result["success"] is True
+    assert captured["posts"] == 1
+    assert captured["bodies"][0]["leverage"] == "5"
