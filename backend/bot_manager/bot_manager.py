@@ -4641,7 +4641,9 @@ class BotManager:
         if normalized_mode == "paper":
             try:
                 resolver = self._canonical_parameter_resolver_instance()
-                return resolver.resolve_paper().to_runtime_dict()
+                snapshot = resolver.resolve_paper()
+                self._record_observed_parameter_snapshot("PAPER", snapshot)
+                return snapshot.to_runtime_dict()
             except Exception:
                 # Authority resolution must never change PAPER behavior.  Fall
                 # back to the legacy compatibility shim if unavailable.
@@ -4649,12 +4651,32 @@ class BotManager:
         if normalized_mode == "live":
             try:
                 resolver = self._canonical_parameter_resolver_instance()
-                return resolver.resolve_live().to_runtime_dict()
+                snapshot = resolver.resolve_live()
+                self._record_observed_parameter_snapshot("LIVE", snapshot)
+                return snapshot.to_runtime_dict()
             except Exception:
                 # LIVE fallback is the named class-constant baseline, which is
                 # behavior-equivalent to the legacy None/default path.
                 return None
         return None
+
+    @staticmethod
+    def _record_observed_parameter_snapshot(scope, snapshot):
+        """Record the runtime's observed parameter snapshot (read-only).
+
+        The PARAMETER SETTINGS API reads this registry to report the ACTUAL
+        runtime snapshot.  Recording is best-effort and must never affect the
+        trading cycle.
+        """
+
+        try:
+            from backend.strategy.parameters.runtime_registry import (
+                record_runtime_snapshot,
+            )
+
+            record_runtime_snapshot(scope, snapshot)
+        except Exception:
+            return
 
     def _build_snapshot_aware_exit_evaluator(self, evaluate_exit):
         """Bind the entry parameter snapshot into the strategy exit evaluator.

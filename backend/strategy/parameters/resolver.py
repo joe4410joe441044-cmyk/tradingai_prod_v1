@@ -337,6 +337,13 @@ class CanonicalParameterResolver:
         if store is None:
             return None
         try:
+            # Prefer the promoted EFFECTIVE snapshot when a PARAMETER SETTINGS
+            # write has created one.  A newly configured revision is PENDING
+            # until E-PARAM-5 promotion, so the runtime keeps using the last
+            # promoted set instead of falsely adopting the pending one.
+            effective = store.load(scope, variant="effective")
+            if effective is not None and effective.status is StoreLoadStatus.VALID:
+                return effective
             return store.load(scope)
         except Exception:
             return None
