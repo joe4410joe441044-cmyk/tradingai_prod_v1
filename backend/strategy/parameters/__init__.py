@@ -1,9 +1,10 @@
-"""Canonical strategy parameter authority (E-PARAM-1 foundation).
+"""Canonical strategy parameter authority.
 
 This package is the single canonical authority for strategy parameter values.
-E-PARAM-1 adds the pure model, registry, validation, migration baselines and
-persistence store only.  No Trading Cycle consumer reads this package yet; the
-runtime consumer wiring belongs to E-PARAM-2 / E-PARAM-3.
+E-PARAM-1 added the pure model, registry, validation, migration baselines and
+persistence store.  E-PARAM-2 adds the resolver/runtime snapshot that connects
+the PAPER scope to the Trading Cycle without changing PAPER behavior.  LIVE
+remains on its legacy runtime path.
 """
 
 from .baselines import (
@@ -30,6 +31,14 @@ from .registry import (
     StrategyParameterRegistry,
     ValueType,
 )
+from .resolver import (
+    PAPER_RUNTIME_SCOPE,
+    STRATEGY_PARAMETERS_DIR_ENV,
+    CanonicalParameterResolver,
+    RuntimeAuthorityStatus,
+    RuntimeParameterSnapshot,
+    default_runtime_base_directory,
+)
 from .store import (
     ENVELOPE_VERSION,
     INTEGRITY_ALGORITHM,
@@ -53,6 +62,7 @@ from .validation import (
 __all__ = [
     "CANONICAL_SCHEMA_VERSION",
     "CouplingGroup",
+    "CanonicalParameterResolver",
     "ENVELOPE_VERSION",
     "INTEGRITY_ALGORITHM",
     "LIVE_BASELINE_EXACT_KEYS",
@@ -62,12 +72,16 @@ __all__ = [
     "MAX_FILE_SIZE",
     "MigrationBaseline",
     "PAPER_MIGRATION_BASELINE",
+    "PAPER_RUNTIME_SCOPE",
     "ParameterMetadata",
     "ParameterScope",
     "ParameterSource",
     "ParameterStatus",
     "ParameterTier",
+    "RuntimeAuthorityStatus",
+    "RuntimeParameterSnapshot",
     "STORAGE_SUBDIRECTORY",
+    "STRATEGY_PARAMETERS_DIR_ENV",
     "StoreFailureCode",
     "StoreLoadResult",
     "StoreLoadStatus",
@@ -80,6 +94,7 @@ __all__ = [
     "ValidationIssue",
     "ValidationResult",
     "ValueType",
+    "default_runtime_base_directory",
     "format_timestamp",
     "materialize_parameter_set",
     "serialize_parameter_envelope",

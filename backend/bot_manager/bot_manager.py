@@ -155,6 +155,11 @@ class BotManager:
 
         self.engine = None
 
+        # Canonical PAPER parameter authority resolver.  Lazily created so the
+        # import cost and the runtime store probe happen only for PAPER.  LIVE
+        # keeps the legacy runtime path (resolver returns None).
+        self._canonical_parameter_resolver = None
+
         # ============================================
         # EXECUTION LOCK
         # ============================================
@@ -4699,6 +4704,32 @@ class BotManager:
         self.orderbook_symbol = exchange_symbol
         return True
 
+    def _resolve_microstructure_parameter_set(self, mode):
+        """Resolve the PAPER parameter authority into the runtime contract.
+
+        PAPER obtains its parameterAuthority from the canonical resolver
+        (CONFIGURED -> EFFECTIVE -> immutable runtime snapshot).  LIVE keeps the
+        legacy path: the resolver is never consulted and ``None`` is returned so
+        ``MicrostructureStateBuilder`` uses its class-constant defaults.
+        """
+
+        if str(mode or "").strip().lower() != "paper":
+            return None
+        try:
+            resolver = self._canonical_parameter_resolver
+            if resolver is None:
+                from backend.strategy.parameters.resolver import (
+                    CanonicalParameterResolver,
+                )
+
+                resolver = CanonicalParameterResolver()
+                self._canonical_parameter_resolver = resolver
+            return resolver.resolve_paper().to_runtime_dict()
+        except Exception:
+            # Authority resolution must never change PAPER behavior.  Fall back
+            # to the legacy compatibility shim if resolution is unavailable.
+            return paper_calibration_for_mode(mode)
+
     def _synchronize_market_intelligence_for_safe_switch(
         self, symbol, runtime_id, snapshot,
     ):
@@ -4732,7 +4763,7 @@ class BotManager:
         self.state.strategy_state = {}
         self.state.execution_state = {}
         self.microstructure_builder = MicrostructureStateBuilder(
-            parameter_set=paper_calibration_for_mode(
+            parameter_set=self._resolve_microstructure_parameter_set(
                 self.config.get("mode")
             )
         )
@@ -5140,10 +5171,10 @@ class BotManager:
             config = self.config
 
             # A fresh causal history is owned by this runtime/symbol.  Only
-            # Paper receives the normalized calibration; Live keeps legacy
-            # defaults because paper_calibration_for_mode returns None.
+            # Paper receives the canonical normalized parameter authority;
+            # Live keeps legacy defaults because the resolver returns None.
             self.microstructure_builder = MicrostructureStateBuilder(
-                parameter_set=paper_calibration_for_mode(
+                parameter_set=self._resolve_microstructure_parameter_set(
                     config.get("mode")
                 )
             )
