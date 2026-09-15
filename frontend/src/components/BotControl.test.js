@@ -161,6 +161,8 @@ const loadBotControl = async () => {
                 "  loopStop: () => '/api/bot/loop/stop',",
                 "  liveOrderEntryArm: () => '/api/bot/live-order-entry/arm',",
                 "  liveOrderEntryDisarm: () => '/api/bot/live-order-entry/disarm',",
+                "  botControl: () => '/api/bot/control',",
+                "  botManualTrade: () => '/api/bot/manual-trade',",
                 "};",
             ].join("\n"),
         );
@@ -2346,6 +2348,164 @@ test("LIVE DISARMED modal cancel sends no START", async () => {
         await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
         await clickAndRender(renderer, findButton(renderer.root, "キャンセル"));
         assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+// Work D: EXECUTION CONTROL and MANUAL BUY/SELL must use the existing
+// authenticated authoritative routes and must never fake success.
+test("Work D: EXECUTION CONTROL switch posts to the authenticated control route", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/control") {
+            return jsonResponse({
+                body: {
+                    success: true,
+                    controlAuthority: "MANUAL",
+                    controlRevision: 1,
+                    execution_enabled: false,
+                },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT" }));
+        const manualOption = findGroupButton(
+            renderer.root,
+            "Execution control authority",
+            "MANUAL",
+        );
+        assert.ok(manualOption, "MANUAL selector present");
+        await clickAndRender(renderer, manualOption);
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/control");
+        assert.equal(mock.requests[0].options.method, "POST");
+        assert.equal(JSON.parse(mock.requests[0].options.body).authority, "MANUAL");
+    } finally {
+        mock.restore();
+    }
+});
+
+test("Work D: denied EXECUTION CONTROL switch keeps authoritative state and shows the reason", async () => {
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/control") {
+            return jsonResponse({
+                ok: false,
+                status: 409,
+                body: { detail: { reason: "POSITION_OPEN" } },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT" }));
+        await clickAndRender(
+            renderer,
+            findGroupButton(renderer.root, "Execution control authority", "MANUAL"),
+        );
+        renderer.render();
+        assert.equal(textIncludes(renderer.root, "POSITION_OPEN"), true);
+        // The authoritative prop still reports BOT; the UI must not fake MANUAL.
+        assert.equal(textIncludes(renderer.root, "BOT TRADING ACTIVE"), true);
+        assert.equal(textIncludes(renderer.root, "MANUAL TRADING LOCKED"), true);
+    } finally {
+        mock.restore();
+    }
+});
+
+test("Work D: MANUAL BUY posts to the authenticated manual-trade route", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({
+                body: {
+                    success: true,
+                    action: "BUY",
+                    operation: "ENTRY_LONG",
+                    position: "LONG",
+                },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/manual-trade");
+        assert.equal(mock.requests[0].options.method, "POST");
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.action, "BUY");
+        assert.equal(payload.expectedMode, "paper");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D: MANUAL SELL posts to the authenticated manual-trade route", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({
+                body: {
+                    success: true,
+                    action: "SELL",
+                    operation: "ENTRY_SHORT",
+                    position: "SHORT",
+                },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "SELL / SHORT"));
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/manual-trade");
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.action, "SELL");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D: failed manual trade response never fakes success", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({
+                ok: false,
+                status: 409,
+                body: { detail: { reason: "MANUAL_CONTROL_NOT_ACTIVE" } },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        renderer.render();
+        assert.equal(textIncludes(renderer.root, "MANUAL_CONTROL_NOT_ACTIVE"), true);
+        assert.equal(textIncludes(renderer.root, "MANUAL POSITION LONG"), false);
     } finally {
         clearMmStatus();
         clearMmConfiguration();

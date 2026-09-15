@@ -1863,3 +1863,120 @@ test("D4: PENDING order locks BUY and SELL", async () => {
     assert.equal(content.includes("MANUAL POSITION PENDING"), true);
 });
 
+// Work D: EXECUTION CONTROL / 実行操作 and the BOT/MANUAL panels must be part
+// of the always-visible operation area, not hidden behind the collapsible
+// TRADE SETTINGS disclosure. The backend remains the authority owner.
+const executionControlOptions = (root) => {
+    const group = descendants(root).find(
+        (node) => node.props?.["aria-label"] === "Execution control authority"
+            && node.props?.role === "group",
+    );
+    assert.ok(group, "EXECUTION CONTROL segmented group present");
+    return descendants(group).filter((node) => node.type === "button");
+};
+
+test("Work D: EXECUTION CONTROL renders BOT/MANUAL selectors with both panels visible", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({ controlAuthority: "BOT" }));
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("EXECUTION CONTROL / 実行操作"), true);
+    const options = executionControlOptions(renderer.root);
+    assert.deepEqual(options.map(normalizedText), ["BOT", "MANUAL"]);
+    assert.ok(findTestId(renderer.root, "bot-trading-panel"), "BOT panel visible");
+    assert.ok(findTestId(renderer.root, "manual-trading-panel"), "MANUAL panel visible");
+    assert.ok(findTestId(renderer.root, "manual-trade-buttons"), "BUY/SELL visible");
+});
+
+test("Work D: EXECUTION CONTROL selection invokes the authoritative control handler", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        handleExecutionControlChange: (authority) => calls.push(authority),
+    }));
+    const options = executionControlOptions(renderer.root);
+    options.find((button) => normalizedText(button) === "MANUAL").props.onClick();
+    assert.deepEqual(calls, ["MANUAL"]);
+});
+
+test("Work D: BOT authority locks and dims MANUAL panel and disables BUY/SELL", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({ controlAuthority: "BOT" }));
+    const botPanel = findTestId(renderer.root, "bot-trading-panel");
+    const manualPanel = findTestId(renderer.root, "manual-trading-panel");
+    assert.equal(String(botPanel.props.className).includes("is-active"), true);
+    assert.equal(String(manualPanel.props.className).includes("is-locked"), true);
+    assert.equal(normalizedText(findTestId(renderer.root, "bot-trading-state")), "ACTIVE");
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-trading-state")), "LOCKED");
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+});
+
+test("Work D: MANUAL authority activates MANUAL panel, dims BOT, and enables FLAT BUY/SELL", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+    }));
+    const botPanel = findTestId(renderer.root, "bot-trading-panel");
+    const manualPanel = findTestId(renderer.root, "manual-trading-panel");
+    assert.equal(String(manualPanel.props.className).includes("is-active"), true);
+    assert.equal(String(botPanel.props.className).includes("is-locked"), true);
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-trading-state")), "ACTIVE");
+    assert.equal(normalizedText(findTestId(renderer.root, "bot-trading-state")), "LOCKED");
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, false);
+    assert.equal(buttons[1].props.disabled, false);
+});
+
+test("Work D: MANUAL panel displays the canonical runtime active symbol", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        activeSymbol: "ETHUSDTM",
+        config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+    }));
+    const panel = normalizedText(descendants(findTestId(renderer.root, "manual-trading-panel")));
+    assert.equal(panel.includes("ACTIVE SYMBOL ETHUSDTM"), true);
+    assert.equal(panel.includes("XRPUSDTM"), false, "must not hard-code the configured symbol");
+});
+
+test("Work D: MANUAL panel fails closed when no canonical symbol is available", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        config: { mode: "PAPER", selectionMode: "MANUAL" },
+    }));
+    const panel = normalizedText(descendants(findTestId(renderer.root, "manual-trading-panel")));
+    assert.equal(panel.includes("ACTIVE SYMBOL NOT AVAILABLE"), true);
+});
+
+test("Work D: MANUAL BUY and SELL invoke the existing manual trade handler", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    buttons[0].props.onClick();
+    buttons[1].props.onClick();
+    assert.deepEqual(calls, ["BUY", "SELL"]);
+});
+
+test("Work D: Emergency Lock prevents manual order operation", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        emergencyState: "LOCKED",
+        emergencyLocked: true,
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+    assert.ok(findTestId(renderer.root, "manual-emergency-lock"));
+});
+

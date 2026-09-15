@@ -442,6 +442,63 @@
     filter: brightness(1.15);
 }
 
+/* EXECUTION CONTROL / 実行操作 — always-visible BOT/MANUAL authority block.
+   The non-selected panel is dimmed (presentation only); the backend remains
+   the authoritative control owner. */
+.operation-execution-authority {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.operation-authority-panel {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid #243149;
+    border-radius: 4px;
+    background: #0b101a;
+    box-sizing: border-box;
+    transition: opacity .15s ease;
+}
+
+.operation-authority-panel--bot {
+    border-color: rgba(63, 212, 139, .3);
+}
+
+.operation-authority-panel--manual {
+    border-color: rgba(90, 150, 240, .35);
+}
+
+.operation-authority-panel.is-locked {
+    opacity: .45;
+}
+
+.operation-authority-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    color: #9badc6;
+}
+
+.operation-authority-panel__header strong {
+    font-family: var(--operation-font-mono);
+    font-size: 10px;
+    line-height: 1.1;
+}
+
+.operation-authority-panel__header strong.is-active {
+    color: #3fd48b;
+}
+
+.operation-authority-panel__header strong.is-locked {
+    color: #ff7272;
+}
+
 .operation-prep-derived-row {
     display: grid;
     grid-template-columns: minmax(auto, 1fr) minmax(auto, 1fr);

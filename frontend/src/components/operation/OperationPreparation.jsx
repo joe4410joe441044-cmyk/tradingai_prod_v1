@@ -138,6 +138,7 @@ export default function OperationPreparation({
     manualTradePending = false,
     manualTradeError = null,
     handleManualTrade = () => {},
+    activeSymbol,
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
@@ -408,18 +409,31 @@ export default function OperationPreparation({
     const manualPositionUnknown = manualPositionState === "UNKNOWN";
     const manualPendingState = Boolean(pendingOrder);
     const manualControlActive = controlAuthority === "MANUAL";
+    // Emergency authority sits above BOT and MANUAL. When Emergency Lock is
+    // active the Manual panel must fail closed: BUY and SELL are disabled and
+    // the backend remains the final authority for the actual deny.
+    const manualEmergencyLocked = resolvedEmergencyLocked === true;
     const manualBusy = manualTradePending || controlPending;
     const manualBuyLocked = (
         !manualControlActive
+        || manualEmergencyLocked
         || manualPendingState
         || manualPositionUnknown
         || manualPositionState === "LONG"
     );
     const manualSellLocked = (
         !manualControlActive
+        || manualEmergencyLocked
         || manualPendingState
         || manualPositionUnknown
         || manualPositionState === "SHORT"
+    );
+    // Canonical runtime active symbol authority. The Dashboard passes the
+    // authoritative runtime symbol; config.displaySymbol is the existing
+    // presentation fallback. Never hard-code an execution symbol here.
+    const manualActiveSymbol = (
+        String(activeSymbol || config?.displaySymbol || "").trim()
+        || "NOT AVAILABLE"
     );
     const manualBuyLabel = (
         manualPositionState === "SHORT"
@@ -727,40 +741,7 @@ return (
                         <SelectField disabled={controlsDisabled} id="operation-prep-timeframe" label="Timeframe（時間足）" onChange={(value) => changeSetting("timeframe", value)} options={OPERATION_PREPARATION_OPTIONS.timeframes} value={settings.timeframe} />
                         <DerivedRow hideSource label="Execution（執行）" source={executionSource} value={executionMode} />
                         <DerivedRow hideSource label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
-                        <span className="operation-prep-label">EXECUTION CONTROL / 実行操作</span>
-                        <SegmentedControl
-                            disabled={controlPending}
-                            label="Execution control authority"
-                            onChange={handleExecutionControlChange}
-                            options={["BOT", "MANUAL"]}
-                            value={controlAuthority}
-                        />
-                        <div className="operation-prep-derived-list">
-                            <DerivedRow hideSource label="BOT TRADING" source="RUNTIME" status value={controlAuthority === "BOT" ? "ACTIVE" : "LOCKED"} />
-                            <DerivedRow hideSource label="MANUAL TRADING" source="RUNTIME" status value={controlAuthority === "MANUAL" ? "ACTIVE" : "LOCKED"} />
-                            <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
-                        </div>
-                        <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">
-                            <button
-                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--buy"
-                                disabled={manualBuyLocked || manualBusy}
-                                onClick={() => handleManualTrade("BUY")}
-                                type="button"
-                            >
-                                {manualBuyLabel}
-                            </button>
-                            <button
-                                className="operation-prep-manual-trade__button operation-prep-manual-trade__button--sell"
-                                disabled={manualSellLocked || manualBusy}
-                                onClick={() => handleManualTrade("SELL")}
-                                type="button"
-                            >
-                                {manualSellLabel}
-                            </button>
-                        </div>
-                        {manualTradePending && <p className="operation-prep-note" role="status">REQUESTING…</p>}
-                        {manualTradeError && <p className="operation-prep-error" role="alert">{manualTradeError}</p>}
-                        {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
+                        <DerivedRow hideSource label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
                     </Section>
 
                     <Section bodyClassName="operation-prep-section__body--automation" number="5" testId="automation-section" title="AUTOMATION（自動化）">
@@ -958,6 +939,75 @@ return (
                         </div>
                     </div>
                     <div className="operation-start-controls">
+                        <div className="operation-execution-authority" data-testid="execution-control">
+                            <span className="operation-prep-label">EXECUTION CONTROL / 実行操作</span>
+                            <SegmentedControl
+                                disabled={controlPending}
+                                label="Execution control authority"
+                                onChange={handleExecutionControlChange}
+                                options={["BOT", "MANUAL"]}
+                                value={controlAuthority}
+                            />
+                            {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
+                            <div
+                                className={
+                                    "operation-authority-panel operation-authority-panel--bot"
+                                    + (manualControlActive ? " is-locked" : " is-active")
+                                }
+                                data-testid="bot-trading-panel"
+                            >
+                                <div className="operation-authority-panel__header">
+                                    <span>BOT TRADING</span>
+                                    <strong className={manualControlActive ? "is-locked" : "is-active"} data-testid="bot-trading-state">
+                                        {manualControlActive ? "LOCKED" : "ACTIVE"}
+                                    </strong>
+                                </div>
+                                {children}
+                            </div>
+                            <div
+                                className={
+                                    "operation-authority-panel operation-authority-panel--manual"
+                                    + (manualControlActive ? " is-active" : " is-locked")
+                                }
+                                data-testid="manual-trading-panel"
+                            >
+                                <div className="operation-authority-panel__header">
+                                    <span>MANUAL TRADING</span>
+                                    <strong className={manualControlActive ? "is-active" : "is-locked"} data-testid="manual-trading-state">
+                                        {manualControlActive ? "ACTIVE" : "LOCKED"}
+                                    </strong>
+                                </div>
+                                <div className="operation-prep-derived-list">
+                                    <DerivedRow hideSource label="ACTIVE SYMBOL" source="RUNTIME" value={manualActiveSymbol} />
+                                    <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
+                                </div>
+                                <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">
+                                    <button
+                                        className="operation-prep-manual-trade__button operation-prep-manual-trade__button--buy"
+                                        disabled={manualBuyLocked || manualBusy}
+                                        onClick={() => handleManualTrade("BUY")}
+                                        type="button"
+                                    >
+                                        {manualBuyLabel}
+                                    </button>
+                                    <button
+                                        className="operation-prep-manual-trade__button operation-prep-manual-trade__button--sell"
+                                        disabled={manualSellLocked || manualBusy}
+                                        onClick={() => handleManualTrade("SELL")}
+                                        type="button"
+                                    >
+                                        {manualSellLabel}
+                                    </button>
+                                </div>
+                                {manualEmergencyLocked && (
+                                    <p className="operation-prep-note" role="status" data-testid="manual-emergency-lock">
+                                        EMERGENCY LOCK — manual orders disabled（緊急停止中は手動注文不可）
+                                    </p>
+                                )}
+                                {manualTradePending && <p className="operation-prep-note" role="status">REQUESTING…</p>}
+                                {manualTradeError && <p className="operation-prep-error" role="alert">{manualTradeError}</p>}
+                            </div>
+                        </div>
                         <div className="operation-prep-start operation-prep-start--right" data-testid="ready-to-start">
                             {botRunning ? (
                                 <div><span className="operation-prep-status operation-prep-status--running"><i aria-hidden="true" /></span><strong>N/A — BOT ALREADY RUNNING / 実行中 — START判定対象外</strong></div>
@@ -990,7 +1040,6 @@ return (
                         {botRunning ? null : (
                             <small>Runtime guards remain authoritative. Preview settings are not sent to execution.</small>
                         )}
-                        {children}
                     </div>
                 </div>
             </div>

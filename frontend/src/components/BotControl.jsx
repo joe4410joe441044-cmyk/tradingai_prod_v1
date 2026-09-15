@@ -1274,6 +1274,18 @@ export default function BotControl({
         controlAuthority || "BOT"
     ).trim().toUpperCase();
 
+    // The manual-trade stale-intent guard compares against the canonical
+    // runtime trade mode (paper / live). The UI execution label (SIMULATION /
+    // REAL) is presentation only and must never be sent as the mode.
+    const manualExpectedMode = (() => {
+        const candidate = String(
+            config?.tradeMode || executionMode || ""
+        ).trim().toLowerCase();
+        return candidate === "paper" || candidate === "live"
+            ? candidate
+            : undefined;
+    })();
+
     const handleExecutionControlChange = async (
         nextAuthority
     ) => {
@@ -1403,7 +1415,7 @@ export default function BotControl({
                                 : undefined
                         ),
                         expectedSymbol: activeSymbol || undefined,
-                        expectedMode: executionMode || undefined,
+                        expectedMode: manualExpectedMode,
                         expectedPositionId: positionId,
                     }),
                 }
@@ -1639,6 +1651,7 @@ export default function BotControl({
                 manualTradePending={manualTradePending}
                 manualTradeError={manualTradeError}
                 handleManualTrade={handleManualTrade}
+                activeSymbol={activeSymbol}
                 mmDraft={mmDraft}
                 mmConfiguration={effectiveMmConfiguration}
                 mmDraftInvalid={mmDraftInvalid}
