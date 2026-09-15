@@ -64,6 +64,14 @@ class MicrostructureStateBuilder:
             isinstance(self.parameter_set, dict)
             and self.parameter_set.get("scope") == "PAPER_ONLY"
         )
+        # E-PARAM-3: a LIVE canonical authority keeps the legacy callback-window
+        # detector contract (no normalized features) but publishes the resolved
+        # canonical LIVE parameters as the runtime parameterAuthority so the
+        # strategy gates read the canonical snapshot instead of class constants.
+        self.live_parameters_enabled = (
+            isinstance(self.parameter_set, dict)
+            and self.parameter_set.get("scope") == "LIVE_ONLY"
+        )
         volume_window_size = int(parameter_value(
             self.parameter_set,
             "volumeWindowSize",
@@ -1488,10 +1496,13 @@ class MicrostructureStateBuilder:
                 sell_pressure,
                 price_delta,
             )
-            parameter_authority = {
-                "source": "MicrostructureStateBuilder",
-                "kind": "classConstant",
-            }
+            if self.live_parameters_enabled:
+                parameter_authority = deepcopy(self.parameter_set)
+            else:
+                parameter_authority = {
+                    "source": "MicrostructureStateBuilder",
+                    "kind": "classConstant",
+                }
             detector_details = {
                 "absorption": {
                     "observedTotalVolume": total_volume,

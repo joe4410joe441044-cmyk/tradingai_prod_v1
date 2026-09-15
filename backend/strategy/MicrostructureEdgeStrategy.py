@@ -150,6 +150,70 @@ class MicrostructureEdgeStrategy:
             None,
         ) == "TIME_SYMBOL_NORMALIZED_V1"
 
+    # --------------------------------------------------------
+    # Canonical parameter authority (E-PARAM-3)
+    # --------------------------------------------------------
+    #
+    # Strategy gates and the Cycle 10 exit thresholds read their value from the
+    # canonical runtime snapshot when one is present.  PAPER and LIVE scopes are
+    # read explicitly; the class constants remain the observable fallback so a
+    # missing authority cannot change behavior.
+    STRATEGY_PARAMETER_SCOPES = ("PAPER_ONLY", "LIVE_ONLY")
+
+    @classmethod
+    def _strategy_parameter(cls, authority, name, default):
+        return parameter_value(
+            authority, name, default, scopes=cls.STRATEGY_PARAMETER_SCOPES
+        )
+
+    @staticmethod
+    def _entry_parameter_snapshot(position_info):
+        """Return the strategy parameter snapshot captured for this position."""
+
+        if isinstance(position_info, dict):
+            snapshot = position_info.get("parameterSnapshot")
+            if isinstance(snapshot, dict):
+                return snapshot
+        return None
+
+    def _exit_parameter_authority(self, microstructure_state, position_info):
+        """Snapshot-at-entry wins over the current cycle's authority."""
+
+        snapshot = self._entry_parameter_snapshot(position_info)
+        if snapshot is not None:
+            return snapshot
+        if isinstance(microstructure_state, dict):
+            authority = microstructure_state.get("parameterAuthority")
+            if isinstance(authority, dict):
+                return authority
+        return None
+
+    def _exit_thresholds(self, microstructure_state, position_info):
+        authority = self._exit_parameter_authority(
+            microstructure_state, position_info
+        )
+        return {
+            "minimumHoldMs": self._strategy_parameter(
+                authority, "minimumHoldMs", self.MIN_HOLD_MS
+            ),
+            "maximumHoldMs": self._strategy_parameter(
+                authority, "maximumHoldMs", self.MAX_HOLD_MS
+            ),
+            "exitMomentumMinimum": self._strategy_parameter(
+                authority, "exitMomentumMinimum", self.EXIT_MOMENTUM_MIN
+            ),
+            "exitLiquidityQualityMinimum": self._strategy_parameter(
+                authority,
+                "exitLiquidityQualityMinimum",
+                self.EXIT_LIQUIDITY_QUALITY_MIN,
+            ),
+            "exitSpreadQualityMinimum": self._strategy_parameter(
+                authority,
+                "exitSpreadQualityMinimum",
+                self.EXIT_SPREAD_QUALITY_MIN,
+            ),
+        }
+
     # ============================================================
     # EDGE SCORE
     # ============================================================
@@ -1326,8 +1390,12 @@ class MicrostructureEdgeStrategy:
         # --------------------------------------------------------
         # Deterministic exit evaluation
         # --------------------------------------------------------
+        thresholds = self._exit_thresholds(
+            microstructure_state, position_info
+        )
         exit_reason = self._evaluate_exit_conditions(
             microstructure_state, position_side, holding_duration_ms, symbol,
+            thresholds,
         )
         if isinstance(exit_reason, self.ExitReason):
             exit_reason = exit_reason.value
@@ -1384,6 +1452,7 @@ class MicrostructureEdgeStrategy:
         position_side,
         holding_duration_ms,
         symbol,
+        thresholds=None,
     ):
         """
         Deterministic exit priority (highest first).  Generic SL/TP remain
@@ -1396,7 +1465,15 @@ class MicrostructureEdgeStrategy:
         4. Momentum decay              (side-aware, gated by MIN_HOLD_MS)
         5. Max hold                    (hard holding-time bound)
         6. HOLD
+
+        ``thresholds`` is the strategy exit snapshot captured at entry; when
+        omitted it falls back to the current authority / class constants.
         """
+
+        if thresholds is None:
+            thresholds = self._exit_thresholds(microstructure_state, None)
+        minimum_hold_ms = thresholds["minimumHoldMs"]
+        maximum_hold_ms = thresholds["maximumHoldMs"]
 
         normalized_contract = self._uses_normalized_feature_contract(
             microstructure_state
@@ -1409,10 +1486,10 @@ class MicrostructureEdgeStrategy:
             return reversal_reason
 
         # Evaluate liquidity condition
-        liquidity_condition_met = bool(self._evaluate_liquidity_deterioration(microstructure_state, normalized_contract))
+        liquidity_condition_met = bool(self._evaluate_liquidity_deterioration(microstructure_state, normalized_contract, thresholds))
         liquidity_reason = None
         if liquidity_condition_met:
-            if holding_duration_ms < self.MIN_HOLD_MS:
+            if holding_duration_ms < minimum_hold_ms:
                 # Early exit: need confirmation
                 count = self._update_confirmation_state(
                     symbol, self.ExitReason.LIQUIDITY_DETERIORATION, condition_met=True
@@ -1424,10 +1501,10 @@ class MicrostructureEdgeStrategy:
                 liquidity_reason = self.ExitReason.LIQUIDITY_DETERIORATION
 
         # Evaluate spread condition
-        spread_condition_met = bool(self._evaluate_spread_deterioration(microstructure_state, normalized_contract))
+        spread_condition_met = bool(self._evaluate_spread_deterioration(microstructure_state, normalized_contract, thresholds))
         spread_reason = None
         if spread_condition_met and not liquidity_reason:
-            if holding_duration_ms < self.MIN_HOLD_MS:
+            if holding_duration_ms < minimum_hold_ms:
                 # Early exit: need confirmation
                 count = self._update_confirmation_state(
                     symbol, self.ExitReason.SPREAD_DIVERGENCE, condition_met=True
@@ -1446,14 +1523,15 @@ class MicrostructureEdgeStrategy:
             state = self._get_confirmation_state(symbol)
             state["spread_divergence"]["count"] = 0
 
-        if holding_duration_ms >= self.MIN_HOLD_MS:
+        if holding_duration_ms >= minimum_hold_ms:
             momentum_reason = self._evaluate_momentum_decay(
                 microstructure_state, position_side, normalized_contract,
+                thresholds,
             )
             if momentum_reason:
                 return momentum_reason
 
-        if holding_duration_ms >= self.MAX_HOLD_MS:
+        if holding_duration_ms >= maximum_hold_ms:
             return self.ExitReason.MAX_HOLD
 
 
@@ -1493,8 +1571,15 @@ class MicrostructureEdgeStrategy:
         self,
         microstructure_state,
         normalized_contract,
+        thresholds=None,
     ):
         """Unsafe liquidity (formal authority) or weak liquidity quality."""
+
+        threshold = (
+            self.EXIT_LIQUIDITY_QUALITY_MIN
+            if thresholds is None
+            else thresholds["exitLiquidityQualityMinimum"]
+        )
 
         liquidity_result = self.evaluate_liquidity_safety(
             microstructure_state
@@ -1507,10 +1592,10 @@ class MicrostructureEdgeStrategy:
                 "normalizedLiquidityQuality"
                 if normalized_contract
                 else "liquidityQuality",
-                self.EXIT_LIQUIDITY_QUALITY_MIN,
+                threshold,
             )
         )
-        if liquidity_quality < self.EXIT_LIQUIDITY_QUALITY_MIN:
+        if liquidity_quality < threshold:
             return self.ExitReason.LIQUIDITY_DETERIORATION
 
         return None
@@ -1519,8 +1604,15 @@ class MicrostructureEdgeStrategy:
         self,
         microstructure_state,
         normalized_contract,
+        thresholds=None,
     ):
         """Unsafe spread (formal authority) or divergent spread quality."""
+
+        threshold = (
+            self.EXIT_SPREAD_QUALITY_MIN
+            if thresholds is None
+            else thresholds["exitSpreadQualityMinimum"]
+        )
 
         spread_result = self.evaluate_spread_safety(
             microstructure_state
@@ -1533,10 +1625,10 @@ class MicrostructureEdgeStrategy:
                 "normalizedSpreadQuality"
                 if normalized_contract
                 else "spreadQuality",
-                self.EXIT_SPREAD_QUALITY_MIN,
+                threshold,
             )
         )
-        if spread_quality < self.EXIT_SPREAD_QUALITY_MIN:
+        if spread_quality < threshold:
             return self.ExitReason.SPREAD_DIVERGENCE
 
         return None
@@ -1546,8 +1638,15 @@ class MicrostructureEdgeStrategy:
         microstructure_state,
         position_side,
         normalized_contract,
+        thresholds=None,
     ):
         """Side-aware loss of the formal momentum evidence present at entry."""
+
+        threshold = (
+            self.EXIT_MOMENTUM_MIN
+            if thresholds is None
+            else thresholds["exitMomentumMinimum"]
+        )
 
         momentum_score = float(
             microstructure_state.get(
@@ -1573,7 +1672,7 @@ class MicrostructureEdgeStrategy:
             if not momentum_result.get("momentumValid", False):
                 return self.ExitReason.MOMENTUM_DECAY
 
-        if momentum_score < self.EXIT_MOMENTUM_MIN:
+        if momentum_score < threshold:
             return self.ExitReason.MOMENTUM_DECAY
 
         return None
@@ -1593,12 +1692,12 @@ class MicrostructureEdgeStrategy:
                 microstructure_state
             )
 
-            minimum_confidence = float(parameter_value(
+            minimum_confidence = float(self._strategy_parameter(
                 microstructure_state.get("parameterAuthority"),
                 "minimumStrategyConfidence",
                 self.MIN_CONFIDENCE,
             ))
-            minimum_composite_score = float(parameter_value(
+            minimum_composite_score = float(self._strategy_parameter(
                 microstructure_state.get("parameterAuthority"),
                 "minimumCompositeScore",
                 self.MIN_EDGE_SCORE,
