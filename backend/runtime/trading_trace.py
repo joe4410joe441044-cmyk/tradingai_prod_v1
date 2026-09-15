@@ -89,27 +89,47 @@ def strategy_decision_snapshot(strategy_state: Mapping[str, Any]) -> dict[str, A
     if pressure_difference is None and buy_pressure is not None and sell_pressure is not None:
         pressure_difference = abs(float(buy_pressure) - float(sell_pressure))
 
-    parameter_authority = debug.get("parameterAuthority")
+    raw_parameter_authority = debug.get("parameterAuthority")
+    parameter_authority = raw_parameter_authority
     if (
-        isinstance(parameter_authority, Mapping)
-        and parameter_authority.get("scope") == "PAPER_ONLY"
+        isinstance(raw_parameter_authority, Mapping)
+        and raw_parameter_authority.get("scope") == "PAPER_ONLY"
     ):
         parameter_authority = {
-            "schemaVersion": parameter_authority.get("schemaVersion"),
-            "calibrationId": parameter_authority.get("calibrationId"),
-            "scope": parameter_authority.get("scope"),
-            "authority": parameter_authority.get("authority"),
+            "schemaVersion": raw_parameter_authority.get("schemaVersion"),
+            "calibrationId": raw_parameter_authority.get("calibrationId"),
+            "scope": raw_parameter_authority.get("scope"),
+            "authority": raw_parameter_authority.get("authority"),
             "parameters": {
                 str(name): {
                     "value": item.get("value"),
                     "unit": item.get("unit"),
                 }
                 for name, item in (
-                    parameter_authority.get("parameters") or {}
+                    raw_parameter_authority.get("parameters") or {}
                 ).items()
                 if isinstance(item, Mapping)
             },
         }
+        # Additive canonical authority metadata (E-PARAM-2).  Present only when
+        # the parameterAuthority came from the canonical resolver; legacy
+        # PAPER_ONLY dicts keep the original trace shape.
+        for canonical_key in (
+            "canonicalScope",
+            "parameterSetId",
+            "configuredRevision",
+            "effectiveRevision",
+            "source",
+            "featureContract",
+            "capturedAt",
+            "authorityStatus",
+            "storeStatus",
+            "parameterSetStatus",
+        ):
+            if canonical_key in raw_parameter_authority:
+                parameter_authority[canonical_key] = (
+                    raw_parameter_authority.get(canonical_key)
+                )
 
     return sanitize_metadata({
         "market": {
