@@ -44,11 +44,13 @@ def account(**changes):
 
 def test_verified_stopped_paper_rebuilds_only_current_live_disabled_reasons():
     result = derive_live_readiness(base(), account())
-    assert result["exchangeAuthReady"] and result["exchangeClientReady"]
+    assert result["exchangeAuthReady"]
+    assert not result["exchangeClientReady"]
     assert result["balanceCheckOk"] and result["positionCheckOk"]
     assert result["blockReasons"] == [
         "SELECTED_MODE_NOT_LIVE", "DRY_RUN_ACTIVE", "LIVE_NOT_ENABLED",
-        "TRADE_MODE_NOT_LIVE", "EXECUTION_DISABLED",
+        "TRADE_MODE_NOT_LIVE", "EXCHANGE_CLIENT_NOT_READY",
+        "EXECUTION_DISABLED",
     ]
     assert not result["ready"] and not result["realOrderAllowed"]
 
@@ -127,9 +129,18 @@ def test_current_account_authority_overrides_stale_positive_checks():
         ),
     )
     assert "KUCOIN_CREDENTIALS_MISSING" in result["blockReasons"]
-    assert "EXCHANGE_CLIENT_NOT_READY" in result["blockReasons"]
+    assert "EXCHANGE_CLIENT_NOT_READY" not in result["blockReasons"]
     assert "BALANCE_CHECK_FAILED" in result["blockReasons"]
     assert "POSITION_CHECK_FAILED" in result["blockReasons"]
+
+
+def test_paper_engine_without_exchange_client_never_reports_client_ready():
+    source = base()
+    source["selectedMode"] = "PAPER"
+    source["dryRun"] = True
+    result = derive_live_readiness(source, account())
+    assert result["exchangeClientReady"] is False
+    assert "EXCHANGE_CLIENT_NOT_READY" in result["blockReasons"]
 
 
 def test_real_live_account_source_and_mapping_pending_state_are_supported():

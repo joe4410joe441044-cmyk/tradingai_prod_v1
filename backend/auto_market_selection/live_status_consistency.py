@@ -40,7 +40,6 @@ def derive_live_readiness(readiness, real_account=None, *, reported_reasons=None
         and account.get("apiKeyStatus", "VERIFIED") == "VERIFIED"
         and account.get("credentialValid", True) is True
     )
-    connected = bool(account.get("connected"))
     fresh = account.get("stale") is False
     balance_valid = bool(
         fresh
@@ -55,7 +54,7 @@ def derive_live_readiness(readiness, real_account=None, *, reported_reasons=None
     )
     checks.update({
         "exchangeAuthReady": authenticated if has_account_authority else bool(checks.get("exchangeAuthReady")),
-        "exchangeClientReady": connected if has_account_authority else bool(checks.get("exchangeClientReady")),
+        "exchangeClientReady": bool(checks.get("exchangeClientReady")),
         "balanceCheckOk": balance_valid if has_account_authority else bool(checks.get("balanceCheckOk")),
         "positionCheckOk": position_valid if has_account_authority else bool(checks.get("positionCheckOk")),
     })
