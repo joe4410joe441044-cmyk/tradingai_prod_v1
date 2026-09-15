@@ -490,11 +490,23 @@ class ExecutionRuntime:
         )
 
         minimum_confidence = 0.60
-        if str(getattr(self.engine, "mode", "")).strip().lower() == "paper":
+        execution_mode = str(getattr(self.engine, "mode", "")).strip().lower()
+        parameter_authority = strategy_state.get("parameterAuthority")
+        if execution_mode == "paper":
             minimum_confidence = float(parameter_value(
-                strategy_state.get("parameterAuthority"),
+                parameter_authority,
                 "minimumStrategyConfidence",
                 minimum_confidence,
+            ))
+        elif execution_mode == "live":
+            # E-PARAM-3: LIVE reads only the isolated canonical LIVE authority
+            # while preserving the existing 0.60 floor exactly.  A missing or
+            # PAPER-scoped authority keeps the legacy default.
+            minimum_confidence = float(parameter_value(
+                parameter_authority,
+                "minimumStrategyConfidence",
+                minimum_confidence,
+                scopes=("LIVE_ONLY",),
             ))
 
         if confidence < minimum_confidence:
@@ -587,6 +599,25 @@ class ExecutionRuntime:
 
         return execution_event
 
+    def _bind_entry_parameter_snapshot(self, strategy_state):
+        """Bind the entry decision's canonical snapshot to the open position.
+
+        Snapshot-at-entry: the strategy exit evaluator must keep using the
+        parameter revision captured for this trading decision even after the
+        configured/effective revision advances.  This records metadata only on
+        the engine's own position dict; it does not alter execution authority
+        and never changes a quantity or an order.
+        """
+
+        if not self.handoff_executed:
+            return
+        position = getattr(self.engine, "actual_position", None)
+        if not isinstance(position, dict):
+            return
+        snapshot = (strategy_state or {}).get("parameterAuthority")
+        if not isinstance(snapshot, dict):
+            return
+        position.setdefault("parameter_snapshot", dict(snapshot))
 
     # ========================================================
     # SUPPRESSION EVENT
@@ -1154,6 +1185,7 @@ class ExecutionRuntime:
                 canonical_direction,
                 trace_id=trace_id,
             )
+            self._bind_entry_parameter_snapshot(strategy_state)
             if not self.handoff_executed:
                 clear_preflight()
 

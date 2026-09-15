@@ -127,12 +127,17 @@ def paper_calibration_for_mode(mode):
     return deepcopy(PAPER_NORMALIZED_CALIBRATION)
 
 
-def parameter_value(parameter_set, name, default):
-    """Read a calibrated value only from the explicitly Paper-scoped authority."""
+def parameter_value(parameter_set, name, default, scopes=("PAPER_ONLY",)):
+    """Read a calibrated value only from an explicitly allowed scope.
+
+    The default remains PAPER_ONLY so legacy PAPER consumers are unchanged.
+    E-PARAM-3 callers that own a LIVE runtime authority must opt in explicitly
+    with ``scopes=("PAPER_ONLY", "LIVE_ONLY")`` or ``scopes=("LIVE_ONLY",)``.
+    """
 
     if not isinstance(parameter_set, dict):
         return default
-    if parameter_set.get("scope") != "PAPER_ONLY":
+    if parameter_set.get("scope") not in scopes:
         return default
     parameters = parameter_set.get("parameters")
     if not isinstance(parameters, dict):

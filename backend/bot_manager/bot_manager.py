@@ -4704,31 +4704,70 @@ class BotManager:
         self.orderbook_symbol = exchange_symbol
         return True
 
-    def _resolve_microstructure_parameter_set(self, mode):
-        """Resolve the PAPER parameter authority into the runtime contract.
+    def _canonical_parameter_resolver_instance(self):
+        resolver = getattr(self, "_canonical_parameter_resolver", None)
+        if resolver is None:
+            from backend.strategy.parameters.resolver import (
+                CanonicalParameterResolver,
+            )
 
-        PAPER obtains its parameterAuthority from the canonical resolver
-        (CONFIGURED -> EFFECTIVE -> immutable runtime snapshot).  LIVE keeps the
-        legacy path: the resolver is never consulted and ``None`` is returned so
-        ``MicrostructureStateBuilder`` uses its class-constant defaults.
+            resolver = CanonicalParameterResolver()
+            self._canonical_parameter_resolver = resolver
+        return resolver
+
+    def _resolve_microstructure_parameter_set(self, mode):
+        """Resolve the scope parameter authority into the runtime contract.
+
+        PAPER obtains its parameterAuthority from the canonical PAPER resolver
+        (CONFIGURED -> EFFECTIVE -> immutable runtime snapshot).  LIVE obtains
+        its own isolated canonical LIVE snapshot; the scopes never fall back to
+        one another.  Unknown modes keep the legacy class-constant defaults.
         """
 
-        if str(mode or "").strip().lower() != "paper":
-            return None
-        try:
-            resolver = self._canonical_parameter_resolver
-            if resolver is None:
-                from backend.strategy.parameters.resolver import (
-                    CanonicalParameterResolver,
-                )
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode == "paper":
+            try:
+                resolver = self._canonical_parameter_resolver_instance()
+                return resolver.resolve_paper().to_runtime_dict()
+            except Exception:
+                # Authority resolution must never change PAPER behavior.  Fall
+                # back to the legacy compatibility shim if unavailable.
+                return paper_calibration_for_mode(mode)
+        if normalized_mode == "live":
+            try:
+                resolver = self._canonical_parameter_resolver_instance()
+                return resolver.resolve_live().to_runtime_dict()
+            except Exception:
+                # LIVE fallback is the named class-constant baseline, which is
+                # behavior-equivalent to the legacy None/default path.
+                return None
+        return None
 
-                resolver = CanonicalParameterResolver()
-                self._canonical_parameter_resolver = resolver
-            return resolver.resolve_paper().to_runtime_dict()
-        except Exception:
-            # Authority resolution must never change PAPER behavior.  Fall back
-            # to the legacy compatibility shim if resolution is unavailable.
-            return paper_calibration_for_mode(mode)
+    def _build_snapshot_aware_exit_evaluator(self, evaluate_exit):
+        """Bind the entry parameter snapshot into the strategy exit evaluator.
+
+        ExecutionEngine already carries the entry snapshot on its own position
+        dict; this adapter copies it into ``position_info`` so the strategy's
+        snapshot-at-entry semantics apply without changing ExecutionEngine.
+        """
+
+        engine = self.engine
+
+        def _exit_evaluator(microstructure_state, position_info):
+            snapshot = None
+            actual_position = getattr(engine, "actual_position", None)
+            if isinstance(actual_position, dict):
+                snapshot = actual_position.get("parameter_snapshot")
+            if (
+                snapshot is not None
+                and isinstance(position_info, dict)
+                and "parameterSnapshot" not in position_info
+            ):
+                position_info = dict(position_info)
+                position_info["parameterSnapshot"] = snapshot
+            return evaluate_exit(microstructure_state, position_info)
+
+        return _exit_evaluator
 
     def _synchronize_market_intelligence_for_safe_switch(
         self, symbol, runtime_id, snapshot,
@@ -5290,7 +5329,14 @@ class BotManager:
                     None,
                 )
                 if callable(evaluate_exit):
-                    self.engine.set_exit_evaluator(evaluate_exit)
+                    # Snapshot-at-entry: forward the position's entry parameter
+                    # snapshot (bound by ExecutionRuntime at entry) to the
+                    # strategy exit evaluator without modifying ExecutionEngine.
+                    self.engine.set_exit_evaluator(
+                        self._build_snapshot_aware_exit_evaluator(
+                            evaluate_exit
+                        )
+                    )
 
             from backend.routers.positions import (
                 set_engine

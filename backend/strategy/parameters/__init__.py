@@ -32,6 +32,8 @@ from .registry import (
     ValueType,
 )
 from .resolver import (
+    LIVE_FEATURE_CONTRACT,
+    LIVE_RUNTIME_SCOPE,
     PAPER_RUNTIME_SCOPE,
     STRATEGY_PARAMETERS_DIR_ENV,
     CanonicalParameterResolver,
@@ -69,6 +71,8 @@ __all__ = [
     "LIVE_BASELINE_IMPERFECT_MAPPING_KEYS",
     "LIVE_BASELINE_NON_EQUIVALENT_KEYS",
     "LIVE_CLASS_CONSTANT_BASELINE",
+    "LIVE_FEATURE_CONTRACT",
+    "LIVE_RUNTIME_SCOPE",
     "MAX_FILE_SIZE",
     "MigrationBaseline",
     "PAPER_MIGRATION_BASELINE",
