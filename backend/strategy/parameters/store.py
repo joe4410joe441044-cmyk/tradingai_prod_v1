@@ -48,6 +48,7 @@ class StoreSaveStatus(str, Enum):
 class StoreFailureCode(str, Enum):
     INVALID_SET = "INVALID_SET"
     UNSUPPORTED_SCOPE = "UNSUPPORTED_SCOPE"
+    UNSAFE_VARIANT = "UNSAFE_VARIANT"
     UNSAFE_PATH = "UNSAFE_PATH"
     UNSAFE_FILE = "UNSAFE_FILE"
     TEMPORARY_FILE_EXISTS = "TEMPORARY_FILE_EXISTS"
@@ -196,12 +197,25 @@ def _ensure_scope_directory(base_directory: Path) -> Path:
     return directory
 
 
-def _filename(scope: ParameterScope) -> str:
-    return f"strategy-params__{scope.value}.json"
+def _filename(scope: ParameterScope, variant: Optional[str] = None) -> str:
+    suffix = f".{variant}" if variant else ""
+    return f"strategy-params__{scope.value}{suffix}.json"
 
 
-def _temp_filename(scope: ParameterScope) -> str:
-    return f".strategy-params__{scope.value}.json.tmp"
+def _temp_filename(scope: ParameterScope, variant: Optional[str] = None) -> str:
+    suffix = f".{variant}" if variant else ""
+    return f".strategy-params__{scope.value}{suffix}.json.tmp"
+
+
+def _normalize_variant(variant: Optional[str]) -> Optional[str]:
+    if variant is None:
+        return None
+    if not isinstance(variant, str) or not variant:
+        raise ValueError("variant must be a non-empty string")
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_"
+    if any(character not in allowed for character in variant):
+        raise ValueError("variant contains unsafe characters")
+    return variant
 
 
 class StrategyParameterStore:
@@ -214,17 +228,25 @@ class StrategyParameterStore:
     def base_directory(self) -> Path:
         return self._base_directory
 
-    def path_for(self, scope: Union[ParameterScope, str]) -> Path:
+    def path_for(
+        self,
+        scope: Union[ParameterScope, str],
+        variant: Optional[str] = None,
+    ) -> Path:
         resolved = _coerce_scope(scope)
         if resolved not in _SUPPORTED_SCOPES:
             raise ValueError(f"unsupported scope: {resolved.value}")
         return (
             self._base_directory
             / STORAGE_SUBDIRECTORY
-            / _filename(resolved)
+            / _filename(resolved, _normalize_variant(variant))
         )
 
-    def save(self, parameter_set: StrategyParameterSet) -> StoreSaveResult:
+    def save(
+        self,
+        parameter_set: StrategyParameterSet,
+        variant: Optional[str] = None,
+    ) -> StoreSaveResult:
         temp = None
         phase = "write"
         if not isinstance(parameter_set, StrategyParameterSet):
@@ -241,6 +263,14 @@ class StrategyParameterStore:
                 "unsupported scope",
             )
         try:
+            resolved_variant = _normalize_variant(variant)
+        except ValueError:
+            return StoreSaveResult(
+                StoreSaveStatus.FAILED,
+                StoreFailureCode.UNSAFE_VARIANT,
+                "unsafe variant",
+            )
+        try:
             try:
                 base = _safe_base(self._base_directory)
             except (ValueError, OSError):
@@ -250,8 +280,8 @@ class StrategyParameterStore:
                     "unsafe path",
                 )
             directory = _ensure_scope_directory(base)
-            target = directory / _filename(scope)
-            temp = directory / _temp_filename(scope)
+            target = directory / _filename(scope, resolved_variant)
+            temp = directory / _temp_filename(scope, resolved_variant)
             if target.exists() and (
                 target.is_symlink()
                 or not stat.S_ISREG(target.stat().st_mode)
@@ -327,7 +357,11 @@ class StrategyParameterStore:
                 except OSError:
                     pass
 
-    def load(self, scope: Union[ParameterScope, str]) -> StoreLoadResult:
+    def load(
+        self,
+        scope: Union[ParameterScope, str],
+        variant: Optional[str] = None,
+    ) -> StoreLoadResult:
         try:
             resolved = _coerce_scope(scope)
         except ValueError:
@@ -343,6 +377,15 @@ class StrategyParameterStore:
                 None,
                 "UNSUPPORTED_SCOPE",
                 "unsupported scope",
+            )
+        try:
+            resolved_variant = _normalize_variant(variant)
+        except ValueError:
+            return StoreLoadResult(
+                StoreLoadStatus.INVALID,
+                None,
+                "UNSAFE_VARIANT",
+                "unsafe variant",
             )
         try:
             base = _safe_base(self._base_directory)
@@ -361,7 +404,7 @@ class StrategyParameterStore:
                 "UNSAFE_FILE",
                 "unsafe directory",
             )
-        target = directory / _filename(resolved)
+        target = directory / _filename(resolved, resolved_variant)
         try:
             if not target.exists():
                 return StoreLoadResult(

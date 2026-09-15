@@ -676,6 +676,7 @@ if _auth_configured:
         "/api/bot/set_mode",
         "/api/bot/paper-account/capital",
         "/api/money-management/configuration",
+        "/api/parameter-settings/configuration",
         "/api/governance/mode",
         "/api/governance/execution",
         "/api/governance/risk-profile",
@@ -711,6 +712,10 @@ from backend.api import websocket as websocket_api
 from backend.api import result as result_api
 from backend.api.money_management import (
     router as money_management_router,
+)
+
+from backend.api.parameter_settings import (
+    router as parameter_settings_router,
 )
 
 from backend.api.trade_preview import (
@@ -756,6 +761,10 @@ app.include_router(
 
 app.include_router(
     money_management_router
+)
+
+app.include_router(
+    parameter_settings_router
 )
 
 app.include_router(

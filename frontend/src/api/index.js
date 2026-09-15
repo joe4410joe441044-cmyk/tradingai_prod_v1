@@ -138,6 +138,25 @@ export const API = {
     join("/money-management/history"),
 
   // ==========================
+  // PARAMETER SETTINGS
+  // ==========================
+
+  parameterSettingsSchema: () =>
+    join("/parameter-settings/schema"),
+
+  parameterSettingsConfiguration: () =>
+    join("/parameter-settings/configuration"),
+
+  parameterSettingsEffective: () =>
+    join("/parameter-settings/effective"),
+
+  parameterSettingsRuntime: () =>
+    join("/parameter-settings/runtime"),
+
+  parameterSettingsStatus: () =>
+    join("/parameter-settings/status"),
+
+  // ==========================
   // PNL
   // ==========================
 

@@ -3,8 +3,10 @@
 This package is the single canonical authority for strategy parameter values.
 E-PARAM-1 added the pure model, registry, validation, migration baselines and
 persistence store.  E-PARAM-2 adds the resolver/runtime snapshot that connects
-the PAPER scope to the Trading Cycle without changing PAPER behavior.  LIVE
-remains on its legacy runtime path.
+the PAPER scope to the Trading Cycle without changing PAPER behavior.  E-PARAM-3
+adds the isolated LIVE scope and the exit-threshold authority.  E-PARAM-4 adds
+the operator-facing settings service (single validated write path with
+optimistic concurrency) and the read-only observed runtime snapshot registry.
 """
 
 from .baselines import (
@@ -41,6 +43,20 @@ from .resolver import (
     RuntimeParameterSnapshot,
     default_runtime_base_directory,
 )
+from .runtime_registry import (
+    RuntimeParameterSnapshotRegistry,
+    default_runtime_snapshot_registry,
+    get_runtime_snapshot,
+    record_runtime_snapshot,
+    reset_runtime_snapshots,
+    runtime_snapshot_available,
+)
+from .settings_service import (
+    EFFECTIVE_VARIANT,
+    ParameterSettingsService,
+    UpdateOutcome,
+    UpdateResult,
+)
 from .store import (
     ENVELOPE_VERSION,
     INTEGRITY_ALGORITHM,
@@ -65,6 +81,7 @@ __all__ = [
     "CANONICAL_SCHEMA_VERSION",
     "CouplingGroup",
     "CanonicalParameterResolver",
+    "EFFECTIVE_VARIANT",
     "ENVELOPE_VERSION",
     "INTEGRITY_ALGORITHM",
     "LIVE_BASELINE_EXACT_KEYS",
@@ -79,11 +96,13 @@ __all__ = [
     "PAPER_RUNTIME_SCOPE",
     "ParameterMetadata",
     "ParameterScope",
+    "ParameterSettingsService",
     "ParameterSource",
     "ParameterStatus",
     "ParameterTier",
     "RuntimeAuthorityStatus",
     "RuntimeParameterSnapshot",
+    "RuntimeParameterSnapshotRegistry",
     "STORAGE_SUBDIRECTORY",
     "STRATEGY_PARAMETERS_DIR_ENV",
     "StoreFailureCode",
@@ -94,13 +113,20 @@ __all__ = [
     "StrategyParameterRegistry",
     "StrategyParameterSet",
     "StrategyParameterStore",
+    "UpdateOutcome",
+    "UpdateResult",
     "ValidationCode",
     "ValidationIssue",
     "ValidationResult",
     "ValueType",
     "default_runtime_base_directory",
+    "default_runtime_snapshot_registry",
     "format_timestamp",
+    "get_runtime_snapshot",
     "materialize_parameter_set",
+    "record_runtime_snapshot",
+    "reset_runtime_snapshots",
+    "runtime_snapshot_available",
     "serialize_parameter_envelope",
     "validate_parameters",
 ]

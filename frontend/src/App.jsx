@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
 import MarketRecorderPage from "./pages/MarketRecorderPage";
 import MoneyManagementPage from "./pages/MoneyManagementPage";
+import ParameterSettingsPage from "./pages/ParameterSettingsPage";
 import SupervisorPage from "./pages/SupervisorPage";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import {
@@ -22,6 +23,7 @@ const MONEY_MANAGEMENT_PATH = "/money-management";
 const MARKET_RECORDER_PATH = "/market-recorder";
 const SUPERVISOR_PATH = "/supervisor";
 const ACCOUNT_STATUS_PATH = "/account-status";
+const PARAMETER_SETTINGS_PATH = "/parameter-settings";
 
 const resolveAppPath = (pathname) => {
     if (pathname === MARKET_INTELLIGENCE_PATH) {
@@ -41,6 +43,9 @@ const resolveAppPath = (pathname) => {
     }
     if (pathname === ACCOUNT_STATUS_PATH) {
         return ACCOUNT_STATUS_PATH;
+    }
+    if (pathname === PARAMETER_SETTINGS_PATH) {
+        return PARAMETER_SETTINGS_PATH;
     }
     return "/";
 };
@@ -66,7 +71,9 @@ export default function App() {
                         ? MarketRecorderPage
                         : currentPath === SUPERVISOR_PATH
                             ? SupervisorPage
-                            : Dashboard;
+                            : currentPath === PARAMETER_SETTINGS_PATH
+                                ? ParameterSettingsPage
+                                : Dashboard;
     const advisorActive = currentPath === AI_ADVISOR_PATH;
 
     useEffect(() => {
