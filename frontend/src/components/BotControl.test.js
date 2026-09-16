@@ -748,6 +748,21 @@ const clickAndRender = (
     return result;
 };
 
+// Work D: MANUAL TRADING now defaults to ORDER CONFIRM=ON, so a BUY/SELL click
+// opens the confirmation popup and only CONFIRM sends the manual-trade request.
+const confirmManualTrade = (
+    renderer
+) => {
+    const confirmButton = findButton(renderer.root, "実行 / CONFIRM");
+
+    assert.ok(
+        confirmButton,
+        "manual trade confirmation button is present",
+    );
+
+    return clickAndRender(renderer, confirmButton);
+};
+
 
 test("Return to Normal is permanently rendered with the required state matrix", async () => {
     const cases = [
@@ -2438,6 +2453,7 @@ test("Work D: MANUAL BUY posts to the authenticated manual-trade route", async (
             position: "FLAT",
         }));
         await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        await confirmManualTrade(renderer);
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests[0].url, "/api/bot/manual-trade");
         assert.equal(mock.requests[0].options.method, "POST");
@@ -2473,6 +2489,7 @@ test("Work D: MANUAL SELL posts to the authenticated manual-trade route", async 
             position: "FLAT",
         }));
         await clickAndRender(renderer, findButton(renderer.root, "SELL / SHORT"));
+        await confirmManualTrade(renderer);
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests[0].url, "/api/bot/manual-trade");
         const payload = JSON.parse(mock.requests[0].options.body);
@@ -2503,6 +2520,7 @@ test("Work D: failed manual trade response never fakes success", async () => {
             position: "FLAT",
         }));
         await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        await confirmManualTrade(renderer);
         renderer.render();
         assert.equal(textIncludes(renderer.root, "MANUAL_CONTROL_NOT_ACTIVE"), true);
         assert.equal(textIncludes(renderer.root, "MANUAL POSITION LONG"), false);
@@ -2532,6 +2550,7 @@ test("Work D: manual expectedMode uses the selected mode, not the environment tr
             position: "FLAT",
         }));
         await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        await confirmManualTrade(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.expectedMode, "paper");
     } finally {
@@ -2561,8 +2580,106 @@ test("Work D: manual expectedMode resolves LIVE from the selected live mode", as
             position: "FLAT",
         }));
         await clickAndRender(renderer, findButton(renderer.root, "SELL / SHORT"));
+        await confirmManualTrade(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.expectedMode, "live");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D ORDER CONFIRM: repeated one-click BUY while submitting sends exactly one request", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const gate = deferred();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return gate.promise;
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(
+            renderer,
+            findGroupButton(renderer.root, "Manual order confirmation", "OFF"),
+        );
+        const buy = findButton(renderer.root, "BUY / LONG");
+        buy.props.onClick();
+        buy.props.onClick();
+        assert.equal(mock.requests.length, 1, "double click issues exactly one request");
+        gate.resolve(jsonResponse({
+            body: { success: true, action: "BUY", operation: "ENTRY_LONG" },
+        }));
+        await gate.promise;
+        await Promise.resolve();
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D ORDER CONFIRM: repeated CONFIRM while submitting sends exactly one request", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const gate = deferred();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return gate.promise;
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        assert.equal(mock.requests.length, 0, "popup alone sends no request");
+        const confirmButton = findButton(renderer.root, "実行 / CONFIRM");
+        assert.ok(confirmButton, "confirmation button present");
+        confirmButton.props.onClick();
+        confirmButton.props.onClick();
+        assert.equal(mock.requests.length, 1, "repeated CONFIRM issues exactly one request");
+        gate.resolve(jsonResponse({
+            body: { success: true, action: "BUY", operation: "ENTRY_LONG" },
+        }));
+        await gate.promise;
+        await Promise.resolve();
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D ORDER CONFIRM: a successful manual trade surfaces an accepted notice", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({
+                body: { success: true, action: "BUY", operation: "ENTRY_LONG" },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        await confirmManualTrade(renderer);
+        renderer.render();
+        assert.equal(textIncludes(renderer.root, "MANUAL BUY ACCEPTED"), true);
+        assert.equal(textIncludes(renderer.root, "ENTRY_LONG"), true);
     } finally {
         clearMmStatus();
         clearMmConfiguration();

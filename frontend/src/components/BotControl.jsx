@@ -393,6 +393,10 @@ export default function BotControl({
         setManualTradeError,
     ] = useState(null);
     const [
+        manualTradeNotice,
+        setManualTradeNotice,
+    ] = useState(null);
+    const [
         emergencyPending,
         setEmergencyPending,
     ] = useState(false);
@@ -1404,6 +1408,7 @@ export default function BotControl({
         manualTradePendingRef.current = true;
         setManualTradePending(true);
         setManualTradeError(null);
+        setManualTradeNotice(null);
 
         try {
             const positionId = (
@@ -1456,6 +1461,11 @@ export default function BotControl({
             // No optimistic position update: the authoritative status refresh
             // below is the only source of the new position state.
             setManualTradeError(null);
+            setManualTradeNotice(
+                `MANUAL ${normalized} ACCEPTED${
+                    data?.operation ? ` — ${data.operation}` : ""
+                }`,
+            );
         } catch (error) {
             if (isAuthErrorStatus(error?.status)) {
                 setManualTradeError(authErrorMessage(error.status));
@@ -1667,6 +1677,7 @@ export default function BotControl({
                 handleExecutionControlChange={handleExecutionControlChange}
                 manualTradePending={manualTradePending}
                 manualTradeError={manualTradeError}
+                manualTradeNotice={manualTradeNotice}
                 handleManualTrade={handleManualTrade}
                 activeSymbol={activeSymbol}
                 mmDraft={mmDraft}

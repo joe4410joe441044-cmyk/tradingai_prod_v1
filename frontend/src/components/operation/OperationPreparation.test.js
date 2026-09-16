@@ -1987,6 +1987,7 @@ test("Work D: MANUAL BUY and SELL invoke the existing manual trade handler", asy
         position: "FLAT",
         handleManualTrade: (action) => calls.push(action),
     }));
+    setOrderConfirm(renderer, "OFF");
     const buttons = manualTradeButtons(renderer.root);
     buttons[0].props.onClick();
     buttons[1].props.onClick();
@@ -2092,6 +2093,259 @@ test("Work D SELECT: Execution Control still renders BOT/MANUAL and emits MANUAL
     assert.deepEqual(calls, ["MANUAL"]);
     assert.equal(
         normalizedText(descendants(renderer.root)).includes("MANUAL TRADING"),
+        true,
+    );
+});
+
+// =========================
+// WORK D: OPTIONAL MANUAL ORDER CONFIRM UX
+// =========================
+
+const orderConfirmOptions = (root) => {
+    const group = descendants(root).find(
+        (node) => node.props?.["aria-label"] === "Manual order confirmation"
+            && node.props?.role === "group",
+    );
+    assert.ok(group, "ORDER CONFIRM segmented group present");
+    return descendants(group).filter((node) => node.type === "button");
+};
+
+const setOrderConfirm = (renderer, value) => {
+    const button = orderConfirmOptions(renderer.root).find(
+        (option) => normalizedText(option) === value,
+    );
+    assert.ok(button, `ORDER CONFIRM ${value} option present`);
+    button.props.onClick();
+    renderer.render();
+};
+
+const manualConfirmModal = (root) => findTestId(root, "manual-trade-confirm");
+const manualConfirmExecute = (root) => findTestId(root, "manual-trade-confirm-execute");
+const manualConfirmCancel = (root) => findTestId(root, "manual-trade-confirm-cancel");
+const manualConfirmAction = (root) => normalizedText(findTestId(root, "manual-confirm-action"));
+
+test("Work D ORDER CONFIRM: defaults to ON with a clear current mode", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({ controlAuthority: "MANUAL" }));
+    const options = orderConfirmOptions(renderer.root);
+    assert.deepEqual(options.map(normalizedText), ["OFF", "ON"]);
+    assert.equal(options.find((option) => normalizedText(option) === "ON").props["aria-pressed"], true);
+    assert.equal(
+        normalizedText(findTestId(renderer.root, "manual-order-confirm-hint")).includes("Confirm before execution"),
+        true,
+    );
+    setOrderConfirm(renderer, "OFF");
+    assert.equal(
+        orderConfirmOptions(renderer.root).find((option) => normalizedText(option) === "OFF").props["aria-pressed"],
+        true,
+    );
+    assert.equal(
+        normalizedText(findTestId(renderer.root, "manual-order-confirm-hint")).includes("One-click execution"),
+        true,
+    );
+});
+
+test("Work D ORDER CONFIRM ON: FLAT BUY opens the popup and sends no request", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.ok(manualConfirmModal(renderer.root), "confirmation popup opens");
+    assert.deepEqual(calls, [], "no request before CONFIRM");
+});
+
+test("Work D ORDER CONFIRM ON: CANCEL closes the popup with zero requests", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    manualConfirmCancel(renderer.root).props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmModal(renderer.root), undefined, "popup closed");
+    assert.deepEqual(calls, []);
+});
+
+test("Work D ORDER CONFIRM ON: FLAT BUY CONFIRM emits exactly one ENTRY LONG", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmAction(renderer.root), "ENTRY LONG");
+    manualConfirmExecute(renderer.root).props.onClick();
+    renderer.render();
+    assert.deepEqual(calls, ["BUY"]);
+});
+
+test("Work D ORDER CONFIRM ON: FLAT SELL CONFIRM emits exactly one ENTRY SHORT", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[1].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmAction(renderer.root), "ENTRY SHORT");
+    manualConfirmExecute(renderer.root).props.onClick();
+    renderer.render();
+    assert.deepEqual(calls, ["SELL"]);
+});
+
+test("Work D ORDER CONFIRM ON: LONG SELL CONFIRM emits exactly one CLOSE LONG", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "LONG",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(normalizedText(buttons[1]), "SELL / CLOSE LONG");
+    buttons[1].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmAction(renderer.root), "CLOSE LONG");
+    manualConfirmExecute(renderer.root).props.onClick();
+    renderer.render();
+    assert.deepEqual(calls, ["SELL"]);
+});
+
+test("Work D ORDER CONFIRM ON: SHORT BUY CONFIRM emits exactly one CLOSE SHORT", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "SHORT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(normalizedText(buttons[0]), "BUY / CLOSE SHORT");
+    buttons[0].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmAction(renderer.root), "CLOSE SHORT");
+    manualConfirmExecute(renderer.root).props.onClick();
+    renderer.render();
+    assert.deepEqual(calls, ["BUY"]);
+});
+
+test("Work D ORDER CONFIRM OFF: BUY executes immediately with no popup", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    setOrderConfirm(renderer, "OFF");
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmModal(renderer.root), undefined, "no popup in one-click mode");
+    assert.deepEqual(calls, ["BUY"]);
+});
+
+test("Work D ORDER CONFIRM OFF: SELL executes immediately with no popup", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    setOrderConfirm(renderer, "OFF");
+    manualTradeButtons(renderer.root)[1].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmModal(renderer.root), undefined, "no popup in one-click mode");
+    assert.deepEqual(calls, ["SELL"]);
+});
+
+test("Work D ORDER CONFIRM: PAPER popup shows PAPER, symbol, and operation", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        activeSymbol: "XRPUSDTM",
+        config: { mode: "PAPER", selectedMode: "PAPER", dryRun: true, selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-confirm-mode")), "PAPER");
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-confirm-symbol")), "XRPUSDTM");
+    assert.equal(manualConfirmAction(renderer.root), "ENTRY LONG");
+    assert.equal(findTestId(renderer.root, "manual-confirm-real-execution"), undefined);
+    assert.deepEqual(calls, []);
+});
+
+test("Work D ORDER CONFIRM: LIVE popup shows LIVE and REAL EXECUTION without executing", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        activeSymbol: "XRPUSDTM",
+        config: { mode: "LIVE", selectedMode: "LIVE", dryRun: false, selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-confirm-mode")), "LIVE");
+    assert.equal(
+        normalizedText(findTestId(renderer.root, "manual-confirm-real-execution")),
+        "REAL EXECUTION",
+    );
+    assert.deepEqual(calls, [], "no real order is executed by the popup alone");
+});
+
+test("Work D ORDER CONFIRM: BOT authority keeps manual controls locked", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        position: "FLAT",
+        handleManualTrade: (action) => calls.push(action),
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+    assert.equal(
+        orderConfirmOptions(renderer.root).every((option) => option.props.disabled === true),
+        true,
+        "ORDER CONFIRM is locked while BOT owns execution",
+    );
+    buttons[0].props.onClick();
+    renderer.render();
+    assert.equal(manualConfirmModal(renderer.root), undefined);
+    assert.deepEqual(calls, []);
+});
+
+test("Work D ORDER CONFIRM: manual controls and popup confirm are disabled while executing", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        manualTradePending: true,
+    }));
+    const buttons = manualTradeButtons(renderer.root);
+    assert.equal(buttons[0].props.disabled, true);
+    assert.equal(buttons[1].props.disabled, true);
+    assert.equal(
+        orderConfirmOptions(renderer.root).every((option) => option.props.disabled === true),
         true,
     );
 });

@@ -138,6 +138,7 @@ export default function OperationPreparation({
     handleExecutionControlChange = () => {},
     manualTradePending = false,
     manualTradeError = null,
+    manualTradeNotice = null,
     handleManualTrade = () => {},
     activeSymbol,
     mmRuntime = "UNKNOWN",
@@ -184,6 +185,11 @@ export default function OperationPreparation({
     const settings = createOperationPreparationSettings(config);
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
+    // MANUAL TRADING execution confirmation preference. Presentation-only:
+    // the canonical manual-trade request path is unchanged. Default fails safe
+    // to ON (confirm before execution).
+    const [orderConfirm, setOrderConfirm] = useState(true);
+    const [manualConfirmAction, setManualConfirmAction] = useState(null);
     const toggleTradeSettings = () => setTradeSettingsOpen((open) => !open);
     const handleBottomTradeSettingsCollapse = (event) => {
         const scrollOwner = event.currentTarget.closest(".dashboard");
@@ -461,6 +467,38 @@ export default function OperationPreparation({
         }
         return "UNKNOWN";
     })();
+
+    // Manual execution confirmation (presentation-only). The backend remains
+    // the authority; this only decides whether the operator confirms first.
+    // Canonical semantics: FLAT+BUY=ENTRY LONG, FLAT+SELL=ENTRY SHORT,
+    // LONG+SELL=CLOSE LONG, SHORT+BUY=CLOSE SHORT. No reversal is introduced.
+    const manualConfirmOperationLabel = (
+        manualConfirmAction === "BUY"
+            ? (manualPositionState === "SHORT" ? "CLOSE SHORT" : "ENTRY LONG")
+            : manualConfirmAction === "SELL"
+                ? (manualPositionState === "LONG" ? "CLOSE LONG" : "ENTRY SHORT")
+                : "UNKNOWN"
+    );
+    const requestManualTrade = (action) => {
+        if (manualBusy || !manualControlActive) return undefined;
+        const locked = action === "BUY" ? manualBuyLocked : manualSellLocked;
+        if (locked) return undefined;
+        if (orderConfirm) {
+            setManualConfirmAction(action);
+            return undefined;
+        }
+        return handleManualTrade(action);
+    };
+    const confirmManualTrade = () => {
+        if (!manualConfirmAction || manualBusy || !manualControlActive) return undefined;
+        const action = manualConfirmAction;
+        setManualConfirmAction(null);
+        return handleManualTrade(action);
+    };
+    const cancelManualTrade = () => {
+        if (manualBusy) return;
+        setManualConfirmAction(null);
+    };
 
     const mmAvailable = Boolean(mmDraft);
     const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
@@ -999,11 +1037,26 @@ return (
                                     <DerivedRow hideSource label="DESTINATION" source="RUNTIME" value={manualDestination} />
                                     <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
                                 </div>
+                                <div className="operation-prep-order-confirm" data-testid="manual-order-confirm">
+                                    <span className="operation-prep-label">ORDER CONFIRM（注文確認）</span>
+                                    <SegmentedControl
+                                        disabled={!manualControlActive || manualBusy}
+                                        label="Manual order confirmation"
+                                        onChange={(value) => setOrderConfirm(value === "ON")}
+                                        options={["OFF", "ON"]}
+                                        value={orderConfirm ? "ON" : "OFF"}
+                                    />
+                                    <small className="operation-prep-order-confirm__hint" data-testid="manual-order-confirm-hint">
+                                        {orderConfirm
+                                            ? "Confirm before execution（実行前に確認）"
+                                            : "One-click execution（ワンクリック実行）"}
+                                    </small>
+                                </div>
                                 <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">
                                     <button
                                         className="operation-prep-manual-trade__button operation-prep-manual-trade__button--buy"
                                         disabled={manualBuyLocked || manualBusy}
-                                        onClick={() => handleManualTrade("BUY")}
+                                        onClick={() => requestManualTrade("BUY")}
                                         type="button"
                                     >
                                         {manualBuyLabel}
@@ -1011,7 +1064,7 @@ return (
                                     <button
                                         className="operation-prep-manual-trade__button operation-prep-manual-trade__button--sell"
                                         disabled={manualSellLocked || manualBusy}
-                                        onClick={() => handleManualTrade("SELL")}
+                                        onClick={() => requestManualTrade("SELL")}
                                         type="button"
                                     >
                                         {manualSellLabel}
@@ -1022,8 +1075,13 @@ return (
                                         EMERGENCY LOCK — manual orders disabled（緊急停止中は手動注文不可）
                                     </p>
                                 )}
-                                {manualTradePending && <p className="operation-prep-note" role="status">REQUESTING…</p>}
-                                {manualTradeError && <p className="operation-prep-error" role="alert">{manualTradeError}</p>}
+                                {manualTradePending && <p className="operation-prep-note" role="status">EXECUTING…</p>}
+                                {manualTradeNotice && (
+                                    <p className="operation-prep-note" role="status" data-testid="manual-trade-notice">
+                                        {manualTradeNotice}
+                                    </p>
+                                )}
+                                {manualTradeError && <p className="operation-prep-error" role="alert" data-testid="manual-trade-error">{manualTradeError}</p>}
                             </div>
                         </div>
                         <div className="operation-prep-start operation-prep-start--right" data-testid="ready-to-start">
@@ -1191,6 +1249,80 @@ return (
                         >
                             CONFIRM EMERGENCY
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* MANUAL TRADING execution confirmation. Reuses the existing
+                LIVE START confirmation modal structure/style. Presentation-only:
+                CANCEL performs no request and no runtime mutation; CONFIRM sends
+                exactly one canonical manual-trade request. */}
+            {manualConfirmAction && (
+                <div
+                    aria-label="Confirm manual trade"
+                    aria-modal="true"
+                    className="operation-live-confirm"
+                    data-testid="manual-trade-confirm"
+                    role="dialog"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) cancelManualTrade();
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.key === "Escape") cancelManualTrade();
+                    }}
+                >
+                    <div className="operation-live-confirm__content">
+                        <div className="operation-live-confirm__title">
+                            MANUAL取引を確認
+                        </div>
+                        <div className="operation-live-confirm__body">
+                            <div className="operation-live-confirm__details">
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>MODE:</span>
+                                    <strong data-testid="manual-confirm-mode">{manualDestination}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>SYMBOL:</span>
+                                    <strong data-testid="manual-confirm-symbol">{manualActiveSymbol}</strong>
+                                </div>
+                                <div className="operation-live-confirm__detail-row">
+                                    <span>ACTION:</span>
+                                    <strong data-testid="manual-confirm-action">{manualConfirmOperationLabel}</strong>
+                                </div>
+                                {manualDestination === "LIVE" && (
+                                    <div className="operation-live-confirm__detail-row">
+                                        <span>EXECUTION:</span>
+                                        <strong
+                                            className="operation-live-confirm__danger"
+                                            data-testid="manual-confirm-real-execution"
+                                        >
+                                            REAL EXECUTION
+                                        </strong>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="operation-live-confirm__actions">
+                            <button
+                                autoFocus
+                                className="operation-live-confirm__cancel"
+                                data-testid="manual-trade-confirm-cancel"
+                                disabled={manualBusy}
+                                onClick={cancelManualTrade}
+                                type="button"
+                            >
+                                キャンセル
+                            </button>
+                            <button
+                                className="operation-live-confirm__confirm"
+                                data-testid="manual-trade-confirm-execute"
+                                disabled={manualBusy}
+                                onClick={confirmManualTrade}
+                                type="button"
+                            >
+                                {manualBusy ? "EXECUTING..." : "実行 / CONFIRM"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
