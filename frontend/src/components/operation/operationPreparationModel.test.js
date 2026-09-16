@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    OPERATION_PREPARATION_OPTIONS,
+    createOperationPreparationSettings,
     deriveOperationReadiness,
     pendingOrderAuthorityValue,
     resolveEffectiveMmConfiguration,
     resolveOperationDisplaySymbol,
+    selectionModeDisplayLabel,
 } from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
@@ -555,4 +558,38 @@ test("resolveOperationDisplaySymbol: RUNNING never promotes the candidate", () =
 test("resolveOperationDisplaySymbol: no authority at all fails closed", () => {
     assert.equal(resolveOperationDisplaySymbol(), "NOT AVAILABLE");
     assert.equal(resolveOperationDisplaySymbol({ status: "STOPPED" }), "NOT AVAILABLE");
+});
+
+// =========================
+// WORK D: Market Selection label MANUAL -> SELECT (presentation only)
+// =========================
+
+test("Work D SELECT: canonical Market Selection MANUAL is presented as SELECT", () => {
+    assert.equal(selectionModeDisplayLabel("MANUAL"), "SELECT");
+    assert.equal(selectionModeDisplayLabel("manual"), "SELECT");
+    assert.equal(selectionModeDisplayLabel("AUTO"), "AUTO");
+    assert.equal(selectionModeDisplayLabel("auto"), "AUTO");
+    // Unknown/absent values pass through unchanged and are never coerced to a
+    // market selection value.
+    assert.equal(selectionModeDisplayLabel("UNAVAILABLE"), "UNAVAILABLE");
+    assert.equal(selectionModeDisplayLabel(undefined), undefined);
+});
+
+test("Work D SELECT: the canonical internal selection mode stays MANUAL", () => {
+    const settings = createOperationPreparationSettings({
+        mode: "PAPER",
+        selectionMode: "MANUAL",
+        symbol: "XRPUSDTM",
+    });
+    assert.equal(settings.selectionMode, "MANUAL");
+    // The presentation mapping must not leak into the canonical model value.
+    assert.notEqual(settings.selectionMode, "SELECT");
+    assert.equal(
+        OPERATION_PREPARATION_OPTIONS.selectionModes.includes("MANUAL"),
+        true,
+    );
+    assert.equal(
+        OPERATION_PREPARATION_OPTIONS.selectionModes.includes("SELECT"),
+        false,
+    );
 });

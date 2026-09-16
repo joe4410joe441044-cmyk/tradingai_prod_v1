@@ -1,6 +1,10 @@
 export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     tradingModes: ["PAPER", "LIVE"],
     selectionModes: ["MANUAL", "AUTO"],
+    // Note: the canonical Market Selection value stays "MANUAL". Only the
+    // operator-facing label is presented as "SELECT" (see below) so that Market
+    // Selection (which market / symbol) is never confused with Execution
+    // Control authority, which legitimately keeps the label "MANUAL".
     symbols: ["XRPUSDTM", "BTCUSDTM", "ETHUSDTM"],
     riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],
     maxExposure: [10, 20, 30, 40, 50],
@@ -11,6 +15,21 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     takeProfitPercent: [0.5, 1, 1.5, 2, 3, 5],
     timeframes: ["1m", "5m", "15m", "1h"],
 });
+
+// UI presentation only. Market Selection canonical values remain
+// AUTO / MANUAL; the operator-facing label for MANUAL is "SELECT" (the
+// operator selects the market / symbol). This mapping MUST NOT be applied to
+// Execution Control authority, where "MANUAL" means human manual trade
+// authority and stays "MANUAL".
+export const SELECTION_MODE_DISPLAY_LABELS = Object.freeze({
+    AUTO: "AUTO",
+    MANUAL: "SELECT",
+});
+
+export const selectionModeDisplayLabel = (value) => {
+    const key = String(value ?? "").trim().toUpperCase();
+    return SELECTION_MODE_DISPLAY_LABELS[key] || value;
+};
 
 const supportedValue = (values, candidate, fallback) => (
     values.includes(candidate) ? candidate : fallback

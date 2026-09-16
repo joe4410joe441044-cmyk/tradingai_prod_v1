@@ -98,16 +98,16 @@ export const deriveOperationBlockGuidance = ({
                 ? `AUTO runtime=${current(selectionRuntime)} candidate=${current(selectedRuntimeSymbol, "none")}`
                 : current(config.displaySymbol),
             required: isAuto
-                ? "READY AUTO candidate (or choose MANUAL)"
+                ? "READY AUTO candidate (or choose SELECT)"
                 : "READY (valid symbol)",
             section: "② MARKET SELECTION",
             en: isAuto
-                ? "AUTO candidate runtime is not ready. Choose a MANUAL symbol or wait for the AUTO candidate."
-                : "Manual symbol must be a valid, ready market selection.",
+                ? "AUTO candidate runtime is not ready. Choose a SELECT symbol or wait for the AUTO candidate."
+                : "Selected symbol must be a valid, ready market selection.",
             ja: isAuto
-                ? "AUTO候補が決定していません。MANUALを選ぶかAUTO候補を待ってください。"
+                ? "AUTO候補が決定していません。SELECTを選ぶかAUTO候補を待ってください。"
                 : "有効なシンボルを選択してください。",
-            fix: "② MARKET SELECTION で MANUAL シンボルを選ぶ / ② choose MANUAL symbol or fix AUTO readiness",
+            fix: "② MARKET SELECTION で SELECT シンボルを選ぶ / ② choose SELECT symbol or fix AUTO readiness",
         });
     }
     if (!notBlocking(startMmReadiness)) {

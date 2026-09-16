@@ -29,6 +29,16 @@ const modelSource =
 '    timeframes: ["1m", "5m", "15m", "1h"],' + "\n" +
 ' });' + "\n" +
 "\n" +
+'export const SELECTION_MODE_DISPLAY_LABELS = Object.freeze({' + "\n" +
+'    AUTO: "AUTO",' + "\n" +
+'    MANUAL: "SELECT",' + "\n" +
+' });' + "\n" +
+"\n" +
+'export const selectionModeDisplayLabel = (value) => {' + "\n" +
+'    const key = String(value ?? "").trim().toUpperCase();' + "\n" +
+'    return SELECTION_MODE_DISPLAY_LABELS[key] || value;' + "\n" +
+' };' + "\n" +
+"\n" +
 'const supportedValue = (values, candidate, fallback) => (' + "\n" +
 '    values.includes(candidate) ? candidate : fallback' + "\n" +
 ' );' + "\n" +
@@ -464,7 +474,7 @@ test("manual/auto, leverage, and automation controls update the reactive summary
         children: { type: "button", props: { children: "START BOT" } },
     });
 
-    findButton(renderer.root, "MANUAL").props.onClick();
+    findButton(renderer.root, "SELECT").props.onClick();
     renderer.render({ config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "MANUAL" } });
     findSelect(renderer.root, "operation-prep-symbol").props.onChange({ target: { value: "BTCUSDTM" } });
     renderer.render({ config: { mode: "PAPER", symbol: "BTCUSDTM", selectionMode: "MANUAL", leverage: 5 } });
@@ -480,7 +490,7 @@ test("manual/auto, leverage, and automation controls update the reactive summary
     assert.equal(content.includes("BTCUSDTM"), true);
     assert.equal(content.includes("4x"), true);
     assert.equal(content.includes("AUTO MODE → ON START"), false);
-    assert.equal(content.includes("MANUAL MODE"), true);
+    assert.equal(content.includes("SELECT MODE"), true);
     assert.deepEqual(legacyChanges.filter((change) => "symbol" in change).at(-1), { symbol: "BTCUSDTM" });
     assert.ok(legacyChanges.some((change) => change.loopOnStart === true));
     assert.ok(legacyChanges.some((change) => change.autoTradeOnStart === true));
@@ -498,7 +508,7 @@ test("selectionMode changes propagate to legacy config as the single source", as
     renderer.render();
     assert.deepEqual(legacyChanges.at(-1), { selectionMode: "AUTO" });
 
-    findButton(renderer.root, "MANUAL").props.onClick();
+    findButton(renderer.root, "SELECT").props.onClick();
     renderer.render();
     assert.deepEqual(legacyChanges.at(-1), { selectionMode: "MANUAL" });
 });
@@ -1730,7 +1740,7 @@ test("Trade Settings ①–⑤ suppress provenance/source bars but preserve auth
         "Effective Leverage（有効レバレッジ） 5x",
         "Execution（執行） SIMULATION",
         "REAL ORDER DISABLED",
-        "AUTO SELECTION START MANUAL MODE",
+        "AUTO SELECTION START SELECT MODE",
     ]) {
         assert.equal(text.includes(expected), true, `value preserved: ${expected}`);
     }
@@ -1766,7 +1776,7 @@ test("Trade Settings rows render label+value only, with the source bar omitted",
     assert.equal(text.includes("Effective Leverage（有効レバレッジ） 5x"), true);
     assert.equal(text.includes("Execution（執行） SIMULATION"), true);
     assert.equal(text.includes("REAL ORDER DISABLED"), true);
-    assert.equal(text.includes("AUTO SELECTION START MANUAL MODE"), true);
+    assert.equal(text.includes("AUTO SELECTION START SELECT MODE"), true);
     assert.equal(text.includes("MM LEVERAGE LIMIT"), false, "Final-prep-only uppercase label is not in Trade Settings");
 });
 
@@ -1995,5 +2005,94 @@ test("Work D: Emergency Lock prevents manual order operation", async () => {
     assert.equal(buttons[0].props.disabled, true);
     assert.equal(buttons[1].props.disabled, true);
     assert.ok(findTestId(renderer.root, "manual-emergency-lock"));
+});
+
+// Work D: Market Selection is presented as AUTO / SELECT while the canonical
+// internal value stays MANUAL. Execution Control keeps BOT / MANUAL so the two
+// independent concepts (market/symbol selection vs manual trade authority) are
+// never conflated.
+const marketSelectionOptions = (root) => {
+    const group = descendants(root).find(
+        (node) => node.props?.["aria-label"] === "Market selection mode"
+            && node.props?.role === "group",
+    );
+    assert.ok(group, "MARKET SELECTION segmented group present");
+    return descendants(group).filter((node) => node.type === "button");
+};
+
+const derivedRowValue = (root, label) => {
+    const row = descendants(root).find((node) => (
+        node.type === "div"
+        && String(node.props?.className || "").includes("operation-prep-derived-row")
+        && (Array.isArray(node.props.children) ? node.props.children : [node.props.children])
+            .some((child) => typeof child === "object" && child.type === "span" && normalizedText(child) === label)
+    ));
+    assert.ok(row, `derived row ${label} present`);
+    return normalizedText(row.props.children.find(
+        (child) => typeof child === "object" && child.type === "strong",
+    ));
+};
+
+test("Work D SELECT: Market Selection renders AUTO/SELECT for canonical AUTO/MANUAL", async () => {
+    const Component = await loadComponent();
+    const manualRenderer = createRenderer(Component, readyProps({
+        config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+    }));
+    assert.deepEqual(
+        marketSelectionOptions(manualRenderer.root).map(normalizedText),
+        ["SELECT", "AUTO"],
+    );
+    assert.equal(
+        marketSelectionOptions(manualRenderer.root)[0].props["aria-pressed"],
+        true,
+        "canonical MANUAL is the selected SELECT option",
+    );
+    assert.equal(derivedRowValue(manualRenderer.root, "MARKET"), "SELECT");
+    assert.equal(
+        normalizedText(descendants(manualRenderer.root)).includes("AUTO SELECTION START SELECT MODE"),
+        true,
+    );
+
+    const autoRenderer = createRenderer(Component, readyProps({
+        config: { mode: "PAPER", selectionMode: "AUTO", symbol: "XRPUSDTM", displaySymbol: "XRPUSDTM" },
+    }));
+    assert.deepEqual(
+        marketSelectionOptions(autoRenderer.root).map(normalizedText),
+        ["SELECT", "AUTO"],
+    );
+    assert.equal(marketSelectionOptions(autoRenderer.root)[1].props["aria-pressed"], true);
+    assert.equal(derivedRowValue(autoRenderer.root, "MARKET"), "AUTO");
+});
+
+test("Work D SELECT: selecting SELECT sends the canonical selectionMode=MANUAL", async () => {
+    const Component = await loadComponent();
+    const changes = [];
+    const renderer = createRenderer(Component, readyProps({
+        config: { mode: "PAPER", selectionMode: "AUTO", symbol: "XRPUSDTM" },
+        onLegacyConfigChange: (update) => changes.push(update),
+    }));
+    const select = marketSelectionOptions(renderer.root).find(
+        (button) => normalizedText(button) === "SELECT",
+    );
+    assert.ok(select, "SELECT option rendered");
+    select.props.onClick();
+    assert.deepEqual(changes.at(-1), { selectionMode: "MANUAL" });
+});
+
+test("Work D SELECT: Execution Control still renders BOT/MANUAL and emits MANUAL", async () => {
+    const Component = await loadComponent();
+    const calls = [];
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        handleExecutionControlChange: (authority) => calls.push(authority),
+    }));
+    const options = executionControlOptions(renderer.root);
+    assert.deepEqual(options.map(normalizedText), ["BOT", "MANUAL"]);
+    options.find((button) => normalizedText(button) === "MANUAL").props.onClick();
+    assert.deepEqual(calls, ["MANUAL"]);
+    assert.equal(
+        normalizedText(descendants(renderer.root)).includes("MANUAL TRADING"),
+        true,
+    );
 });
 

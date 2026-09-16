@@ -17,8 +17,11 @@ const loadCard = async () => {
     const output = join(temporary, "AutoMarketSelectionCard.mjs");
     const modelUrl = pathToFileURL(join(directory,
         "../features/auto-market-selection/autoMarketSelectionModel.js")).href;
+    const operationModelUrl = pathToFileURL(join(directory,
+        "./operation/operationPreparationModel.js")).href;
     const code = transformed.code
-        .replace('from "../features/auto-market-selection/autoMarketSelectionModel.js";', `from "${modelUrl}";`);
+        .replace('from "../features/auto-market-selection/autoMarketSelectionModel.js";', `from "${modelUrl}";`)
+        .replace('from "./operation/operationPreparationModel.js";', `from "${operationModelUrl}";`);
     try {
         await writeFile(output, code);
         return await import(`${pathToFileURL(output).href}?test=ams-card`);

@@ -33,6 +33,7 @@ import {
     createOperationPreparationSettings,
     deriveOperationReadiness,
     resolveEffectiveMmConfiguration,
+    selectionModeDisplayLabel,
 } from "./operation/operationPreparationModel";
 
 const formatLoopError = (
@@ -1763,7 +1764,7 @@ export default function BotControl({
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Market Selection:</span>
-                                    <strong>{startSettings?.selectionMode}</strong>
+                                    <strong>{selectionModeDisplayLabel(startSettings?.selectionMode)}</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Symbol:</span>

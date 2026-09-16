@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
+import { selectionModeDisplayLabel } from "./operation/operationPreparationModel.js";
 
 const statusClass = (value) => {
     const status = String(value || "").toUpperCase();
@@ -48,7 +49,7 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
 
             {collapsible && !expanded && (
                 <div className="ams-summary" data-testid="auto-market-selection-summary">
-                    <Field label="MODE" value={model.selectionMode} />
+                    <Field label="MODE" value={selectionModeDisplayLabel(model.selectionMode)} />
                     <Field label="TOP CANDIDATE" value={top.symbol} />
                     <Field label="ACTIVE SYMBOL" value={model.activeSymbol} className="ams-active-symbol" />
                     <Field label="SELECTION STATE" value={autoRuntime.runtimeState} className={statusClass(autoRuntime.runtimeState)} />
@@ -58,7 +59,7 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
             {expanded && <div id="ams-card-details" data-testid="auto-market-selection-details">
 
             <div className="ams-symbol-grid">
-                <Field label="SELECTION MODE" value={model.selectionMode} />
+                <Field label="SELECTION MODE" value={selectionModeDisplayLabel(model.selectionMode)} />
                 <Field label="ACTIVE SYMBOL · RUNTIME" value={model.activeSymbol} className="ams-active-symbol" />
                 <Field label="NEXT REQUESTED SYMBOL" value={model.requestedSymbol} />
                 <Field label="TOP CANDIDATE · PREVIEW" value={top.symbol} />

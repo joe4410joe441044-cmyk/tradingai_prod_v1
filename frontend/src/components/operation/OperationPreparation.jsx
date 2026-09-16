@@ -5,6 +5,7 @@ import {
     createOperationPreparationSettings,
     deriveOperationReadiness,
     operationPreparationSummary,
+    selectionModeDisplayLabel,
 } from "./operationPreparationModel";
 import { deriveOperationBlockGuidance } from "./operationPreparationGuidance";
 
@@ -34,7 +35,7 @@ const sourceBadge = (source) => (
     </span>
 );
 
-function SegmentedControl({ disabled, label, onChange, options, value }) {
+function SegmentedControl({ disabled, format = (option) => option, label, onChange, options, value }) {
     return (
         <div aria-label={label} className="operation-prep-segmented" role="group">
             {options.map((option) => (
@@ -46,7 +47,7 @@ function SegmentedControl({ disabled, label, onChange, options, value }) {
                     onClick={() => onChange(option)}
                     type="button"
                 >
-                    {option}
+                    {format(option)}
                 </button>
             ))}
         </div>
@@ -687,6 +688,7 @@ return (
                         <span className="operation-prep-label">SELECTION MODE</span>
                         <SegmentedControl
                             disabled={controlsDisabled}
+                            format={selectionModeDisplayLabel}
                             label="Market selection mode"
                             onChange={(value) => changeSetting("selectionMode", value)}
                             options={OPERATION_PREPARATION_OPTIONS.selectionModes}
@@ -774,7 +776,7 @@ return (
                                 <ToggleControl disabled={autoTradeDisabled} label="Runtime auto trade" onChange={handleAutoTradeChange} value={autoTradeChecked} />
                             </div>
                         )}
-                        <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                        <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
                     </Section>
                     {tradeSettingsOpen && (
                         <button
@@ -814,7 +816,7 @@ return (
                         </Section>
 
                         <Section number="2" testId="final-prep-market-selection" title="MARKET SELECTION">
-                            <DerivedRow label="MARKET" source="OPERATOR" value={summary.market} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="MARKET" source="OPERATOR" value={selectionModeDisplayLabel(summary.market)} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
                         </Section>
@@ -850,7 +852,7 @@ return (
                             <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={settings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} />
                             <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "MANUAL MODE"} />
+                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
                         </Section>
 
                         <section className="operation-prep-section operation-prep-section--final-readiness" data-testid="final-prep-start-readiness">
