@@ -1,0 +1,769 @@
+/* =========================================================
+PARAMETER SETTINGS
+Reuses the completed Account Status visual language.
+
+The page root also carries `account-status-page` and
+`account-runtime-overview`, so the semantic-card / semantic-metric /
+semantic-badge tokens, the as-page-header / as-page-badge, the
+as-details-toggle and the as-fin-icon treatment are inherited from
+dashboard.css. This file only adds the Parameter-Settings-specific
+layout: the primary parameter card grid, the compact scope selector,
+the advanced row grid, the save action and the authority details.
+
+Scoped to .ps-page so no other surface is affected.
+========================================================= */
+
+.ps-page {
+    --ps-blue: #57b8ff;
+    --ps-blue-soft: rgba(87, 184, 255, 0.12);
+    --ps-field-bg: #080e18;
+    --ps-field-border: #33445e;
+    gap: 10px;
+}
+
+/* ---------------------------------------------------------
+   Compact header
+--------------------------------------------------------- */
+.ps-page .ps-page__header {
+    min-height: 0;
+}
+
+/* ---------------------------------------------------------
+   Scope selector — TradingAI segmented control
+--------------------------------------------------------- */
+.ps-page .ps-scope {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--semantic-card-border);
+    border-radius: 8px;
+    background: var(--semantic-card-bg);
+}
+
+.ps-page .ps-scope__hint {
+    flex: 0 0 auto;
+    color: #8ea0b8;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-scope__buttons {
+    flex: 0 0 auto;
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid #2d405e;
+    border-radius: 6px;
+    background: var(--ps-field-bg);
+}
+
+.ps-page .ps-scope__button {
+    min-width: 84px;
+    height: 28px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #8ea0b8;
+    font: 700 11px "Consolas", monospace;
+    letter-spacing: 0.6px;
+    cursor: pointer;
+}
+
+.ps-page .ps-scope__button:hover {
+    color: #d7e5f5;
+}
+
+.ps-page .ps-scope__button--active {
+    background: linear-gradient(
+        180deg,
+        rgba(87, 184, 255, 0.28),
+        rgba(87, 184, 255, 0.12)
+    );
+    color: #eaf5ff;
+    box-shadow: inset 0 0 0 1px rgba(87, 184, 255, 0.5);
+}
+
+.ps-page .ps-scope__button:focus-visible {
+    outline: 2px solid var(--ps-blue);
+    outline-offset: 2px;
+}
+
+.ps-page .ps-scope__note {
+    flex: 1 1 260px;
+    min-width: 0;
+    color: #7e90a8;
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+/* ---------------------------------------------------------
+   Section shells (semantic-card inherited)
+--------------------------------------------------------- */
+.ps-page .ps-section {
+    min-width: 0;
+}
+
+/* ---------------------------------------------------------
+   Primary parameter grid
+   6 tracks: first 3 cards span 2 (thirds), last 2 span 3 (halves)
+--------------------------------------------------------- */
+.ps-page .ps-param-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+}
+
+.ps-page .ps-param-card {
+    grid-column: span 2;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--semantic-card-border);
+    border-radius: 8px;
+    background: var(--semantic-card-bg);
+    box-shadow: inset 0 2px 0 rgba(87, 184, 255, 0.35);
+    color: #e7edf7;
+}
+
+.ps-page .ps-param-card:nth-child(4),
+.ps-page .ps-param-card:nth-child(5) {
+    grid-column: span 3;
+}
+
+.ps-page .ps-param-card__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.ps-page .ps-param-card__titles {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.ps-page .ps-param-card__label {
+    overflow: hidden;
+    color: #dbe6f4;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.ps-page .ps-param-card__label-ja {
+    color: #71849c;
+    font-size: 9.5px;
+    letter-spacing: 0.2px;
+    overflow-wrap: anywhere;
+}
+
+.ps-page .ps-param-card__configured {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.ps-page .ps-param-card__field-label {
+    color: #8ea0b8;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-param-card__input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* Dark TradingAI input — replaces browser-default number boxes */
+.ps-page .ps-param-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid var(--ps-field-border);
+    border-radius: 4px;
+    background: var(--ps-field-bg);
+    color: #e8eef7;
+    font: 700 13px "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.ps-page .ps-param-input--sm {
+    font-size: 12px;
+    padding: 5px 7px;
+}
+
+.ps-page .ps-param-input:focus {
+    outline: none;
+    border-color: var(--ps-blue);
+    box-shadow: 0 0 0 2px rgba(87, 184, 255, 0.18);
+}
+
+.ps-page .ps-param-input:disabled {
+    border-color: #2a3749;
+    background: #0a0f18;
+    color: #6b7a8d;
+    cursor: not-allowed;
+}
+
+.ps-page .ps-param-card__unit {
+    flex: 0 0 auto;
+    min-width: 18px;
+    color: #7e90a8;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.ps-page .ps-param-card__lock,
+.ps-page .ps-adv-row__lock {
+    color: #e8b45f;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+}
+
+.ps-page .ps-param-card__readouts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding-top: 7px;
+    border-top: 1px solid var(--semantic-grid-line);
+}
+
+.ps-page .ps-readout {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ps-page .ps-readout__label {
+    color: #8ea0b8;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-readout__value {
+    overflow: hidden;
+    color: #eef4fc;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-page .ps-param-card__source {
+    overflow: hidden;
+    color: #6f8199;
+    font-size: 8px;
+    letter-spacing: 0.3px;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.ps-page .ps-param-card__error {
+    color: var(--semantic-danger);
+    font-size: 9px;
+    line-height: 1.3;
+}
+
+/* ---------------------------------------------------------
+   Status badges
+--------------------------------------------------------- */
+.ps-page .ps-status {
+    flex: 0 0 auto;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid rgba(142, 160, 184, 0.3);
+    border-radius: 999px;
+    background: rgba(142, 160, 184, 0.08);
+    color: #8ea0b8;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.ps-page .ps-status--effective {
+    border-color: rgba(101, 201, 135, 0.45);
+    background: rgba(101, 201, 135, 0.08);
+    color: #65c987;
+}
+
+.ps-page .ps-status--pending {
+    border-color: rgba(232, 180, 95, 0.45);
+    background: rgba(232, 180, 95, 0.08);
+    color: #e8b45f;
+}
+
+.ps-page .ps-status--unknown {
+    border-color: rgba(142, 160, 184, 0.3);
+    background: rgba(142, 160, 184, 0.08);
+    color: #8ea0b8;
+}
+
+/* ---------------------------------------------------------
+   Advanced parameters — same system, less prominent
+--------------------------------------------------------- */
+.ps-page .ps-advanced {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px;
+}
+
+.ps-page .ps-adv-head,
+.ps-page .ps-adv-row {
+    display: grid;
+    grid-template-columns:
+        minmax(160px, 1.6fr)
+        minmax(110px, 1fr)
+        minmax(80px, 0.7fr)
+        minmax(80px, 0.7fr)
+        auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.ps-page .ps-adv-head {
+    padding: 0 8px 5px;
+    border-bottom: 1px solid var(--semantic-grid-line);
+    color: #8ea0b8;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-advanced-group {
+    min-width: 0;
+    border: 1px solid var(--semantic-card-separator);
+    border-radius: 6px;
+    background: rgba(7, 11, 20, 0.22);
+}
+
+.ps-page .ps-advanced-group h3 {
+    margin: 0;
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--semantic-grid-line);
+    color: #a9b8cb;
+    font-size: 9px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-adv-row {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--semantic-grid-line);
+}
+
+.ps-page .ps-adv-row:last-child {
+    border-bottom: 0;
+}
+
+.ps-page .ps-adv-row__identity {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.ps-page .ps-adv-row__label {
+    overflow: hidden;
+    color: #c7d2e4;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.ps-page .ps-adv-row__label-ja {
+    color: #71849c;
+    font-size: 8.5px;
+}
+
+.ps-page .ps-adv-row__detail {
+    color: #6f8199;
+    font-size: 8px;
+    line-height: 1.3;
+}
+
+.ps-page .ps-adv-row__configured {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.ps-page .ps-adv-row__value {
+    overflow: hidden;
+    color: #eef4fc;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-page .ps-adv-row__status {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ps-page .ps-adv-row .ps-param-card__error {
+    grid-column: 1 / -1;
+}
+
+/* ---------------------------------------------------------
+   Effective / Revision + Runtime Context
+--------------------------------------------------------- */
+.ps-page .ps-lower-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    gap: 10px;
+}
+
+/* Bordered metric cells with a gap (matches the financial card grid)
+   and neutralises the shared-edge border rules from Account Status. */
+.ps-page .ps-revision-grid .semantic-metric,
+.ps-page .ps-context-grid .semantic-metric {
+    border: 1px solid var(--semantic-grid-line);
+    border-radius: 5px;
+    background: rgba(7, 11, 20, 0.22);
+}
+
+.ps-page .ps-revision-grid .semantic-metric-value {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.ps-page .ps-context-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px;
+}
+
+.ps-page .ps-context-grid .semantic-metric {
+    min-height: 48px;
+    padding: 6px 8px;
+}
+
+.ps-page .ps-context-meta {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 0 8px 8px;
+}
+
+.ps-page .ps-context-meta__item {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 8px;
+    border: 1px solid var(--semantic-grid-line);
+    border-radius: 5px;
+    background: rgba(7, 11, 20, 0.14);
+}
+
+.ps-page .ps-context-meta__label {
+    overflow: hidden;
+    color: #6f8199;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.ps-page .ps-context-meta__value {
+    overflow: hidden;
+    color: #9badc6;
+    font-size: 9px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-page .ps-context-note {
+    margin: 0;
+    padding: 6px 9px;
+    border-top: 1px solid var(--semantic-grid-line);
+    color: #7e90a8;
+    font-size: 8px;
+    line-height: 1.35;
+}
+
+.ps-page .ps-pending {
+    margin: 0;
+    padding: 7px 9px;
+    border-top: 1px solid var(--semantic-grid-line);
+    color: #e8b45f;
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+.ps-page .ps-warnings,
+.ps-page .ps-errors {
+    margin: 0;
+    padding: 7px 9px 7px 22px;
+    border-top: 1px solid var(--semantic-grid-line);
+    color: #e8b45f;
+    font-size: 9px;
+    line-height: 1.4;
+}
+
+.ps-page .ps-errors {
+    color: var(--semantic-danger);
+}
+
+/* ---------------------------------------------------------
+   Save action
+--------------------------------------------------------- */
+.ps-page .ps-save {
+    min-width: 0;
+}
+
+.ps-page .ps-save__body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 12px;
+}
+
+.ps-page .ps-save__info {
+    flex: 1 1 260px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #9badc6;
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+.ps-page .ps-save__health {
+    color: #8ea0b8;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.ps-page .ps-save__error {
+    color: var(--semantic-danger);
+}
+
+.ps-page .ps-save__button {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 0 20px;
+    border: 1px solid rgba(87, 184, 255, 0.5);
+    border-radius: 6px;
+    background: linear-gradient(
+        180deg,
+        rgba(87, 184, 255, 0.22),
+        rgba(87, 184, 255, 0.1)
+    );
+    color: #dff0ff;
+    font: 700 11px "Consolas", monospace;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.ps-page .ps-save__button:hover {
+    border-color: var(--ps-blue);
+    color: #ffffff;
+}
+
+.ps-page .ps-save__button:focus-visible {
+    outline: 2px solid var(--ps-blue);
+    outline-offset: 2px;
+}
+
+.ps-page .ps-save__button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------
+   LIVE confirmation
+--------------------------------------------------------- */
+.ps-page .ps-confirm {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(232, 180, 95, 0.45);
+    border-radius: 8px;
+    background: rgba(232, 180, 95, 0.07);
+    color: #f2c56f;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.ps-page .ps-confirm p {
+    flex: 1 1 100%;
+    margin: 0;
+}
+
+.ps-page .ps-confirm button {
+    min-height: 30px;
+    padding: 0 14px;
+    border-radius: 5px;
+    font: 700 10px "Consolas", monospace;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.ps-page .ps-confirm__primary {
+    border: 1px solid rgba(232, 180, 95, 0.6);
+    background: rgba(232, 180, 95, 0.16);
+    color: #ffd98a;
+}
+
+.ps-page .ps-confirm__secondary {
+    border: 1px solid #2d405e;
+    background: var(--ps-field-bg);
+    color: #9badc6;
+}
+
+.ps-page .ps-confirm button:focus-visible {
+    outline: 2px solid var(--ps-blue);
+    outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------
+   Authority / explanations (bottom, collapsed by default)
+--------------------------------------------------------- */
+.ps-page .ps-authority {
+    min-width: 0;
+}
+
+.ps-page .ps-authority__content {
+    display: grid;
+    gap: 10px;
+    padding: 10px 12px;
+    color: #aebdd0;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.ps-page .ps-authority__content h3 {
+    margin: 0 0 3px;
+    color: #c7d2e4;
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.ps-page .ps-authority__content p,
+.ps-page .ps-authority__content ul {
+    margin: 0;
+}
+
+.ps-page .ps-authority__content ul {
+    padding-left: 16px;
+    display: grid;
+    gap: 3px;
+}
+
+/* ---------------------------------------------------------
+   Responsive
+--------------------------------------------------------- */
+@media (max-width: 1199px) {
+    .ps-page .ps-param-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ps-page .ps-param-card,
+    .ps-page .ps-param-card:nth-child(4),
+    .ps-page .ps-param-card:nth-child(5) {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 1023px) {
+    .ps-page .ps-lower-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ps-page .ps-context-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ps-page .ps-context-meta {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+    .ps-page .ps-adv-head {
+        display: none;
+    }
+
+    .ps-page .ps-adv-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .ps-page .ps-adv-row__identity {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 767px) {
+    .ps-page .ps-param-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ps-page .ps-save__body {
+        justify-content: stretch;
+    }
+
+    .ps-page .ps-save__button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 560px) {
+    .ps-page .ps-context-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ps-page .ps-param-card__readouts {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

@@ -32,6 +32,22 @@ const findByTestId = (node, testId) => {
     return findByTestId(node.props?.children, testId);
 };
 
+const collectTestIds = (node, ids = []) => {
+    if (node == null || typeof node !== "object") return ids;
+    if (Array.isArray(node)) {
+        for (const child of node) collectTestIds(child, ids);
+        return ids;
+    }
+    const id = node.props?.["data-testid"];
+    if (id) ids.push(id);
+    if (typeof node.type === "function") {
+        collectTestIds(node.type(node.props), ids);
+        return ids;
+    }
+    collectTestIds(node.props?.children, ids);
+    return ids;
+};
+
 const loadPage = async () => {
     let transformWithOxc;
     try {
@@ -215,6 +231,109 @@ test("view renders runtime context read-only, primary=5, advanced=7 collapsed", 
     );
 });
 
+const PRIMARY_NAMES = [
+    "minimumCompositeScore",
+    "maximumStrategySpreadPct",
+    "momentumWindowSeconds",
+    "minimumStrategyConfidence",
+    "maximumHoldMs",
+];
+
+test("primary parameters are five structured icon cards above runtime context", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView(baseProps);
+    const ids = collectTestIds(tree);
+
+    for (const name of PRIMARY_NAMES) {
+        assert.ok(ids.includes(`parameter-row-${name}`), name);
+        assert.ok(ids.includes(`parameter-icon-${name}`), name);
+    }
+    assert.equal(
+        ids.filter((id) => id.startsWith("parameter-icon-")).length,
+        5,
+    );
+
+    // Runtime Context is below the primary parameters, not the first card.
+    assert.ok(ids.includes("runtime-context-section"));
+    assert.ok(
+        ids.indexOf("primary-parameters-section")
+        < ids.indexOf("runtime-context-section"),
+    );
+
+    // No advanced rows leak into the collapsed first viewport.
+    assert.equal(
+        ids.filter((id) => id.startsWith("advanced-group-")).length,
+        0,
+    );
+
+    // Each primary card keeps Configured / Effective / Runtime distinct.
+    for (const name of PRIMARY_NAMES) {
+        const card = textOf(findByTestId(tree, `parameter-row-${name}`));
+        assert.match(card, /Configured/);
+        assert.match(card, /Effective/);
+        assert.match(card, /Runtime/);
+    }
+});
+
+test("authority details are collapsed at the bottom with the moved explanations", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const collapsed = page.ParameterSettingsView(baseProps);
+    assert.equal(findByTestId(collapsed, "authority-details-content"), null);
+    assert.doesNotMatch(
+        textOf(collapsed),
+        /Scope selector changes which parameter configuration is viewed or edited/,
+    );
+
+    const expanded = page.ParameterSettingsView({
+        ...baseProps,
+        authorityExpanded: true,
+    });
+    const content = findByTestId(expanded, "authority-details-content");
+    assert.ok(content);
+    const text = textOf(content);
+    assert.match(text, /does NOT change the running bot mode/);
+    assert.match(text, /Snapshot-at-entry/);
+    assert.match(text, /PENDING/);
+});
+
+test("runtime context and AI remain read-only", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView(baseProps);
+    const runtimeText = textOf(findByTestId(tree, "runtime-context-section"));
+    assert.match(runtimeText, /READ ONLY/);
+    assert.match(runtimeText, /OFF \/ NOT_INSTALLED \/ NONE/);
+    assert.match(runtimeText, /BTCUSDT/);
+});
+
+test("page exposes no apply-now or auto-optimization control", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        advancedExpanded: true,
+    });
+    const text = textOf(tree);
+    assert.doesNotMatch(
+        text,
+        /Apply Now|Auto Tune|Auto Apply|Best Parameters|Optimize/,
+    );
+});
+
 test("advanced expands on demand", async (context) => {
     const page = await loadPage();
     if (!page) {
@@ -304,4 +423,7 @@ test("page structure keeps advanced collapsed and inputs read-only when locked",
     assert.match(source, /disabled=\{!editable\}/);
     assert.match(source, /LOCKED — LIVE legacy/);
     assert.match(source, /READ ONLY/);
+    assert.match(source, /ps-param-input/);
+    assert.match(source, /account-runtime-overview/);
+    assert.match(source, /authority-details-toggle/);
 });
