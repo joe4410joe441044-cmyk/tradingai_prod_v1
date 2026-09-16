@@ -362,6 +362,42 @@ test("effective revision model distinguishes configured/effective/runtime", () =
     assert.equal(model.capturedAt, "2026-01-01T00:00:00.000000Z");
 });
 
+test("effective revision model tracks the promotion transition", () => {
+    const promotedConfiguration = {
+        ...configuration,
+        configuredRevision: 5,
+        effectiveRevision: 5,
+        status: "ACTIVE",
+        pending: false,
+    };
+    const promotedEffective = { ...effective, effectiveRevision: 5 };
+
+    // Promotion is not the same as runtime observation: before the runtime
+    // consumes R5 the runtime revision must not be claimed.
+    const beforeRuntime = buildEffectiveRevisionModel(
+        promotedConfiguration,
+        promotedEffective,
+        { runtimeSnapshotAvailable: false, parameters: {} },
+    );
+    assert.equal(beforeRuntime.pending, false);
+    assert.equal(beforeRuntime.status, "ACTIVE");
+    assert.equal(beforeRuntime.runtimeAvailable, false);
+    assert.equal(beforeRuntime.runtimeRevision, null);
+
+    const afterRuntime = buildEffectiveRevisionModel(
+        promotedConfiguration,
+        promotedEffective,
+        {
+            runtimeSnapshotAvailable: true,
+            effectiveRevision: 5,
+            capturedAt: "2026-01-02T00:00:00.000000Z",
+            parameters: { minimumCompositeScore: 0.4 },
+        },
+    );
+    assert.equal(afterRuntime.runtimeRevision, 5);
+    assert.equal(afterRuntime.pending, false);
+});
+
 test("effective revision model reports NO_RUNTIME_SNAPSHOT explicitly", () => {
     const model = buildEffectiveRevisionModel(configuration, effective, {
         runtimeSnapshotAvailable: false,
