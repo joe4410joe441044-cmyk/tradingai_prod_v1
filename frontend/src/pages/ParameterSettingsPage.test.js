@@ -4,6 +4,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+    GUIDE_PARAMETER_KEYS,
+    LIVE_MIGRATION,
+    PARAMETER_GUIDE,
+} from "../features/parameter-settings/parameterGuide.js";
+
 const directory = dirname(fileURLToPath(import.meta.url));
 const moduleUrl = (source) =>
     `data:text/javascript,${encodeURIComponent(source)}`;
@@ -67,8 +73,16 @@ const loadPage = async () => {
         "parameter-settings",
         "parameterSettingsModel.js",
     );
+    const guideFile = join(
+        directory,
+        "..",
+        "features",
+        "parameter-settings",
+        "parameterGuide.js",
+    );
     const featureStub = moduleUrl(
         `export * from "${pathToFileURL(modelFile).href}";`
+        + `export * from "${pathToFileURL(guideFile).href}";`
         + "export const useParameterSettings=()=>({});",
     );
     const pollingStub = moduleUrl(
@@ -401,6 +415,241 @@ test("409 conflict and 422 validation are rendered", async (context) => {
     assert.match(textOf(invalidTree), /must be >= 0/);
 });
 
+const ADVANCED_NAMES = [
+    "minimumHoldMs",
+    "exitMomentumMinimum",
+    "exitLiquidityQualityMinimum",
+    "exitSpreadQualityMinimum",
+    "momentumMinimumWarmupSeconds",
+    "absorptionVolumePercentile",
+    "liquidityQualityPercentile",
+];
+
+test("guide definitions cover exactly the canonical twelve parameters", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    assert.equal(GUIDE_PARAMETER_KEYS.length, 12);
+    assert.deepEqual(
+        [...GUIDE_PARAMETER_KEYS].sort(),
+        [...PRIMARY_NAMES, ...ADVANCED_NAMES].sort(),
+    );
+
+    const validMigrations = [
+        LIVE_MIGRATION.EXACT,
+        LIVE_MIGRATION.IMPERFECT_UNIT_MAPPING,
+        LIVE_MIGRATION.NO_LEGACY_EQUIVALENT,
+    ];
+    for (const key of GUIDE_PARAMETER_KEYS) {
+        const guide = PARAMETER_GUIDE[key];
+        for (const field of [
+            "labelEn",
+            "labelJa",
+            "controls",
+            "valueMeaning",
+            "increase",
+            "decrease",
+            "directEffect",
+            "possibleTradingEffect",
+            "applicationTiming",
+            "liveAuthorityNote",
+        ]) {
+            assert.ok(
+                typeof guide[field] === "string" && guide[field].length > 0,
+                `${key}.${field}`,
+            );
+        }
+        assert.ok(Array.isArray(guide.related), `${key}.related`);
+        assert.ok(
+            Array.isArray(guide.cycleStages) && guide.cycleStages.length > 0,
+            `${key}.cycleStages`,
+        );
+        assert.ok(
+            validMigrations.includes(guide.liveMigration),
+            `${key}.liveMigration`,
+        );
+        const prose = [
+            guide.controls,
+            guide.valueMeaning,
+            guide.increase,
+            guide.decrease,
+            guide.directEffect,
+            guide.possibleTradingEffect,
+        ].join(" ");
+        assert.doesNotMatch(
+            prose,
+            /guarantee|increase profit|win rate|best value|optimize performance|recommend/i,
+            `${key} performance claim`,
+        );
+    }
+});
+
+test("primary guide triggers exist for all five primary parameters", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView(baseProps);
+    const ids = collectTestIds(tree);
+    for (const name of PRIMARY_NAMES) {
+        assert.ok(ids.includes(`parameter-guide-${name}`), name);
+    }
+    assert.equal(
+        ids.filter((id) => id.startsWith("parameter-guide-")).length,
+        5,
+    );
+});
+
+test("advanced guide triggers exist for all seven advanced parameters", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const collapsed = page.ParameterSettingsView(baseProps);
+    assert.equal(
+        collectTestIds(collapsed).filter((id) => (
+            id.startsWith("parameter-guide-")
+        )).length,
+        5,
+    );
+
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        advancedExpanded: true,
+    });
+    const ids = collectTestIds(tree);
+    for (const name of ADVANCED_NAMES) {
+        assert.ok(ids.includes(`parameter-guide-${name}`), name);
+    }
+    assert.equal(
+        ids.filter((id) => id.startsWith("parameter-guide-")).length,
+        12,
+    );
+});
+
+test("guide trigger selects the correct parameter without writing", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const opened = [];
+    let saved = 0;
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        advancedExpanded: true,
+        onOpenGuide: (name) => opened.push(name),
+        onSave: () => { saved += 1; },
+    });
+    for (const name of [...PRIMARY_NAMES, ...ADVANCED_NAMES]) {
+        findByTestId(tree, `parameter-guide-${name}`).props.onClick({
+            currentTarget: {},
+        });
+    }
+    assert.deepEqual(opened, [...PRIMARY_NAMES, ...ADVANCED_NAMES]);
+    assert.equal(saved, 0);
+});
+
+test("guide modal opens with dynamic current values and closes via X/backdrop", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const closed = [];
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        guideKey: "minimumCompositeScore",
+        onCloseGuide: () => closed.push("close"),
+    });
+    assert.ok(findByTestId(tree, "guide-modal"));
+    assert.match(
+        textOf(findByTestId(tree, "guide-title")),
+        /Composite Entry Score/,
+    );
+    const values = textOf(findByTestId(tree, "guide-current-values"));
+    assert.match(values, /0\.40/);
+    assert.match(values, /0\.34/);
+    assert.match(values, /0\.30/);
+    const modalText = textOf(findByTestId(tree, "guide-modal"));
+    assert.match(modalText, /Direct effect/);
+    assert.match(modalText, /Possible trading effect/);
+
+    const exitTree = page.ParameterSettingsView({
+        ...baseProps,
+        guideKey: "maximumHoldMs",
+    });
+    assert.match(
+        textOf(findByTestId(exitTree, "guide-modal")),
+        /Snapshot-at-entry/,
+    );
+
+    findByTestId(tree, "guide-close").props.onClick();
+    assert.equal(closed.length, 1);
+    findByTestId(tree, "guide-backdrop").props.onClick();
+    assert.equal(closed.length, 2);
+
+    let stopped = 0;
+    findByTestId(tree, "guide-modal").props.onClick({
+        stopPropagation: () => { stopped += 1; },
+    });
+    assert.equal(stopped, 1);
+});
+
+test("guide modal values follow the scope and legacy raw display", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const paper = page.ParameterSettingsView({
+        ...baseProps,
+        guideKey: "maximumStrategySpreadPct",
+    });
+    assert.match(
+        textOf(findByTestId(paper, "guide-configured")),
+        /0\.50 %/,
+    );
+
+    const live = page.ParameterSettingsView({
+        ...baseProps,
+        scope: "LIVE",
+        guideKey: "maximumStrategySpreadPct",
+    });
+    const liveConfigured = textOf(findByTestId(live, "guide-configured"));
+    assert.doesNotMatch(liveConfigured, /%/);
+    assert.match(liveConfigured, /0\.5/);
+    assert.ok(findByTestId(live, "guide-legacy-note"));
+    assert.match(
+        textOf(findByTestId(live, "guide-authority")),
+        /locked/i,
+    );
+});
+
+test("percentile parameters are not shown with a percent suffix", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        advancedExpanded: true,
+    });
+    for (const name of [
+        "absorptionVolumePercentile",
+        "liquidityQualityPercentile",
+    ]) {
+        const text = textOf(findByTestId(tree, `parameter-row-${name}`));
+        assert.match(text, /0\.90/);
+        assert.doesNotMatch(text, /0\.90 %/);
+    }
+});
+
 test("page source contains no order / bot / optimization authority", async () => {
     const source = await readFile(
         new URL("./ParameterSettingsPage.jsx", import.meta.url),
@@ -426,4 +675,25 @@ test("page structure keeps advanced collapsed and inputs read-only when locked",
     assert.match(source, /ps-param-input/);
     assert.match(source, /account-runtime-overview/);
     assert.match(source, /authority-details-toggle/);
+    assert.match(source, /ParameterGuideModal/);
+    assert.match(source, /ps-guide-trigger/);
+    assert.match(source, /guideKey = null/);
+});
+
+test("guide metadata module is static and never writes configuration", async () => {
+    const guideSource = await readFile(
+        new URL(
+            "../features/parameter-settings/parameterGuide.js",
+            import.meta.url,
+        ),
+        "utf8",
+    );
+    assert.doesNotMatch(
+        guideSource,
+        /fetch\(|updateParameterSettingsConfiguration|onSave|api\//,
+    );
+    assert.doesNotMatch(
+        guideSource,
+        /Optimize|Auto Tune|Auto Apply|Apply Now/,
+    );
 });

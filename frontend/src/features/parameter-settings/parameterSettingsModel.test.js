@@ -11,10 +11,12 @@ import {
     buildRuntimeContext,
     countAdvancedParameters,
     countPrimaryParameters,
+    dedupeWarnings,
     formatParameterValue,
     isLiveWritable,
     performSave,
     splitSchema,
+    unitSymbol,
     validateDraftValue,
 } from "./parameterSettingsModel.js";
 
@@ -185,6 +187,44 @@ test("units are displayed including percent for maximumStrategySpreadPct", () =>
         (row) => row.name === "momentumWindowSeconds",
     );
     assert.equal(momentum.configuredDisplay, "60 s");
+});
+
+test("normalized percentile units never render a percent suffix", () => {
+    assert.equal(unitSymbol("normalized percentile (0.0-1.0)"), "");
+    const absorption = metadata("absorptionVolumePercentile", {
+        unit: "normalized percentile (0.0-1.0)",
+        minimumInclusive: false,
+    });
+    assert.equal(formatParameterValue(absorption, 0.9), "0.90");
+    assert.equal(formatParameterValue(absorption, 0.9).includes("%"), false);
+});
+
+test("identical authority warnings are deduplicated and distinct ones preserved", () => {
+    const shared = {
+        code: "CONFIDENCE_EXCEEDS_COMPOSITE",
+        parameter: "minimumStrategyConfidence",
+        message: "minimumStrategyConfidence is greater than "
+            + "minimumCompositeScore; the confidence floor may never bind",
+    };
+    const distinct = {
+        code: "EXIT_MOMENTUM_HIGH",
+        parameter: "exitMomentumMinimum",
+        message: "exitMomentumMinimum is greater than 0.5 and may cause "
+            + "unusually early momentum-decay exits",
+    };
+    assert.equal(dedupeWarnings([shared, shared, distinct]).length, 2);
+
+    const revision = buildEffectiveRevisionModel(
+        { configuredRevision: 1, effectiveRevision: 1, warnings: [shared] },
+        { effectiveRevision: 1, warnings: [shared, distinct] },
+        {},
+    );
+    assert.equal(revision.warnings.length, 2);
+    assert.equal(
+        revision.warnings[0].code,
+        "CONFIDENCE_EXCEEDS_COMPOSITE",
+    );
+    assert.equal(revision.warnings[1].code, "EXIT_MOMENTUM_HIGH");
 });
 
 test("frontend validation is convenience only and uses backend ranges", () => {

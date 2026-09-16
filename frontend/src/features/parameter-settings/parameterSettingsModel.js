@@ -121,6 +121,9 @@ export const splitSchema = (schema) => {
 
 export const unitSymbol = (unit) => {
     const value = String(unit ?? "").toLowerCase();
+    // A normalized percentile rank (0.0-1.0) is not a percent. Check it
+    // before the generic "percent" match so 0.90 is never shown as "0.90 %".
+    if (value.includes("percentile")) return "";
     if (value.includes("percent")) return "%";
     if (value.includes("millisecond")) return "ms";
     if (value.includes("seconds")) return "s";
@@ -306,6 +309,25 @@ export const buildRuntimeContext = (
     };
 };
 
+export const warningKey = (warning) => (
+    `${warning?.code ?? ""}|${warning?.parameter ?? ""}|${warning?.message ?? ""}`
+);
+
+/* The same cross-field warning is legitimately emitted by both the configured
+   and effective authority responses. Presentation aggregates them, so dedupe
+   only truly identical warnings and keep distinct warnings intact. */
+export const dedupeWarnings = (warnings = []) => {
+    const seen = new Set();
+    const result = [];
+    for (const warning of warnings) {
+        const key = warningKey(warning);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(warning);
+    }
+    return result;
+};
+
 export const buildEffectiveRevisionModel = (
     configuration = {},
     effective = {},
@@ -317,10 +339,10 @@ export const buildEffectiveRevisionModel = (
     scope: configuration?.scope ?? null,
     source: configuration?.source ?? null,
     status: configuration?.status ?? null,
-    warnings: [
+    warnings: dedupeWarnings([
         ...(configuration?.warnings ?? []),
         ...(effective?.warnings ?? []),
-    ],
+    ]),
     capturedAt: runtime?.capturedAt ?? null,
     runtimeAvailable: runtime?.runtimeSnapshotAvailable === true,
     pending: (
