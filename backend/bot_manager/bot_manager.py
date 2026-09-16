@@ -445,6 +445,13 @@ class BotManager:
             MicrostructureStateBuilder()
         )
 
+        # ============================================
+        # PARAMETER PROMOTION (E-PARAM-5)
+        # ============================================
+
+        self._parameter_promotion_service = None
+        self._last_parameter_promotion_check = 0.0
+
     # ============================================
     # POSITION RECONCILIATION
     # ============================================
@@ -4765,6 +4772,108 @@ class BotManager:
         except Exception:
             return
 
+    def _parameter_promotion_service_instance(self):
+        service = getattr(self, "_parameter_promotion_service", None)
+        if service is None:
+            from backend.strategy.parameters.promotion_service import (
+                ParameterPromotionService,
+            )
+
+            service = ParameterPromotionService()
+            self._parameter_promotion_service = service
+        return service
+
+    def _parameter_promotion_scope(self):
+        mode = str(self.config.get("mode") or "").strip().lower()
+        if mode == "paper":
+            return "PAPER"
+        if mode == "live":
+            return "LIVE"
+        return None
+
+    def _parameter_position_is_open(self):
+        try:
+            state = self._execution_control_position_state()
+        except Exception:
+            state = None
+        if isinstance(state, dict):
+            side = str(state.get("side") or "").strip().upper()
+            if side in ("LONG", "SHORT"):
+                return True
+        engine = getattr(self, "engine", None)
+        return bool(getattr(engine, "actual_position", None))
+
+    def _rebuild_microstructure_parameter_authority(self):
+        """Rebuild the runtime parameter authority from the promoted set.
+
+        Called only after a successful canonical promotion.  The builder
+        resolves the newly EFFECTIVE revision and records the observed runtime
+        snapshot, so the runtime revision always matches the values actually
+        consumed by the strategy.
+        """
+
+        try:
+            parameter_set = self._resolve_microstructure_parameter_set(
+                self.config.get("mode")
+            )
+            self.microstructure_builder = MicrostructureStateBuilder(
+                parameter_set=parameter_set
+            )
+        except Exception:
+            return False
+        return True
+
+    def promote_parameter_revision_if_safe(self, *, bot_stopped=None):
+        """Attempt the safe PENDING -> EFFECTIVE promotion for the bot scope.
+
+        The canonical promotion authority owns the transition; this method only
+        supplies the runtime safety signal and rebuilds the runtime parameter
+        authority when a promotion actually happens.
+        """
+
+        scope = self._parameter_promotion_scope()
+        if scope is None:
+            return {
+                "outcome": "INVALID_SCOPE",
+                "promoted": False,
+                "scope": None,
+            }
+        open_position = self._parameter_position_is_open()
+        if bot_stopped is None:
+            bot_stopped = (
+                not getattr(self, "_running", False)
+                or self.lifecycle_state == "STOPPED"
+            )
+        safe_to_promote = bool(bot_stopped) or not open_position
+        try:
+            result = self._parameter_promotion_service_instance().promote_pending(
+                scope,
+                safe_to_promote=safe_to_promote,
+                open_position=open_position,
+            )
+        except Exception:
+            return {
+                "outcome": "PROMOTION_ERROR",
+                "promoted": False,
+                "scope": scope,
+            }
+        payload = result.to_dict()
+        if result.promoted:
+            payload["runtimeRebuilt"] = (
+                self._rebuild_microstructure_parameter_authority()
+            )
+        return payload
+
+    def _maybe_promote_parameter_authority_at_boundary(self):
+        """Throttled safe-boundary promotion check for the WS decision cycle."""
+
+        now = time.monotonic()
+        last = getattr(self, "_last_parameter_promotion_check", 0.0)
+        if now - last < 1.0:
+            return
+        self._last_parameter_promotion_check = now
+        self.promote_parameter_revision_if_safe()
+
     def _build_snapshot_aware_exit_evaluator(self, evaluate_exit):
         """Bind the entry parameter snapshot into the strategy exit evaluator.
 
@@ -5234,6 +5343,9 @@ class BotManager:
             # A fresh causal history is owned by this runtime/symbol.  Only
             # Paper receives the canonical normalized parameter authority;
             # Live keeps legacy defaults because the resolver returns None.
+            # A pending revision saved while STOPPED is promoted at this safe
+            # start boundary before the runtime snapshot is captured.
+            self.promote_parameter_revision_if_safe(bot_stopped=True)
             self.microstructure_builder = MicrostructureStateBuilder(
                 parameter_set=self._resolve_microstructure_parameter_set(
                     config.get("mode")
@@ -5647,6 +5759,11 @@ class BotManager:
                             "Runtime market packet=%s",
                             packet,
                         )
+
+                        # Safe promotion boundary: a pending parameter revision
+                        # is promoted here (never mid-position) before the next
+                        # decision/trade snapshot is captured.
+                        self._maybe_promote_parameter_authority_at_boundary()
 
                         micro_state = (
                             self.microstructure_builder

@@ -26,6 +26,11 @@ from .model import (
     StrategyParameterSet,
     format_timestamp,
 )
+from .promotion_service import (
+    ParameterPromotionService,
+    PromotionOutcome,
+    PromotionResult,
+)
 from .registry import (
     CouplingGroup,
     ParameterMetadata,
@@ -95,11 +100,14 @@ __all__ = [
     "PAPER_MIGRATION_BASELINE",
     "PAPER_RUNTIME_SCOPE",
     "ParameterMetadata",
+    "ParameterPromotionService",
     "ParameterScope",
     "ParameterSettingsService",
     "ParameterSource",
     "ParameterStatus",
     "ParameterTier",
+    "PromotionOutcome",
+    "PromotionResult",
     "RuntimeAuthorityStatus",
     "RuntimeParameterSnapshot",
     "RuntimeParameterSnapshotRegistry",

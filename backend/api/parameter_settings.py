@@ -41,6 +41,36 @@ _OUTCOME_STATUS = {
 }
 
 
+def _attempt_stopped_promotion(scope) -> dict:
+    """Trigger the canonical safe promotion when the bot is STOPPED.
+
+    Promotion logic stays in the canonical parameter authority; this helper
+    only supplies the runtime lifecycle signal.  When no bot manager exists
+    (e.g. an isolated settings API test) no promotion is attempted, so a bare
+    configuration write keeps its PENDING semantics.
+    """
+
+    try:
+        from backend.bot_manager.bot_manager import get_existing_bot_manager
+    except Exception:
+        return {}
+    try:
+        manager = get_existing_bot_manager()
+    except Exception:
+        return {}
+    if manager is None:
+        return {}
+    try:
+        running = bool(getattr(manager, "_running", False))
+        lifecycle = str(getattr(manager, "lifecycle_state", "STOPPED"))
+        if running and lifecycle != "STOPPED":
+            return {}
+        result = manager.promote_parameter_revision_if_safe(bot_stopped=True)
+    except Exception:
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
 def _service(request: Request) -> ParameterSettingsService:
     state = getattr(getattr(request, "app", None), "state", None)
     service = getattr(state, _APPLICATION_STATE_ATTRIBUTE, None)
@@ -184,5 +214,21 @@ async def update_parameter_settings_configuration(
         expected_revision=payload.get("expectedRevision"),
         confirm_live=payload.get("confirmLive") is True,
     )
+    content = result.payload
+    if result.outcome is UpdateOutcome.ACCEPTED:
+        promotion = _attempt_stopped_promotion(payload.get("scope"))
+        if promotion.get("promoted") is True:
+            # The bot is STOPPED, so the safe promotion boundary was reached
+            # without starting the bot.  Refresh the read models so the
+            # response never claims a stale effective revision.
+            scope = payload.get("scope")
+            content = {
+                **content,
+                "status": "ACTIVE",
+                "effectiveRevision": promotion.get("effectiveRevision"),
+                "promotion": promotion,
+                "configuration": service.configuration(scope),
+                "effective": service.effective(scope),
+            }
     status_code = _OUTCOME_STATUS.get(result.outcome, 500)
-    return JSONResponse(status_code=status_code, content=result.payload)
+    return JSONResponse(status_code=status_code, content=content)

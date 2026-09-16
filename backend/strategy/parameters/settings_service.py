@@ -42,6 +42,11 @@ from .model import (
     StrategyParameterSet,
     format_timestamp,
 )
+from .promotion_service import (
+    ParameterPromotionService,
+    PromotionOutcome,
+    PromotionResult,
+)
 from .registry import ParameterTier, StrategyParameterRegistry
 from .resolver import default_runtime_base_directory
 from .runtime_registry import get_runtime_snapshot
@@ -110,6 +115,7 @@ class ParameterSettingsService:
         self._base_directory = base_directory
         self._now = now
         self._baseline_cache: dict = {}
+        self._promotion: Optional[ParameterPromotionService] = None
 
     # ------------------------------------------------------------------
     # infrastructure
@@ -120,6 +126,17 @@ class ParameterSettingsService:
         if self._store is None:
             self._store = StrategyParameterStore(self._base_directory)
         return self._store
+
+    @property
+    def promotion(self) -> ParameterPromotionService:
+        """The single canonical PENDING -> EFFECTIVE promotion authority."""
+
+        if self._promotion is None:
+            self._promotion = ParameterPromotionService(
+                store=self.store,
+                now=self._now,
+            )
+        return self._promotion
 
     def _captured_at(self) -> datetime:
         if callable(self._now):
@@ -200,9 +217,23 @@ class ParameterSettingsService:
         configured: StrategyParameterSet,
         effective: StrategyParameterSet,
     ) -> str:
+        # PENDING is observable exactly while the configured revision has not
+        # yet been promoted into EFFECTIVE.  Once promoted, the presentation
+        # status follows the promoted EFFECTIVE record (ACTIVE) rather than the
+        # historical configured record, which intentionally keeps the PENDING
+        # status it was written with for audit.
         if configured.configuredRevision > effective.effectiveRevision:
             return ParameterStatus.PENDING.value
+        if effective.status is ParameterStatus.ACTIVE:
+            return ParameterStatus.ACTIVE.value
         return configured.status.value
+
+    @staticmethod
+    def _is_pending(
+        configured: StrategyParameterSet,
+        effective: StrategyParameterSet,
+    ) -> bool:
+        return configured.configuredRevision > effective.effectiveRevision
 
     @staticmethod
     def _parameters_map(parameter_set: StrategyParameterSet) -> dict:
@@ -273,6 +304,8 @@ class ParameterSettingsService:
             "configuredRevision": configured.configuredRevision,
             "effectiveRevision": effective.effectiveRevision,
             "status": self._presentation_status(configured, effective),
+            "pending": self._is_pending(configured, effective),
+            "effectiveStatus": effective.status.value,
             "source": configured.source.value,
             "updatedAt": format_timestamp(configured.updatedAt),
             "effectiveFrom": (
@@ -302,6 +335,8 @@ class ParameterSettingsService:
             "configuredRevision": configured.configuredRevision,
             "effectiveRevision": effective.effectiveRevision,
             "status": self._presentation_status(configured, effective),
+            "pending": self._is_pending(configured, effective),
+            "effectiveStatus": effective.status.value,
             "source": effective.source.value,
             "validation": validation.to_dict(),
             "warnings": [
@@ -372,6 +407,13 @@ class ParameterSettingsService:
                 "authorityStatus": self._authority_status(scope),
                 "source": configured.source.value,
                 "status": self._presentation_status(configured, effective),
+                "pending": self._is_pending(configured, effective),
+                "promotionState": (
+                    "PENDING"
+                    if self._is_pending(configured, effective)
+                    else "EFFECTIVE"
+                ),
+                "effectiveStatus": effective.status.value,
                 "configuredRevision": configured.configuredRevision,
                 "effectiveRevision": effective.effectiveRevision,
                 "warnings": warnings,
@@ -382,6 +424,48 @@ class ParameterSettingsService:
             "parameterCount": len(StrategyParameterRegistry.PARAMETERS),
             "scopes": scopes,
         }
+
+    # ------------------------------------------------------------------
+    # promotion
+    # ------------------------------------------------------------------
+
+    def promote_if_safe(
+        self,
+        scope: Any,
+        *,
+        safe_to_promote: bool,
+        open_position: bool = False,
+    ) -> dict:
+        """Delegate one safe promotion attempt to the canonical authority.
+
+        This is intentionally a thin pass-through: the promotion logic lives in
+        :class:`ParameterPromotionService`.  A successful promotion never
+        changes order / bot / runtime authority; it only advances the effective
+        parameter revision for the scope.
+        """
+
+        try:
+            resolved = _coerce_scope(scope)
+        except (ValueError, TypeError):
+            return PromotionResult(
+                outcome=PromotionOutcome.INVALID_SCOPE,
+                scope=None,
+                promoted=False,
+                message="scope must be PAPER or LIVE",
+            ).to_dict()
+        result = self.promotion.promote_pending(
+            resolved,
+            safe_to_promote=safe_to_promote,
+            open_position=open_position,
+        )
+        return result.to_dict()
+
+    def pending_state(self, scope: Any) -> dict:
+        try:
+            resolved = _coerce_scope(scope)
+        except (ValueError, TypeError):
+            return {"scope": None, "valid": False, "pending": False}
+        return self.promotion.pending_state(resolved)
 
     # ------------------------------------------------------------------
     # write

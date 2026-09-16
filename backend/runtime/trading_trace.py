@@ -67,6 +67,74 @@ def sanitize_metadata(value: Optional[Mapping[str, Any]]) -> dict[str, Any]:
     return cleaned
 
 
+PARAMETER_TRADE_KEYS = (
+    "parameterRevision",
+    "parameterSetId",
+    "parameterScope",
+    "featureContract",
+    "configuredRevision",
+    "effectiveRevision",
+    "source",
+    "capturedAt",
+)
+
+
+def parameter_authority_metadata(parameter_authority: Any) -> dict[str, Any]:
+    """Extract the minimal durable parameter linkage for a completed trade.
+
+    The source is the ENTRY runtime ``parameterAuthority`` snapshot, never the
+    current configured/effective revision at close time.  Only canonical
+    linkage metadata is retained; the full parameter map is never duplicated
+    into the trade record.
+    """
+
+    if not isinstance(parameter_authority, Mapping):
+        return {}
+    effective_revision = parameter_authority.get("effectiveRevision")
+    canonical_scope = parameter_authority.get("canonicalScope")
+    if canonical_scope is None:
+        canonical_scope = parameter_authority.get("scope")
+    metadata: dict[str, Any] = {}
+    if effective_revision is not None:
+        metadata["parameterRevision"] = effective_revision
+    if parameter_authority.get("parameterSetId") is not None:
+        metadata["parameterSetId"] = parameter_authority.get("parameterSetId")
+    if canonical_scope is not None:
+        metadata["parameterScope"] = canonical_scope
+    if parameter_authority.get("featureContract") is not None:
+        metadata["featureContract"] = parameter_authority.get("featureContract")
+    if parameter_authority.get("configuredRevision") is not None:
+        metadata["configuredRevision"] = parameter_authority.get(
+            "configuredRevision"
+        )
+    if effective_revision is not None:
+        metadata["effectiveRevision"] = effective_revision
+    if parameter_authority.get("source") is not None:
+        metadata["source"] = parameter_authority.get("source")
+    if parameter_authority.get("capturedAt") is not None:
+        metadata["capturedAt"] = parameter_authority.get("capturedAt")
+    return metadata
+
+
+def entry_parameter_metadata(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Return the ENTRY parameter linkage from a trace's STRATEGY event.
+
+    Cycle 13 must record the revision the trade actually entered with.  The
+    STRATEGY event is captured at the decision/entry boundary, so it is the
+    authoritative entry source even after the effective revision changes.
+    """
+
+    for event in events:
+        if str(event.get("stage") or "").upper() != "STRATEGY":
+            continue
+        metadata = event.get("metadata") or {}
+        authority = metadata.get("parameterAuthority")
+        linkage = parameter_authority_metadata(authority)
+        if linkage:
+            return linkage
+    return {}
+
+
 def strategy_decision_snapshot(strategy_state: Mapping[str, Any]) -> dict[str, Any]:
     """Select already-computed Strategy inputs; never re-evaluate a decision."""
     state = dict(strategy_state or {})
@@ -130,6 +198,16 @@ def strategy_decision_snapshot(strategy_state: Mapping[str, Any]) -> dict[str, A
                 parameter_authority[canonical_key] = (
                     raw_parameter_authority.get(canonical_key)
                 )
+        # Cycle 13 entry linkage: expose the effective revision consumed at the
+        # decision boundary under a stable name plus its canonical scope.
+        if "effectiveRevision" in raw_parameter_authority:
+            parameter_authority["parameterRevision"] = (
+                raw_parameter_authority.get("effectiveRevision")
+            )
+        if "canonicalScope" in raw_parameter_authority:
+            parameter_authority["parameterScope"] = (
+                raw_parameter_authority.get("canonicalScope")
+            )
 
     return sanitize_metadata({
         "market": {
@@ -277,8 +355,40 @@ class TradingTraceStore:
         self.max_events = max_events
         self.persistence_errors = 0
 
+    def _attach_entry_parameter_linkage(self, payload: dict) -> dict:
+        """Attach ENTRY parameter linkage to a completed trade event.
+
+        The linkage comes from the same trace's STRATEGY event (the decision
+        boundary), never from the current configured/effective revision at
+        close time.  This makes the persisted HISTORY/RESULT trade record
+        self-describing for Cycle 13 without redesigning trade history.
+        """
+
+        metadata = dict(payload.get("metadata") or {})
+        if "parameterRevision" in metadata or "parameter" in metadata:
+            return payload
+        linkage = entry_parameter_metadata(self._events_for_trace(payload.get("traceId")))
+        if not linkage:
+            return payload
+        metadata.update(linkage)
+        metadata["parameter"] = dict(linkage)
+        updated = dict(payload)
+        updated["metadata"] = sanitize_metadata(metadata)
+        return updated
+
+    def _events_for_trace(self, trace_id: Any) -> list[dict[str, Any]]:
+        if not trace_id:
+            return []
+        with self._lock:
+            return [dict(e) for e in self._events if e.get("traceId") == trace_id]
+
     def record(self, event: TraceEvent) -> None:
         payload = event.to_dict()
+        if str(payload.get("stage") or "").upper() in ("HISTORY", "RESULT"):
+            try:
+                payload = self._attach_entry_parameter_linkage(payload)
+            except Exception:
+                pass
         with self._lock:
             self._events.append(payload)
             if len(self._events) > self.max_events:
@@ -303,12 +413,16 @@ class TradingTraceStore:
         first, last = events[0], events[-1]
         result_event = next((e for e in reversed(events) if e["stage"] == "RESULT"), {})
         execution = next((e for e in reversed(events) if e["stage"] == "EXECUTION"), {})
+        history_event = next((e for e in reversed(events) if e["stage"] == "HISTORY"), {})
         ids = {}
         for event in events:
             for key in ("runtimeId", "observationId", "decisionId"):
                 ids[key] = event.get(key) or ids.get(key)
             for key in ("rankingCycleId", "orderId", "exchangeOrderId", "positionId", "markerId"):
                 ids[key] = event.get("metadata", {}).get(key) or ids.get(key)
+        parameter_performance = self._parameter_performance(
+            trace_id, events, history_event, result_event
+        )
         return {
             "traceId": trace_id, "mode": first["mode"], "symbol": first.get("symbol"),
             "startedAt": first["timestamp"], "updatedAt": last["timestamp"],
@@ -316,7 +430,38 @@ class TradingTraceStore:
             "finalStatus": result["classification"], "primaryReason": result["primaryReason"],
             "failurePoint": result["failurePoint"], "executionStatus": execution.get("status"),
             "netPnL": result_event.get("metadata", {}).get("netPnL"),
+            "parameterPerformance": parameter_performance,
             **ids, "events": events,
+        }
+
+    @staticmethod
+    def _parameter_performance(
+        trace_id: str,
+        events: list[dict[str, Any]],
+        history_event: Mapping[str, Any],
+        result_event: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Cycle 13 linkage: which parameter revision produced this trade.
+
+        The linkage is read from the persisted HISTORY/RESULT trade record,
+        falling back to the ENTRY STRATEGY snapshot for legacy traces.  It is
+        never derived from the latest effective revision at settlement time.
+        """
+
+        metadata = history_event.get("metadata") or result_event.get("metadata") or {}
+        linkage = {
+            key: metadata.get(key)
+            for key in PARAMETER_TRADE_KEYS
+            if metadata.get(key) is not None
+        }
+        if not linkage:
+            linkage = entry_parameter_metadata(events)
+        if not linkage:
+            return None
+        return {
+            "tradeId": metadata.get("tradeId"),
+            "traceId": trace_id,
+            **linkage,
         }
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:

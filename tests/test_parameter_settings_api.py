@@ -583,6 +583,57 @@ def test_write_does_not_mutate_order_or_runtime_authority(client):
         assert forbidden not in body
 
 
+def test_stopped_bot_write_promotes_configuration(client, monkeypatch):
+    """A write while the bot is STOPPED reaches the safe promotion boundary.
+
+    Promotion logic stays in the canonical authority; the API only supplies the
+    lifecycle signal through the bot manager.
+    """
+
+    from backend.bot_manager import bot_manager as bot_manager_module
+
+    service = client.app.state.parameter_settings_service
+
+    class _StoppedManager:
+        _running = False
+        lifecycle_state = "STOPPED"
+
+        def promote_parameter_revision_if_safe(self, *, bot_stopped=None):
+            return service.promote_if_safe("PAPER", safe_to_promote=True)
+
+    monkeypatch.setattr(
+        bot_manager_module,
+        "get_existing_bot_manager",
+        lambda: _StoppedManager(),
+    )
+
+    session, csrf = _login(client)
+    before = _configured_parameters(client, "PAPER")
+    parameters = dict(before["parameters"])
+    parameters["minimumCompositeScore"] = 0.42
+
+    resp = _put(
+        client,
+        session,
+        csrf,
+        {
+            "scope": "PAPER",
+            "parameters": parameters,
+            "expectedRevision": before["configuredRevision"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["promotion"]["outcome"] == "PROMOTED"
+    assert body["status"] == "ACTIVE"
+    assert body["effectiveRevision"] == before["configuredRevision"] + 1
+
+    after = _configured_parameters(client, "PAPER")
+    assert after["configuredRevision"] == before["configuredRevision"] + 1
+    assert after["effectiveRevision"] == before["configuredRevision"] + 1
+    assert after["parameters"]["minimumCompositeScore"] == 0.42
+
+
 def test_only_one_write_route_is_registered():
     write_routes = []
     for route in parameter_settings_router.routes:
