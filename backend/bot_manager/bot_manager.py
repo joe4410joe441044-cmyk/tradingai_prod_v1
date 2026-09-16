@@ -2775,20 +2775,49 @@ class BotManager:
         return MANUAL_OPERATION_DENY
 
     def _manual_trade_mode(self):
+        """Resolve the single authoritative manual execution destination.
 
+        Manual trading must never silently fall back between PAPER and LIVE.
+        The engine execution mode (derived from ``dry_run``), the configured
+        mode and the dry-run switch must all agree; otherwise the mode is
+        unresolved and manual trading fails closed.  This mirrors the canonical
+        :meth:`ExecutionRuntime._authoritative_execution_mode` contract so the
+        displayed mode, the preparation mode and the execution destination are
+        one and the same.
+        """
+
+        engine = self.engine
         engine_mode = str(
-            getattr(self.engine, "mode", "") or ""
+            getattr(engine, "mode", "") or ""
         ).strip().lower()
-        config_mode = str(
-            self.config.get("mode", "") if isinstance(
-                self.config, dict
-            ) else ""
+
+        engine_config = getattr(engine, "config", None)
+        if isinstance(engine_config, dict):
+            config = engine_config
+        elif isinstance(self.config, dict):
+            config = self.config
+        else:
+            config = {}
+
+        configured_mode = str(
+            config.get("mode", "") or ""
         ).strip().lower()
-        modes = {mode for mode in (engine_mode, config_mode) if mode}
-        if modes == {"paper"}:
+        dry_run = config.get("dry_run")
+
+        if (
+            engine_mode == "paper"
+            and configured_mode == "paper"
+            and dry_run is True
+        ):
             return "paper"
-        if modes:
-            return sorted(modes)[0]
+
+        if (
+            engine_mode == "live"
+            and configured_mode == "live"
+            and dry_run is False
+        ):
+            return "live"
+
         return ""
 
     def _manual_runtime_symbol_context(self, active_symbol):
@@ -2943,7 +2972,7 @@ class BotManager:
         )
 
     def _manual_entry_authority_snapshot(
-        self, engine, active_symbol, preflight
+        self, engine, active_symbol, preflight, mode
     ):
 
         config = engine.config if isinstance(
@@ -2951,7 +2980,7 @@ class BotManager:
         ) else {}
 
         return {
-            "mode": "paper",
+            "mode": mode,
             "symbol": active_symbol,
             "runtimeInstanceId": self.runtime_instance_id,
             "runtimeId": self.active_runtime_id,
@@ -2984,7 +3013,7 @@ class BotManager:
         }
 
     def _manual_entry_locked(
-        self, request_id, action, operation, active_symbol
+        self, request_id, action, operation, active_symbol, mode
     ):
 
         engine = self.engine
@@ -3028,7 +3057,7 @@ class BotManager:
 
             reservation["snapshot"] = (
                 self._manual_entry_authority_snapshot(
-                    engine, active_symbol, preflight
+                    engine, active_symbol, preflight, mode
                 )
             )
 
@@ -3052,13 +3081,29 @@ class BotManager:
                 engine.clear_execution_entry_preflight(trace_id)
 
             position = getattr(engine, "actual_position", None)
-            if not (
-                isinstance(position, dict)
-                and str(
-                    position.get("entry_authority") or ""
-                ).strip().upper() == MANUAL_ENTRY_AUTHORITY
-                and position.get("request_id") == request_id
-            ):
+            if mode == "live":
+                # LIVE position authority is the exchange.  The manual entry
+                # is confirmed only when an authoritative position now exists
+                # on the intended side (no local fabrication).
+                confirmed = (
+                    isinstance(position, dict)
+                    and str(
+                        position.get("side") or ""
+                    ).strip().upper()
+                    in {
+                        action,
+                        "LONG" if action == "BUY" else "SHORT",
+                    }
+                )
+            else:
+                confirmed = (
+                    isinstance(position, dict)
+                    and str(
+                        position.get("entry_authority") or ""
+                    ).strip().upper() == MANUAL_ENTRY_AUTHORITY
+                    and position.get("request_id") == request_id
+                )
+            if not confirmed:
                 reason = (
                     entry_result.get("reason")
                     if isinstance(entry_result, dict)
@@ -3080,7 +3125,7 @@ class BotManager:
                 "controlAuthority": self.control_authority,
                 "controlRevision": self.control_revision,
                 "symbol": active_symbol,
-                "mode": "paper",
+                "mode": mode,
                 "side": action,
                 "approvedQuantity": approved,
                 "quantity": approved,
@@ -3096,7 +3141,7 @@ class BotManager:
             self._end_execution_admission(reservation)
 
     def _manual_close_locked(
-        self, request_id, operation, expected_position_id
+        self, request_id, operation, expected_position_id, mode
     ):
 
         engine = self.engine
@@ -3122,15 +3167,20 @@ class BotManager:
                 request_id=request_id,
             )
 
-        reconciliation = self._reconcile_manual_close_quantity(
-            engine, position
-        )
-        if reconciliation is not True:
-            return self._manual_trade_deny(
-                reconciliation,
-                operation=operation,
-                request_id=request_id,
+        # PAPER closes reconcile the simulated engine position against the
+        # authoritative simulated portfolio.  LIVE closes take their position
+        # and quantity authority from the exchange adapter, so the PAPER
+        # portfolio reconciliation does not apply and must not gate them.
+        if mode == "paper":
+            reconciliation = self._reconcile_manual_close_quantity(
+                engine, position
             )
+            if reconciliation is not True:
+                return self._manual_trade_deny(
+                    reconciliation,
+                    operation=operation,
+                    request_id=request_id,
+                )
 
         if self.close_reservation is not None:
             return self._manual_trade_deny(
@@ -3184,21 +3234,40 @@ class BotManager:
                 request_id=request_id,
             )
 
-        history_list = getattr(engine, "trade_history", None)
-        committed = bool(
-            isinstance(history_list, list)
-            and len(history_list) > before_history
-            and isinstance(history_list[-1], dict)
-            and history_list[-1].get("tradeId") == position_id
-            and history_list[-1].get("reason") == MANUAL_CLOSE_REASON
-        )
-        if not committed:
-            # Another close path (auto exit / emergency) committed first.
-            return self._manual_trade_deny(
-                "ALREADY_CLOSED",
-                operation=operation,
-                request_id=request_id,
+        if mode == "live":
+            # LIVE close is confirmed only by authoritative exchange evidence
+            # carried on the close result.  No local history shape is trusted.
+            if not (
+                isinstance(close_result, dict)
+                and close_result.get("confirmed") is True
+                and close_result.get("closed") is True
+            ):
+                reason = (
+                    close_result.get("reason")
+                    if isinstance(close_result, dict)
+                    else None
+                ) or "MANUAL_CLOSE_UNCONFIRMED"
+                return self._manual_trade_deny(
+                    reason,
+                    operation=operation,
+                    request_id=request_id,
+                )
+        else:
+            history_list = getattr(engine, "trade_history", None)
+            committed = bool(
+                isinstance(history_list, list)
+                and len(history_list) > before_history
+                and isinstance(history_list[-1], dict)
+                and history_list[-1].get("tradeId") == position_id
+                and history_list[-1].get("reason") == MANUAL_CLOSE_REASON
             )
+            if not committed:
+                # Another close path (auto exit / emergency) committed first.
+                return self._manual_trade_deny(
+                    "ALREADY_CLOSED",
+                    operation=operation,
+                    request_id=request_id,
+                )
 
         event_key = (
             f"{self.runtime_instance_id}:"
@@ -3223,13 +3292,29 @@ class BotManager:
             "controlAuthority": self.control_authority,
             "controlRevision": self.control_revision,
             "symbol": self.activeSymbol,
-            "mode": "paper",
+            "mode": mode,
             "closeReason": MANUAL_CLOSE_REASON,
-            "positionId": position_id,
-            "quantity": position.get("coin_qty"),
+            "positionId": (
+                position_id
+                or (
+                    close_result.get("order_id")
+                    if isinstance(close_result, dict)
+                    else None
+                )
+            ),
+            "quantity": (
+                position.get("coin_qty")
+                if mode == "paper"
+                else position.get("qty")
+            ),
             "quantityUnit": "coin",
             "exitPrice": price,
             "closed": True,
+            "orderId": (
+                close_result.get("order_id")
+                if isinstance(close_result, dict)
+                else None
+            ),
             "tradeId": (
                 history.get("tradeId")
                 if isinstance(history, dict)
@@ -3238,12 +3323,14 @@ class BotManager:
         }
 
     def execute_manual_trade(self, request):
-        """Execute one human-intent PAPER BUY/SELL.
+        """Execute one human-intent MANUAL BUY/SELL.
 
         The backend owns the operation classification, entry admission,
-        approved-quantity binding and close serialization. Denials are
-        returned as structured results; the caller never receives a mutation
-        from a denied request.
+        approved-quantity binding and close serialization.  MANUAL is only an
+        entry authority: the resolved canonical execution mode (PAPER or LIVE)
+        decides the destination, and both reuse the existing ExecutionEngine
+        entry/close path.  Denials are returned as structured results; the
+        caller never receives a mutation from a denied request.
         """
 
         if not isinstance(request, dict):
@@ -3294,12 +3381,12 @@ class BotManager:
                 )
 
             mode = self._manual_trade_mode()
-            if mode != "paper":
+            if mode not in ("paper", "live"):
                 return self._record_manual_trade(
                     request_id,
                     signature,
                     self._manual_trade_deny(
-                        "MANUAL_TRADE_PAPER_ONLY",
+                        "MANUAL_MODE_UNRESOLVED",
                         request_id=request_id,
                         mode=mode,
                     ),
@@ -3479,11 +3566,11 @@ class BotManager:
 
             if operation in MANUAL_ENTRY_OPERATIONS:
                 result = self._manual_entry_locked(
-                    request_id, action, operation, active_symbol
+                    request_id, action, operation, active_symbol, mode
                 )
             elif operation in MANUAL_CLOSE_OPERATIONS:
                 result = self._manual_close_locked(
-                    request_id, operation, expected_position_id
+                    request_id, operation, expected_position_id, mode
                 )
             else:
                 result = self._manual_trade_deny(

@@ -445,6 +445,21 @@ export default function OperationPreparation({
             ? "SELL / CLOSE LONG"
             : "SELL / SHORT"
     );
+    // PAPER/LIVE is the execution destination; BOT/MANUAL is the entry
+    // authority. The destination is the canonical selected mode, never the
+    // process-wide environment trade capability (which is not a destination).
+    const manualDestination = (() => {
+        const selected = String(
+            config?.selectedMode || ""
+        ).trim().toUpperCase();
+        if (selected === "LIVE" && config?.dryRun === false) {
+            return "LIVE";
+        }
+        if (selected === "PAPER") {
+            return "PAPER";
+        }
+        return "UNKNOWN";
+    })();
 
     const mmAvailable = Boolean(mmDraft);
     const mmRiskValue = mmDraft ? Number(mmDraft.riskPerTradePercent) : undefined;
@@ -979,6 +994,7 @@ return (
                                 </div>
                                 <div className="operation-prep-derived-list">
                                     <DerivedRow hideSource label="ACTIVE SYMBOL" source="RUNTIME" value={manualActiveSymbol} />
+                                    <DerivedRow hideSource label="DESTINATION" source="RUNTIME" value={manualDestination} />
                                     <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
                                 </div>
                                 <div className="operation-prep-manual-trade" data-testid="manual-trade-buttons">

@@ -1275,14 +1275,30 @@ export default function BotControl({
     ).trim().toUpperCase();
 
     // The manual-trade stale-intent guard compares against the canonical
-    // runtime trade mode (paper / live). The UI execution label (SIMULATION /
-    // REAL) is presentation only and must never be sent as the mode.
+    // manual execution mode (paper / live) resolved by the backend from the
+    // selected bot mode and the dry-run switch. `tradeMode` is only the
+    // process-wide environment capability, never the destination, so it must
+    // not be sent as the mode. The UI execution label (SIMULATION / REAL) is
+    // presentation only as well.
     const manualExpectedMode = (() => {
-        const candidate = String(
-            config?.tradeMode || executionMode || ""
+        const selected = String(
+            config?.selectedMode || ""
         ).trim().toLowerCase();
-        return candidate === "paper" || candidate === "live"
-            ? candidate
+        if (selected === "paper" || selected === "live") {
+            return selected;
+        }
+        const execution = String(
+            config?.executionMode || executionMode || ""
+        ).trim().toUpperCase();
+        if (execution === "LIVE") {
+            return "live";
+        }
+        if (execution === "SIMULATION") {
+            return "paper";
+        }
+        const fallback = String(config?.tradeMode || "").trim().toLowerCase();
+        return fallback === "paper" || fallback === "live"
+            ? fallback
             : undefined;
     })();
 

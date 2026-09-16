@@ -251,12 +251,28 @@ def test_manual_entry_denied_when_control_is_bot():
     assert engine.actual_position is None
 
 
-def test_manual_entry_denied_when_mode_is_live():
+def test_manual_entry_live_fails_closed_without_canonical_readiness():
+    # MANUAL is no longer PAPER-only.  When the resolved mode is LIVE the
+    # request must reach the canonical LIVE entry gate and fail closed there
+    # (never with a manual-specific PAPER-only rejection).
     manager, engine, _portfolio, _price, _rec = _build_manager()
     engine.mode = "live"
+    engine.config["mode"] = "live"
+    engine.config["dry_run"] = False
+    manager.config = {"mode": "live", "dry_run": False}
     result = _trade(manager, "BUY", "live-1")
     assert result["success"] is False
-    assert result["reason"] == "MANUAL_TRADE_PAPER_ONLY"
+    assert result["reason"] == "LIVE_ORDER_ENTRY_DISARMED"
+    assert result["reason"] != "MANUAL_TRADE_PAPER_ONLY"
+
+
+def test_manual_entry_denied_when_mode_authority_unresolved():
+    # A divergent engine/config mode must not silently fall back to PAPER.
+    manager, engine, _portfolio, _price, _rec = _build_manager()
+    engine.mode = "live"
+    result = _trade(manager, "BUY", "unresolved-1")
+    assert result["success"] is False
+    assert result["reason"] == "MANUAL_MODE_UNRESOLVED"
     assert engine.actual_position is None
 
 

@@ -1942,6 +1942,23 @@ test("Work D: MANUAL panel displays the canonical runtime active symbol", async 
     assert.equal(panel.includes("XRPUSDTM"), false, "must not hard-code the configured symbol");
 });
 
+test("Work D: MANUAL panel shows the canonical execution destination", async () => {
+    const Component = await loadComponent();
+    const liveRenderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        config: { mode: "LIVE", selectedMode: "LIVE", dryRun: false, selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+    }));
+    const livePanel = normalizedText(descendants(findTestId(liveRenderer.root, "manual-trading-panel")));
+    assert.equal(livePanel.includes("DESTINATION LIVE"), true);
+
+    const paperRenderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        config: { mode: "PAPER", selectedMode: "PAPER", dryRun: true, selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+    }));
+    const paperPanel = normalizedText(descendants(findTestId(paperRenderer.root, "manual-trading-panel")));
+    assert.equal(paperPanel.includes("DESTINATION PAPER"), true);
+});
+
 test("Work D: MANUAL panel fails closed when no canonical symbol is available", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps({

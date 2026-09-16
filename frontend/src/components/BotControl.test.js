@@ -2512,3 +2512,60 @@ test("Work D: failed manual trade response never fakes success", async () => {
         mock.restore();
     }
 });
+
+test("Work D: manual expectedMode uses the selected mode, not the environment trade capability", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({ body: { success: true, action: "BUY" } });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                selectedMode: "PAPER",
+                tradeMode: "live",
+            },
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "BUY / LONG"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.expectedMode, "paper");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D: manual expectedMode resolves LIVE from the selected live mode", async () => {
+    setMmStatus();
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/manual-trade") {
+            return jsonResponse({ body: { success: true, action: "SELL" } });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: {
+                selectedMode: "LIVE",
+                dryRun: false,
+                tradeMode: "paper",
+            },
+            controlAuthority: "MANUAL",
+            position: "FLAT",
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "SELL / SHORT"));
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.expectedMode, "live");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});

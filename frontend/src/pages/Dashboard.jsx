@@ -223,6 +223,8 @@ useEffect(() => {
                                     || typeof botStatus?.real_order_allowed === "boolean",
                                 allowLive: botStatus?.allowLive,
                                 tradeMode: botStatus?.tradeMode,
+                                selectedMode: botStatus?.selectedMode,
+                                dryRun: typeof botStatus?.dryRun === "boolean" ? botStatus.dryRun : undefined,
                                 leverageAuthority: botStatus?.leverageAuthority ?? null,
                                 paperBootstrapEligible: botStatus?.paperBootstrapEligible,
                                 paperBootstrapStatus: botStatus?.paperBootstrapStatus,
