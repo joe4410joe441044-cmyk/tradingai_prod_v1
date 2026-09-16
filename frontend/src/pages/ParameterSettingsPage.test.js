@@ -5,6 +5,8 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+    CYCLE_STAGES,
+    GUIDE_BILINGUAL_FIELDS,
     GUIDE_PARAMETER_KEYS,
     LIVE_MIGRATION,
     PARAMETER_GUIDE,
@@ -444,21 +446,27 @@ test("guide definitions cover exactly the canonical twelve parameters", async (c
     ];
     for (const key of GUIDE_PARAMETER_KEYS) {
         const guide = PARAMETER_GUIDE[key];
-        for (const field of [
-            "labelEn",
-            "labelJa",
-            "controls",
-            "valueMeaning",
-            "increase",
-            "decrease",
-            "directEffect",
-            "possibleTradingEffect",
-            "applicationTiming",
-            "liveAuthorityNote",
-        ]) {
+        for (const field of ["labelEn", "labelJa"]) {
             assert.ok(
                 typeof guide[field] === "string" && guide[field].length > 0,
                 `${key}.${field}`,
+            );
+        }
+        for (const field of GUIDE_BILINGUAL_FIELDS) {
+            assert.ok(
+                typeof guide[field]?.en === "string"
+                && guide[field].en.length > 0,
+                `${key}.${field}.en`,
+            );
+            assert.ok(
+                typeof guide[field]?.ja === "string"
+                && guide[field].ja.length > 0,
+                `${key}.${field}.ja`,
+            );
+            assert.match(
+                guide[field].ja,
+                /[\u3040-\u30ff\u4e00-\u9fff]/u,
+                `${key}.${field}.ja is not Japanese`,
             );
         }
         assert.ok(Array.isArray(guide.related), `${key}.related`);
@@ -471,18 +479,61 @@ test("guide definitions cover exactly the canonical twelve parameters", async (c
             `${key}.liveMigration`,
         );
         const prose = [
-            guide.controls,
-            guide.valueMeaning,
-            guide.increase,
-            guide.decrease,
-            guide.directEffect,
-            guide.possibleTradingEffect,
+            guide.controls.en,
+            guide.valueMeaning.en,
+            guide.increase.en,
+            guide.decrease.en,
+            guide.directEffect.en,
+            guide.possibleTradingEffect.en,
         ].join(" ");
         assert.doesNotMatch(
             prose,
             /guarantee|increase profit|win rate|best value|optimize performance|recommend/i,
             `${key} performance claim`,
         );
+        const proseJa = [
+            guide.controls.ja,
+            guide.valueMeaning.ja,
+            guide.increase.ja,
+            guide.decrease.ja,
+            guide.directEffect.ja,
+            guide.possibleTradingEffect.ja,
+        ].join(" ");
+        assert.doesNotMatch(
+            proseJa,
+            /勝率が上が|利益が増|最適な値|推奨値|必ず.*(損失|利益)|保証/,
+            `${key} Japanese performance claim`,
+        );
+    }
+
+    // Every canonical cycle stage used by a Guide is labelled bilingually.
+    for (const key of GUIDE_PARAMETER_KEYS) {
+        for (const stage of PARAMETER_GUIDE[key].cycleStages) {
+            assert.ok(CYCLE_STAGES[stage], `${key} stage ${stage}`);
+            assert.ok(CYCLE_STAGES[stage].en && CYCLE_STAGES[stage].ja);
+        }
+    }
+});
+
+test("guide definitions are bilingual for every explanatory field", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    assert.equal(GUIDE_PARAMETER_KEYS.length, 12);
+    assert.equal(GUIDE_BILINGUAL_FIELDS.length, 8);
+
+    for (const key of GUIDE_PARAMETER_KEYS) {
+        const guide = PARAMETER_GUIDE[key];
+        for (const field of GUIDE_BILINGUAL_FIELDS) {
+            // Japanese must be a genuine translation, not a copy of English.
+            assert.notEqual(
+                guide[field].en,
+                guide[field].ja,
+                `${key}.${field} EN/JA identical`,
+            );
+        }
     }
 });
 
@@ -625,8 +676,20 @@ test("guide modal values follow the scope and legacy raw display", async (contex
     assert.match(liveConfigured, /0\.5/);
     assert.ok(findByTestId(live, "guide-legacy-note"));
     assert.match(
-        textOf(findByTestId(live, "guide-authority")),
+        textOf(findByTestId(live, "guide-legacy-en")),
+        /legacy raw/i,
+    );
+    assert.match(
+        textOf(findByTestId(live, "guide-legacy-ja")),
+        /旧実装/,
+    );
+    assert.match(
+        textOf(findByTestId(live, "guide-authority-en")),
         /locked/i,
+    );
+    assert.match(
+        textOf(findByTestId(live, "guide-authority-ja")),
+        /ロック/,
     );
 });
 
@@ -696,4 +759,34 @@ test("guide metadata module is static and never writes configuration", async () 
         guideSource,
         /Optimize|Auto Tune|Auto Apply|Apply Now/,
     );
+});
+
+test("guide typography is substantially enlarged in the stylesheet", async () => {
+    const css = await readFile(
+        new URL("../styles/parameter-settings.css", import.meta.url),
+        "utf8",
+    );
+    // Body explanation uses a responsive clamp with a >=16px floor.
+    assert.match(
+        css,
+        /\.ps-page \.ps-guide-text\s*\{[^}]*font-size:\s*clamp\(\s*1[6-9]px/s,
+    );
+    // Section headings and the modal title are enlarged too.
+    assert.match(
+        css,
+        /\.ps-page \.ps-guide-section h3\s*\{[^}]*font-size:\s*clamp\(\s*1[6-9]px/s,
+    );
+    assert.match(
+        css,
+        /\.ps-page \.ps-guide-modal__header h2\s*\{[^}]*font-size:\s*clamp\(\s*2[2-9]px/s,
+    );
+    assert.match(
+        css,
+        /\.ps-page \.ps-guide-values strong\s*\{[^}]*font-size:\s*clamp\(\s*1[89]px/s,
+    );
+    // The previous tiny body rule must be gone.
+    assert.doesNotMatch(css, /\.ps-page \.ps-guide-section p\s*\{/);
+    // Bilingual text styling exists.
+    assert.match(css, /\.ps-page \.ps-guide-lang\s*\{/);
+    assert.match(css, /\.ps-page \.ps-guide-text--ja\s*\{/);
 });

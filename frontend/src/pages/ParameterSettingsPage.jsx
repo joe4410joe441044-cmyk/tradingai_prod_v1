@@ -3,15 +3,19 @@ import { useEffect, useRef, useState } from "react";
 import usePolling from "../hooks/usePolling";
 import { fetchBotStatus } from "../components/runtime/accountRuntimeModel";
 import {
+    LEGACY_RAW_NOTE,
     LEGACY_RAW_PARAMETERS,
     PARAMETER_SETTINGS_SCOPE,
+    RELATED_NOTE,
     buildAdvancedGroups,
     buildEffectiveRevisionModel,
     buildPrimaryRows,
     buildRuntimeContext,
+    cycleStageLabel,
     guideFor,
     isLiveScope,
     liveMigrationLabel,
+    liveMigrationLabelJa,
     relatedLabel,
     useParameterSettings,
 } from "../features/parameter-settings";
@@ -102,15 +106,24 @@ const rowUnitDisplay = (row, scope) => (
 );
 
 const guideAuthorityText = (row, scope) => {
-    if (!row) return "";
+    if (!row) return { en: "", ja: "" };
     const guide = guideFor(row.name);
     if (!isLiveScope(scope)) {
-        return "PAPER — editable on this surface (scope configuration only).";
+        return {
+            en: "PAPER — editable on this surface (scope configuration only).",
+            ja: "PAPER — この画面で編集可能です（設定スコープのみ）。",
+        };
     }
     if (!row.liveLocked) {
-        return "LIVE — editable on this surface (proven legacy equivalent).";
+        return {
+            en: "LIVE — editable on this surface (proven legacy equivalent).",
+            ja: "LIVE — この画面で編集可能です（旧実装との等価性が確認済み）。",
+        };
     }
-    return `LIVE — locked / read-only. ${liveMigrationLabel(guide?.liveMigration)}.`;
+    return {
+        en: `LIVE — locked / read-only. ${liveMigrationLabel(guide?.liveMigration)}.`,
+        ja: `LIVE — ロック中／参照専用。${liveMigrationLabelJa(guide?.liveMigration)}。`,
+    };
 };
 
 /* =================================================
@@ -200,6 +213,43 @@ function ContextMetric({ label, value, testId }) {
     );
 }
 
+const SNAPSHOT_NOTE = {
+    en: "Snapshot-at-entry applies to the exit thresholds.",
+    ja: "エントリー時スナップショット（snapshot-at-entry）が決済しきい値に適用されます。",
+};
+
+function BilingualText({ value, testId, tone }) {
+    return (
+        <>
+            <p
+                className={`ps-guide-text ps-guide-text--en${tone ? ` ${tone}` : ""}`}
+                data-testid={testId ? `${testId}-en` : undefined}
+            >
+                <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                {value.en}
+            </p>
+            <p
+                className={`ps-guide-text ps-guide-text--ja${tone ? ` ${tone}` : ""}`}
+                data-testid={testId ? `${testId}-ja` : undefined}
+            >
+                <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                {value.ja}
+            </p>
+        </>
+    );
+}
+
+function GuideField({ title, value, tone }) {
+    return (
+        <section
+            className={`ps-guide-section${tone ? ` ps-guide-section--${tone}` : ""}`}
+        >
+            <h3>{title}</h3>
+            <BilingualText value={value} />
+        </section>
+    );
+}
+
 function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
     if (!row) return null;
     const guide = guideFor(row.name);
@@ -208,6 +258,13 @@ function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
     const unit = rowUnitDisplay(row, scope);
     const withUnit = (value) => (unit ? `${value} ${unit}` : value);
     const legacyRaw = isLegacyRawRow(row, scope);
+    const authority = guideAuthorityText(row, scope);
+    const applicationTiming = guide.snapshotAtEntry
+        ? {
+            en: `${guide.applicationTiming.en} ${SNAPSHOT_NOTE.en}`,
+            ja: `${guide.applicationTiming.ja} ${SNAPSHOT_NOTE.ja}`,
+        }
+        : guide.applicationTiming;
 
     return (
         <div
@@ -238,17 +295,18 @@ function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
                         type="button"
                         className="ps-guide-modal__close"
                         data-testid="guide-close"
-                        aria-label="Close parameter guide"
+                        aria-label="Close parameter guide（パラメーターガイドを閉じる）"
                         onClick={onClose}
                     >
                         ×
                     </button>
                 </header>
                 <div className="ps-guide-modal__body">
-                    <section className="ps-guide-section">
-                        <h3>What it controls / 何を設定するか</h3>
-                        <p>{guide.controls}</p>
-                    </section>
+                    <GuideField
+                        title="What it controls / 何を設定するか"
+                        value={guide.controls}
+                    />
+
                     <section
                         className="ps-guide-section"
                         data-testid="guide-current-values"
@@ -275,65 +333,83 @@ function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
                             </div>
                         </div>
                         {legacyRaw && (
-                            <p
+                            <div
                                 className="ps-guide-note"
                                 data-testid="guide-legacy-note"
                             >
-                                This LIVE value is legacy raw and is not a
-                                canonical percent. No unit conversion is
-                                applied.
-                            </p>
+                                <BilingualText
+                                    value={LEGACY_RAW_NOTE}
+                                    testId="guide-legacy"
+                                />
+                            </div>
                         )}
                     </section>
-                    <section className="ps-guide-section">
-                        <h3>Value meaning / 設定値の意味</h3>
-                        <p>{guide.valueMeaning}</p>
-                    </section>
-                    <section className="ps-guide-section">
-                        <h3>Increase / 値を上げると</h3>
-                        <p>{guide.increase}</p>
-                    </section>
-                    <section className="ps-guide-section">
-                        <h3>Decrease / 値を下げると</h3>
-                        <p>{guide.decrease}</p>
-                    </section>
-                    <section className="ps-guide-section ps-guide-section--direct">
-                        <h3>Direct effect / 直接影響</h3>
-                        <p>{guide.directEffect}</p>
-                    </section>
-                    <section className="ps-guide-section ps-guide-section--possible">
-                        <h3>Possible trading effect / 起こり得るトレードへの影響</h3>
-                        <p>{guide.possibleTradingEffect}</p>
-                    </section>
+
+                    <GuideField
+                        title="Value meaning / 設定値の意味"
+                        value={guide.valueMeaning}
+                    />
+                    <GuideField
+                        title="Increase / 値を上げると"
+                        value={guide.increase}
+                    />
+                    <GuideField
+                        title="Decrease / 値を下げると"
+                        value={guide.decrease}
+                    />
+                    <GuideField
+                        title="Direct effect / 直接影響"
+                        value={guide.directEffect}
+                        tone="direct"
+                    />
+                    <GuideField
+                        title="Possible trading effect / 起こり得るトレードへの影響"
+                        value={guide.possibleTradingEffect}
+                        tone="possible"
+                    />
+
                     <section className="ps-guide-section">
                         <h3>Related parameters / 関連パラメーター</h3>
-                        <p>{guide.related.map(relatedLabel).join(" / ")}</p>
+                        <p className="ps-guide-related">
+                            {guide.related.map(relatedLabel).join(" / ")}
+                        </p>
+                        <BilingualText value={RELATED_NOTE} />
                     </section>
+
                     <section className="ps-guide-section">
                         <h3>Trading cycle / トレーディングサイクル</h3>
-                        <p>
-                            {guide.cycleStages
-                                .map((stage) => `Stage ${stage}`)
-                                .join(" · ")}
-                        </p>
+                        <ul className="ps-guide-cycle">
+                            {guide.cycleStages.map((stage) => {
+                                const label = cycleStageLabel(stage);
+                                return (
+                                    <li key={stage}>
+                                        <strong>Stage {stage}</strong>
+                                        <span className="ps-guide-text--en">
+                                            {label.en}
+                                        </span>
+                                        <span className="ps-guide-text--ja">
+                                            {label.ja}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </section>
-                    <section className="ps-guide-section">
-                        <h3>Application timing / 適用タイミング</h3>
-                        <p>
-                            {guide.applicationTiming}
-                            {guide.snapshotAtEntry
-                                ? " Snapshot-at-entry applies to the exit thresholds."
-                                : ""}
-                        </p>
-                    </section>
+
+                    <GuideField
+                        title="Application timing / 適用タイミング"
+                        value={applicationTiming}
+                    />
+
                     <section className="ps-guide-section">
                         <h3>Authority / 権限・状態</h3>
-                        <p data-testid="guide-authority">
-                            {guideAuthorityText(row, scope)}
-                        </p>
-                        <p className="ps-guide-note">
-                            {guide.liveAuthorityNote}
-                        </p>
+                        <BilingualText
+                            value={authority}
+                            testId="guide-authority"
+                        />
+                        <div className="ps-guide-note">
+                            <BilingualText value={guide.liveAuthorityNote} />
+                        </div>
                     </section>
                 </div>
             </div>
