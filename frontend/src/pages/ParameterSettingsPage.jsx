@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import usePolling from "../hooks/usePolling";
 import { fetchBotStatus } from "../components/runtime/accountRuntimeModel";
 import {
+    LEGACY_RAW_PARAMETERS,
     PARAMETER_SETTINGS_SCOPE,
     buildAdvancedGroups,
     buildEffectiveRevisionModel,
     buildPrimaryRows,
     buildRuntimeContext,
+    guideFor,
     isLiveScope,
+    liveMigrationLabel,
+    relatedLabel,
     useParameterSettings,
 } from "../features/parameter-settings";
 
@@ -56,13 +60,57 @@ const CONTEXT_META_ITEMS = [
 
 /* Short unit token for the compact input row. The canonical unit string
    stays available in the row title / constraint; the visible badge stays
-   small so the input remains the focus. */
+   small so the input remains the focus. Normalized percentile ranks carry no
+   suffix (0.90 is the 90th percentile, never 0.90 %). */
 const shortUnit = (row) => {
     if (row.unitSymbol) return row.unitSymbol;
     const unit = String(row.unit ?? "").toLowerCase();
-    if (unit.includes("percentile")) return "pct";
+    if (unit.includes("percentile")) return "";
     if (unit.includes("score")) return "score";
     return "";
+};
+
+/* A locked LIVE parameter whose legacy runtime semantic is not proven
+   equivalent to the canonical unit must not be shown with a canonical
+   suffix. It is presented as legacy raw instead. */
+const isLegacyRawRow = (row, scope) => (
+    isLiveScope(scope)
+    && row.liveLocked
+    && LEGACY_RAW_PARAMETERS.includes(row.name)
+);
+
+const formatRawValue = (value) => (
+    value === null || value === undefined || value === "" ? "—" : String(value)
+);
+
+const rowValueDisplay = (row, scope, field) => {
+    if (isLegacyRawRow(row, scope)) {
+        const raw = field === "effective"
+            ? row.effectiveValue
+            : field === "runtime"
+                ? row.runtimeValue
+                : row.configuredValue;
+        return formatRawValue(raw);
+    }
+    if (field === "effective") return row.effectiveDisplay;
+    if (field === "runtime") return row.runtimeDisplay;
+    return row.configuredDisplay;
+};
+
+const rowUnitDisplay = (row, scope) => (
+    isLegacyRawRow(row, scope) ? "" : shortUnit(row)
+);
+
+const guideAuthorityText = (row, scope) => {
+    if (!row) return "";
+    const guide = guideFor(row.name);
+    if (!isLiveScope(scope)) {
+        return "PAPER — editable on this surface (scope configuration only).";
+    }
+    if (!row.liveLocked) {
+        return "LIVE — editable on this surface (proven legacy equivalent).";
+    }
+    return `LIVE — locked / read-only. ${liveMigrationLabel(guide?.liveMigration)}.`;
 };
 
 /* =================================================
@@ -152,6 +200,147 @@ function ContextMetric({ label, value, testId }) {
     );
 }
 
+function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
+    if (!row) return null;
+    const guide = guideFor(row.name);
+    if (!guide) return null;
+
+    const unit = rowUnitDisplay(row, scope);
+    const withUnit = (value) => (unit ? `${value} ${unit}` : value);
+    const legacyRaw = isLegacyRawRow(row, scope);
+
+    return (
+        <div
+            className="ps-guide-backdrop"
+            data-testid="guide-backdrop"
+            onClick={onClose}
+        >
+            <div
+                className="ps-guide-modal"
+                data-testid="guide-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ps-guide-title"
+                tabIndex={-1}
+                ref={dialogRef}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <header className="ps-guide-modal__header">
+                    <div>
+                        <span className="ps-guide-modal__kicker">
+                            Parameter Guide（パラメーターガイド）
+                        </span>
+                        <h2 id="ps-guide-title" data-testid="guide-title">
+                            {guide.labelEn}（{guide.labelJa}）
+                        </h2>
+                    </div>
+                    <button
+                        type="button"
+                        className="ps-guide-modal__close"
+                        data-testid="guide-close"
+                        aria-label="Close parameter guide"
+                        onClick={onClose}
+                    >
+                        ×
+                    </button>
+                </header>
+                <div className="ps-guide-modal__body">
+                    <section className="ps-guide-section">
+                        <h3>What it controls / 何を設定するか</h3>
+                        <p>{guide.controls}</p>
+                    </section>
+                    <section
+                        className="ps-guide-section"
+                        data-testid="guide-current-values"
+                    >
+                        <h3>Current values / 現在値</h3>
+                        <div className="ps-guide-values">
+                            <div data-testid="guide-configured">
+                                <span>Configured</span>
+                                <strong>
+                                    {withUnit(rowValueDisplay(row, scope, "configured"))}
+                                </strong>
+                            </div>
+                            <div data-testid="guide-effective">
+                                <span>Effective</span>
+                                <strong>
+                                    {withUnit(rowValueDisplay(row, scope, "effective"))}
+                                </strong>
+                            </div>
+                            <div data-testid="guide-runtime">
+                                <span>Runtime</span>
+                                <strong>
+                                    {withUnit(rowValueDisplay(row, scope, "runtime"))}
+                                </strong>
+                            </div>
+                        </div>
+                        {legacyRaw && (
+                            <p
+                                className="ps-guide-note"
+                                data-testid="guide-legacy-note"
+                            >
+                                This LIVE value is legacy raw and is not a
+                                canonical percent. No unit conversion is
+                                applied.
+                            </p>
+                        )}
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Value meaning / 設定値の意味</h3>
+                        <p>{guide.valueMeaning}</p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Increase / 値を上げると</h3>
+                        <p>{guide.increase}</p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Decrease / 値を下げると</h3>
+                        <p>{guide.decrease}</p>
+                    </section>
+                    <section className="ps-guide-section ps-guide-section--direct">
+                        <h3>Direct effect / 直接影響</h3>
+                        <p>{guide.directEffect}</p>
+                    </section>
+                    <section className="ps-guide-section ps-guide-section--possible">
+                        <h3>Possible trading effect / 起こり得るトレードへの影響</h3>
+                        <p>{guide.possibleTradingEffect}</p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Related parameters / 関連パラメーター</h3>
+                        <p>{guide.related.map(relatedLabel).join(" / ")}</p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Trading cycle / トレーディングサイクル</h3>
+                        <p>
+                            {guide.cycleStages
+                                .map((stage) => `Stage ${stage}`)
+                                .join(" · ")}
+                        </p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Application timing / 適用タイミング</h3>
+                        <p>
+                            {guide.applicationTiming}
+                            {guide.snapshotAtEntry
+                                ? " Snapshot-at-entry applies to the exit thresholds."
+                                : ""}
+                        </p>
+                    </section>
+                    <section className="ps-guide-section">
+                        <h3>Authority / 権限・状態</h3>
+                        <p data-testid="guide-authority">
+                            {guideAuthorityText(row, scope)}
+                        </p>
+                        <p className="ps-guide-note">
+                            {guide.liveAuthorityNote}
+                        </p>
+                    </section>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function PrimaryParameterCard({
     row,
     scope,
@@ -159,10 +348,12 @@ function PrimaryParameterCard({
     onDraftChange,
     disabled,
     error,
+    onOpenGuide = () => {},
 }) {
     const liveLocked = isLiveScope(scope) && row.liveLocked;
     const editable = row.editable && !disabled && !liveLocked;
-    const unit = shortUnit(row);
+    const unit = rowUnitDisplay(row, scope);
+    const legacyRaw = isLegacyRawRow(row, scope);
     return (
         <article
             className="ps-param-card"
@@ -180,6 +371,15 @@ function PrimaryParameterCard({
                 >
                     {row.status}
                 </span>
+                <button
+                    type="button"
+                    className="ps-guide-trigger"
+                    data-testid={`parameter-guide-${row.name}`}
+                    aria-label={`Open parameter guide for ${row.labelEn}`}
+                    onClick={(event) => onOpenGuide(row.name, event.currentTarget)}
+                >
+                    ? GUIDE
+                </button>
             </header>
 
             <div className="ps-param-card__configured">
@@ -208,6 +408,14 @@ function PrimaryParameterCard({
                         <span className="ps-param-card__unit">{unit}</span>
                     )}
                 </div>
+                {legacyRaw && (
+                    <span
+                        className="ps-param-card__legacy"
+                        data-testid={`parameter-legacy-${row.name}`}
+                    >
+                        LEGACY RAW — not a canonical percent
+                    </span>
+                )}
                 {liveLocked && (
                     <span
                         className="ps-param-card__lock"
@@ -225,7 +433,7 @@ function PrimaryParameterCard({
                 >
                     <span className="ps-readout__label">Effective</span>
                     <strong className="ps-readout__value">
-                        {row.effectiveDisplay}
+                        {rowValueDisplay(row, scope, "effective")}
                     </strong>
                 </div>
                 <div
@@ -234,7 +442,7 @@ function PrimaryParameterCard({
                 >
                     <span className="ps-readout__label">Runtime</span>
                     <strong className="ps-readout__value">
-                        {row.runtimeDisplay}
+                        {rowValueDisplay(row, scope, "runtime")}
                     </strong>
                 </div>
             </div>
@@ -266,10 +474,11 @@ function AdvancedParameterRow({
     onDraftChange,
     disabled,
     error,
+    onOpenGuide = () => {},
 }) {
     const liveLocked = isLiveScope(scope) && row.liveLocked;
     const editable = row.editable && !disabled && !liveLocked;
-    const unit = shortUnit(row);
+    const unit = rowUnitDisplay(row, scope);
     return (
         <div
             className="ps-adv-row"
@@ -312,13 +521,13 @@ function AdvancedParameterRow({
                 className="ps-adv-row__value"
                 data-testid={`parameter-effective-${row.name}`}
             >
-                {row.effectiveDisplay}
+                {rowValueDisplay(row, scope, "effective")}
             </div>
             <div
                 className="ps-adv-row__value"
                 data-testid={`parameter-runtime-${row.name}`}
             >
-                {row.runtimeDisplay}
+                {rowValueDisplay(row, scope, "runtime")}
             </div>
             <div className="ps-adv-row__status">
                 <span
@@ -327,6 +536,15 @@ function AdvancedParameterRow({
                 >
                     {row.status}
                 </span>
+                <button
+                    type="button"
+                    className="ps-guide-trigger ps-guide-trigger--sm"
+                    data-testid={`parameter-guide-${row.name}`}
+                    aria-label={`Open parameter guide for ${row.labelEn}`}
+                    onClick={(event) => onOpenGuide(row.name, event.currentTarget)}
+                >
+                    ? GUIDE
+                </button>
             </div>
             {error && (
                 <span
@@ -363,6 +581,10 @@ export function ParameterSettingsView({
     onCancelLive = () => {},
     authorityExpanded = false,
     onAuthorityToggle = () => {},
+    guideKey = null,
+    onOpenGuide = () => {},
+    onCloseGuide = () => {},
+    guideDialogRef = null,
 }) {
     const sources = { configured: configuration, effective, runtime };
     const primaryRows = buildPrimaryRows(schema, sources);
@@ -385,6 +607,12 @@ export function ParameterSettingsView({
     const runtimeRevision = revision.runtimeAvailable
         ? (revision.runtimeRevision ?? "—")
         : "NO_RUNTIME_SNAPSHOT";
+    const guideRow = guideKey
+        ? (
+            [...primaryRows, ...advancedGroups.flatMap((group) => group.rows)]
+                .find((row) => row.name === guideKey) ?? null
+        )
+        : null;
 
     return (
         <main
@@ -429,8 +657,8 @@ export function ParameterSettingsView({
                     ))}
                 </div>
                 <span className="ps-scope__note" data-testid="scope-note">
-                    Scope changes which configuration is viewed or edited —
-                    it does not change the running bot mode.
+                    Configuration scope only — does not change the running bot
+                    mode.
                 </span>
             </section>
 
@@ -466,6 +694,7 @@ export function ParameterSettingsView({
                             onDraftChange={onDraftChange}
                             disabled={loading}
                             error={fieldErrors[row.name]}
+                            onOpenGuide={onOpenGuide}
                         />
                     ))}
                 </div>
@@ -529,6 +758,7 @@ export function ParameterSettingsView({
                                         onDraftChange={onDraftChange}
                                         disabled={loading}
                                         error={fieldErrors[row.name]}
+                                        onOpenGuide={onOpenGuide}
                                     />
                                 ))}
                             </div>
@@ -880,6 +1110,14 @@ export function ParameterSettingsView({
                     </div>
                 )}
             </section>
+
+            {/* PARAMETER GUIDE MODAL — one reusable component for all 12 */}
+            <ParameterGuideModal
+                row={guideRow}
+                scope={scope}
+                onClose={onCloseGuide}
+                dialogRef={guideDialogRef}
+            />
         </main>
     );
 }
@@ -890,6 +1128,9 @@ export default function ParameterSettingsPage() {
     const [advancedExpanded, setAdvancedExpanded] = useState(false);
     const [liveConfirmationOpen, setLiveConfirmationOpen] = useState(false);
     const [authorityExpanded, setAuthorityExpanded] = useState(false);
+    const [guideKey, setGuideKey] = useState(null);
+    const guideDialogRef = useRef(null);
+    const guideReturnFocusRef = useRef(null);
 
     const handleRequestLiveSave = () => setLiveConfirmationOpen(true);
     const handleCancelLive = () => setLiveConfirmationOpen(false);
@@ -897,6 +1138,33 @@ export default function ParameterSettingsPage() {
         setLiveConfirmationOpen(false);
         await controller.save({ confirmLive: true });
     };
+
+    const handleOpenGuide = (name, trigger) => {
+        guideReturnFocusRef.current = trigger ?? null;
+        setGuideKey(name);
+    };
+    const handleCloseGuide = () => setGuideKey(null);
+
+    // Escape close + focus handling for the Parameter Guide dialog. Opening or
+    // closing the guide never writes configuration.
+    useEffect(() => {
+        if (!guideKey) return undefined;
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") {
+                event.stopPropagation();
+                setGuideKey(null);
+            }
+        };
+        document.addEventListener("keydown", onKeyDown);
+        const focusTimer = window.setTimeout(() => {
+            guideDialogRef.current?.focus?.();
+        }, 0);
+        return () => {
+            document.removeEventListener("keydown", onKeyDown);
+            window.clearTimeout(focusTimer);
+            guideReturnFocusRef.current?.focus?.();
+        };
+    }, [guideKey]);
 
     return (
         <ParameterSettingsView
@@ -922,6 +1190,10 @@ export default function ParameterSettingsPage() {
             onCancelLive={handleCancelLive}
             authorityExpanded={authorityExpanded}
             onAuthorityToggle={() => setAuthorityExpanded((value) => !value)}
+            guideKey={guideKey}
+            onOpenGuide={handleOpenGuide}
+            onCloseGuide={handleCloseGuide}
+            guideDialogRef={guideDialogRef}
         />
     );
 }

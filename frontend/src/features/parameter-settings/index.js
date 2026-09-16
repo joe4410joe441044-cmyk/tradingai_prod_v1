@@ -39,4 +39,15 @@ export {
     validateDraftValue,
 } from "./parameterSettingsModel.js";
 
+export {
+    GUIDE_PARAMETER_KEYS,
+    LEGACY_RAW_PARAMETERS,
+    LIVE_MIGRATION,
+    LIVE_MIGRATION_LABELS,
+    PARAMETER_GUIDE,
+    guideFor,
+    liveMigrationLabel,
+    relatedLabel,
+} from "./parameterGuide.js";
+
 export { useParameterSettings } from "./useParameterSettings.js";
