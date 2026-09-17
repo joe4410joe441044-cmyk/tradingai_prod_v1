@@ -2882,6 +2882,34 @@ class ExecutionEngine:
                 if self.close_reservation is reservation:
                     self.close_reservation = None
 
+    @staticmethod
+    def _attach_position_parameter_context(record, position_before):
+        """Retain the entry parameter context on a closed-trade record.
+
+        Metadata only.  The entry ``parameter_snapshot`` was bound to the
+        position at entry by the execution runtime; copying it here preserves
+        the authority the trade was actually observed under.  This never reads
+        the current registry and never changes an order, a close or a quantity.
+        """
+
+        if not isinstance(record, dict) or not isinstance(position_before, dict):
+            return record
+
+        snapshot = position_before.get("parameter_snapshot")
+        if not isinstance(snapshot, dict) or not snapshot:
+            return record
+
+        record["parameterSnapshot"] = copy.deepcopy(snapshot)
+        record["parameterScope"] = (
+            snapshot.get("canonicalScope") or snapshot.get("scope")
+        )
+        record["parameterSetId"] = snapshot.get("parameterSetId")
+        record["configuredRevision"] = snapshot.get("configuredRevision")
+        record["effectiveRevision"] = snapshot.get("effectiveRevision")
+        record["parameterRevision"] = snapshot.get("effectiveRevision")
+        record["featureContract"] = snapshot.get("featureContract")
+        return record
+
     def _close_position_body(self, price, reason):
 
         add_log(f"🚪 CLOSE ({reason})")
@@ -3031,6 +3059,9 @@ class ExecutionEngine:
                 if runtime_context.get(key) is not None
             }
             history_record.update(source_identity)
+            self._attach_position_parameter_context(
+                history_record, position_before
+            )
             trade_id = history_record["tradeId"]
             self.paper_fills.append({
                 "fillId": f"{trade_id}-close-fill-1",
@@ -3049,6 +3080,15 @@ class ExecutionEngine:
                 **source_identity,
             })
             self.trade_history.append(history_record)
+            # Durable Stage 13 parameter-performance record.  Observational and
+            # best-effort: it can never affect P&L, a close or an order.
+            try:
+                from backend.runtime.parameter_performance import (
+                    record_completed_trade,
+                )
+                record_completed_trade(history_record)
+            except Exception:
+                pass
             # Trace recording is intentionally best-effort and cannot affect P&L.
             trace_id = position_before.get("trace_id")
             if trace_id:
@@ -3119,7 +3159,18 @@ class ExecutionEngine:
                 },
                 **identity,
             }
+            self._attach_position_parameter_context(
+                live_record, position_before
+            )
             self.trade_history.append(live_record)
+            # Durable Stage 13 record (LIVE PnL stays explicitly non-authoritative).
+            try:
+                from backend.runtime.parameter_performance import (
+                    record_completed_trade,
+                )
+                record_completed_trade(live_record)
+            except Exception:
+                pass
             self.live_close_state = {
                 **live_close,
                 "status": "CONFIRMED",

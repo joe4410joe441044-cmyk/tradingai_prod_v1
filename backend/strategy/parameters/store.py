@@ -242,6 +242,45 @@ class StrategyParameterStore:
             / _filename(resolved, _normalize_variant(variant))
         )
 
+    def list_variants(
+        self,
+        scope: Union[ParameterScope, str],
+    ) -> tuple:
+        """Return the persisted variant names for one scope (sorted).
+
+        The canonical (default) set and the ``effective`` snapshot are exposed
+        like any other variant so callers can distinguish them explicitly.  A
+        missing or unsafe directory yields an empty tuple; this method never
+        raises for absent storage.
+        """
+
+        try:
+            resolved = _coerce_scope(scope)
+        except ValueError:
+            return ()
+        if resolved not in _SUPPORTED_SCOPES:
+            return ()
+        directory = self._base_directory / STORAGE_SUBDIRECTORY
+        try:
+            if not directory.is_dir() or directory.is_symlink():
+                return ()
+            names = []
+            prefix = f"strategy-params__{resolved.value}."
+            suffix = ".json"
+            for entry in directory.iterdir():
+                name = entry.name
+                if not name.startswith(prefix) or not name.endswith(suffix):
+                    continue
+                variant = name[len(prefix):-len(suffix)]
+                try:
+                    _normalize_variant(variant)
+                except ValueError:
+                    continue
+                names.append(variant)
+            return tuple(sorted(set(names)))
+        except OSError:
+            return ()
+
     def save(
         self,
         parameter_set: StrategyParameterSet,

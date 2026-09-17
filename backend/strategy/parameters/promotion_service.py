@@ -43,6 +43,7 @@ from .model import (
     StrategyParameterSet,
 )
 from .resolver import default_runtime_base_directory
+from .revision_archive import revision_variant
 from .store import StoreLoadStatus, StrategyParameterStore
 from .validation import validate_parameters
 
@@ -435,6 +436,37 @@ class ParameterPromotionService:
                     effective_revision=previous_effective_revision,
                     message="promoted revision failed construction",
                     details={"error": str(exc)},
+                )
+            )
+
+        # E-PERF-2: archive the revision under its own immutable variant before
+        # it becomes EFFECTIVE, so a promoted revision stays reconstructable
+        # after later revisions overwrite the current configured/effective
+        # files.  Archive failure is fail-closed: a revision never becomes
+        # EFFECTIVE without durable history.
+        archive_result = self.store.save(
+            promoted, variant=revision_variant(configured_revision)
+        )
+        if archive_result.status.value != "SAVED":
+            return self._record(
+                PromotionResult(
+                    outcome=PromotionOutcome.PERSISTENCE_FAILURE,
+                    scope=scope.value,
+                    promoted=False,
+                    configured_revision=configured_revision,
+                    previous_effective_revision=previous_effective_revision,
+                    effective_revision=previous_effective_revision,
+                    message=(
+                        "could not persist the parameter revision history; "
+                        "effective authority is unchanged"
+                    ),
+                    details={
+                        "failureCode": (
+                            archive_result.failure_code.value
+                            if archive_result.failure_code is not None
+                            else None
+                        )
+                    },
                 )
             )
 
