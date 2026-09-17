@@ -1310,13 +1310,39 @@ export function ParameterSettingsView({
                             </span>
                         )}
                         {saveState?.phase === "INVALID" && (
-                            <span
+                            <div
                                 className="ps-save__error"
                                 data-testid="save-invalid"
                             >
-                                {saveState?.backend?.message
-                                    ?? "Validation failed. Fix the highlighted values."}
-                            </span>
+                                <span>
+                                    {saveState?.backend?.message
+                                        ?? "Validation failed. Fix the highlighted values."}
+                                </span>
+                                {Array.isArray(
+                                    saveState?.backend?.validation?.errors,
+                                )
+                                    && saveState.backend.validation.errors.length > 0 && (
+                                    <ul
+                                        className="ps-save__validation"
+                                        data-testid="save-invalid-details"
+                                    >
+                                        {saveState.backend.validation.errors.map(
+                                            (error, index) => (
+                                                <li
+                                                    key={`${error?.code ?? "ERROR"}-${error?.parameter ?? index}`}
+                                                >
+                                                    {error?.parameter
+                                                        ? `${error.parameter}: `
+                                                        : ""}
+                                                    {error?.message
+                                                        ?? error?.code
+                                                        ?? "invalid value"}
+                                                </li>
+                                            ),
+                                        )}
+                                    </ul>
+                                )}
+                            </div>
                         )}
                         {saveState?.phase === "ERROR" && (
                             <span

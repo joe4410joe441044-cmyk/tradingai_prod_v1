@@ -568,6 +568,55 @@ test("409 conflict and 422 validation are rendered", async (context) => {
     assert.match(textOf(invalidTree), /must be >= 0/);
 });
 
+test("canonical validation errors show the parameter and safe reason", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        saveState: {
+            phase: "INVALID",
+            backend: {
+                code: "INVALID_CONFIGURATION",
+                message: "configuration failed canonical validation",
+                validation: {
+                    isValid: false,
+                    errors: [{
+                        code: "INVALID_TYPE",
+                        parameter: "maximumHoldMs",
+                        message: "maximumHoldMs must be a finite numeric value, got str",
+                    }],
+                    warnings: [],
+                },
+            },
+        },
+    });
+    assert.ok(findByTestId(tree, "save-invalid"));
+    assert.ok(findByTestId(tree, "save-invalid-details"));
+    const text = textOf(tree);
+    assert.match(text, /maximumHoldMs:\s+maximumHoldMs must be a finite numeric value, got str/);
+    assert.doesNotMatch(text, /stack|Traceback|token|cookie/i);
+});
+
+test("unknown canonical validation failure falls back safely", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        saveState: { phase: "INVALID" },
+    });
+    assert.match(
+        textOf(tree),
+        /Validation failed\. Fix the highlighted values\./,
+    );
+    assert.equal(findByTestId(tree, "save-invalid-details"), null);
+});
+
 const ADVANCED_NAMES = [
     "minimumHoldMs",
     "exitMomentumMinimum",

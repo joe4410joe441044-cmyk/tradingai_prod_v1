@@ -100,6 +100,7 @@ export function useParameterSettings(initialScope = "PAPER") {
             parameters: draft,
             expectedRevision: configuration?.configuredRevision,
             confirmLive,
+            schema,
             api: {
                 updateConfiguration: updateParameterSettingsConfiguration,
             },

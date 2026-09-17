@@ -165,3 +165,48 @@ def test_errors_and_warnings_are_distinct():
     assert payload["isValid"] is False
     assert payload["errors"]
     assert payload["warnings"]
+
+
+def test_frontend_serialized_full_draft_contract_passes():
+    """The normalized frontend payload (canonical JSON numbers) must validate.
+
+    This mirrors the Parameter Settings save path after type normalization:
+    every editable value is a JSON number, not a DOM string.
+    """
+
+    normalized_payload = {
+        "minimumCompositeScore": 0.34,
+        "maximumStrategySpreadPct": 0.5,
+        "momentumWindowSeconds": 60,
+        "minimumStrategyConfidence": 0.23,
+        "maximumHoldMs": 30000,
+        "minimumHoldMs": 500,
+        "exitMomentumMinimum": 0.4,
+        "exitLiquidityQualityMinimum": 0.3,
+        "exitSpreadQualityMinimum": 0.3,
+        "momentumMinimumWarmupSeconds": 20,
+        "absorptionVolumePercentile": 0.9,
+        "liquidityQualityPercentile": 0.9,
+    }
+
+    result = validate_parameters(normalized_payload, require_complete=True)
+    assert result.is_valid, result.to_dict()
+    assert result.errors == ()
+
+    # maximumHoldMs=30000 as a canonical JSON number is valid by itself.
+    assert validate_parameters(values(maximumHoldMs=30000)).is_valid
+
+
+def test_dom_string_serialization_is_rejected_as_invalid_type():
+    """Regression guard: a raw DOM string must remain rejected by the validator.
+
+    The frontend fix normalizes the payload; the backend must NOT be weakened
+    to accept numeric strings.
+    """
+
+    result = validate_parameters(
+        values(maximumHoldMs="30000"), require_complete=True
+    )
+    assert not result.is_valid
+    assert ValidationCode.INVALID_TYPE in _codes(result)
+    assert [issue.parameter for issue in result.errors] == ["maximumHoldMs"]
