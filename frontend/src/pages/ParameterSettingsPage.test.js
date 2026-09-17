@@ -82,9 +82,17 @@ const loadPage = async () => {
         "parameter-settings",
         "parameterGuide.js",
     );
+    const presentationFile = join(
+        directory,
+        "..",
+        "features",
+        "parameter-settings",
+        "parameterPresentation.js",
+    );
     const featureStub = moduleUrl(
         `export * from "${pathToFileURL(modelFile).href}";`
         + `export * from "${pathToFileURL(guideFile).href}";`
+        + `export * from "${pathToFileURL(presentationFile).href}";`
         + "export const useParameterSettings=()=>({});",
     );
     const pollingStub = moduleUrl(
@@ -201,7 +209,7 @@ test("route and navigation register PARAMETER SETTINGS", async () => {
     assert.match(navigation, /"\/parameter-settings"/);
 });
 
-test("view renders runtime context read-only, primary=5, advanced=7 collapsed", async (context) => {
+test("view renders runtime context read-only and four functional groups", async (context) => {
     const page = await loadPage();
     if (!page) {
         context.skip("vite is not installed in this workspace");
@@ -216,19 +224,16 @@ test("view renders runtime context read-only, primary=5, advanced=7 collapsed", 
     assert.match(text, /BTCUSDT/);
     assert.match(text, /OFF \/ NOT_INSTALLED \/ NONE/);
 
-    assert.equal(
-        textOf(findByTestId(tree, "primary-count")),
-        "5",
-    );
-    assert.equal(
-        textOf(findByTestId(tree, "advanced-count")),
-        "7",
-    );
+    assert.equal(textOf(findByTestId(tree, "group-count-ENTRY")), "3");
+    assert.equal(textOf(findByTestId(tree, "group-count-MOMENTUM")), "2");
+    assert.equal(textOf(findByTestId(tree, "group-count-EXIT")), "5");
+    assert.equal(textOf(findByTestId(tree, "group-count-DETECTOR")), "2");
     assert.ok(findByTestId(tree, "scope-PAPER"));
     assert.ok(findByTestId(tree, "scope-LIVE"));
 
-    // Advanced is collapsed initially.
-    assert.equal(findByTestId(tree, "advanced-parameters-content"), null);
+    // Primary/Advanced are no longer the main organization.
+    assert.equal(findByTestId(tree, "primary-parameters-section"), null);
+    assert.equal(findByTestId(tree, "advanced-parameters-section"), null);
 
     // Configured / Effective / Runtime are distinguished.
     assert.match(text, /Configured/);
@@ -255,7 +260,7 @@ const PRIMARY_NAMES = [
     "maximumHoldMs",
 ];
 
-test("primary parameters are five structured icon cards above runtime context", async (context) => {
+test("all twelve parameters render once as structured icon cards in groups", async (context) => {
     const page = await loadPage();
     if (!page) {
         context.skip("vite is not installed in this workspace");
@@ -264,30 +269,36 @@ test("primary parameters are five structured icon cards above runtime context", 
     const tree = page.ParameterSettingsView(baseProps);
     const ids = collectTestIds(tree);
 
-    for (const name of PRIMARY_NAMES) {
-        assert.ok(ids.includes(`parameter-row-${name}`), name);
+    for (const name of ALL_NAMES) {
+        assert.equal(
+            ids.filter((id) => id === `parameter-row-${name}`).length,
+            1,
+            name,
+        );
         assert.ok(ids.includes(`parameter-icon-${name}`), name);
     }
     assert.equal(
+        ids.filter((id) => id.startsWith("parameter-row-")).length,
+        12,
+    );
+    assert.equal(
         ids.filter((id) => id.startsWith("parameter-icon-")).length,
-        5,
+        12,
     );
 
-    // Runtime Context is below the primary parameters, not the first card.
+    // Functional group order: ENTRY -> MOMENTUM -> EXIT -> DETECTOR.
+    assert.ok(ids.indexOf("group-ENTRY") < ids.indexOf("group-MOMENTUM"));
+    assert.ok(ids.indexOf("group-MOMENTUM") < ids.indexOf("group-EXIT"));
+    assert.ok(ids.indexOf("group-EXIT") < ids.indexOf("group-DETECTOR"));
+
+    // Runtime Context is below the editable parameters.
     assert.ok(ids.includes("runtime-context-section"));
     assert.ok(
-        ids.indexOf("primary-parameters-section")
-        < ids.indexOf("runtime-context-section"),
+        ids.indexOf("group-DETECTOR") < ids.indexOf("runtime-context-section"),
     );
 
-    // No advanced rows leak into the collapsed first viewport.
-    assert.equal(
-        ids.filter((id) => id.startsWith("advanced-group-")).length,
-        0,
-    );
-
-    // Each primary card keeps Configured / Effective / Runtime distinct.
-    for (const name of PRIMARY_NAMES) {
+    // Each card keeps Configured / Effective / Runtime distinct.
+    for (const name of ALL_NAMES) {
         const card = textOf(findByTestId(tree, `parameter-row-${name}`));
         assert.match(card, /Configured/);
         assert.match(card, /Effective/);
@@ -339,10 +350,7 @@ test("page exposes no apply-now or auto-optimization control", async (context) =
         context.skip("vite is not installed in this workspace");
         return;
     }
-    const tree = page.ParameterSettingsView({
-        ...baseProps,
-        advancedExpanded: true,
-    });
+    const tree = page.ParameterSettingsView(baseProps);
     const text = textOf(tree);
     assert.doesNotMatch(
         text,
@@ -350,26 +358,169 @@ test("page exposes no apply-now or auto-optimization control", async (context) =
     );
 });
 
-test("advanced expands on demand", async (context) => {
+test("functional groups have the audit-defined membership and exit subgroups", async (context) => {
     const page = await loadPage();
     if (!page) {
         context.skip("vite is not installed in this workspace");
         return;
     }
-    const tree = page.ParameterSettingsView({
-        ...baseProps,
-        advancedExpanded: true,
-    });
-    assert.ok(findByTestId(tree, "advanced-parameters-content"));
-    const text = textOf(tree);
-    for (const group of [
-        "Holding-Time",
-        "Exit-Deterioration",
-        "Momentum-Horizon",
-        "Detector-Sensitivity",
-    ]) {
-        assert.match(text, new RegExp(group));
+    const tree = page.ParameterSettingsView(baseProps);
+    const ids = collectTestIds(tree);
+
+    for (const [groupId, names] of Object.entries(GROUPS)) {
+        assert.ok(ids.includes(`group-${groupId}`), groupId);
+        assert.equal(
+            textOf(findByTestId(tree, `group-count-${groupId}`)),
+            String(names.length),
+            groupId,
+        );
+        const groupIds = collectTestIds(findByTestId(tree, `group-${groupId}`));
+        for (const name of names) {
+            assert.ok(
+                groupIds.includes(`parameter-row-${name}`),
+                `${groupId}:${name}`,
+            );
+        }
     }
+
+    assert.ok(ids.includes("subgroup-HOLDING_TIME"));
+    assert.ok(ids.includes("subgroup-EXIT_DETERIORATION"));
+    const holding = collectTestIds(findByTestId(tree, "subgroup-HOLDING_TIME"));
+    assert.ok(holding.includes("parameter-row-minimumHoldMs"));
+    assert.ok(holding.includes("parameter-row-maximumHoldMs"));
+    const deterioration = collectTestIds(
+        findByTestId(tree, "subgroup-EXIT_DETERIORATION"),
+    );
+    for (const name of [
+        "exitMomentumMinimum",
+        "exitLiquidityQualityMinimum",
+        "exitSpreadQualityMinimum",
+    ]) {
+        assert.ok(deterioration.includes(`parameter-row-${name}`), name);
+    }
+});
+
+test("impact and direction metadata use the audit presentation model", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView(baseProps);
+    const ids = collectTestIds(tree);
+    for (const name of ALL_NAMES) {
+        assert.ok(ids.includes(`parameter-impact-${name}`), name);
+        assert.ok(ids.includes(`parameter-direction-${name}`), name);
+    }
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-minimumCompositeScore")),
+        /DIRECT GATE/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-minimumCompositeScore")),
+        /直接ゲート/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-minimumCompositeScore")),
+        /VERY HIGH/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-minimumStrategyConfidence")),
+        /DOWNSTREAM GATE/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-maximumHoldMs")),
+        /BACKSTOP/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-momentumMinimumWarmupSeconds")),
+        /DEPENDENT/,
+    );
+    assert.match(
+        textOf(findByTestId(tree, "parameter-impact-absorptionVolumePercentile")),
+        /DETECTOR/,
+    );
+});
+
+test("parameter map opens with bilingual flow, all 12 chips and outside authority", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({ ...baseProps, mapOpen: true });
+    assert.ok(findByTestId(tree, "map-modal"));
+    const ids = collectTestIds(tree);
+    for (const name of ALL_NAMES) {
+        assert.ok(ids.includes(`map-chip-${name}`), name);
+    }
+    const mapText = textOf(findByTestId(tree, "map-modal"));
+    assert.match(mapText, /Market Observation/);
+    assert.match(mapText, /市場観測/);
+    assert.match(mapText, /Entry Decision/);
+    assert.match(mapText, /エントリー判定/);
+    assert.match(mapText, /Not controlled here/);
+    assert.match(mapText, /ここでは制御しないもの/);
+    assert.match(mapText, /Stop Loss/);
+    assert.match(mapText, /Trailing/);
+    assert.match(mapText, /Configured/);
+    assert.match(mapText, /snapshot-at-entry/);
+});
+
+test("how to tune exposes exactly ten bilingual goals without numeric recommendations", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({ ...baseProps, tuneOpen: true });
+    assert.ok(findByTestId(tree, "tune-modal"));
+    const ids = collectTestIds(tree);
+    assert.equal(
+        ids.filter((id) => id.startsWith("tune-goal-")).length,
+        10,
+    );
+    for (const id of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]) {
+        assert.ok(findByTestId(tree, `tune-goal-${id}`), id);
+    }
+    const tuneText = textOf(findByTestId(tree, "tune-modal"));
+    assert.match(tuneText, /弱いエントリーを減らす/);
+    assert.match(tuneText, /エントリー機会を増やす/);
+    assert.match(tuneText, /Direct effect/);
+    assert.match(tuneText, /直接影響/);
+    assert.match(tuneText, /Possible consequence/);
+    assert.match(tuneText, /起こり得る結果/);
+    assert.doesNotMatch(
+        tuneText,
+        /win rate|guaranteed|best setting|optimal value/i,
+    );
+    assert.doesNotMatch(tuneText, /推奨値|最適な値/);
+});
+
+test("guide corrections reflect the audit snapshot and timing findings", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    assert.equal(PARAMETER_GUIDE.maximumStrategySpreadPct.snapshotAtEntry, false);
+    assert.equal(PARAMETER_GUIDE.momentumWindowSeconds.snapshotAtEntry, false);
+    assert.equal(PARAMETER_GUIDE.maximumHoldMs.snapshotAtEntry, true);
+    assert.equal(PARAMETER_GUIDE.minimumHoldMs.snapshotAtEntry, true);
+    assert.equal(PARAMETER_GUIDE.absorptionVolumePercentile.snapshotAtEntry, false);
+
+    const guideSource = await readFile(
+        new URL(
+            "../features/parameter-settings/parameterGuide.js",
+            import.meta.url,
+        ),
+        "utf8",
+    );
+    assert.match(guideSource, /CURRENT parameter authority/);
+    assert.match(guideSource, /recomputed every feature\/strategy cycle/);
+    assert.match(guideSource, /applied downstream by the execution path/);
+    assert.match(guideSource, /last resort in the strategy exit order/);
+    assert.match(guideSource, /detector -> feature -> gate/);
 });
 
 test("LIVE scope shows confirmation and locks unmigrated parameters", async (context) => {
@@ -426,6 +577,25 @@ const ADVANCED_NAMES = [
     "absorptionVolumePercentile",
     "liquidityQualityPercentile",
 ];
+
+const GROUPS = {
+    ENTRY: [
+        "minimumCompositeScore",
+        "maximumStrategySpreadPct",
+        "minimumStrategyConfidence",
+    ],
+    MOMENTUM: ["momentumWindowSeconds", "momentumMinimumWarmupSeconds"],
+    EXIT: [
+        "minimumHoldMs",
+        "maximumHoldMs",
+        "exitMomentumMinimum",
+        "exitLiquidityQualityMinimum",
+        "exitSpreadQualityMinimum",
+    ],
+    DETECTOR: ["absorptionVolumePercentile", "liquidityQualityPercentile"],
+};
+
+const ALL_NAMES = Object.values(GROUPS).flat();
 
 test("guide definitions cover exactly the canonical twelve parameters", async (context) => {
     const page = await loadPage();
@@ -537,7 +707,7 @@ test("guide definitions are bilingual for every explanatory field", async (conte
     }
 });
 
-test("primary guide triggers exist for all five primary parameters", async (context) => {
+test("a guide trigger exists for every one of the twelve parameters", async (context) => {
     const page = await loadPage();
     if (!page) {
         context.skip("vite is not installed in this workspace");
@@ -545,35 +715,7 @@ test("primary guide triggers exist for all five primary parameters", async (cont
     }
     const tree = page.ParameterSettingsView(baseProps);
     const ids = collectTestIds(tree);
-    for (const name of PRIMARY_NAMES) {
-        assert.ok(ids.includes(`parameter-guide-${name}`), name);
-    }
-    assert.equal(
-        ids.filter((id) => id.startsWith("parameter-guide-")).length,
-        5,
-    );
-});
-
-test("advanced guide triggers exist for all seven advanced parameters", async (context) => {
-    const page = await loadPage();
-    if (!page) {
-        context.skip("vite is not installed in this workspace");
-        return;
-    }
-    const collapsed = page.ParameterSettingsView(baseProps);
-    assert.equal(
-        collectTestIds(collapsed).filter((id) => (
-            id.startsWith("parameter-guide-")
-        )).length,
-        5,
-    );
-
-    const tree = page.ParameterSettingsView({
-        ...baseProps,
-        advancedExpanded: true,
-    });
-    const ids = collectTestIds(tree);
-    for (const name of ADVANCED_NAMES) {
+    for (const name of ALL_NAMES) {
         assert.ok(ids.includes(`parameter-guide-${name}`), name);
     }
     assert.equal(
@@ -592,16 +734,15 @@ test("guide trigger selects the correct parameter without writing", async (conte
     let saved = 0;
     const tree = page.ParameterSettingsView({
         ...baseProps,
-        advancedExpanded: true,
         onOpenGuide: (name) => opened.push(name),
         onSave: () => { saved += 1; },
     });
-    for (const name of [...PRIMARY_NAMES, ...ADVANCED_NAMES]) {
+    for (const name of ALL_NAMES) {
         findByTestId(tree, `parameter-guide-${name}`).props.onClick({
             currentTarget: {},
         });
     }
-    assert.deepEqual(opened, [...PRIMARY_NAMES, ...ADVANCED_NAMES]);
+    assert.deepEqual(opened, ALL_NAMES);
     assert.equal(saved, 0);
 });
 
@@ -723,13 +864,14 @@ test("page source contains no order / bot / optimization authority", async () =>
     assert.doesNotMatch(source, /money-management|governance|market-intelligence/);
 });
 
-test("page structure keeps advanced collapsed and inputs read-only when locked", async () => {
+test("page structure keeps inputs read-only when locked and includes the panels", async () => {
     const source = await readFile(
         new URL("./ParameterSettingsPage.jsx", import.meta.url),
         "utf8",
     );
     assert.match(source, /export function ParameterSettingsView/);
-    assert.match(source, /advancedExpanded = false/);
+    assert.match(source, /mapOpen = false/);
+    assert.match(source, /tuneOpen = false/);
     assert.match(source, /useState\(false\)/);
     assert.match(source, /readOnly=\{!editable\}/);
     assert.match(source, /disabled=\{!editable\}/);
@@ -739,6 +881,8 @@ test("page structure keeps advanced collapsed and inputs read-only when locked",
     assert.match(source, /account-runtime-overview/);
     assert.match(source, /authority-details-toggle/);
     assert.match(source, /ParameterGuideModal/);
+    assert.match(source, /ParameterMapModal/);
+    assert.match(source, /HowToTuneModal/);
     assert.match(source, /ps-guide-trigger/);
     assert.match(source, /guideKey = null/);
 });
@@ -757,6 +901,22 @@ test("guide metadata module is static and never writes configuration", async () 
     );
     assert.doesNotMatch(
         guideSource,
+        /Optimize|Auto Tune|Auto Apply|Apply Now/,
+    );
+
+    const presentationSource = await readFile(
+        new URL(
+            "../features/parameter-settings/parameterPresentation.js",
+            import.meta.url,
+        ),
+        "utf8",
+    );
+    assert.doesNotMatch(
+        presentationSource,
+        /fetch\(|updateParameterSettingsConfiguration|onSave|api\//,
+    );
+    assert.doesNotMatch(
+        presentationSource,
         /Optimize|Auto Tune|Auto Apply|Apply Now/,
     );
 });

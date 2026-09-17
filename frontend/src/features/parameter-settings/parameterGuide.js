@@ -170,10 +170,10 @@ export const PARAMETER_GUIDE = Object.freeze({
         related: ["minimumCompositeScore", "exitSpreadQualityMinimum"],
         cycleStages: [2, 4, 10],
         applicationTiming: {
-            en: "Entry spread gate applies at the next strategy cycle. The spread-divergence exit reads the entry snapshot for an open position.",
-            ja: "エントリーのスプレッドゲートは次の戦略サイクルから適用されます。spread-divergence 決済は、保有ポジションのエントリー時スナップショットを参照します。",
+            en: "Entry spread gate applies at the next strategy cycle. The formal spread-safety component of the exit reads the CURRENT parameter authority (not the entry snapshot); the separate spread-quality comparison uses the entry snapshot.",
+            ja: "エントリーのスプレッドゲートは次の戦略サイクルから適用されます。決済の正式なスプレッド安全判定は現在のパラメーター権限を参照し（エントリー時スナップショットではありません）、別のスプレッド品質比較はエントリー時スナップショットを使用します。",
         },
-        snapshotAtEntry: true,
+        snapshotAtEntry: false,
         liveMigration: LIVE_MIGRATION.IMPERFECT_UNIT_MAPPING,
         liveAuthorityNote: {
             en: "The legacy LIVE constant MAX_SPREAD is an absolute price threshold (0.0005), not a canonical percent, and is excluded from the LIVE runtime authority. This value is observability-only and is shown as legacy raw.",
@@ -210,10 +210,10 @@ export const PARAMETER_GUIDE = Object.freeze({
         related: ["momentumMinimumWarmupSeconds"],
         cycleStages: [3, 4, 10],
         applicationTiming: {
-            en: "Applies at the next feature/strategy cycle; open positions keep the momentum thresholds captured at entry.",
-            ja: "次の特徴量／戦略サイクルから適用されます。保有ポジションは、エントリー時に取得したモメンタムしきい値を保持します。",
+            en: "Momentum features are recomputed every feature/strategy cycle (not part of the entry snapshot), so this affects both new entries and the live exit evaluation.",
+            ja: "モメンタム特徴量は毎特徴量／戦略サイクルで再計算されます（エントリー時スナップショットには含まれません）。そのため、新規エントリーと保有中の決済判定の両方に影響します。",
         },
-        snapshotAtEntry: true,
+        snapshotAtEntry: false,
         liveMigration: LIVE_MIGRATION.NO_LEGACY_EQUIVALENT,
         liveAuthorityNote: {
             en: "The legacy LIVE contract does not read this parameter; the LIVE value is a MicrostructureStateBuilder fallback and is excluded from the LIVE runtime authority.",
@@ -240,8 +240,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "weak-confidence ゲートが緩くなります。",
         },
         directEffect: {
-            en: "The entry decision compares edgeScore-derived confidence >= minimumStrategyConfidence; failing it sets the suppression reason LOW_CONFIDENCE.",
-            ja: "エントリー判定は、edgeScore から算出した confidence >= minimumStrategyConfidence を比較します。満たさない場合は抑制理由 LOW_CONFIDENCE が設定されます。",
+            en: "In the normalized PAPER contract the strategy hard-gate set does NOT include confidence; the gate is applied downstream by the execution path (LOW_CONFIDENCE). It compares confidence >= minimumStrategyConfidence, where confidence = edgeScore * (0.5 + momentum * 0.5), so confidence <= edgeScore. In the legacy LIVE contract the strategy weak-confidence branch applies.",
+            ja: "正規化された PAPER 契約では、戦略のハードゲート群に confidence は含まれません。このゲートは実行経路の下流で適用されます（LOW_CONFIDENCE）。confidence >= minimumStrategyConfidence を比較し、confidence = edgeScore * (0.5 + momentum * 0.5) のため confidence <= edgeScore です。旧来の LIVE 契約では戦略の weak-confidence 分岐が適用されます。",
         },
         possibleTradingEffect: {
             en: "A stricter floor may reduce entries that pass this gate; the actual number also depends on the other gates. If it exceeds the composite score, the backend emits a cross-field warning that the confidence floor may never bind.",
@@ -280,8 +280,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "ハードな MAX_HOLD に到達するのが早くなります。",
         },
         directEffect: {
-            en: "The exit evaluator returns MAX_HOLD once holding_duration_ms >= maximumHoldMs.",
-            ja: "決済評価は holding_duration_ms >= maximumHoldMs となった時点で MAX_HOLD を返します。",
+            en: "The exit evaluator returns MAX_HOLD once holding_duration_ms >= maximumHoldMs. It is the last resort in the strategy exit order, so any earlier strategy or safety exit may occur first.",
+            ja: "決済評価は holding_duration_ms >= maximumHoldMs となった時点で MAX_HOLD を返します。これは戦略決済順の最後の手段であり、それより早い戦略決済や安全決済が先に発生し得ます。",
         },
         possibleTradingEffect: {
             en: "This changes when a position is forced closed by time; realised outcome still depends on market movement while open.",
@@ -320,8 +320,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "ソフトなマイクロストラクチャ決済がより早く発動できるようになります。",
         },
         directEffect: {
-            en: "The exit evaluator only runs the momentum-decay branch once holding_duration_ms >= minimumHoldMs; early liquidity/spread exits before the floor require repeated confirmation. Safety exits and the ExecutionEngine SL/TP authority are not gated by this floor.",
-            ja: "決済評価は holding_duration_ms >= minimumHoldMs となって初めて momentum-decay 分岐を実行します。下限前の早期の流動性・スプレッド決済は、繰り返し確認を必要とします。安全決済および ExecutionEngine の SL/TP 権限は、この下限の対象外です。",
+            en: "The exit evaluator only runs the momentum-decay branch once holding_duration_ms >= minimumHoldMs; early liquidity/spread exits before the floor require repeated confirmation. Microstructure reversal is immediate and is not gated by this floor, and safety exits (SL/TP/trailing, emergency flatten, manual close) are outside this authority.",
+            ja: "決済評価は holding_duration_ms >= minimumHoldMs となって初めて momentum-decay 分岐を実行します。下限前の早期の流動性・スプレッド決済は、繰り返し確認を必要とします。マイクロストラクチャ反転は即時で、この下限の対象外です。また安全決済（SL/TP/トレーリング・緊急フラット・手動クローズ）はこの権限の範囲外です。",
         },
         possibleTradingEffect: {
             en: "A longer floor may keep positions open through short adverse noise; the eventual exit reason still depends on liquidity, spread and momentum conditions.",
@@ -524,8 +524,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "異常板厚のしきい値が緩くなります。",
         },
         directEffect: {
-            en: "MicrostructureStateBuilder derives absorption_volume_threshold = rolling_percentile(history, absorptionVolumePercentile).",
-            ja: "MicrostructureStateBuilder は absorption_volume_threshold = rolling_percentile(history, absorptionVolumePercentile) を導出します。",
+            en: "MicrostructureStateBuilder derives absorption_volume_threshold = rolling_percentile(history, absorptionVolumePercentile). The resulting absorptionDetected flag becomes the liquidity-safety entry gate and a liquidity-deterioration exit trigger (detector -> feature -> gate), not a direct final comparison.",
+            ja: "MicrostructureStateBuilder は absorption_volume_threshold = rolling_percentile(history, absorptionVolumePercentile) を導出します。その結果の absorptionDetected フラグが流動性安全のエントリーゲートおよび流動性悪化決済のトリガーとなります（検出器 → 特徴量 → ゲート）。直接の最終比較ではありません。",
         },
         possibleTradingEffect: {
             en: "This can change how often the absorption detector flags abnormal depth, which may influence momentum/entry evidence; the actual decision still depends on the other detector and gate conditions.",
@@ -564,8 +564,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "流動性品質の基準が緩くなります。",
         },
         directEffect: {
-            en: "MicrostructureStateBuilder derives liquidity_quality_reference = rolling_percentile(history, liquidityQualityPercentile) to make depth quality symbol-relative.",
-            ja: "MicrostructureStateBuilder は、板厚品質をシンボル相対にするため liquidity_quality_reference = rolling_percentile(history, liquidityQualityPercentile) を導出します。",
+            en: "MicrostructureStateBuilder derives liquidity_quality_reference = rolling_percentile(history, liquidityQualityPercentile) to make depth quality symbol-relative. The resulting normalizedLiquidityQuality feeds a 0.20 edge weight and the liquidity-exit comparison (detector -> feature -> gate).",
+            ja: "MicrostructureStateBuilder は、板厚品質をシンボル相対にするため liquidity_quality_reference = rolling_percentile(history, liquidityQualityPercentile) を導出します。その結果の normalizedLiquidityQuality が edge の 0.20 の重みと流動性決済の比較に供給されます（検出器 → 特徴量 → ゲート）。",
         },
         possibleTradingEffect: {
             en: "This can change the computed liquidity quality used by entry and exit comparisons; the actual outcome still depends on the other conditions.",

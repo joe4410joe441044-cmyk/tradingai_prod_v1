@@ -3,19 +3,27 @@ import { useEffect, useRef, useState } from "react";
 import usePolling from "../hooks/usePolling";
 import { fetchBotStatus } from "../components/runtime/accountRuntimeModel";
 import {
+    IMPACT_CLASS_LABELS,
+    IMPACT_LEGEND,
+    IMPACT_TYPE_LABELS,
     LEGACY_RAW_NOTE,
     LEGACY_RAW_PARAMETERS,
+    PARAMETER_GROUPS,
+    PARAMETER_MAP_FLOW,
+    PARAMETER_MAP_NOTES,
+    PARAMETER_MAP_OUTSIDE,
     PARAMETER_SETTINGS_SCOPE,
     RELATED_NOTE,
-    buildAdvancedGroups,
+    TUNING_GOALS,
     buildEffectiveRevisionModel,
-    buildPrimaryRows,
+    buildParameterRows,
     buildRuntimeContext,
     cycleStageLabel,
     guideFor,
     isLiveScope,
     liveMigrationLabel,
     liveMigrationLabelJa,
+    presentationFor,
     relatedLabel,
     useParameterSettings,
 } from "../features/parameter-settings";
@@ -166,6 +174,56 @@ const PARAMETER_GLYPHS = {
             <circle cx="12" cy="13" r="8" />
             <polyline points="12 9 12 13 15 15" />
             <line x1="9" y1="2" x2="15" y2="2" />
+        </>
+    ),
+    minimumHoldMs: (
+        <>
+            <path d="M7 3h10" />
+            <path d="M7 21h10" />
+            <path d="M8 3c0 4 4 5 4 9s-4 5-4 9" />
+            <path d="M16 3c0 4-4 5-4 9s4 5 4 9" />
+        </>
+    ),
+    exitMomentumMinimum: (
+        <>
+            <polyline points="3 7 9 13 13 10 21 18" />
+            <polyline points="15 18 21 18 21 12" />
+        </>
+    ),
+    exitLiquidityQualityMinimum: (
+        <>
+            <path d="M12 3c3 4 5 6.5 5 9.5A5 5 0 0 1 7 12.5C7 9.5 9 7 12 3z" />
+            <line x1="5" y1="20" x2="19" y2="20" />
+        </>
+    ),
+    exitSpreadQualityMinimum: (
+        <>
+            <path d="M12 4v6" />
+            <polyline points="8 10 12 6 16 10" />
+            <path d="M5 20l5-6" />
+            <path d="M19 20l-5-6" />
+        </>
+    ),
+    momentumMinimumWarmupSeconds: (
+        <>
+            <path d="M12 3c2 3 4 4 4 7a4 4 0 0 1-8 0c0-1.5.7-2.6 1.6-3.6" />
+            <path d="M12 14v7" />
+            <path d="M9 21h6" />
+        </>
+    ),
+    absorptionVolumePercentile: (
+        <>
+            <line x1="5" y1="20" x2="5" y2="12" />
+            <line x1="10" y1="20" x2="10" y2="7" />
+            <line x1="15" y1="20" x2="15" y2="10" />
+            <line x1="20" y1="20" x2="20" y2="4" />
+            <line x1="3" y1="20" x2="21" y2="20" />
+        </>
+    ),
+    liquidityQualityPercentile: (
+        <>
+            <path d="M3 9c3 0 3 2 6 2s3-2 6-2 3 2 6 2" />
+            <path d="M3 15c3 0 3 2 6 2s3-2 6-2 3 2 6 2" />
         </>
     ),
     __fallback: (
@@ -417,7 +475,34 @@ function ParameterGuideModal({ row, scope, onClose, dialogRef }) {
     );
 }
 
-function PrimaryParameterCard({
+function ImpactBadges({ name }) {
+    const presentation = presentationFor(name);
+    if (!presentation) return null;
+    const type = IMPACT_TYPE_LABELS[presentation.impactType];
+    const impact = IMPACT_CLASS_LABELS[presentation.impactClass];
+    return (
+        <div className="ps-card-meta" data-testid={`parameter-impact-${name}`}>
+            <span
+                className={`ps-meta-badge ps-meta-badge--type ps-meta-badge--${presentation.impactType.toLowerCase()}`}
+            >
+                {type.en} / {type.ja}
+            </span>
+            <span
+                className={`ps-meta-badge ps-meta-badge--impact ps-meta-badge--${presentation.impactClass.toLowerCase()}`}
+            >
+                {impact.en} / {impact.ja}
+            </span>
+            <span
+                className="ps-card-meta__direction"
+                data-testid={`parameter-direction-${name}`}
+            >
+                {presentation.directionHint.en} — {presentation.directionHint.ja}
+            </span>
+        </div>
+    );
+}
+
+function ParameterCard({
     row,
     scope,
     draftValue,
@@ -457,6 +542,8 @@ function PrimaryParameterCard({
                     ? GUIDE
                 </button>
             </header>
+
+            <ImpactBadges name={row.name} />
 
             <div className="ps-param-card__configured">
                 <label
@@ -543,93 +630,352 @@ function PrimaryParameterCard({
     );
 }
 
-function AdvancedParameterRow({
-    row,
+function ParameterChip({ name, onOpenParameter }) {
+    const guide = guideFor(name);
+    const presentation = presentationFor(name);
+    const label = guide ? `${guide.labelEn}（${guide.labelJa}）` : name;
+    const type = presentation?.impactType?.toLowerCase() ?? "direct_gate";
+    return (
+        <button
+            type="button"
+            className={`ps-map-chip ps-map-chip--${type}`}
+            data-testid={`map-chip-${name}`}
+            onClick={() => onOpenParameter(name)}
+        >
+            {label}
+        </button>
+    );
+}
+
+function GroupSection({
+    group,
+    rows,
     scope,
-    draftValue,
+    draft,
     onDraftChange,
     disabled,
-    error,
-    onOpenGuide = () => {},
+    fieldErrors,
+    onOpenGuide,
 }) {
-    const liveLocked = isLiveScope(scope) && row.liveLocked;
-    const editable = row.editable && !disabled && !liveLocked;
-    const unit = rowUnitDisplay(row, scope);
+    const renderGrid = (parameterNames) => {
+        const columns = parameterNames.length <= 2 ? 2 : 3;
+        return (
+            <div
+                className={`ps-param-grid ps-param-grid--cols-${columns}`}
+                data-testid={`group-grid-${group.id}`}
+            >
+                {parameterNames.map((name) => {
+                    const row = rows.find((entry) => entry.name === name);
+                    if (!row) return null;
+                    return (
+                        <ParameterCard
+                            key={name}
+                            row={row}
+                            scope={scope}
+                            draftValue={draft[name]}
+                            onDraftChange={onDraftChange}
+                            disabled={disabled}
+                            error={fieldErrors[name]}
+                            onOpenGuide={onOpenGuide}
+                        />
+                    );
+                })}
+            </div>
+        );
+    };
+
+    const count = group.subgroups
+        ? group.subgroups.reduce(
+            (total, subgroup) => total + subgroup.parameters.length,
+            0,
+        )
+        : group.parameters.length;
+
+    return (
+        <section
+            className="semantic-card ps-group"
+            data-testid={`group-${group.id}`}
+        >
+            <header className="semantic-card-header">
+                <div>
+                    <span className="semantic-card-kicker">
+                        Parameter Group（パラメーターグループ）
+                    </span>
+                    <h2>
+                        {group.labelEn}（{group.labelJa}）
+                    </h2>
+                </div>
+                <span
+                    className="semantic-badge"
+                    data-testid={`group-count-${group.id}`}
+                >
+                    {count}
+                </span>
+            </header>
+            <p className="ps-group__description">
+                <span className="ps-group__desc-en">{group.description.en}</span>
+                <span className="ps-group__desc-ja">{group.description.ja}</span>
+            </p>
+            {group.subgroups
+                ? group.subgroups.map((subgroup) => (
+                    <div
+                        key={subgroup.id}
+                        className="ps-subgroup"
+                        data-testid={`subgroup-${subgroup.id}`}
+                    >
+                        <h3 className="ps-subgroup__title">
+                            {subgroup.labelEn}（{subgroup.labelJa}）
+                        </h3>
+                        {renderGrid(subgroup.parameters)}
+                    </div>
+                ))
+                : renderGrid(group.parameters)}
+        </section>
+    );
+}
+
+function ParameterMapModal({ open, onClose, dialogRef, onOpenParameter }) {
+    if (!open) return null;
     return (
         <div
-            className="ps-adv-row"
-            data-testid={`parameter-row-${row.name}`}
+            className="ps-guide-backdrop"
+            data-testid="map-backdrop"
+            onClick={onClose}
         >
-            <div className="ps-adv-row__identity">
-                <span className="ps-adv-row__label">{row.labelEn}</span>
-                <span className="ps-adv-row__label-ja">{row.labelJa}</span>
-                <span className="ps-adv-row__detail">
-                    {row.description} · Range: {row.constraint}
-                </span>
-                {liveLocked && (
-                    <span
-                        className="ps-adv-row__lock"
-                        data-testid={`parameter-lock-${row.name}`}
+            <div
+                className="ps-guide-modal ps-map-modal"
+                data-testid="map-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ps-map-title"
+                tabIndex={-1}
+                ref={dialogRef}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <header className="ps-guide-modal__header">
+                    <div>
+                        <span className="ps-guide-modal__kicker">
+                            Parameter Map（パラメーター全体像）
+                        </span>
+                        <h2 id="ps-map-title">
+                            PARAMETER MAP / パラメーター全体像
+                        </h2>
+                    </div>
+                    <button
+                        type="button"
+                        className="ps-guide-modal__close"
+                        data-testid="map-close"
+                        aria-label="Close parameter map（パラメーター全体像を閉じる）"
+                        onClick={onClose}
                     >
-                        {LOCK_LABEL}
-                    </span>
-                )}
+                        ×
+                    </button>
+                </header>
+                <div className="ps-guide-modal__body">
+                    <ol className="ps-map-flow">
+                        {PARAMETER_MAP_FLOW.map((step) => (
+                            <li
+                                key={step.id}
+                                className="ps-map-step"
+                                data-testid={`map-step-${step.id}`}
+                            >
+                                <div className="ps-map-step__head">
+                                    <strong>{step.labelEn}</strong>
+                                    <span className="ps-map-step__ja">
+                                        {step.labelJa}
+                                    </span>
+                                </div>
+                                <p className="ps-guide-text ps-guide-text--en">
+                                    <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                    {step.note.en}
+                                </p>
+                                <p className="ps-guide-text ps-guide-text--ja">
+                                    <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                    {step.note.ja}
+                                </p>
+                                {step.chips.length > 0 && (
+                                    <div className="ps-map-chips">
+                                        {step.chips.map((name) => (
+                                            <ParameterChip
+                                                key={name}
+                                                name={name}
+                                                onOpenParameter={onOpenParameter}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                    </ol>
+
+                    <section className="ps-map-notes">
+                        <h3>Key relationships / 重要な関係</h3>
+                        {PARAMETER_MAP_NOTES.map((note) => (
+                            <div
+                                key={note.id}
+                                className="ps-map-note"
+                                data-testid={`map-note-${note.id}`}
+                            >
+                                <h4>
+                                    {note.labelEn} / {note.labelJa}
+                                </h4>
+                                <p className="ps-guide-text ps-guide-text--en">
+                                    <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                    {note.en}
+                                </p>
+                                <p className="ps-guide-text ps-guide-text--ja">
+                                    <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                    {note.ja}
+                                </p>
+                            </div>
+                        ))}
+                    </section>
+
+                    <section className="ps-map-outside" data-testid="map-outside">
+                        <h3>Not controlled here / ここでは制御しないもの</h3>
+                        <ul>
+                            {PARAMETER_MAP_OUTSIDE.map((item) => (
+                                <li key={item.en}>
+                                    <span className="ps-map-outside__en">
+                                        {item.en}
+                                    </span>
+                                    <span className="ps-map-outside__ja">
+                                        {item.ja}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                </div>
             </div>
-            <div className="ps-adv-row__configured">
-                <input
-                    aria-label={`${row.labelEn} configured value`}
-                    className="ps-param-input ps-param-input--sm"
-                    data-testid={`parameter-configured-${row.name}`}
-                    disabled={!editable}
-                    readOnly={!editable}
-                    onChange={(event) => (
-                        onDraftChange(row.name, event.target.value)
-                    )}
-                    step="any"
-                    type="number"
-                    value={draftValue ?? ""}
-                />
-                {unit && (
-                    <span className="ps-param-card__unit">{unit}</span>
-                )}
-            </div>
+        </div>
+    );
+}
+
+function HowToTuneModal({ open, onClose, dialogRef, onOpenParameter }) {
+    if (!open) return null;
+    return (
+        <div
+            className="ps-guide-backdrop"
+            data-testid="tune-backdrop"
+            onClick={onClose}
+        >
             <div
-                className="ps-adv-row__value"
-                data-testid={`parameter-effective-${row.name}`}
+                className="ps-guide-modal ps-tune-modal"
+                data-testid="tune-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ps-tune-title"
+                tabIndex={-1}
+                ref={dialogRef}
+                onClick={(event) => event.stopPropagation()}
             >
-                {rowValueDisplay(row, scope, "effective")}
+                <header className="ps-guide-modal__header">
+                    <div>
+                        <span className="ps-guide-modal__kicker">
+                            How To Tune（目的から調整）
+                        </span>
+                        <h2 id="ps-tune-title">
+                            HOW TO TUNE / 目的から調整
+                        </h2>
+                    </div>
+                    <button
+                        type="button"
+                        className="ps-guide-modal__close"
+                        data-testid="tune-close"
+                        aria-label="Close how to tune（目的から調整を閉じる）"
+                        onClick={onClose}
+                    >
+                        ×
+                    </button>
+                </header>
+                <div className="ps-guide-modal__body">
+                    <p className="ps-guide-text ps-guide-text--en">
+                        <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                        Choose a goal to see the affected parameters and direction.
+                        These are behavioural directions, not numeric
+                        recommendations.
+                    </p>
+                    <p className="ps-guide-text ps-guide-text--ja">
+                        <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                        目的を選ぶと、影響するパラメーターと方向が表示されます。
+                        これは挙動の方向であり、数値の推奨ではありません。
+                    </p>
+                    {TUNING_GOALS.map((goal) => (
+                        <section
+                            key={goal.id}
+                            className="ps-tune-goal"
+                            data-testid={`tune-goal-${goal.id}`}
+                        >
+                            <h3>
+                                {goal.id}. {goal.titleEn}（{goal.titleJa}）
+                            </h3>
+                            <p className="ps-guide-text ps-guide-text--en">
+                                <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                When to use: {goal.whenEn}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--ja">
+                                <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                使う場面: {goal.whenJa}
+                            </p>
+                            <div className="ps-tune-goal__params">
+                                <span className="ps-tune-goal__label">
+                                    Primary / 主要
+                                </span>
+                                <div className="ps-map-chips">
+                                    {goal.primary.map((name) => (
+                                        <ParameterChip
+                                            key={name}
+                                            name={name}
+                                            onOpenParameter={onOpenParameter}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                            {goal.secondary.length > 0 && (
+                                <div className="ps-tune-goal__params">
+                                    <span className="ps-tune-goal__label">
+                                        Secondary / 補助
+                                    </span>
+                                    <div className="ps-map-chips">
+                                        {goal.secondary.map((name) => (
+                                            <ParameterChip
+                                                key={name}
+                                                name={name}
+                                                onOpenParameter={onOpenParameter}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <p className="ps-guide-text ps-guide-text--en">
+                                <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                Direct effect: {goal.directEffect.en}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--ja">
+                                <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                直接影響: {goal.directEffect.ja}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--en">
+                                <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                Possible consequence: {goal.possibleConsequence.en}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--ja">
+                                <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                起こり得る結果: {goal.possibleConsequence.ja}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--en">
+                                <span className="ps-guide-lang" aria-hidden="true">EN</span>
+                                Watch out: {goal.watchOut.en}
+                            </p>
+                            <p className="ps-guide-text ps-guide-text--ja">
+                                <span className="ps-guide-lang" aria-hidden="true">JP</span>
+                                注意: {goal.watchOut.ja}
+                            </p>
+                        </section>
+                    ))}
+                </div>
             </div>
-            <div
-                className="ps-adv-row__value"
-                data-testid={`parameter-runtime-${row.name}`}
-            >
-                {rowValueDisplay(row, scope, "runtime")}
-            </div>
-            <div className="ps-adv-row__status">
-                <span
-                    className={`ps-status ps-status--${String(row.status).toLowerCase()}`}
-                    data-testid={`parameter-status-${row.name}`}
-                >
-                    {row.status}
-                </span>
-                <button
-                    type="button"
-                    className="ps-guide-trigger ps-guide-trigger--sm"
-                    data-testid={`parameter-guide-${row.name}`}
-                    aria-label={`Open parameter guide for ${row.labelEn}`}
-                    onClick={(event) => onOpenGuide(row.name, event.currentTarget)}
-                >
-                    ? GUIDE
-                </button>
-            </div>
-            {error && (
-                <span
-                    className="ps-param-card__error"
-                    data-testid={`parameter-error-${row.name}`}
-                >
-                    {error}
-                </span>
-            )}
         </div>
     );
 }
@@ -645,8 +991,6 @@ export function ParameterSettingsView({
     botStatus = {},
     draft = {},
     onDraftChange = () => {},
-    advancedExpanded = false,
-    onAdvancedToggle = () => {},
     loading = false,
     saveState = { phase: "IDLE" },
     conflict = null,
@@ -661,10 +1005,18 @@ export function ParameterSettingsView({
     onOpenGuide = () => {},
     onCloseGuide = () => {},
     guideDialogRef = null,
+    mapOpen = false,
+    tuneOpen = false,
+    onOpenMap = () => {},
+    onCloseMap = () => {},
+    onOpenTune = () => {},
+    onCloseTune = () => {},
+    onOpenParameter = () => {},
+    mapDialogRef = null,
+    tuneDialogRef = null,
 }) {
     const sources = { configured: configuration, effective, runtime };
-    const primaryRows = buildPrimaryRows(schema, sources);
-    const advancedGroups = buildAdvancedGroups(schema, sources);
+    const rows = buildParameterRows(schema, sources);
     const context = buildRuntimeContext(botStatus, configuration, runtime);
     const revision = buildEffectiveRevisionModel(
         configuration,
@@ -675,19 +1027,12 @@ export function ParameterSettingsView({
     const liveScope = isLiveScope(scope);
     const saving = saveState?.phase === "SAVING";
     const fieldErrors = saveState?.fieldErrors ?? {};
-    const advancedCount = advancedGroups.reduce(
-        (total, group) => total + group.rows.length,
-        0,
-    );
     const aiSummary = `${context.aiDecision} / ${context.aiStatus} / ${context.aiAuthority}`;
     const runtimeRevision = revision.runtimeAvailable
         ? (revision.runtimeRevision ?? "—")
         : "NO_RUNTIME_SNAPSHOT";
     const guideRow = guideKey
-        ? (
-            [...primaryRows, ...advancedGroups.flatMap((group) => group.rows)]
-                .find((row) => row.name === guideKey) ?? null
-        )
+        ? (rows.find((row) => row.name === guideKey) ?? null)
         : null;
 
     return (
@@ -738,110 +1083,50 @@ export function ParameterSettingsView({
                 </span>
             </section>
 
-            {/* PRIMARY PARAMETERS — dominant task */}
-            <section
-                className="semantic-card semantic-card-paper ps-section"
-                data-testid="primary-parameters-section"
-            >
-                <header className="semantic-card-header">
-                    <div>
-                        <span className="semantic-card-kicker">
-                            Core strategy thresholds（中核戦略しきい値）
-                        </span>
-                        <h2>Primary Parameters（主要パラメーター）</h2>
-                    </div>
-                    <span
-                        className="semantic-badge"
-                        data-testid="primary-count"
-                    >
-                        {primaryRows.length}
-                    </span>
-                </header>
-                <div
-                    className="ps-param-grid"
-                    data-testid="primary-parameter-table"
+            {/* TOOLS — compact entry controls for Parameter Map / How To Tune */}
+            <section className="ps-tools" data-testid="ps-tools">
+                <button
+                    type="button"
+                    className="ps-tools__button"
+                    data-testid="open-parameter-map"
+                    onClick={onOpenMap}
                 >
-                    {primaryRows.map((row) => (
-                        <PrimaryParameterCard
-                            key={row.name}
-                            row={row}
-                            scope={scope}
-                            draftValue={draft[row.name]}
-                            onDraftChange={onDraftChange}
-                            disabled={loading}
-                            error={fieldErrors[row.name]}
-                            onOpenGuide={onOpenGuide}
-                        />
-                    ))}
-                </div>
+                    <span className="ps-tools__title">PARAMETER MAP</span>
+                    <span className="ps-tools__sub">パラメーター全体像</span>
+                </button>
+                <button
+                    type="button"
+                    className="ps-tools__button"
+                    data-testid="open-how-to-tune"
+                    onClick={onOpenTune}
+                >
+                    <span className="ps-tools__title">HOW TO TUNE</span>
+                    <span className="ps-tools__sub">目的から調整</span>
+                </button>
+                <span className="ps-tools__legend" data-testid="impact-legend">
+                    <span className="ps-tools__legend-en">
+                        {IMPACT_LEGEND.en}
+                    </span>
+                    <span className="ps-tools__legend-ja">
+                        {IMPACT_LEGEND.ja}
+                    </span>
+                </span>
             </section>
 
-            {/* ADVANCED PARAMETERS — collapsed by default */}
-            <section
-                className="semantic-card ps-section"
-                data-testid="advanced-parameters-section"
-            >
-                <header className="semantic-card-header">
-                    <div>
-                        <span className="semantic-card-kicker">
-                            Secondary tuning（補助チューニング）
-                        </span>
-                        <h2>Advanced Parameters（詳細パラメーター）</h2>
-                    </div>
-                    <span
-                        className="semantic-badge"
-                        data-testid="advanced-count"
-                    >
-                        {advancedCount}
-                    </span>
-                    <button
-                        type="button"
-                        className="as-details-toggle"
-                        data-testid="advanced-toggle"
-                        aria-expanded={advancedExpanded}
-                        onClick={onAdvancedToggle}
-                    >
-                        {advancedExpanded ? "COLLAPSE ▲" : "EXPAND ▼"}
-                    </button>
-                </header>
-                {advancedExpanded && (
-                    <div
-                        className="ps-advanced"
-                        data-testid="advanced-parameters-content"
-                    >
-                        <div className="ps-adv-head" aria-hidden="true">
-                            <span>Parameter</span>
-                            <span>Configured</span>
-                            <span>Effective</span>
-                            <span>Runtime</span>
-                            <span>Status</span>
-                        </div>
-                        {advancedGroups.map((group) => (
-                            <div
-                                key={group.id}
-                                className="ps-advanced-group"
-                                data-testid={`advanced-group-${group.id}`}
-                            >
-                                <h3>
-                                    {group.labelEn}（{group.labelJa}）
-                                </h3>
-                                {group.rows.map((row) => (
-                                    <AdvancedParameterRow
-                                        key={row.name}
-                                        row={row}
-                                        scope={scope}
-                                        draftValue={draft[row.name]}
-                                        onDraftChange={onDraftChange}
-                                        disabled={loading}
-                                        error={fieldErrors[row.name]}
-                                        onOpenGuide={onOpenGuide}
-                                    />
-                                ))}
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </section>
+            {/* FUNCTIONAL GROUPS — ENTRY first, then MOMENTUM, EXIT, DETECTOR */}
+            {PARAMETER_GROUPS.map((group) => (
+                <GroupSection
+                    key={group.id}
+                    group={group}
+                    rows={rows}
+                    scope={scope}
+                    draft={draft}
+                    onDraftChange={onDraftChange}
+                    disabled={loading}
+                    fieldErrors={fieldErrors}
+                    onOpenGuide={onOpenGuide}
+                />
+            ))}
 
             {/* LOWER: EFFECTIVE / REVISION + RUNTIME CONTEXT (READ ONLY) */}
             <div className="ps-lower-grid">
@@ -1194,6 +1479,22 @@ export function ParameterSettingsView({
                 onClose={onCloseGuide}
                 dialogRef={guideDialogRef}
             />
+
+            {/* PARAMETER MAP MODAL */}
+            <ParameterMapModal
+                open={mapOpen}
+                onClose={onCloseMap}
+                dialogRef={mapDialogRef}
+                onOpenParameter={onOpenParameter}
+            />
+
+            {/* HOW TO TUNE MODAL */}
+            <HowToTuneModal
+                open={tuneOpen}
+                onClose={onCloseTune}
+                dialogRef={tuneDialogRef}
+                onOpenParameter={onOpenParameter}
+            />
         </main>
     );
 }
@@ -1201,12 +1502,15 @@ export function ParameterSettingsView({
 export default function ParameterSettingsPage() {
     const controller = useParameterSettings(PARAMETER_SETTINGS_SCOPE.PAPER);
     const { data } = usePolling(fetchBotStatus, 5000);
-    const [advancedExpanded, setAdvancedExpanded] = useState(false);
     const [liveConfirmationOpen, setLiveConfirmationOpen] = useState(false);
     const [authorityExpanded, setAuthorityExpanded] = useState(false);
     const [guideKey, setGuideKey] = useState(null);
+    const [mapOpen, setMapOpen] = useState(false);
+    const [tuneOpen, setTuneOpen] = useState(false);
     const guideDialogRef = useRef(null);
     const guideReturnFocusRef = useRef(null);
+    const mapDialogRef = useRef(null);
+    const tuneDialogRef = useRef(null);
 
     const handleRequestLiveSave = () => setLiveConfirmationOpen(true);
     const handleCancelLive = () => setLiveConfirmationOpen(false);
@@ -1220,27 +1524,46 @@ export default function ParameterSettingsPage() {
         setGuideKey(name);
     };
     const handleCloseGuide = () => setGuideKey(null);
+    const handleOpenMap = () => setMapOpen(true);
+    const handleCloseMap = () => setMapOpen(false);
+    const handleOpenTune = () => setTuneOpen(true);
+    const handleCloseTune = () => setTuneOpen(false);
+    const handleOpenParameter = (name) => {
+        // From the Parameter Map / How-To-Tune panels: close them and open
+        // the corresponding Guide. Never writes configuration.
+        setMapOpen(false);
+        setTuneOpen(false);
+        setGuideKey(name);
+    };
 
-    // Escape close + focus handling for the Parameter Guide dialog. Opening or
-    // closing the guide never writes configuration.
+    const anyOverlayOpen = Boolean(guideKey) || mapOpen || tuneOpen;
+
+    // Escape close + focus handling for the Guide / Map / Tune dialogs.
+    // Opening or closing them never writes configuration.
     useEffect(() => {
-        if (!guideKey) return undefined;
+        if (!anyOverlayOpen) return undefined;
         const onKeyDown = (event) => {
             if (event.key === "Escape") {
                 event.stopPropagation();
                 setGuideKey(null);
+                setMapOpen(false);
+                setTuneOpen(false);
             }
         };
         document.addEventListener("keydown", onKeyDown);
         const focusTimer = window.setTimeout(() => {
-            guideDialogRef.current?.focus?.();
+            (
+                guideDialogRef.current
+                || mapDialogRef.current
+                || tuneDialogRef.current
+            )?.focus?.();
         }, 0);
         return () => {
             document.removeEventListener("keydown", onKeyDown);
             window.clearTimeout(focusTimer);
             guideReturnFocusRef.current?.focus?.();
         };
-    }, [guideKey]);
+    }, [anyOverlayOpen]);
 
     return (
         <ParameterSettingsView
@@ -1254,8 +1577,6 @@ export default function ParameterSettingsPage() {
             botStatus={data?.data}
             draft={controller.draft}
             onDraftChange={controller.changeDraft}
-            advancedExpanded={advancedExpanded}
-            onAdvancedToggle={() => setAdvancedExpanded((value) => !value)}
             loading={controller.loading}
             saveState={controller.saveState}
             conflict={controller.conflict}
@@ -1270,6 +1591,15 @@ export default function ParameterSettingsPage() {
             onOpenGuide={handleOpenGuide}
             onCloseGuide={handleCloseGuide}
             guideDialogRef={guideDialogRef}
+            mapOpen={mapOpen}
+            tuneOpen={tuneOpen}
+            onOpenMap={handleOpenMap}
+            onCloseMap={handleCloseMap}
+            onOpenTune={handleOpenTune}
+            onCloseTune={handleCloseTune}
+            onOpenParameter={handleOpenParameter}
+            mapDialogRef={mapDialogRef}
+            tuneDialogRef={tuneDialogRef}
         />
     );
 }
