@@ -763,6 +763,30 @@ const confirmManualTrade = (
     return clickAndRender(renderer, confirmButton);
 };
 
+const findTestId = (
+    root,
+    testId
+) => findAll(
+    root,
+    (element) => element.props?.["data-testid"] === testId,
+)[0] || null;
+
+// START / runtime now always requires confirmation (PAPER and LIVE). Clicking
+// the lifecycle control opens the modal and sends no request; CONFIRM sends it.
+const startBot = async (
+    renderer
+) => {
+    await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+
+    const confirmButton = findTestId(renderer.root, "start-confirm-execute");
+
+    if (!confirmButton) {
+        return undefined;
+    }
+
+    return clickAndRender(renderer, confirmButton);
+};
+
 
 test("Return to Normal is permanently rendered with the required state matrix", async () => {
     const cases = [
@@ -1029,7 +1053,9 @@ test("START BOT uses existing lifecycle authority and prevents duplicate request
     setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
-        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0, "no request before CONFIRM");
+        const first = clickAndRender(renderer, findTestId(renderer.root, "start-confirm-execute"));
         renderer.render();
         const pending = findButton(renderer.root, "STARTING...");
         assert.ok(pending);
@@ -1054,7 +1080,7 @@ test("START payload uses the single effective selectionMode source", async () =>
         const manualRenderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL" },
         }));
-        await clickAndRender(manualRenderer, findButton(manualRenderer.root, "START BOT"));
+        await startBot(manualRenderer);
         assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "MANUAL");
         assert.equal(JSON.parse(mock.requests[0].options.body).symbol, "XRPUSDTM");
 
@@ -1065,7 +1091,7 @@ test("START payload uses the single effective selectionMode source", async () =>
                 autoMarketState: "READY"  // 确保自动选择状态为READY
             },
         }));
-        await clickAndRender(autoRenderer, findButton(autoRenderer.root, "START BOT"));
+        await startBot(autoRenderer);
         assert.equal(JSON.parse(mock.requests[1].options.body).selection_mode, "AUTO");
         assert.equal(JSON.parse(mock.requests[1].options.body).symbol, "BTCUSDTM");
         assert.notEqual(JSON.parse(mock.requests[1].options.body).symbol, "XRPUSDTM");
@@ -1097,7 +1123,7 @@ test("polling rerender keeps AUTO display, runtime symbol, and START payload ali
         assert.equal(textIncludes(renderer.root, "YGGUSDT"), true);
         const start = findButton(renderer.root, "START BOT");
         assert.equal(start.props.disabled, false);
-        await clickAndRender(renderer, start);
+        await startBot(renderer);
 
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.selection_mode, "AUTO");
@@ -1133,7 +1159,7 @@ test("STOPPED AUTO restart shape resolves the START payload bootstrap symbol fro
                 positionSize: 0,
             },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
 
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.selection_mode, "AUTO");
@@ -1153,7 +1179,7 @@ test("START blocks over-limit leverage without clamping the payload", async () =
         const renderer = await renderBotControl(readyStartProps({
             config: { leverage: 10 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally { clearMmConfiguration(); mock.restore(); }
 });
@@ -1168,7 +1194,7 @@ test("unsaved MM draft maximum cannot authorize START", async () => {
         const renderer = await renderBotControl(readyStartProps({
             config: { leverage: 10 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         clearMmConfiguration();
@@ -1188,7 +1214,7 @@ test("START reconciles a valid changed MM draft risk before sending the payload"
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", risk_percent: 2.5 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 3);
         assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid draft is reconciled before START");
@@ -1211,7 +1237,7 @@ test("START reconciles a valid 0.50→0.75 MM draft risk before sending the payl
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.75);
         assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid draft is reconciled before START");
@@ -1233,7 +1259,7 @@ test("START payload risk_percent is 0.50 when saved MM risk is 0.50", async () =
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.5);
     } finally {
@@ -1250,7 +1276,7 @@ test("START payload risk_percent is 0.75 when saved MM risk is 0.75", async () =
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.75);
     } finally {
@@ -1268,7 +1294,7 @@ test("invalid MM draft fails closed: START sends no request", async () => {
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
         assert.equal(globalThis.__MM_SAVE_CALLS__ ?? 0, 0, "invalid draft is never persisted");
     } finally {
@@ -1291,7 +1317,7 @@ test("START payload risk_percent uses saved MM risk over legacy config risk_perc
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", risk_percent: 1 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.5);
     } finally {
@@ -1329,7 +1355,7 @@ test("START reconciles a valid changed MM max drawdown before sending the payloa
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", maxDd: 3 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.max_drawdown_pct, 10);
         assert.ok(globalThis.__MM_SAVE_CALLS__ >= 1, "valid drawdown draft is reconciled before START");
@@ -1354,7 +1380,7 @@ test("MM persistence failure fails closed: START sends no request", async () => 
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", maxDd: 10 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         mock.restore();
@@ -1374,7 +1400,7 @@ test("unchanged valid MM configuration needs no redundant persistence before STA
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.5);
         assert.equal(payload.max_drawdown_pct, 5);
@@ -1476,7 +1502,7 @@ test("START payload risk_percent, leverage, selection_mode contracts preserved a
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", maxDd: 3, leverage: 5 },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.risk_percent, 0.5);
         assert.equal(payload.max_drawdown_pct, 7);
@@ -1745,7 +1771,7 @@ test("PAPER runtime-only MM wait starts Bot without starting automation", async 
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.deepEqual(mock.requests.map((request) => request.url), ["/api/bot/start"]);
     } finally {
         mock.restore();
@@ -1770,6 +1796,7 @@ test("START BOT is disabled while a start request is pending", async () => {
     try {
         const renderer = await renderBotControl(readyStartProps());
         clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        clickAndRender(renderer, findTestId(renderer.root, "start-confirm-execute"));
         renderer.render();
         const pending = findButton(renderer.root, "STARTING...");
         assert.ok(pending);
@@ -1790,7 +1817,9 @@ test("START handler reaches START action when startReady is READY", async () => 
     setMmConfiguration();
     try {
         const renderer = await renderBotControl(readyStartProps());
-        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.equal(mock.requests.length, 0, "no request before CONFIRM");
+        const first = clickAndRender(renderer, findTestId(renderer.root, "start-confirm-execute"));
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests[0].url, "/api/bot/start");
         response.resolve(jsonResponse({ body: { status: "started" } }));
@@ -1812,7 +1841,7 @@ test("START handler is blocked when readiness is WAITING", async () => {
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         clearMmStatus();
@@ -1827,7 +1856,7 @@ test("START handler is blocked when MM is UNKNOWN", async () => {
     });
     try {
         const renderer = await renderBotControl(readyStartProps());
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         clearMmStatus();
@@ -1845,7 +1874,7 @@ test("START handler is blocked when Emergency blocks operations", async () => {
             emergencyLocked: true,
             emergencyState: "LOCKED",
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         mock.restore();
@@ -1889,7 +1918,7 @@ test("L1: Loop on Start OFF triggers no Loop activation after START success", as
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL" },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests[0].url, "/api/bot/start");
         assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 0);
@@ -1910,7 +1939,7 @@ test("L2: Loop on Start ON invokes the existing Loop authority exactly once afte
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests[0].url, "/api/bot/start");
         const loopRequests = mock.requests.filter((request) => request.url === "/api/bot/loop/start");
         assert.equal(loopRequests.length, 0);
@@ -1931,7 +1960,7 @@ test("L3: Loop on Start ON does not activate Loop when START fails", async () =>
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         renderer.render();
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 0);
@@ -1952,7 +1981,7 @@ test("L4: Loop on Start activation failure surfaces a truthful error without fak
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         renderer.render();
         assert.equal(textIncludes(renderer.root, "START failed"), true);
         assert.equal(mock.requests.filter((request) => request.url === "/api/bot/loop/start").length, 0);
@@ -1972,7 +2001,7 @@ test("AT1: Auto Trade on Start OFF triggers no Auto Trade activation after START
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL" },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 0);
     } finally {
         clearMmConfiguration();
@@ -1990,7 +2019,7 @@ test("AT2: Auto Trade on Start ON invokes the existing Governance authority exac
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         const autoTradeRequests = mock.requests.filter((request) => request.url === "/api/governance/execution");
         assert.equal(autoTradeRequests.length, 0);
         const payload = JSON.parse(mock.requests[0].options.body);
@@ -2012,7 +2041,7 @@ test("AT3: Auto Trade on Start ON does not activate when START fails", async () 
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", autoTradeOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 0);
     } finally {
         clearMmConfiguration();
@@ -2030,7 +2059,7 @@ test("AT4: Auto Trade on Start activation failure surfaces a truthful error with
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", autoTradeOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         renderer.render();
         assert.equal(textIncludes(renderer.root, "START failed"), true);
         assert.equal(mock.requests.filter((request) => request.url === "/api/governance/execution").length, 0);
@@ -2053,7 +2082,7 @@ test("AT5: Auto Trade on Start cannot bypass the MM readiness gate", async () =>
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", autoTradeOnStart: true },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 0);
     } finally {
         clearMmStatus();
@@ -2077,7 +2106,7 @@ test("Sequencing: START succeeds, then Loop, then Auto Trade in deterministic or
                 autoMarketState: "READY"  // 确保自动选择状态为READY
             },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 1);
         assert.equal(mock.requests[0].url, "/api/bot/start");
         assert.equal(JSON.parse(mock.requests[0].options.body).selection_mode, "AUTO");
@@ -2100,7 +2129,8 @@ test("START lifecycle stays single-flight while automation is applied", async ()
         const renderer = await renderBotControl(readyStartProps({
             config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
         }));
-        const first = clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const first = clickAndRender(renderer, findTestId(renderer.root, "start-confirm-execute"));
         renderer.render();
         const pending = findButton(renderer.root, "STARTING...");
         assert.ok(pending);
@@ -2231,7 +2261,7 @@ test("all trade/execution controls send distinct nondefault values through the s
                 autoTradeOnStart: true,
             },
         }));
-        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await startBot(renderer);
         assert.equal(mock.requests.length, 1);
         assert.deepEqual(JSON.parse(mock.requests[0].options.body), {
             symbol: "ETHUSDTM", selection_mode: "MANUAL", exchange: "kucoin",
@@ -2682,6 +2712,167 @@ test("Work D ORDER CONFIRM: a successful manual trade surfaces an accepted notic
         assert.equal(textIncludes(renderer.root, "ENTRY_LONG"), true);
     } finally {
         clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+// =========================
+// Work D: shared runtime lifecycle (authority-aware) + START confirmation
+// =========================
+
+test("Work D runtime control: BOT+STOPPED shows START BOT; MANUAL+STOPPED shows START RUNTIME", async () => {
+    const botRenderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT", botRunning: false }));
+    assert.ok(findButton(botRenderer.root, "START BOT"), "BOT + STOPPED shows START BOT");
+    assert.equal(findButton(botRenderer.root, "START RUNTIME"), null);
+
+    const manualRenderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: false }));
+    assert.ok(findButton(manualRenderer.root, "START RUNTIME"), "MANUAL + STOPPED shows START RUNTIME");
+    assert.equal(findButton(manualRenderer.root, "START BOT"), null, "MANUAL never presents START BOT");
+});
+
+test("Work D runtime control: BOT+RUNNING shows STOP BOT; MANUAL+RUNNING shows STOP RUNTIME", async () => {
+    const botRenderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT", botRunning: true }));
+    assert.ok(findButton(botRenderer.root, "STOP BOT"));
+
+    const manualRenderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: true }));
+    assert.ok(findButton(manualRenderer.root, "STOP RUNTIME"));
+    assert.equal(findButton(manualRenderer.root, "STOP BOT"), null);
+});
+
+test("Work D runtime control: MANUAL keeps the BOT trading panel locked", async () => {
+    const renderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: false }));
+    assert.equal(textIncludes(renderer.root, "BOT TRADING LOCKED"), true);
+    assert.equal(textIncludes(renderer.root, "BOT entry locked by MANUAL control authority."), true);
+});
+
+test("Work D runtime control: MANUAL START RUNTIME opens confirmation and sends nothing before CONFIRM", async () => {
+    const mock = installFetchMock(() => { throw new Error("No request expected before CONFIRM"); });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: false }));
+        await clickAndRender(renderer, findButton(renderer.root, "START RUNTIME"));
+        assert.ok(findTestId(renderer.root, "start-confirm"), "runtime confirmation modal opens");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-mode")), "PAPER");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-control")), "MANUAL");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-action")), "START RUNTIME");
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D runtime control: MANUAL START RUNTIME CANCEL sends no start", async () => {
+    const mock = installFetchMock(() => { throw new Error("No request expected"); });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: false }));
+        await clickAndRender(renderer, findButton(renderer.root, "START RUNTIME"));
+        await clickAndRender(renderer, findTestId(renderer.root, "start-confirm-cancel"));
+        assert.equal(findTestId(renderer.root, "start-confirm"), null, "modal closed");
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D runtime control: MANUAL CONFIRM sends one start with loop/auto forced off", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            controlAuthority: "MANUAL",
+            botRunning: false,
+            config: { selectionMode: "MANUAL", loopOnStart: true, autoTradeOnStart: true },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START RUNTIME"));
+        await clickAndRender(renderer, findTestId(renderer.root, "start-confirm-execute"));
+        assert.equal(mock.requests.length, 1, "exactly one start request");
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.mode, "paper");
+        assert.equal(payload.loop_on_start, false);
+        assert.equal(payload.auto_trade_on_start, false);
+        assert.equal(payload.controlAuthority, undefined, "authority is not part of the start payload");
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D runtime control: repeated CONFIRM sends exactly one start", async () => {
+    const gate = deferred();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") {
+            return gate.promise;
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "MANUAL", botRunning: false }));
+        await clickAndRender(renderer, findButton(renderer.root, "START RUNTIME"));
+        const confirm = findTestId(renderer.root, "start-confirm-execute");
+        assert.ok(confirm, "confirmation button present");
+        confirm.props.onClick();
+        confirm.props.onClick();
+        assert.equal(mock.requests.length, 1, "repeated CONFIRM issues exactly one start");
+        gate.resolve(jsonResponse({ body: { status: "started" } }));
+        await gate.promise;
+        await Promise.resolve();
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D START confirm: PAPER BOT requires confirmation and sends nothing before CONFIRM", async () => {
+    const mock = installFetchMock(() => { throw new Error("No request expected before CONFIRM"); });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT", botRunning: false }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        assert.ok(findTestId(renderer.root, "start-confirm"), "PAPER start confirmation modal opens");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-mode")), "PAPER");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-control")), "BOT");
+        assert.equal(normalizeText(findTestId(renderer.root, "start-confirm-action")), "START BOT");
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D START confirm: PAPER CANCEL sends no start", async () => {
+    const mock = installFetchMock(() => { throw new Error("No request expected"); });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT", botRunning: false }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await clickAndRender(renderer, findTestId(renderer.root, "start-confirm-cancel"));
+        assert.equal(mock.requests.length, 0);
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("Work D START confirm: PAPER CONFIRM sends exactly one start", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({ controlAuthority: "BOT", botRunning: false }));
+        await startBot(renderer);
+        assert.equal(mock.requests.length, 1);
+        assert.equal(mock.requests[0].url, "/api/bot/start");
+    } finally {
         clearMmConfiguration();
         mock.restore();
     }

@@ -1004,6 +1004,14 @@ return (
                                 value={controlAuthority}
                             />
                             {controlError && <p className="operation-prep-error" role="alert">{controlError}</p>}
+                            {/* Shared runtime lifecycle (infrastructure). Kept
+                                OUTSIDE the BOT/MANUAL entry panels so it is never
+                                presented as a BOT command while MANUAL holds entry
+                                authority. The backend gates BOT entry separately. */}
+                            <div className="operation-runtime-control" data-testid="runtime-control">
+                                <span className="operation-prep-label">RUNTIME CONTROL（実行基盤）</span>
+                                {children}
+                            </div>
                             <div
                                 className={
                                     "operation-authority-panel operation-authority-panel--bot"
@@ -1017,7 +1025,11 @@ return (
                                         {manualControlActive ? "LOCKED" : "ACTIVE"}
                                     </strong>
                                 </div>
-                                {children}
+                                <div className="operation-authority-panel__note" data-testid="bot-entry-note">
+                                    {manualControlActive
+                                        ? "BOT entry locked by MANUAL control authority."
+                                        : "BOT entry authority active."}
+                                </div>
                             </div>
                             <div
                                 className={

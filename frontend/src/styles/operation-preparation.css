@@ -476,6 +476,22 @@
     transition: opacity .15s ease;
 }
 
+.operation-runtime-control {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(120, 150, 200, .35);
+    border-radius: 4px;
+    background: #0e1526;
+    box-sizing: border-box;
+}
+
+.operation-authority-panel__note {
+    font-size: 10px;
+    letter-spacing: .02em;
+    color: #9badc6;
+}
+
 .operation-authority-panel--bot {
     border-color: rgba(63, 212, 139, .3);
 }

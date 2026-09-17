@@ -409,8 +409,8 @@ export default function BotControl({
         setEmergencyConfirmOpen,
     ] = useState(false);
     const [
-        liveConfirmOpen,
-        setLiveConfirmOpen,
+        startConfirmOpen,
+        setStartConfirmOpen,
     ] = useState(false);
     const [
         unlockPending,
@@ -814,16 +814,25 @@ export default function BotControl({
         && startMaxDrawdownPercent > 0
     );
     const isLiveMode = startSettings?.tradingMode === "LIVE";
+    const manualControlActive = String(controlAuthority || "BOT").trim().toUpperCase() === "MANUAL";
+    // Shared-runtime lifecycle terminology. controlAuthority gates automatic BOT
+    // ENTRY only; the common runtime is shared infrastructure. Under MANUAL the
+    // same lifecycle operation is presented as RUNTIME, never as a BOT command.
+    const runtimeActionLabel = manualControlActive ? "RUNTIME" : "BOT";
+    const runtimeStartLabel = `START ${runtimeActionLabel}`;
+    const runtimeStopLabel = `STOP ${runtimeActionLabel}`;
     // Problem 1/9: an invalid MM draft must never become authoritative and
     // must not be silently ignored. START fails closed while the draft cannot
     // be safely reconciled/persisted.
     const startConfigSafe = startReady === true && mmDraftInvalid !== true;
     const paperStartAllowed = !botRunning && !botPending && !isLiveMode && startConfigSafe;
-    const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !liveConfirmOpen;
-    const liveConfirmAllowed = (
+    const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !startConfirmOpen;
+    // START / runtime confirmation gate. Applies to both PAPER and LIVE; the
+    // modal may open when the trigger is allowed, and CONFIRM requires the full
+    // fail-closed readiness set.
+    const startConfirmAllowed = (
         !botRunning
         && !botPending
-        && isLiveMode
         && startConfigSafe
         && startRiskAvailable
         && startMaxDrawdownAvailable
@@ -851,20 +860,14 @@ export default function BotControl({
     ].filter((reason, index, reasons) => reasons.indexOf(reason) === index);
 
     useEffect(() => {
-        if (!liveConfirmOpen) {
-            return;
-        }
-
-        if (startSettings?.tradingMode !== "LIVE") {
-            setLiveConfirmOpen(false);
+        if (!startConfirmOpen) {
             return;
         }
 
         if (botRunning) {
-            setLiveConfirmOpen(false);
-            return;
+            setStartConfirmOpen(false);
         }
-    }, [startSettings?.tradingMode, botRunning, liveConfirmOpen, setLiveConfirmOpen]);
+    }, [botRunning, startConfirmOpen, setStartConfirmOpen]);
 
     const refreshStatusSafely = async () => {
         if (typeof onStatusRefresh !== "function") {
@@ -884,11 +887,6 @@ export default function BotControl({
             await executeBotStop();
             return;
         }
-        if (isLiveMode) {
-            openLiveConfirm();
-            return;
-        }
-        if (!paperStartAllowed) return;
         if (!startRiskAvailable) {
             setBotError("START failed: authoritative Money Management risk-per-trade is unavailable.");
             return;
@@ -897,7 +895,12 @@ export default function BotControl({
             setBotError("START failed: authoritative Money Management maximum drawdown is unavailable.");
             return;
         }
-        await executeBotStart();
+        if (isLiveMode) {
+            openStartConfirm();
+            return;
+        }
+        if (!paperStartAllowed) return;
+        openStartConfirm();
     };
 
     const executeBotStop = async () => {
@@ -994,8 +997,10 @@ export default function BotControl({
                     trailing_stop: config?.trailing === true,
                     dry_run: startSettings.tradingMode === "PAPER",
                     mode: startSettings.tradingMode.toLowerCase(),
-                    loop_on_start: isLiveMode ? false : startSettings.loopOnStart,
-                    auto_trade_on_start: isLiveMode ? false : startSettings.autoTradeOnStart,
+                    // LIVE is DISARMED by design. MANUAL holds entry authority,
+                    // so a shared-runtime start must never arm BOT automation.
+                    loop_on_start: (isLiveMode || manualControlActive) ? false : startSettings.loopOnStart,
+                    auto_trade_on_start: (isLiveMode || manualControlActive) ? false : startSettings.autoTradeOnStart,
                 }),
             });
             const result = await response.json().catch(() => null);
@@ -1506,32 +1511,39 @@ export default function BotControl({
         setEmergencyConfirmOpen(false);
     };
 
-    const openLiveConfirm = () => {
-        if (botPendingRef.current || botRunning || !isLiveMode || liveConfirmOpen) {
+    const openStartConfirm = () => {
+        if (botPendingRef.current || botRunning || startConfirmOpen) {
             return;
         }
 
-        setLiveConfirmOpen(true);
+        if (isLiveMode && !liveStartTriggerAllowed) {
+            return;
+        }
+        if (!isLiveMode && !paperStartAllowed) {
+            return;
+        }
+
+        setStartConfirmOpen(true);
     };
 
-    const cancelLiveConfirm = () => {
+    const cancelStartConfirm = () => {
         if (botPendingRef.current) {
             return;
         }
 
-        setLiveConfirmOpen(false);
+        setStartConfirmOpen(false);
     };
 
-    const confirmLiveStart = async () => {
+    const confirmStart = async () => {
         if (botPendingRef.current) {
             return;
         }
 
-        if (!liveConfirmAllowed) {
+        if (!startConfirmAllowed) {
             return;
         }
 
-        setLiveConfirmOpen(false);
+        setStartConfirmOpen(false);
         await executeBotStart();
     };
 
@@ -1706,7 +1718,7 @@ export default function BotControl({
             >
                 <div className="operation-prep-existing-start" data-testid="ready-start-step">
                     <button className={botRunning ? "operation-bot-action operation-bot-action--stop" : "operation-bot-action"} disabled={botRunning ? botPending : isLiveMode ? !liveStartTriggerAllowed : !paperStartAllowed} onClick={handleBotLifecycle} type="button">
-                        {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? "STOP BOT" : "START BOT")}
+                        {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? runtimeStopLabel : runtimeStartLabel)}
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
                     {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
@@ -1715,23 +1727,24 @@ export default function BotControl({
                 </div>
             </OperationPreparation>
 
-            {/* LIVE START Confirmation Modal */}
-            {liveConfirmOpen && (
+            {/* START / RUNTIME Confirmation Modal (PAPER and LIVE) */}
+            {startConfirmOpen && (
                 <div
                     className="operation-live-confirm"
+                    data-testid="start-confirm"
                     role="dialog"
                     aria-modal="true"
-                    aria-label="Confirm LIVE start"
+                    aria-label="Confirm runtime start"
                     onClick={(e) => {
                         // Close on backdrop click
                         if (e.target === e.currentTarget) {
-                            cancelLiveConfirm();
+                            cancelStartConfirm();
                         }
                     }}
                     onKeyDown={(e) => {
                         // ESC to cancel
                         if (e.key === "Escape") {
-                            cancelLiveConfirm();
+                            cancelStartConfirm();
                         }
                         if (e.key === "Tab") {
                             const buttons = [...e.currentTarget.querySelectorAll("button:not(:disabled)")];
@@ -1754,59 +1767,80 @@ export default function BotControl({
                 >
                     <div className="operation-live-confirm__content">
                         <div className="operation-live-confirm__title">
-                            LIVE取引を開始します
+                            {isLiveMode ? "LIVE取引を開始します" : "ランタイムを開始します"}
                         </div>
 
                         <div className="operation-live-confirm__body">
-                            <p>
-                                LIVE runtimeを監視専用のDISARMED状態で開始します。
-                                注文権限のARM、Runtime Loop、Auto Tradeは開始後に個別の操作が必要です。
-                                この確認だけでは注文権限は有効にならず、注文も行われません。
-                            </p>
+                            {isLiveMode ? (
+                                <p>
+                                    LIVE runtimeを監視専用のDISARMED状態で開始します。
+                                    注文権限のARM、Runtime Loop、Auto Tradeは開始後に個別の操作が必要です。
+                                    この確認だけでは注文権限は有効にならず、注文も行われません。
+                                </p>
+                            ) : (
+                                <p>
+                                    共通のPAPER runtime（監視・手動取引の実行基盤）を開始します。
+                                    Loop / Auto Trade は開始されません。この確認だけでは注文は行われません。
+                                </p>
+                            )}
 
                             <div className="operation-live-confirm__details">
                                 <div className="operation-live-confirm__detail-row">
-                                    <span>START READINESS:</span>
-                                    <strong>{startReadiness.startReadiness}</strong>
+                                    <span>MODE:</span>
+                                    <strong data-testid="start-confirm-mode">{startSettings?.tradingMode}</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
-                                    <span>Mode:</span>
-                                    <strong>{startSettings?.tradingMode}</strong>
+                                    <span>CONTROL:</span>
+                                    <strong data-testid="start-confirm-control">{manualControlActive ? "MANUAL" : "BOT"}</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
-                                    <span>Market Selection:</span>
-                                    <strong>{selectionModeDisplayLabel(startSettings?.selectionMode)}</strong>
+                                    <span>ACTION:</span>
+                                    <strong data-testid="start-confirm-action">{runtimeStartLabel}</strong>
                                 </div>
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Symbol:</span>
                                     <strong>{effectiveStartSymbol}</strong>
                                 </div>
-                                <div className="operation-live-confirm__detail-row">
-                                    <span>Risk / Trade:</span>
-                                    <strong>{startRiskPercent}%</strong>
-                                </div>
-                                <div className="operation-live-confirm__detail-row">
-                                    <span>Leverage:</span>
-                                    <strong>{startSettings?.requestedLeverage}x</strong>
-                                </div>
-                                <div className="operation-live-confirm__detail-row">
-                                    <span>Execution Authority:</span>
-                                    <strong>DISARMED</strong>
-                                </div>
-                                <div className="operation-live-confirm__detail-row">
-                                    <span>Real Order Authority:</span>
-                                    <strong className="operation-live-confirm__danger">
-                                        DISARMED
-                                    </strong>
-                                </div>
+                                {isLiveMode && (
+                                    <>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>START READINESS:</span>
+                                            <strong>{startReadiness.startReadiness}</strong>
+                                        </div>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>Market Selection:</span>
+                                            <strong>{selectionModeDisplayLabel(startSettings?.selectionMode)}</strong>
+                                        </div>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>Risk / Trade:</span>
+                                            <strong>{startRiskPercent}%</strong>
+                                        </div>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>Leverage:</span>
+                                            <strong>{startSettings?.requestedLeverage}x</strong>
+                                        </div>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>Execution Authority:</span>
+                                            <strong>DISARMED</strong>
+                                        </div>
+                                        <div className="operation-live-confirm__detail-row">
+                                            <span>Real Order Authority:</span>
+                                            <strong className="operation-live-confirm__danger">
+                                                DISARMED
+                                            </strong>
+                                        </div>
+                                    </>
+                                )}
                                 <div className="operation-live-confirm__detail-row">
                                     <span>Loop / Auto Trade:</span>
                                     <strong>OFF / OFF</strong>
                                 </div>
                             </div>
-                            {!liveConfirmAllowed && (
-                                <div className="operation-live-confirm__blocked" id="live-confirm-block-reasons">
-                                    <strong>現在はLIVEを開始できません。</strong>
+                            {!startConfirmAllowed && (
+                                <div className="operation-live-confirm__blocked" id="start-confirm-block-reasons">
+                                    <strong>
+                                        {isLiveMode ? "現在はLIVEを開始できません。" : "現在はランタイムを開始できません。"}
+                                    </strong>
                                     <span>設定またはRuntime Authorityを確認してください。</span>
                                     <ul>
                                         {liveBlockReasons.map((reason) => <li key={reason}>{reason}</li>)}
@@ -1818,7 +1852,8 @@ export default function BotControl({
                         <div className="operation-live-confirm__actions">
                             <button
                                 className="operation-live-confirm__cancel"
-                                onClick={cancelLiveConfirm}
+                                data-testid="start-confirm-cancel"
+                                onClick={cancelStartConfirm}
                                 type="button"
                                 autoFocus
                             >
@@ -1827,12 +1862,13 @@ export default function BotControl({
 
                             <button
                                 className="operation-live-confirm__confirm"
-                                aria-describedby={!liveConfirmAllowed ? "live-confirm-block-reasons" : undefined}
-                                onClick={confirmLiveStart}
-                                disabled={!liveConfirmAllowed}
+                                data-testid="start-confirm-execute"
+                                aria-describedby={!startConfirmAllowed ? "start-confirm-block-reasons" : undefined}
+                                onClick={confirmStart}
+                                disabled={!startConfirmAllowed}
                                 type="button"
                             >
-                                {botPending ? "STARTING..." : "LIVEを開始"}
+                                {botPending ? "STARTING..." : (isLiveMode ? "LIVEを開始" : "START")}
                             </button>
                         </div>
                     </div>

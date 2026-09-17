@@ -2350,3 +2350,55 @@ test("Work D ORDER CONFIRM: manual controls and popup confirm are disabled while
     );
 });
 
+// =========================
+// WORK D: shared runtime lifecycle control (neutral, outside BOT authority)
+// =========================
+
+test("Work D runtime control: lifecycle control renders in a neutral runtime block outside the locked BOT panel", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        children: { type: "button", props: { children: "START RUNTIME" } },
+    }));
+    const runtime = findTestId(renderer.root, "runtime-control");
+    assert.ok(runtime, "neutral runtime control block present");
+    assert.equal(
+        descendants(runtime).some((node) => node.type === "button" && normalizedText(node) === "START RUNTIME"),
+        true,
+        "lifecycle control lives in the runtime block",
+    );
+    const botPanel = findTestId(renderer.root, "bot-trading-panel");
+    assert.ok(String(botPanel.props.className).includes("is-locked"), "BOT panel locked under MANUAL");
+    assert.equal(
+        descendants(botPanel).some((node) => node.type === "button"),
+        false,
+        "locked BOT panel contains no actionable lifecycle button",
+    );
+    assert.equal(normalizedText(findTestId(renderer.root, "bot-trading-state")), "LOCKED");
+    assert.equal(
+        normalizedText(findTestId(renderer.root, "bot-entry-note")).includes("BOT entry locked by MANUAL control authority."),
+        true,
+    );
+});
+
+test("Work D runtime control: BOT authority keeps the runtime block and active BOT panel", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        children: { type: "button", props: { children: "START BOT" } },
+    }));
+    const runtime = findTestId(renderer.root, "runtime-control");
+    assert.ok(runtime, "runtime control block present");
+    assert.equal(
+        descendants(runtime).some((node) => node.type === "button" && normalizedText(node) === "START BOT"),
+        true,
+    );
+    const botPanel = findTestId(renderer.root, "bot-trading-panel");
+    assert.ok(String(botPanel.props.className).includes("is-active"), "BOT panel active under BOT");
+    assert.equal(normalizedText(findTestId(renderer.root, "bot-trading-state")), "ACTIVE");
+    assert.equal(
+        normalizedText(findTestId(renderer.root, "bot-entry-note")).includes("BOT entry authority active."),
+        true,
+    );
+});
+
