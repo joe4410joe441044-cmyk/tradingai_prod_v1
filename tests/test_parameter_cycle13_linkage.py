@@ -66,9 +66,10 @@ def test_history_record_preserves_entry_revision_after_effective_changes():
     strategy_snapshot = strategy_decision_snapshot(
         _strategy_state(ENTRY_AUTHORITY)
     )
+    # Production shape: ExecutionRuntime nests the snapshot under decisionInput.
     store.record(make_event(
         trace_id=trace_id, mode="PAPER", stage="STRATEGY", status="BUY",
-        metadata=strategy_snapshot,
+        metadata={"decision": "BUY", "decisionInput": strategy_snapshot},
     ))
 
     # Later the operator promotes a new effective revision (R8); the completed
@@ -105,11 +106,34 @@ def test_entry_parameter_metadata_reads_strategy_event():
     trace_id = "trading-e2e-cycle13-legacy"
     store.record(make_event(
         trace_id=trace_id, mode="PAPER", stage="STRATEGY", status="HOLD",
-        metadata=strategy_decision_snapshot(_strategy_state(ENTRY_AUTHORITY)),
+        metadata={
+            "decision": "HOLD",
+            "decisionInput": strategy_decision_snapshot(
+                _strategy_state(ENTRY_AUTHORITY)
+            ),
+        },
     ))
     store.record(make_event(
         trace_id=trace_id, mode="PAPER", stage="HISTORY", status="RECORDED",
         metadata={"tradeId": "trade-legacy"},
+    ))
+    linkage = entry_parameter_metadata(store.events(trace_id))
+    assert linkage["parameterRevision"] == 7
+    assert linkage["parameterScope"] == "PAPER"
+
+
+def test_entry_parameter_metadata_accepts_legacy_top_level_shape():
+    """Backward compatibility: the pre-E-PERF-2 top-level metadata shape.
+
+    Production shape (``metadata.decisionInput.parameterAuthority``) is primary
+    and takes precedence when both shapes are present.
+    """
+
+    store = TradingTraceStore()
+    trace_id = "trading-e2e-cycle13-legacy-top-level"
+    store.record(make_event(
+        trace_id=trace_id, mode="PAPER", stage="STRATEGY", status="HOLD",
+        metadata=strategy_decision_snapshot(_strategy_state(ENTRY_AUTHORITY)),
     ))
     linkage = entry_parameter_metadata(store.events(trace_id))
     assert linkage["parameterRevision"] == 7

@@ -116,19 +116,42 @@ def parameter_authority_metadata(parameter_authority: Any) -> dict[str, Any]:
     return metadata
 
 
+def _strategy_event_parameter_authority(metadata: Mapping[str, Any]):
+    """Return the entry parameter authority from a STRATEGY event metadata.
+
+    Production shape (authoritative): ``metadata["decisionInput"]`` is the
+    :func:`strategy_decision_snapshot` payload, which carries
+    ``parameterAuthority``.  A legacy/top-level ``metadata["parameterAuthority"]``
+    is still accepted as a backward-compatible fallback.  Production shape takes
+    precedence when both are present.
+    """
+
+    decision_input = metadata.get("decisionInput")
+    if isinstance(decision_input, Mapping):
+        authority = decision_input.get("parameterAuthority")
+        if isinstance(authority, Mapping) and authority:
+            return authority
+    authority = metadata.get("parameterAuthority")
+    if isinstance(authority, Mapping) and authority:
+        return authority
+    return None
+
+
 def entry_parameter_metadata(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Return the ENTRY parameter linkage from a trace's STRATEGY event.
 
     Cycle 13 must record the revision the trade actually entered with.  The
     STRATEGY event is captured at the decision/entry boundary, so it is the
-    authoritative entry source even after the effective revision changes.
+    authoritative entry source even after the effective revision changes.  The
+    production event stores the snapshot under ``metadata.decisionInput``;
+    reading it from there is required for the linkage to attach at all.
     """
 
     for event in events:
         if str(event.get("stage") or "").upper() != "STRATEGY":
             continue
         metadata = event.get("metadata") or {}
-        authority = metadata.get("parameterAuthority")
+        authority = _strategy_event_parameter_authority(metadata)
         linkage = parameter_authority_metadata(authority)
         if linkage:
             return linkage
