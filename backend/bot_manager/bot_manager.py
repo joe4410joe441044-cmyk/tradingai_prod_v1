@@ -2336,6 +2336,25 @@ class BotManager:
 
         mode = str(self.config.get("mode", "")).strip().lower()
         if mode not in ("paper", "live"):
+            # ``self.config`` is populated only at start(), so after a backend
+            # restart it is empty while the manager is in a legitimate STOPPED
+            # bootstrap. Resolve the mode from the SAME canonical
+            # stopped-runtime authority used elsewhere instead of treating a
+            # valid STOPPED state as unknown. The canonical resolver fails
+            # closed (returns no mode) on genuinely unknown or conflicting
+            # authorities, which stays denied below.
+            if (
+                self.engine is None
+                and self.lifecycle_state == "STOPPED"
+            ):
+                resolution = self._stopped_paper_mode_resolution()
+                resolved_mode = str(
+                    resolution.get("mode") or ""
+                ).strip().lower()
+                if resolved_mode in ("paper", "live"):
+                    mode = resolved_mode
+
+        if mode not in ("paper", "live"):
             reasons.append("RUNTIME_MODE_UNKNOWN")
 
         if self.lifecycle_state not in (

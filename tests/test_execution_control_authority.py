@@ -38,12 +38,14 @@ def _reset_governance():
     governance_state["execution_enabled"] = False
     governance_state["emergency_stop"] = False
     governance_state["emergency_state"] = EMERGENCY_READY
+    governance_state["mode"] = "PAPER"
     yield
     governance_state["control_authority"] = CONTROL_AUTHORITY_BOT
     governance_state["control_revision"] = 0
     governance_state["execution_enabled"] = False
     governance_state["emergency_stop"] = False
     governance_state["emergency_state"] = EMERGENCY_READY
+    governance_state["mode"] = "PAPER"
 
 
 def _flat_pending():
@@ -232,12 +234,127 @@ def test_entry_admission_in_progress_denies_switch():
     assert manager.control_revision == 0
 
 
+# =========================
+# SWITCH GUARD: POST-RESTART MODE AUTHORITY
+# =========================
+# After a backend restart self.config is empty (it is populated only at
+# start()) while the manager is in a legitimate STOPPED bootstrap. The guard
+# must resolve the canonical stopped-runtime mode rather than reporting
+# RUNTIME_MODE_UNKNOWN, but it must stay fail-closed for genuinely unknown or
+# conflicting mode authorities.
+
+def test_empty_runtime_config_with_canonical_paper_allows_switch():
+    manager = _manager()
+    manager.config = {}
+    governance_state["mode"] = "PAPER"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is True
+    assert result["changed"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert result["controlRevision"] == 1
+
+
+def test_empty_runtime_config_with_canonical_live_allows_switch():
+    manager = _manager()
+    manager.config = {}
+    governance_state["mode"] = "LIVE"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert result["controlRevision"] == 1
+
+
 def test_unknown_runtime_mode_denies_switch():
     manager = _manager()
     manager.config = {}
+    governance_state["mode"] = "UNRESOLVED"
     result = manager.set_execution_control("MANUAL")
     assert result["success"] is False
     assert result["reason"] == "RUNTIME_MODE_UNKNOWN"
+    assert manager.control_revision == 0
+
+
+def test_missing_canonical_mode_denies_switch():
+    manager = _manager()
+    manager.config = {}
+    governance_state["mode"] = None
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "RUNTIME_MODE_UNKNOWN"
+    assert manager.control_revision == 0
+
+
+def test_post_restart_bootstrap_allows_bot_to_manual_switch():
+    """Exact Production bootstrap: fresh manager after a backend restart."""
+
+    manager = BotManager()
+    manager.engine = None
+    manager.config = {}
+    manager.lifecycle_state = "STOPPED"
+    manager.loop_state = "STOPPED"
+    manager._running = False
+    manager.pending_order = False
+    manager.state.position_state = "FLAT"
+    manager._active_symbol = None
+    manager.get_authoritative_pending_order_state = Mock(
+        return_value=_flat_pending()
+    )
+    manager.control_authority = CONTROL_AUTHORITY_BOT
+    manager.control_revision = 0
+    governance_state["control_authority"] = CONTROL_AUTHORITY_BOT
+    governance_state["control_revision"] = 0
+    governance_state["mode"] = "PAPER"
+
+    result = manager.set_execution_control(
+        "MANUAL", expected_revision=0
+    )
+
+    assert result["success"] is True
+    assert result["changed"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert result["controlRevision"] == 1
+
+    # The authority switch must never mutate the runtime bootstrap.
+    assert manager.lifecycle_state == "STOPPED"
+    assert manager.loop_state == "STOPPED"
+    assert manager._running is False
+    assert manager.engine is None
+    assert manager.activeSymbol is None
+    assert manager.pending_order is False
+    assert manager.state.actual_position is None
+    assert manager.state.position_state == "FLAT"
+    assert governance_state["execution_enabled"] is False
+
+
+def test_post_restart_stale_expected_revision_denied():
+    manager = _manager()
+    manager.config = {}
+    governance_state["mode"] = "PAPER"
+    assert manager.set_execution_control(
+        "MANUAL", expected_revision=0
+    )["success"] is True
+    stale = manager.set_execution_control("BOT", expected_revision=0)
+    assert stale["success"] is False
+    assert stale["reason"] == "DENY_STALE_CONTROL_REVISION"
+    assert manager.control_revision == 1
+
+
+def test_canonical_live_mode_resolves_live_not_paper():
+    manager = _manager()
+    manager.config = {}
+    governance_state["mode"] = "LIVE"
+    resolution = manager._stopped_paper_mode_resolution()
+    assert resolution["mode"] == "live"
+    assert resolution["source"] == "governance_state.mode"
+
+
+def test_conflicting_canonical_modes_fail_closed():
+    manager = _manager()
+    manager.config = {"mode": "live", "dry_run": False}
+    governance_state["mode"] = "PAPER"
+    resolution = manager._stopped_paper_mode_resolution()
+    assert resolution["mode"] is None
+    assert resolution["reason"] == "MODE_CONFLICT"
 
 
 # =========================
