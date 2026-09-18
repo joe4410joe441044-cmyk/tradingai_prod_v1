@@ -63,6 +63,28 @@ export const getParameterSettingsStatus = () => (
     requestJson(API.parameterSettingsStatus())
 );
 
+/* Read-only Parameter Performance history (E-PERF-3).  These helpers never
+   issue a write and never influence configuration authority. */
+
+export const getParameterSettingsPerformance = (scope) => (
+    scope
+        ? requestJson(scopedUrl(API.parameterSettingsPerformance(), scope))
+        : requestJson(API.parameterSettingsPerformance())
+);
+
+export const getParameterSettingsPerformanceCompare = (
+    scope,
+    revisionA,
+    revisionB,
+) => (
+    requestJson(
+        `${API.parameterSettingsPerformanceCompare()}`
+        + `?scope=${encodeURIComponent(String(scope ?? ""))}`
+        + `&revisionA=${encodeURIComponent(String(revisionA ?? ""))}`
+        + `&revisionB=${encodeURIComponent(String(revisionB ?? ""))}`,
+    )
+);
+
 export const updateParameterSettingsConfiguration = async (payload) => {
     try {
         const response = await authenticatedControlRequest(
