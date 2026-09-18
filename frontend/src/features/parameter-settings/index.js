@@ -1,6 +1,8 @@
 export {
     getParameterSettingsConfiguration,
     getParameterSettingsEffective,
+    getParameterSettingsPerformance,
+    getParameterSettingsPerformanceCompare,
     getParameterSettingsRuntime,
     getParameterSettingsSchema,
     getParameterSettingsStatus,
@@ -74,3 +76,22 @@ export {
 } from "./parameterPresentation.js";
 
 export { useParameterSettings } from "./useParameterSettings.js";
+export { useParameterPerformance } from "./useParameterPerformance.js";
+
+export {
+    PERFORMANCE_METRIC_DEFINITIONS,
+    PERFORMANCE_SEMANTICS_NOTE,
+    buildExitReasonRows,
+    buildMetricsView,
+    buildParameterDiffRows,
+    buildPerformanceViewModel,
+    buildRevisionHistoryRows,
+    buildRevisionOptions,
+    buildRevisionValueRows,
+    buildTradeRows,
+    displayPerformanceValue,
+    formatCount,
+    formatHoldingDuration,
+    formatPnl,
+    formatWinRate,
+} from "./parameterPerformanceModel.js";

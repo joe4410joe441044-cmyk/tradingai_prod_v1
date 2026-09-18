@@ -89,11 +89,20 @@ const loadPage = async () => {
         "parameter-settings",
         "parameterPresentation.js",
     );
+    const performanceFile = join(
+        directory,
+        "..",
+        "features",
+        "parameter-settings",
+        "parameterPerformanceModel.js",
+    );
     const featureStub = moduleUrl(
         `export * from "${pathToFileURL(modelFile).href}";`
         + `export * from "${pathToFileURL(guideFile).href}";`
         + `export * from "${pathToFileURL(presentationFile).href}";`
-        + "export const useParameterSettings=()=>({});",
+        + `export * from "${pathToFileURL(performanceFile).href}";`
+        + "export const useParameterSettings=()=>({});"
+        + "export const useParameterPerformance=()=>({});",
     );
     const pollingStub = moduleUrl(
         "export default ()=>({data:null,loading:false,error:false});",
@@ -949,4 +958,173 @@ test("guide typography is substantially enlarged in the stylesheet", async () =>
     // Bilingual text styling exists.
     assert.match(css, /\.ps-page \.ps-guide-lang\s*\{/);
     assert.match(css, /\.ps-page \.ps-guide-text--ja\s*\{/);
+});
+
+/* =================================================
+   E-PERF-3 Parameter Performance（パラメーター実績）
+================================================= */
+
+const performancePayload = {
+    available: true,
+    scope: "PAPER",
+    revisionCount: 2,
+    recordCount: 2,
+    revisions: [
+        {
+            scope: "PAPER",
+            effectiveRevision: 2,
+            parameterSetId: "strategy-params/PAPER",
+            featureContract: "TIME_SYMBOL_NORMALIZED_V1",
+            capturedAt: "2026-09-18T00:00:00Z",
+            parameterValues: {
+                minimumCompositeScore: 0.42,
+                absorptionVolumePercentile: 0.9,
+            },
+            valueSource: "REVISION_ARCHIVE",
+            observedTradeCount: 2,
+            metrics: {
+                tradeCount: 2,
+                winCount: 1,
+                lossCount: 1,
+                breakevenCount: 0,
+                winRate: 0.5,
+                realizedPnl: 4.0,
+                averagePnl: 2.0,
+                medianPnl: 2.0,
+                averageHoldingMs: 2000,
+                realizedPnlAuthoritative: true,
+                exitReasons: [{ reason: "TP", count: 1 }],
+            },
+        },
+        {
+            scope: "PAPER",
+            effectiveRevision: 3,
+            parameterSetId: "strategy-params/PAPER",
+            featureContract: "TIME_SYMBOL_NORMALIZED_V1",
+            capturedAt: "2026-09-18T01:00:00Z",
+            parameterValues: { minimumCompositeScore: 0.55 },
+            valueSource: "REVISION_ARCHIVE",
+            observedTradeCount: 0,
+            metrics: { tradeCount: 0, winRate: null, realizedPnl: null },
+        },
+    ],
+    records: [
+        { recordId: "r1", tradeId: "t1", positionId: "p1", scope: "PAPER", effectiveRevision: 2, symbol: "MOVEUSDT", side: "BUY", mode: "paper", entryPrice: 0.1, exitPrice: 0.11, holdingMs: 1000, realizedPnl: 5.0, realizedPnlAuthoritative: true, exitReason: "TP" },
+    ],
+    metrics: {
+        tradeCount: 1,
+        winCount: 1,
+        lossCount: 0,
+        breakevenCount: 0,
+        winRate: 1.0,
+        realizedPnl: 5.0,
+        averagePnl: 5.0,
+        medianPnl: 5.0,
+        averageHoldingMs: 1000,
+        realizedPnlAuthoritative: true,
+        exitReasons: [{ reason: "TP", count: 1 }],
+    },
+    semantics: { entrySnapshotParameters: ["minimumHoldMs"], dynamicAuthorityParameters: ["minimumCompositeScore"], note: "note" },
+};
+
+const comparisonPayload = {
+    available: true,
+    scope: "PAPER",
+    revisionA: { effectiveRevision: 2 },
+    revisionB: { effectiveRevision: 3 },
+    parameterDiff: [
+        { name: "minimumCompositeScore", labelEn: "Composite Entry Score", labelJa: "総合エントリースコア", unit: "normalized score (0.0-1.0)", a: 0.42, b: 0.55, delta: 0.13, changed: true },
+        { name: "absorptionVolumePercentile", labelEn: "Absorption Volume Percentile", labelJa: "吸収出来高パーセンタイル", unit: "normalized percentile (0.0-1.0)", a: 0.9, b: 0.9, delta: 0, changed: false },
+    ],
+    changedCount: 1,
+};
+
+test("parameter performance renders revisions, metrics, comparison and trades", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        performance: performancePayload,
+        performanceComparison: comparisonPayload,
+        revisionA: 2,
+        revisionB: 3,
+    });
+    const text = textOf(tree);
+
+    assert.match(text, /PARAMETER PERFORMANCE（パラメーター実績）/);
+    assert.match(text, /REVISION HISTORY（リビジョン履歴）/);
+    assert.match(text, /COMPARE REVISIONS（リビジョン比較）/);
+    assert.match(text, /OBSERVED TRADES（観測取引）/);
+    assert.match(text, /OBSERVED UNDER THIS PARAMETER SET/);
+    assert.match(text, /このパラメーター構成下で観測/);
+    assert.match(text, /Trade count/);
+    assert.match(text, /Changed parameters（変更パラメーター）:\s+1/);
+    assert.match(text, /\+0.13/);
+
+    assert.ok(findByTestId(tree, "performance-revision-PAPER-2"));
+    assert.ok(findByTestId(tree, "performance-revision-PAPER-3"));
+    assert.ok(findByTestId(tree, "performance-trade-r1"));
+    assert.ok(findByTestId(tree, "comparison-result"));
+    assert.ok(findByTestId(tree, "performance-diff-minimumCompositeScore"));
+
+    assert.doesNotMatch(
+        text,
+        /Best Revision|Optimal Revision|Winning Revision|Recommended Revision/,
+    );
+});
+
+test("parameter performance empty state is truthful", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        performance: {
+            available: false,
+            scope: "PAPER",
+            revisions: [],
+            records: [],
+            metrics: {},
+        },
+    });
+    assert.ok(findByTestId(tree, "performance-empty"));
+    assert.match(
+        textOf(tree),
+        /NO PERFORMANCE RECORDS YET（実績記録はまだありません）/,
+    );
+});
+
+test("parameter performance read error does not break the editor", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        performance: null,
+        performanceError: { status: 503 },
+    });
+    assert.ok(findByTestId(tree, "performance-error"));
+    // The editable parameter surface and save action remain intact.
+    assert.ok(findByTestId(tree, "parameter-row-minimumCompositeScore"));
+    assert.ok(findByTestId(tree, "save-button"));
+    assert.equal(findByTestId(tree, "performance-metrics"), null);
+});
+
+test("parameter performance section introduces no causal or best wording", async () => {
+    const source = await readFile(
+        new URL("./ParameterSettingsPage.jsx", import.meta.url),
+        "utf8",
+    );
+    assert.doesNotMatch(
+        source,
+        /Best Revision|Optimal Revision|Winning Revision|Recommended Revision|This parameter improved/,
+    );
+    assert.match(source, /OBSERVED UNDER THIS PARAMETER SET/);
 });

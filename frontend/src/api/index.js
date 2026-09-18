@@ -156,6 +156,12 @@ export const API = {
   parameterSettingsStatus: () =>
     join("/parameter-settings/status"),
 
+  parameterSettingsPerformance: () =>
+    join("/parameter-settings/performance"),
+
+  parameterSettingsPerformanceCompare: () =>
+    join("/parameter-settings/performance/compare"),
+
   // ==========================
   // PNL
   // ==========================

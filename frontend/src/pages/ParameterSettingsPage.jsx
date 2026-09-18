@@ -13,10 +13,12 @@ import {
     PARAMETER_MAP_NOTES,
     PARAMETER_MAP_OUTSIDE,
     PARAMETER_SETTINGS_SCOPE,
+    PERFORMANCE_SEMANTICS_NOTE,
     RELATED_NOTE,
     TUNING_GOALS,
     buildEffectiveRevisionModel,
     buildParameterRows,
+    buildPerformanceViewModel,
     buildRuntimeContext,
     cycleStageLabel,
     guideFor,
@@ -25,6 +27,7 @@ import {
     liveMigrationLabelJa,
     presentationFor,
     relatedLabel,
+    useParameterPerformance,
     useParameterSettings,
 } from "../features/parameter-settings";
 
@@ -980,6 +983,399 @@ function HowToTuneModal({ open, onClose, dialogRef, onOpenParameter }) {
     );
 }
 
+/* =================================================
+   PARAMETER PERFORMANCE（パラメーター実績）
+
+   Read-only observed history on top of the durable E-PERF-2 records.  It
+   presents observations only: no winner, no score, no recommendation and no
+   causal claim.  A read failure here never affects the parameter editor.
+================================================= */
+
+function PerformanceMetric({ metric }) {
+    return (
+        <div
+            className="ps-performance__metric"
+            data-testid={metric.testId}
+        >
+            <span className="ps-performance__metric-label">
+                {metric.labelEn}
+                <span className="ps-performance__metric-ja">
+                    （{metric.labelJa}）
+                </span>
+            </span>
+            <strong
+                className={
+                    "ps-performance__metric-value"
+                    + (metric.available ? "" : " ps-performance__metric-value--na")
+                }
+            >
+                {metric.value}
+            </strong>
+        </div>
+    );
+}
+
+function RevisionHistoryCard({ revision }) {
+    return (
+        <li
+            className="ps-performance__revision"
+            data-testid={`performance-revision-${revision.scope}-${revision.effectiveRevision}`}
+        >
+            <header className="ps-performance__revision-head">
+                <strong>
+                    {revision.scope} R{revision.effectiveRevision}
+                </strong>
+                <span
+                    className="ps-performance__revision-trades"
+                    data-testid={`performance-revision-trades-${revision.scope}-${revision.effectiveRevision}`}
+                >
+                    OBSERVED TRADES（観測取引）: {revision.observedTradeCount}
+                </span>
+            </header>
+            <div className="ps-performance__revision-meta">
+                <span>Parameter set: {revision.parameterSetId}</span>
+                <span>Feature contract: {revision.featureContract}</span>
+                <span>Captured: {revision.capturedAt}</span>
+            </div>
+            {revision.valuesAvailable ? (
+                <details className="ps-performance__values">
+                    <summary>Parameter values（パラメーター値）</summary>
+                    <ul>
+                        {revision.valueRows.map((row) => (
+                            <li
+                                key={row.name}
+                                data-testid={
+                                    `performance-value-${revision.scope}`
+                                    + `-${revision.effectiveRevision}-${row.name}`
+                                }
+                            >
+                                <span className="ps-performance__value-name">
+                                    {row.labelEn}
+                                    <span className="ps-performance__value-ja">
+                                        （{row.labelJa}）
+                                    </span>
+                                </span>
+                                <span className="ps-performance__value-number">
+                                    {row.display}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </details>
+            ) : (
+                <p
+                    className="ps-performance__unavailable"
+                    data-testid={
+                        `performance-values-unavailable-${revision.scope}`
+                        + `-${revision.effectiveRevision}`
+                    }
+                >
+                    Parameter values unavailable（パラメーター値は利用できません）
+                </p>
+            )}
+        </li>
+    );
+}
+
+function ParameterPerformanceSection({
+    view,
+    revisionA = null,
+    revisionB = null,
+    onRevisionAChange = () => {},
+    onRevisionBChange = () => {},
+    comparisonLoading = false,
+    comparisonError = null,
+}) {
+    const canCompare = view.revisionOptions.length >= 2;
+    return (
+        <section
+            className="semantic-card ps-performance ps-section"
+            data-testid="parameter-performance-section"
+        >
+            <header className="semantic-card-header">
+                <div>
+                    <span className="semantic-card-kicker">
+                        Observed history（観測履歴）
+                    </span>
+                    <h2>PARAMETER PERFORMANCE（パラメーター実績）</h2>
+                </div>
+                <span className="semantic-badge">READ ONLY</span>
+            </header>
+
+            <p
+                className="ps-performance__observed"
+                data-testid="performance-observed-note"
+            >
+                OBSERVED UNDER THIS PARAMETER SET
+                <span className="ps-performance__observed-ja">
+                    （このパラメーター構成下で観測）
+                </span>
+            </p>
+
+            {view.loading && (
+                <p className="ps-performance__state" data-testid="performance-loading">
+                    Loading…（読み込み中…）
+                </p>
+            )}
+
+            {!view.loading && view.error && (
+                <p
+                    className="ps-performance__error"
+                    data-testid="performance-error"
+                >
+                    Performance history is unavailable.
+                    （実績履歴を取得できません。）
+                </p>
+            )}
+
+            {!view.loading && !view.error
+                && !view.hasRevisions && !view.hasTrades && (
+                <p className="ps-performance__state" data-testid="performance-empty">
+                    NO PERFORMANCE RECORDS YET（実績記録はまだありません）
+                </p>
+            )}
+
+            {!view.loading && !view.error
+                && (view.hasRevisions || view.hasTrades) && (
+                <>
+                    <div
+                        className="ps-performance__metrics"
+                        data-testid="performance-metrics"
+                    >
+                        {view.metrics.map((metric) => (
+                            <PerformanceMetric key={metric.key} metric={metric} />
+                        ))}
+                    </div>
+
+                    {view.exitReasons.length > 0 && (
+                        <div
+                            className="ps-performance__reasons"
+                            data-testid="performance-exit-reasons"
+                        >
+                            <h3>EXIT REASONS（決済理由）</h3>
+                            <ul>
+                                {view.exitReasons.map((entry) => (
+                                    <li key={entry.reason} data-testid={entry.testId}>
+                                        <span>{entry.reason}</span>
+                                        <strong>{entry.count}</strong>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    <section className="ps-performance__block">
+                        <h3>REVISION HISTORY（リビジョン履歴）</h3>
+                        {view.hasRevisions ? (
+                            <ul
+                                className="ps-performance__revision-list"
+                                data-testid="performance-revision-list"
+                            >
+                                {view.revisions.map((revision) => (
+                                    <RevisionHistoryCard
+                                        key={revision.key}
+                                        revision={revision}
+                                    />
+                                ))}
+                            </ul>
+                        ) : (
+                            <p
+                                className="ps-performance__state"
+                                data-testid="performance-revision-empty"
+                            >
+                                NO PERFORMANCE RECORDS YET
+                                （実績記録はまだありません）
+                            </p>
+                        )}
+                    </section>
+
+                    <section className="ps-performance__block">
+                        <h3>COMPARE REVISIONS（リビジョン比較）</h3>
+                        {canCompare ? (
+                            <div className="ps-performance__compare-controls">
+                                <label htmlFor="compare-revision-a">
+                                    Revision A
+                                </label>
+                                <select
+                                    id="compare-revision-a"
+                                    data-testid="compare-revision-a"
+                                    value={revisionA ?? ""}
+                                    onChange={(event) => onRevisionAChange(
+                                        event.target.value === ""
+                                            ? null
+                                            : Number(event.target.value)
+                                    )}
+                                >
+                                    <option value="">—</option>
+                                    {view.revisionOptions.map((option) => (
+                                        <option
+                                            key={option.value}
+                                            value={option.value}
+                                        >
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <label htmlFor="compare-revision-b">
+                                    Revision B
+                                </label>
+                                <select
+                                    id="compare-revision-b"
+                                    data-testid="compare-revision-b"
+                                    value={revisionB ?? ""}
+                                    onChange={(event) => onRevisionBChange(
+                                        event.target.value === ""
+                                            ? null
+                                            : Number(event.target.value)
+                                    )}
+                                >
+                                    <option value="">—</option>
+                                    {view.revisionOptions.map((option) => (
+                                        <option
+                                            key={option.value}
+                                            value={option.value}
+                                        >
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        ) : (
+                            <p
+                                className="ps-performance__state"
+                                data-testid="comparison-unavailable"
+                            >
+                                COMPARE REQUIRES TWO REVISIONS
+                                （比較には2つ以上のリビジョンが必要です）
+                            </p>
+                        )}
+
+                        {comparisonLoading && (
+                            <p
+                                className="ps-performance__state"
+                                data-testid="comparison-loading"
+                            >
+                                Loading…（読み込み中…）
+                            </p>
+                        )}
+                        {!comparisonLoading && comparisonError && (
+                            <p
+                                className="ps-performance__error"
+                                data-testid="comparison-error"
+                            >
+                                Comparison unavailable.（比較を取得できません。）
+                            </p>
+                        )}
+                        {!comparisonLoading && view.comparison && (
+                            <div data-testid="comparison-result">
+                                <p
+                                    className="ps-performance__changed"
+                                    data-testid="comparison-changed-count"
+                                >
+                                    Changed parameters（変更パラメーター）:
+                                    {" "}
+                                    {view.comparison.changedCount}
+                                </p>
+                                <div className="ps-performance__table-wrap">
+                                    <table className="ps-performance__diff-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Parameter（パラメーター）</th>
+                                                <th>A</th>
+                                                <th>B</th>
+                                                <th>Δ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {view.comparison.rows
+                                                .filter((row) => row.changed)
+                                                .map((row) => (
+                                                    <tr
+                                                        key={row.name}
+                                                        data-testid={row.testId}
+                                                    >
+                                                        <td>
+                                                            {row.labelEn}
+                                                            <span className="ps-performance__value-ja">
+                                                                （{row.labelJa}）
+                                                            </span>
+                                                        </td>
+                                                        <td>{row.aDisplay}</td>
+                                                        <td>{row.bDisplay}</td>
+                                                        <td>{row.deltaDisplay}</td>
+                                                    </tr>
+                                                ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="ps-performance__block">
+                        <h3>OBSERVED TRADES（観測取引）</h3>
+                        {view.hasTrades ? (
+                            <div className="ps-performance__table-wrap">
+                                <table className="ps-performance__trade-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Trade（取引）</th>
+                                            <th>Symbol</th>
+                                            <th>Side</th>
+                                            <th>Rev</th>
+                                            <th>Entry</th>
+                                            <th>Exit</th>
+                                            <th>Holding</th>
+                                            <th>PnL</th>
+                                            <th>Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {view.trades.map((trade) => (
+                                            <tr
+                                                key={trade.key}
+                                                data-testid={`performance-trade-${trade.key}`}
+                                            >
+                                                <td>{trade.tradeId}</td>
+                                                <td>{trade.symbol}</td>
+                                                <td>{trade.side}</td>
+                                                <td>{trade.effectiveRevision}</td>
+                                                <td>{trade.entryDisplay}</td>
+                                                <td>{trade.exitDisplay}</td>
+                                                <td>{trade.holdingDisplay}</td>
+                                                <td>{trade.pnlDisplay}</td>
+                                                <td>{trade.exitReason}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <p
+                                className="ps-performance__state"
+                                data-testid="performance-trades-empty"
+                            >
+                                NO COMPLETED TRADES FOR THIS REVISION
+                                （このリビジョンの完了取引はまだありません）
+                            </p>
+                        )}
+                    </section>
+
+                    <p
+                        className="ps-performance__semantics"
+                        data-testid="performance-semantics-note"
+                    >
+                        {PERFORMANCE_SEMANTICS_NOTE.en}
+                        <span className="ps-performance__semantics-ja">
+                            （{PERFORMANCE_SEMANTICS_NOTE.ja}）
+                        </span>
+                    </p>
+                </>
+            )}
+        </section>
+    );
+}
+
 export function ParameterSettingsView({
     scope = PARAMETER_SETTINGS_SCOPE.PAPER,
     onScopeChange = () => {},
@@ -1014,6 +1410,16 @@ export function ParameterSettingsView({
     onOpenParameter = () => {},
     mapDialogRef = null,
     tuneDialogRef = null,
+    performance = null,
+    performanceLoading = false,
+    performanceError = null,
+    performanceComparison = null,
+    comparisonLoading = false,
+    comparisonError = null,
+    revisionA = null,
+    revisionB = null,
+    onRevisionAChange = () => {},
+    onRevisionBChange = () => {},
 }) {
     const sources = { configured: configuration, effective, runtime };
     const rows = buildParameterRows(schema, sources);
@@ -1034,6 +1440,13 @@ export function ParameterSettingsView({
     const guideRow = guideKey
         ? (rows.find((row) => row.name === guideKey) ?? null)
         : null;
+    const performanceView = buildPerformanceViewModel({
+        performance,
+        comparison: performanceComparison,
+        schema,
+        loading: performanceLoading,
+        error: performanceError,
+    });
 
     return (
         <main
@@ -1384,6 +1797,17 @@ export function ParameterSettingsView({
                 </div>
             )}
 
+            {/* PARAMETER PERFORMANCE — read-only observed history */}
+            <ParameterPerformanceSection
+                view={performanceView}
+                revisionA={revisionA}
+                revisionB={revisionB}
+                onRevisionAChange={onRevisionAChange}
+                onRevisionBChange={onRevisionBChange}
+                comparisonLoading={comparisonLoading}
+                comparisonError={comparisonError}
+            />
+
             {/* AUTHORITY / EXPLANATIONS — collapsed by default, bottom */}
             <section
                 className="semantic-card ps-authority"
@@ -1501,6 +1925,7 @@ export function ParameterSettingsView({
 
 export default function ParameterSettingsPage() {
     const controller = useParameterSettings(PARAMETER_SETTINGS_SCOPE.PAPER);
+    const performance = useParameterPerformance(controller.scope);
     const { data } = usePolling(fetchBotStatus, 5000);
     const [liveConfirmationOpen, setLiveConfirmationOpen] = useState(false);
     const [authorityExpanded, setAuthorityExpanded] = useState(false);
@@ -1600,6 +2025,16 @@ export default function ParameterSettingsPage() {
             onOpenParameter={handleOpenParameter}
             mapDialogRef={mapDialogRef}
             tuneDialogRef={tuneDialogRef}
+            performance={performance.performance}
+            performanceLoading={performance.loading}
+            performanceError={performance.error}
+            performanceComparison={performance.comparison}
+            comparisonLoading={performance.comparisonLoading}
+            comparisonError={performance.comparisonError}
+            revisionA={performance.revisionA}
+            revisionB={performance.revisionB}
+            onRevisionAChange={performance.setRevisionA}
+            onRevisionBChange={performance.setRevisionB}
         />
     );
 }

@@ -17,6 +17,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from backend.auth.dependencies import require_operator_session
+from backend.runtime.parameter_performance_read import (
+    ParameterPerformanceReadService,
+)
 from backend.strategy.parameters.settings_service import (
     ParameterSettingsService,
     UpdateOutcome,
@@ -28,6 +31,7 @@ router = APIRouter(
 )
 
 _APPLICATION_STATE_ATTRIBUTE = "parameter_settings_service"
+_PERFORMANCE_STATE_ATTRIBUTE = "parameter_performance_read_service"
 
 _OUTCOME_STATUS = {
     UpdateOutcome.ACCEPTED: 200,
@@ -80,6 +84,20 @@ def _service(request: Request) -> ParameterSettingsService:
     if state is not None:
         try:
             setattr(state, _APPLICATION_STATE_ATTRIBUTE, service)
+        except Exception:
+            pass
+    return service
+
+
+def _performance_service(request: Request) -> ParameterPerformanceReadService:
+    state = getattr(getattr(request, "app", None), "state", None)
+    service = getattr(state, _PERFORMANCE_STATE_ATTRIBUTE, None)
+    if isinstance(service, ParameterPerformanceReadService):
+        return service
+    service = ParameterPerformanceReadService()
+    if state is not None:
+        try:
+            setattr(state, _PERFORMANCE_STATE_ATTRIBUTE, service)
         except Exception:
             pass
     return service
@@ -177,6 +195,78 @@ def get_parameter_settings_status(request: Request):
             503,
             "PARAMETER_SETTINGS_UNAVAILABLE",
             "Parameter settings status is unavailable.",
+        )
+
+
+@router.get("/performance")
+def get_parameter_settings_performance(
+    request: Request,
+    scope: str | None = None,
+    revision: int | None = None,
+    symbol: str | None = None,
+    mode: str | None = None,
+    limit: int = 200,
+):
+    """Read-only Parameter Performance history (observed trades per revision).
+
+    This endpoint is observational.  It never writes parameter configuration and
+    never changes trading authority.
+    """
+
+    if scope is not None and (
+        not isinstance(scope, str)
+        or scope.strip().upper() not in ("PAPER", "LIVE")
+    ):
+        return _scope_required(scope)
+    service = _performance_service(request)
+    try:
+        return JSONResponse(
+            status_code=200,
+            content=service.performance(
+                scope=scope,
+                revision=revision,
+                symbol=symbol,
+                mode=mode,
+                limit=limit,
+            ),
+        )
+    except Exception:
+        return _safe_error(
+            503,
+            "PARAMETER_PERFORMANCE_UNAVAILABLE",
+            "Parameter performance history is unavailable.",
+        )
+
+
+@router.get("/performance/compare")
+def get_parameter_settings_performance_compare(
+    request: Request,
+    scope: str,
+    revisionA: int,
+    revisionB: int,
+):
+    """Read-only comparison of two observed parameter revisions (same scope)."""
+
+    if not isinstance(scope, str) or scope.strip().upper() not in (
+        "PAPER",
+        "LIVE",
+    ):
+        return _scope_required(scope)
+    service = _performance_service(request)
+    try:
+        return JSONResponse(
+            status_code=200,
+            content=service.compare(
+                scope=scope,
+                revision_a=revisionA,
+                revision_b=revisionB,
+            ),
+        )
+    except Exception:
+        return _safe_error(
+            503,
+            "PARAMETER_PERFORMANCE_UNAVAILABLE",
+            "Parameter performance comparison is unavailable.",
         )
 
 
