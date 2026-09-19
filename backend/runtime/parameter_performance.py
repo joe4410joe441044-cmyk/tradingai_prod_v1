@@ -62,6 +62,78 @@ PARAMETER_SEMANTICS_NOTE = (
     "frozen at entry."
 )
 
+# ---------------------------------------------------------------------------
+# Durable provenance / eligibility contract
+# ---------------------------------------------------------------------------
+# A completed-trade record carries an explicit ``origin`` so the read layer can
+# distinguish a real Production runtime trade from a test / fixture / synthetic
+# record WITHOUT ever inferring provenance from the tradeId string and WITHOUT
+# assuming PAPER == TEST.  A Production PAPER simulation trade is valid
+# Production history.
+#
+#   origin = "PRODUCTION"      -> real runtime completed trade
+#   origin = "NON_PRODUCTION"  -> test / fixture / synthetic / non-production
+#
+# The origin is resolved once, at write time, from an explicit, injectable
+# signal.  It is never recomputed at read time.  ``PARAMETER_PERFORMANCE_ORIGIN``
+# is the explicit override; otherwise ``TEST_MODE`` marks non-production.  The
+# production service does not set TEST_MODE, so runtime records default to
+# PRODUCTION.
+#
+# Records persisted before this field existed have ``origin`` absent.  They are
+# treated as legacy and are eligible for Production Parameter Performance only
+# when they carry a provable parameter revision identity (an integer
+# ``effectiveRevision``).  That deterministic rule preserves the confirmed real
+# PAPER R3 records while excluding the confirmed legacy null-revision test
+# records.  It is not tradeId-based and does not make the null-revision test
+# records eligible.
+ORIGIN_FIELD = "origin"
+ORIGIN_ENV = "PARAMETER_PERFORMANCE_ORIGIN"
+ORIGIN_PRODUCTION = "PRODUCTION"
+ORIGIN_NON_PRODUCTION = "NON_PRODUCTION"
+SUPPORTED_ORIGINS = (ORIGIN_PRODUCTION, ORIGIN_NON_PRODUCTION)
+
+
+def resolve_record_origin() -> str:
+    """Resolve the durable origin for a newly written completed-trade record."""
+
+    explicit = os.environ.get(ORIGIN_ENV)
+    if isinstance(explicit, str):
+        normalized = explicit.strip().upper()
+        if normalized in SUPPORTED_ORIGINS:
+            return normalized
+    test_mode = str(os.environ.get("TEST_MODE", "")).strip().lower()
+    if test_mode not in ("", "0", "false", "no", "off"):
+        return ORIGIN_NON_PRODUCTION
+    return ORIGIN_PRODUCTION
+
+
+def is_production_eligible(record: Mapping[str, Any]) -> bool:
+    """Return whether a completed-trade record is Production Parameter evidence.
+
+    Deterministic and durable:
+
+    - explicit ``origin == "PRODUCTION"`` is eligible;
+    - explicit ``origin == "NON_PRODUCTION"`` is never eligible;
+    - a legacy record (no ``origin``) is eligible only when it carries a
+      provable integer ``effectiveRevision`` (revision identity).  This is the
+      backward-compatible rule for records written before provenance existed.
+
+    Provenance is never inferred from ``tradeId`` naming.
+    """
+
+    if not isinstance(record, Mapping):
+        return False
+    origin = record.get(ORIGIN_FIELD)
+    if origin == ORIGIN_PRODUCTION:
+        return True
+    if origin == ORIGIN_NON_PRODUCTION:
+        return False
+    revision = record.get("effectiveRevision")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        return False
+    return True
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -100,6 +172,7 @@ def build_completed_trade_record(
     source_record: Mapping[str, Any],
     *,
     recorded_at: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> Optional[dict]:
     """Build one Stage 13 record from an engine closed-trade record.
 
@@ -111,6 +184,12 @@ def build_completed_trade_record(
 
     if not isinstance(source_record, Mapping):
         return None
+
+    resolved_origin = origin
+    if isinstance(resolved_origin, str):
+        resolved_origin = resolved_origin.strip().upper()
+    if resolved_origin not in SUPPORTED_ORIGINS:
+        resolved_origin = resolve_record_origin()
 
     snapshot = source_record.get("parameterSnapshot")
     if not isinstance(snapshot, Mapping):
@@ -184,6 +263,7 @@ def build_completed_trade_record(
     return {
         "schemaVersion": STAGE13_SCHEMA_VERSION,
         "recordId": f"stage13-{uuid4()}",
+        "origin": resolved_origin,
         "tradeId": _first(source_record, ("tradeId", "positionId")),
         "traceId": source_record.get("traceId"),
         "positionId": _first(source_record, ("positionId", "order_id")),
@@ -351,6 +431,7 @@ def record_completed_trade(
     source_record: Mapping[str, Any],
     *,
     recorded_at: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> bool:
     """Best-effort durable recording of one completed trade.
 
@@ -360,7 +441,7 @@ def record_completed_trade(
 
     try:
         record = build_completed_trade_record(
-            source_record, recorded_at=recorded_at
+            source_record, recorded_at=recorded_at, origin=origin
         )
         if record is None:
             return False

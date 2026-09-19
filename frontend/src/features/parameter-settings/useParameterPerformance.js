@@ -15,8 +15,13 @@ import { normalizeScope } from "./parameterSettingsModel.js";
    mutates the parameter editor.
 ================================================= */
 
-export function useParameterPerformance(scope = "PAPER") {
+export function useParameterPerformance(scope = "PAPER", revision = null) {
     const normalizedScope = normalizeScope(scope);
+    const normalizedRevision = (
+        revision === null || revision === undefined || revision === ""
+    )
+        ? null
+        : Number(revision);
     const [performance, setPerformance] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -26,10 +31,13 @@ export function useParameterPerformance(scope = "PAPER") {
     const [comparisonLoading, setComparisonLoading] = useState(false);
     const [comparisonError, setComparisonError] = useState(null);
 
-    const load = useCallback(async (target) => {
+    const load = useCallback(async (target, targetRevision) => {
         setLoading(true);
         setError(null);
-        const result = await getParameterSettingsPerformance(target);
+        const result = await getParameterSettingsPerformance(
+            target,
+            targetRevision,
+        );
         if (result?.ok) {
             setPerformance(result.body);
         } else {
@@ -44,13 +52,15 @@ export function useParameterPerformance(scope = "PAPER") {
         (async () => {
             setLoading(true);
             setError(null);
-            // A scope change invalidates any previous A/B selection.
+            // A scope or selected-revision change invalidates any previous A/B
+            // selection.
             setRevisionA(null);
             setRevisionB(null);
             setComparison(null);
             setComparisonError(null);
             const result = await getParameterSettingsPerformance(
-                normalizedScope
+                normalizedScope,
+                normalizedRevision,
             );
             if (!active) return;
             if (result?.ok) {
@@ -64,7 +74,7 @@ export function useParameterPerformance(scope = "PAPER") {
         return () => {
             active = false;
         };
-    }, [normalizedScope]);
+    }, [normalizedScope, normalizedRevision]);
 
     useEffect(() => {
         let active = true;
@@ -106,6 +116,6 @@ export function useParameterPerformance(scope = "PAPER") {
         comparison,
         comparisonLoading,
         comparisonError,
-        reload: () => load(normalizedScope),
+        reload: () => load(normalizedScope, normalizedRevision),
     };
 }
