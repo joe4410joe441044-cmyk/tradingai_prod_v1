@@ -64,13 +64,20 @@ export const getParameterSettingsStatus = () => (
 );
 
 /* Read-only Parameter Performance history (E-PERF-3).  These helpers never
-   issue a write and never influence configuration authority. */
+   issue a write and never influence configuration authority.  The headline
+   population is revision-scoped: when a revision is supplied the backend
+   returns only that revision's Production-eligible observed trades. */
 
-export const getParameterSettingsPerformance = (scope) => (
-    scope
-        ? requestJson(scopedUrl(API.parameterSettingsPerformance(), scope))
-        : requestJson(API.parameterSettingsPerformance())
-);
+export const getParameterSettingsPerformance = (scope, revision) => {
+    const params = new URLSearchParams();
+    if (scope) params.set("scope", String(scope));
+    if (revision !== null && revision !== undefined && revision !== "") {
+        params.set("revision", String(revision));
+    }
+    const query = params.toString();
+    const base = API.parameterSettingsPerformance();
+    return requestJson(query ? `${base}?${query}` : base);
+};
 
 export const getParameterSettingsPerformanceCompare = (
     scope,

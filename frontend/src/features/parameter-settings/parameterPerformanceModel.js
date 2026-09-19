@@ -61,6 +61,22 @@ export const formatHoldingDuration = (value) => {
     return `${(value / 60000).toFixed(1)} min`;
 };
 
+/* Canonical completed-trade timestamps are stored as Unix epoch seconds.
+   They are rendered in local time with a stable, readable pattern; the raw
+   canonical value is never mutated. */
+export const formatTradeTimestamp = (value) => {
+    if (value === null || value === undefined || value === "") return "—";
+    const seconds = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(seconds)) return "—";
+    const date = new Date(seconds * 1000);
+    if (Number.isNaN(date.getTime())) return "—";
+    const pad = (part) => String(part).padStart(2, "0");
+    return (
+        `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+        + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    );
+};
+
 const formatMetricValue = (format, value) => {
     if (format === "count") return formatCount(value);
     if (format === "rate") return formatWinRate(value);
@@ -170,6 +186,8 @@ export const buildTradeRows = (records = []) => (
         symbol: record?.symbol ?? "—",
         side: record?.side ?? "—",
         mode: record?.mode ?? "—",
+        entryTimeDisplay: formatTradeTimestamp(record?.entryTimestamp),
+        exitTimeDisplay: formatTradeTimestamp(record?.exitTimestamp),
         entryDisplay: isNumber(record?.entryPrice)
             ? String(record.entryPrice)
             : "—",
@@ -228,10 +246,17 @@ export const buildPerformanceViewModel = ({
 } = {}) => {
     const revisions = performance?.revisions ?? [];
     const records = performance?.records ?? [];
+    const selectedRevision = (
+        performance?.revision === null || performance?.revision === undefined
+    )
+        ? null
+        : performance.revision;
     return {
         loading: loading === true,
         error: error ?? null,
         scope: performance?.scope ?? null,
+        selectedRevision,
+        allRevisions: selectedRevision === null,
         available: performance?.available === true,
         revisionCount: performance?.revisionCount ?? revisions.length,
         recordCount: performance?.recordCount ?? records.length,

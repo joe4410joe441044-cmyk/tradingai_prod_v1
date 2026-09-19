@@ -29,6 +29,7 @@ from backend.runtime.parameter_performance import (
     ENTRY_SNAPSHOT_PARAMETERS,
     ParameterPerformanceStore,
     default_parameter_performance_store,
+    is_production_eligible,
 )
 from backend.strategy.parameters.model import format_timestamp
 from backend.strategy.parameters.registry import StrategyParameterRegistry
@@ -160,16 +161,18 @@ class ParameterPerformanceReadService:
         self,
         *,
         scope: Optional[str],
-        revision: Optional[int],
         symbol: Optional[str],
         mode: Optional[str],
     ) -> list:
-        return self.store.history(
-            scope=scope,
-            revision=revision,
-            symbol=symbol,
-            mode=mode,
-        )
+        """Return only Production-eligible completed-trade records.
+
+        Test / fixture / synthetic records and legacy records without a provable
+        parameter revision identity are excluded here, so they can never reach
+        any revision metric, Observed Trades list or comparison population.
+        """
+
+        rows = self.store.history(scope=scope, symbol=symbol, mode=mode)
+        return [record for record in rows if is_production_eligible(record)]
 
     def _revision_summaries(
         self,
@@ -207,7 +210,14 @@ class ParameterPerformanceReadService:
         for record in records:
             record_scope = record.get("scope")
             effective_revision = record.get("effectiveRevision")
-            if record_scope not in SUPPORTED_SCOPES:
+            # Revision-specific history is only defined for a provable integer
+            # revision.  Unknown-revision records are never attributed to a
+            # revision (no null fallback).
+            if (
+                record_scope not in SUPPORTED_SCOPES
+                or isinstance(effective_revision, bool)
+                or not isinstance(effective_revision, int)
+            ):
                 continue
             key = (record_scope, effective_revision)
             entry = summaries.get(key)
@@ -291,23 +301,33 @@ class ParameterPerformanceReadService:
 
         records = self._records(
             scope=normalized_scope,
-            revision=revision,
             symbol=symbol,
             mode=mode,
         )
+        # Revision-scoped metrics.  A selected revision is an exact filter over
+        # Production-eligible records; there is no effectiveRevision=null
+        # fallback and no scope-wide fallback.
+        if revision is None:
+            scoped_records = records
+        else:
+            scoped_records = [
+                record
+                for record in records
+                if record.get("effectiveRevision") == revision
+            ]
         summaries = self._revision_summaries(
             records, scope=normalized_scope
         )
         return {
-            "available": bool(records) or bool(summaries),
+            "available": bool(scoped_records) or bool(summaries),
             "scope": normalized_scope,
             "revision": revision,
             "symbol": symbol,
             "revisionCount": len(summaries),
-            "recordCount": len(records),
+            "recordCount": len(scoped_records),
             "revisions": summaries,
-            "records": records[:normalized_limit],
-            "metrics": compute_metrics(records),
+            "records": scoped_records[:normalized_limit],
+            "metrics": compute_metrics(scoped_records),
             "semantics": PARAMETER_SEMANTICS,
         }
 
@@ -324,7 +344,6 @@ class ParameterPerformanceReadService:
 
         records = self._records(
             scope=normalized_scope,
-            revision=None,
             symbol=None,
             mode=None,
         )

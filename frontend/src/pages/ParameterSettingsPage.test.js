@@ -1016,6 +1016,7 @@ test("guide typography is substantially enlarged in the stylesheet", async () =>
 const performancePayload = {
     available: true,
     scope: "PAPER",
+    revision: 2,
     revisionCount: 2,
     recordCount: 2,
     revisions: [
@@ -1109,10 +1110,14 @@ test("parameter performance renders revisions, metrics, comparison and trades", 
     assert.match(text, /OBSERVED TRADES（観測取引）/);
     assert.match(text, /OBSERVED UNDER THIS PARAMETER SET/);
     assert.match(text, /このパラメーター構成下で観測/);
+    assert.match(text, /PAPER R2/);
+    assert.match(text, /Entry Time/);
+    assert.match(text, /Exit Time/);
     assert.match(text, /Trade count/);
     assert.match(text, /Changed parameters（変更パラメーター）:\s+1/);
     assert.match(text, /\+0.13/);
 
+    assert.ok(findByTestId(tree, "performance-observed-scope"));
     assert.ok(findByTestId(tree, "performance-revision-PAPER-2"));
     assert.ok(findByTestId(tree, "performance-revision-PAPER-3"));
     assert.ok(findByTestId(tree, "performance-trade-r1"));

@@ -1106,9 +1106,21 @@ function ParameterPerformanceSection({
                 className="ps-performance__observed"
                 data-testid="performance-observed-note"
             >
-                OBSERVED UNDER THIS PARAMETER SET
+                {view.allRevisions
+                    ? "OBSERVED ACROSS ALL ELIGIBLE REVISIONS"
+                    : "OBSERVED UNDER THIS PARAMETER SET"}
+                <span
+                    className="ps-performance__observed-scope"
+                    data-testid="performance-observed-scope"
+                >
+                    {view.allRevisions
+                        ? "ALL REVISIONS（全リビジョン）"
+                        : `${view.scope} R${view.selectedRevision}`}
+                </span>
                 <span className="ps-performance__observed-ja">
-                    （このパラメーター構成下で観測）
+                    {view.allRevisions
+                        ? "（対象となる全リビジョンで観測）"
+                        : "（このパラメーター構成下で観測）"}
                 </span>
             </p>
 
@@ -1320,6 +1332,8 @@ function ParameterPerformanceSection({
                                     <thead>
                                         <tr>
                                             <th>Trade（取引）</th>
+                                            <th>Entry Time</th>
+                                            <th>Exit Time</th>
                                             <th>Symbol</th>
                                             <th>Side</th>
                                             <th>Rev</th>
@@ -1337,6 +1351,8 @@ function ParameterPerformanceSection({
                                                 data-testid={`performance-trade-${trade.key}`}
                                             >
                                                 <td>{trade.tradeId}</td>
+                                                <td>{trade.entryTimeDisplay}</td>
+                                                <td>{trade.exitTimeDisplay}</td>
                                                 <td>{trade.symbol}</td>
                                                 <td>{trade.side}</td>
                                                 <td>{trade.effectiveRevision}</td>
@@ -1951,7 +1967,17 @@ export function ParameterSettingsView({
 
 export default function ParameterSettingsPage() {
     const controller = useParameterSettings(PARAMETER_SETTINGS_SCOPE.PAPER);
-    const performance = useParameterPerformance(controller.scope);
+    // The headline Parameter Performance population is the currently selected
+    // parameter set (the effective revision), never a scope-wide aggregate.
+    const selectedRevision = (
+        controller.effective?.effectiveRevision
+        ?? controller.configuration?.effectiveRevision
+        ?? null
+    );
+    const performance = useParameterPerformance(
+        controller.scope,
+        selectedRevision,
+    );
     const { data } = usePolling(fetchBotStatus, 5000);
     const [liveConfirmationOpen, setLiveConfirmationOpen] = useState(false);
     const [authorityExpanded, setAuthorityExpanded] = useState(false);

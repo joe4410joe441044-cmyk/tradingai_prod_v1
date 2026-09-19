@@ -14,6 +14,7 @@ import {
     displayPerformanceValue,
     formatHoldingDuration,
     formatPnl,
+    formatTradeTimestamp,
     formatWinRate,
 } from "./parameterPerformanceModel.js";
 
@@ -224,6 +225,41 @@ test("trade rows are factual and null-safe", () => {
     assert.equal(rows[1].pnlDisplay, "-1.00");
     assert.equal(rows[0].holdingDisplay, "1.0 s");
     assert.equal(rows[0].exitReason, "TP");
+});
+
+
+test("trade timestamps are formatted truthfully and null-safely", () => {
+    assert.equal(formatTradeTimestamp(null), "—");
+    assert.equal(formatTradeTimestamp(undefined), "—");
+    assert.equal(formatTradeTimestamp("not-a-number"), "—");
+    const formatted = formatTradeTimestamp(1789784124.9367893);
+    assert.match(formatted, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+});
+
+
+test("trade rows expose entry and exit times", () => {
+    const rows = buildTradeRows([{
+        recordId: "t",
+        entryTimestamp: 1789784124.9367893,
+        exitTimestamp: 1789784125.7253401,
+    }]);
+    assert.match(rows[0].entryTimeDisplay, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.match(rows[0].exitTimeDisplay, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.equal(buildTradeRows([{}])[0].entryTimeDisplay, "—");
+});
+
+
+test("view model exposes the selected revision and all-revision state", () => {
+    const scoped = buildPerformanceViewModel({
+        performance: { ...PERFORMANCE, revision: 2 },
+    });
+    assert.equal(scoped.selectedRevision, 2);
+    assert.equal(scoped.allRevisions, false);
+    const all = buildPerformanceViewModel({
+        performance: { ...PERFORMANCE, revision: null },
+    });
+    assert.equal(all.selectedRevision, null);
+    assert.equal(all.allRevisions, true);
 });
 
 
