@@ -2287,7 +2287,9 @@ class BotManager:
             return "FLAT"
         return "UNKNOWN"
 
-    def _execution_control_pending_state(self):
+    def _execution_control_pending_state(
+        self, allow_stopped_paper_revalidation=False
+    ):
 
         try:
             pending = self.get_authoritative_pending_order_state()
@@ -2307,7 +2309,127 @@ class BotManager:
                 "reason": "PENDING_ORDER_UNKNOWN",
             }
 
+        if (
+            allow_stopped_paper_revalidation is True
+            and pending.get("known") is not True
+            and pending.get("reason")
+            in self._stopped_paper_stale_pending_reasons()
+            and self._stopped_paper_control_revalidation_applicable()
+        ):
+            # The stored stopped-PAPER snapshot has aged past its freshness
+            # bound. A legitimate STOPPED PAPER control-authority switch may
+            # synchronously revalidate the authoritative stopped-PAPER safety
+            # state instead of forcing the operator to race a manual refresh
+            # endpoint. This path still fails closed: revalidation must prove
+            # PAPER + STOPPED + FLAT + no pending order.
+            pending = (
+                self._revalidate_stopped_paper_authority_for_control_switch()
+            )
+
         return pending
+
+    @staticmethod
+    def _stopped_paper_stale_pending_reasons():
+
+        return {
+            "SNAPSHOT_STALE",
+            "DURABLE_SNAPSHOT_STALE",
+            "SNAPSHOT_TIMESTAMP_MISSING",
+            "SNAPSHOT_TIMESTAMP_INVALID",
+            "SNAPSHOT_TIMESTAMP_FUTURE",
+            "SNAPSHOT_TIME_UNAVAILABLE",
+            "SNAPSHOT_STALE_THRESHOLD_INVALID",
+            "SNAPSHOT_UNAVAILABLE",
+            "SNAPSHOT_NOT_SYNCED",
+        }
+
+    def _stopped_paper_control_revalidation_applicable(self):
+        """Whether a stale stopped-PAPER snapshot may be synchronously
+        revalidated while evaluating a control-authority switch.
+
+        Limited to a legitimate STOPPED PAPER runtime with no engine, no
+        running loop, and a canonically resolved PAPER mode. LIVE, unknown,
+        or conflicting mode authority never qualifies.
+        """
+
+        if self.engine is not None:
+            return False
+
+        if self._running is not False:
+            return False
+
+        if self.lifecycle_state != "STOPPED":
+            return False
+
+        if getattr(self, "pending_order", None) is not False:
+            return False
+
+        if self._execution_control_position_state() != "FLAT":
+            return False
+
+        resolution = self._stopped_paper_mode_resolution()
+
+        return resolution.get("mode") == "paper"
+
+    def _revalidate_stopped_paper_authority_for_control_switch(self):
+        """Synchronously revalidate stopped-PAPER safety authority for a
+        control switch and return the authoritative pending-order payload.
+
+        Fails closed: anything that cannot prove PAPER + STOPPED + FLAT + no
+        pending order yields an unknown/unsafe payload that denies the switch.
+        """
+
+        try:
+            state = self._stopped_paper_authoritative_safety_state(
+                refresh_snapshot=True,
+            )
+        except Exception:
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_UNKNOWN",
+                source="stopped_paper_recheck",
+            )
+
+        if not isinstance(state, dict):
+            return self._pending_order_authority_payload(
+                known=False,
+                pending=None,
+                safe=False,
+                reason="PENDING_ORDER_UNKNOWN",
+                source="stopped_paper_recheck",
+            )
+
+        if state.get("safe") is True:
+            return self._pending_order_authority_payload(
+                known=True,
+                pending=False,
+                safe=True,
+                reason="STOPPED_PAPER_AUTHORITATIVE_SAFE",
+                source="stopped_paper_authoritative",
+                manager_pending_order=False,
+                engine_available=False,
+            )
+
+        reason = state.get("reason") or "PENDING_ORDER_UNKNOWN"
+
+        if reason == "PENDING_ORDER_REMAINING":
+            return self._pending_order_authority_payload(
+                known=True,
+                pending=True,
+                safe=False,
+                reason=reason,
+                source="stopped_paper_recheck",
+            )
+
+        return self._pending_order_authority_payload(
+            known=False,
+            pending=None,
+            safe=False,
+            reason=reason,
+            source="stopped_paper_recheck",
+        )
 
     def _execution_control_entry_admission_idle(self):
 
@@ -2394,7 +2516,9 @@ class BotManager:
                 f"POSITION_{position_state}_BLOCKS_CONTROL_SWITCH"
             )
 
-        pending = self._execution_control_pending_state()
+        pending = self._execution_control_pending_state(
+            allow_stopped_paper_revalidation=True
+        )
         if pending.get("known") is not True:
             reasons.append(
                 pending.get("reason")

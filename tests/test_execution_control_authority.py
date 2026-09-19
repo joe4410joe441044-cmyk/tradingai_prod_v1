@@ -11,6 +11,8 @@ new-entry is denied by the manager-owned shared authority boundary.
 """
 
 import os
+import tempfile
+import time
 
 os.environ.setdefault("TEST_MODE", "1")
 
@@ -576,3 +578,272 @@ def test_manual_execution_not_implemented_in_d2():
     assert not hasattr(manager, "manual_sell")
     assert not hasattr(manager, "manual_close")
     assert manager.engine is None
+
+
+# =========================
+# STOPPED PAPER STALE SNAPSHOT: SYNCHRONOUS REVALIDATION
+# =========================
+# WORK D defect: with the PAPER runtime STOPPED the authoritative
+# stopped-PAPER safety snapshot ages past account_stale_after (90s). A human
+# BOT -> MANUAL switch was then rejected with SNAPSHOT_STALE even though the
+# runtime was legitimately STOPPED + PAPER + FLAT with no pending order. The
+# switch admission path now synchronously revalidates stopped-PAPER safety
+# authority (instead of forcing the operator to race a manual refresh), while
+# still failing closed on any unproven safety state.
+
+def _stale_pending():
+    return {
+        "known": False,
+        "pending": None,
+        "safe": False,
+        "pending_order": True,
+        "reason": "SNAPSHOT_STALE",
+        "source": "stopped_paper_authoritative",
+    }
+
+
+def _stale_manager(revalidation):
+    manager = _manager()
+    manager.get_authoritative_pending_order_state = Mock(
+        return_value=_stale_pending()
+    )
+    manager._revalidate_stopped_paper_authority_for_control_switch = Mock(
+        return_value=revalidation
+    )
+    return manager
+
+
+def _production_like_stopped_paper_snapshot(generation, last_update):
+    return {
+        "source": "stopped_paper_engine_portfolio_snapshot",
+        "authorityReason": "STOPPED_PAPER_ENGINE_STATE_CAPTURED",
+        "available": True,
+        "generation": generation,
+        "stateUnknown": False,
+        "tradeMode": "paper",
+        "mode": "paper",
+        "selectedMode": "PAPER",
+        "lifecycleState": "STOPPED",
+        "operationId": None,
+        "capturedAt": last_update,
+        "timestamp": last_update,
+        "timestampEpoch": last_update,
+        "last_update": last_update,
+        "position": None,
+        "positions": [],
+        "positionRemaining": False,
+        "positionStateSource": (
+            "execution_engine.actual_position+portfolio.positions"
+        ),
+        "pendingOrder": False,
+        "pending_order": False,
+        "pendingStateSource": (
+            "execution_engine.pending_order_duplicate_lock"
+        ),
+        "pendingOrderStateSource": (
+            "execution_engine.pending_order_duplicate_lock"
+        ),
+        "openOrderCount": 0,
+        "openOrderStateSource": (
+            "execution_engine."
+            "paper_immediate_fill_no_open_order_collection"
+        ),
+        "runtimeInstanceId": "test-runtime",
+        "evidenceGeneration": generation,
+        "evidenceCapturedAt": last_update,
+        "evidenceRuntimeInstanceId": "test-runtime",
+        "evidenceSource": "stopped_paper_engine_portfolio_snapshot",
+    }
+
+
+def _stale_stopped_paper_manager():
+    manager = BotManager()
+    manager.engine = None
+    manager.config = {"mode": "paper", "dry_run": True}
+    manager.lifecycle_state = "STOPPED"
+    manager.loop_state = "STOPPED"
+    manager._running = False
+    manager.pending_order = False
+    manager.state.position_state = "FLAT"
+    manager.stopped_paper_durable_snapshot_path = os.path.join(
+        tempfile.mkdtemp(),
+        "stopped_paper_safety_snapshot.json",
+    )
+    manager.account_snapshot_generation = 0
+    manager.account_snapshot = _production_like_stopped_paper_snapshot(
+        0,
+        time.time() - 1000,
+    )
+    manager.control_authority = CONTROL_AUTHORITY_BOT
+    manager.control_revision = 0
+    governance_state["control_authority"] = CONTROL_AUTHORITY_BOT
+    governance_state["control_revision"] = 0
+    governance_state["execution_enabled"] = False
+    governance_state["mode"] = "PAPER"
+    return manager
+
+
+def test_stale_stopped_paper_snapshot_bot_to_manual_revalidates():
+    manager = _stale_manager(_flat_pending())
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is True
+    assert result["changed"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert result["controlRevision"] == 1
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_called_once()
+
+
+def test_stale_stopped_paper_snapshot_manual_to_bot_revalidates():
+    manager = _stale_manager(_flat_pending())
+    assert manager.set_execution_control("MANUAL")["success"] is True
+    manager.get_authoritative_pending_order_state = Mock(
+        return_value=_stale_pending()
+    )
+    manager._revalidate_stopped_paper_authority_for_control_switch = Mock(
+        return_value=_flat_pending()
+    )
+    result = manager.set_execution_control("BOT")
+    assert result["success"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_BOT
+    assert result["controlRevision"] == 2
+
+
+def test_stale_revalidation_unknown_denies_switch():
+    manager = _stale_manager({
+        "known": False,
+        "pending": None,
+        "safe": False,
+        "reason": "PENDING_ORDER_UNKNOWN",
+    })
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "PENDING_ORDER_UNKNOWN"
+    assert manager.control_revision == 0
+
+
+def test_stale_revalidation_pending_true_denies_switch():
+    manager = _stale_manager({
+        "known": True,
+        "pending": True,
+        "safe": False,
+        "reason": "PENDING_ORDER_REMAINING",
+    })
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "PENDING_ORDER_REMAINING"
+    assert manager.control_revision == 0
+
+
+def test_stale_revalidation_unsafe_denies_switch():
+    manager = _stale_manager({
+        "known": False,
+        "pending": None,
+        "safe": False,
+        "reason": "POSITION_STATE_UNKNOWN",
+    })
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "POSITION_STATE_UNKNOWN"
+    assert manager.control_revision == 0
+
+
+def test_stale_revalidation_position_non_flat_denies_switch():
+    manager = _stale_manager(_flat_pending())
+    manager.state.position_state = "LONG"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "POSITION_LONG_BLOCKS_CONTROL_SWITCH"
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_not_called()
+
+
+def test_stale_revalidation_mode_unknown_denies_switch():
+    manager = _stale_manager(_flat_pending())
+    manager.config = {}
+    governance_state["mode"] = "UNRESOLVED"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    assert result["reason"] == "RUNTIME_MODE_UNKNOWN"
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_not_called()
+
+
+def test_stale_revalidation_mode_conflict_denies_switch():
+    manager = _stale_manager(_flat_pending())
+    manager.config = {"mode": "live", "dry_run": False}
+    governance_state["mode"] = "PAPER"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_not_called()
+
+
+def test_live_mode_does_not_use_stopped_paper_revalidation():
+    manager = _stale_manager(_flat_pending())
+    manager.config = {}
+    governance_state["mode"] = "LIVE"
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is False
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_not_called()
+
+
+def test_stale_snapshot_stale_expected_revision_denied():
+    manager = _stale_manager(_flat_pending())
+    assert manager.set_execution_control("MANUAL")["success"] is True
+    manager.get_authoritative_pending_order_state = Mock(
+        return_value=_stale_pending()
+    )
+    manager._revalidate_stopped_paper_authority_for_control_switch = Mock(
+        return_value=_flat_pending()
+    )
+    result = manager.set_execution_control("BOT", expected_revision=0)
+    assert result["success"] is False
+    assert result["reason"] == "DENY_STALE_CONTROL_REVISION"
+    manager._revalidate_stopped_paper_authority_for_control_switch \
+        .assert_not_called()
+
+
+def test_stale_snapshot_switch_never_creates_order_or_engine():
+    manager = _stale_manager(_flat_pending())
+    result = manager.set_execution_control("MANUAL")
+    assert result["success"] is True
+    assert manager.engine is None
+    assert manager.pending_order is False
+    assert manager.state.actual_position is None
+
+
+def test_revalidation_calls_real_refresh_and_maps_safe_state():
+    manager = _manager()
+    manager._stopped_paper_authoritative_safety_state = Mock(
+        return_value={
+            "safe": True,
+            "reason": "STOPPED_PAPER_AUTHORITATIVE_SAFE",
+        }
+    )
+    payload = manager._revalidate_stopped_paper_authority_for_control_switch()
+    manager._stopped_paper_authoritative_safety_state.assert_called_once_with(
+        refresh_snapshot=True
+    )
+    assert payload["known"] is True
+    assert payload["pending"] is False
+    assert payload["safe"] is True
+
+
+def test_real_stale_snapshot_bot_to_manual_revalidates_end_to_end():
+    manager = _stale_stopped_paper_manager()
+
+    pending = manager.get_authoritative_pending_order_state()
+    assert pending["known"] is False
+    assert pending["reason"] == "SNAPSHOT_STALE"
+
+    result = manager.set_execution_control("MANUAL", expected_revision=0)
+
+    assert result["success"] is True
+    assert result["changed"] is True
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert result["controlRevision"] == 1
+    assert manager.engine is None
+    assert manager.pending_order is False
+    assert manager.state.actual_position is None
