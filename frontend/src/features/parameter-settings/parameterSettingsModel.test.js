@@ -12,6 +12,7 @@ import {
     countAdvancedParameters,
     countPrimaryParameters,
     dedupeWarnings,
+    describeParameterConstraint,
     formatParameterValue,
     isLiveWritable,
     normalizeDraftForSave,
@@ -59,7 +60,7 @@ const schema = {
             precision: 0,
             valueType: "int",
             minimum: 100,
-            maximum: 60000,
+            maximum: null,
         }),
         metadata("minimumHoldMs", {
             tier: "ADVANCED",
@@ -469,7 +470,7 @@ const integerMetadata = metadata("maximumHoldMs", {
     precision: 0,
     valueType: "int",
     minimum: 100,
-    maximum: 60000,
+    maximum: null,
 });
 const floatMetadata = metadata("minimumCompositeScore");
 const booleanMetadata = metadata("flag", { valueType: "bool" });
@@ -683,4 +684,16 @@ test("TEST L — authentication failure classification is preserved", async () =
     assert.equal(result.ok, false);
     assert.equal(result.status, 403);
     assert.equal(result.body.status, "UNAUTHENTICATED");
+});
+
+
+test("Maximum Hold has a minimum but no fixed upper bound", () => {
+    assert.equal(describeParameterConstraint(integerMetadata), ">= 100 milliseconds");
+    for (const hold of [60000, 90000, 120000, 1000000]) {
+        assert.equal(validateDraftValue(integerMetadata, String(hold)), null);
+        assert.equal(normalizeParameterValue(integerMetadata, String(hold)), hold);
+    }
+    for (const hold of [-1, 0, 99, "invalid", Infinity, NaN, 100.5]) {
+        assert.ok(validateDraftValue(integerMetadata, hold));
+    }
 });

@@ -1,5 +1,7 @@
 """Validation tests for canonical strategy parameters (E-PARAM-1)."""
 
+import pytest
+
 from backend.strategy.parameters import (
     PAPER_MIGRATION_BASELINE,
     ValidationCode,
@@ -40,9 +42,6 @@ def test_require_complete_flags_missing_parameters():
 def test_range_rejection_below_and_above():
     assert ValidationCode.BELOW_MINIMUM in _codes(
         validate_parameters(values(maximumHoldMs=99))
-    )
-    assert ValidationCode.ABOVE_MAXIMUM in _codes(
-        validate_parameters(values(maximumHoldMs=60001))
     )
     assert ValidationCode.BELOW_MINIMUM in _codes(
         validate_parameters(values(momentumWindowSeconds=4.9))
@@ -210,3 +209,13 @@ def test_dom_string_serialization_is_rejected_as_invalid_type():
     assert not result.is_valid
     assert ValidationCode.INVALID_TYPE in _codes(result)
     assert [issue.parameter for issue in result.errors] == ["maximumHoldMs"]
+
+
+@pytest.mark.parametrize("hold", [60000, 90000, 120000, 1000000])
+def test_maximum_hold_has_no_fixed_upper_limit(hold):
+    assert validate_parameters(values(maximumHoldMs=hold), require_complete=True).is_valid
+
+
+@pytest.mark.parametrize("hold", [-1, 0, 99, "90000", "invalid", None, True, [], {}, 100.5, float("nan"), float("inf"), float("-inf")])
+def test_maximum_hold_retains_fundamental_validation(hold):
+    assert not validate_parameters(values(maximumHoldMs=hold)).is_valid

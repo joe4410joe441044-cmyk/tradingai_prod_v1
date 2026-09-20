@@ -644,3 +644,20 @@ def test_only_one_write_route_is_registered():
     assert write_routes == [
         ("/api/parameter-settings/configuration", ["PUT"])
     ], write_routes
+
+
+@pytest.mark.parametrize("hold", [60000, 90000, 120000])
+def test_maximum_hold_unbounded_schema_and_save(client, hold):
+    schema = client.get("/api/parameter-settings/schema").json()
+    metadata = next(p for p in schema["parameters"] if p["name"] == "maximumHoldMs")
+    assert metadata["maximum"] is None
+    assert metadata["minimum"] == 100
+    session, csrf = _login(client)
+    before = _configured_parameters(client, "PAPER")
+    parameters = {**before["parameters"], "maximumHoldMs": hold}
+    response = _put(client, session, csrf, {
+        "scope": "PAPER", "parameters": parameters,
+        "expectedRevision": before["configuredRevision"],
+    })
+    assert response.status_code == 200, response.text
+    assert _configured_parameters(client, "PAPER")["parameters"]["maximumHoldMs"] == hold

@@ -157,6 +157,9 @@ export const formatParameterValue = (metadata, value) => {
 export const describeParameterConstraint = (metadata) => {
     if (!metadata) return null;
     const lower = metadata.minimumInclusive === false ? ">" : ">=";
+    if (metadata.maximum == null) {
+        return `${lower} ${metadata.minimum} ${metadata.unit ?? ""}`.trim();
+    }
     const upper = metadata.maximumInclusive === false ? "<" : "<=";
     return `${lower} ${metadata.minimum} and ${upper} ${metadata.maximum} ${metadata.unit ?? ""}`.trim();
 };
@@ -178,9 +181,9 @@ export const validateDraftValue = (metadata, value) => {
     if (!aboveMinimum) {
         return `must be ${metadata?.minimumInclusive === false ? ">" : ">="} ${metadata.minimum}`;
     }
-    const belowMaximum = metadata?.maximumInclusive === false
+    const belowMaximum = metadata?.maximum == null || (metadata.maximumInclusive === false
         ? numeric < metadata.maximum
-        : numeric <= metadata.maximum;
+        : numeric <= metadata.maximum);
     if (!belowMaximum) {
         return `must be ${metadata?.maximumInclusive === false ? "<" : "<="} ${metadata.maximum}`;
     }
