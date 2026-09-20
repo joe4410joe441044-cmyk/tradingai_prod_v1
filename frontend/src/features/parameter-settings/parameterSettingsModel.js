@@ -447,10 +447,38 @@ export const performSave = async ({
     });
     const response = await api.updateConfiguration(payload);
     if (response?.ok) {
+        const accepted = response.body?.configuration;
+        const matches = (configuration) => (
+            configuration?.scope === payload.scope
+            && configuration?.storeStatus === "VALID"
+            && configuration?.configuredRevision === payload.expectedRevision + 1
+            && Object.entries(payload.parameters).every(([name, value]) => (
+                configuration?.parameters?.[name] === value
+            ))
+        );
+        const failed = () => ({
+            ok: false,
+            status: 0,
+            code: "CONFIGURATION_READBACK_FAILED",
+            message: "Save could not be verified against configured state. Reload before retrying.",
+            body: response.body,
+        });
+        if (response.body?.code !== "CONFIGURATION_ACCEPTED"
+            || response.body?.configuredRevision !== accepted?.configuredRevision
+            || !matches(accepted)
+            || typeof api.getConfiguration !== "function") return failed();
+        let readback;
+        try {
+            readback = await api.getConfiguration(payload.scope);
+        } catch {
+            return failed();
+        }
+        if (!readback?.ok || !matches(readback.body)) return failed();
         return {
             ok: true,
             status: response.status,
             body: response.body,
+            configuration: readback.body,
         };
     }
     return {

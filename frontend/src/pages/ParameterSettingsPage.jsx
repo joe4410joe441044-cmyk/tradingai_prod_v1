@@ -1735,7 +1735,11 @@ export function ParameterSettingsView({
                         )}
                         {saveState?.phase === "SAVED" && (
                             <span data-testid="save-saved">
-                                Saved (revision pending).
+                                {!Number.isInteger(effective?.effectiveRevision)
+                                    ? "Saved (effective state unavailable)."
+                                    : effective.effectiveRevision >= configuration?.configuredRevision
+                                        ? "Saved (effective)."
+                                        : "Saved (effective promotion pending)."}
                             </span>
                         )}
                         {saveState?.phase === "INVALID" && (

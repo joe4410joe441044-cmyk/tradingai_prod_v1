@@ -314,10 +314,15 @@ test("PAPER save returns success without confirmLive", async () => {
         parameters: { minimumCompositeScore: 0.4 },
         expectedRevision: 7,
         api: {
+            getConfiguration: async () => ({ok: true, body: {scope: "PAPER", storeStatus: "VALID", configuredRevision: 8, parameters: {minimumCompositeScore: 0.4}}}),
             updateConfiguration: async () => ({
                 ok: true,
                 status: 200,
-                body: { code: "CONFIGURATION_ACCEPTED", warnings: [] },
+                body: {
+                    code: "CONFIGURATION_ACCEPTED", configuredRevision: 8,
+                    configuration: {scope: "PAPER", storeStatus: "VALID", configuredRevision: 8, parameters: {minimumCompositeScore: 0.4}},
+                    warnings: [],
+                },
             }),
         },
     });

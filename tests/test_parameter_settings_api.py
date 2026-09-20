@@ -661,3 +661,64 @@ def test_maximum_hold_unbounded_schema_and_save(client, hold):
     })
     assert response.status_code == 200, response.text
     assert _configured_parameters(client, "PAPER")["parameters"]["maximumHoldMs"] == hold
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_maximum_hold_save_verified_readback(client, monkeypatch, promote):
+    from backend.api import parameter_settings as api
+    from backend.strategy.parameters.model import ParameterScope
+    from backend.strategy.parameters.store import StrategyParameterStore
+
+    service = client.app.state.parameter_settings_service
+    monkeypatch.setattr(api, "_attempt_stopped_promotion", lambda scope: (
+        service.promote_if_safe(scope, safe_to_promote=promote)
+    ))
+    session, csrf = _login(client)
+    before = _configured_parameters(client, "PAPER")
+    parameters = {**before["parameters"], "maximumHoldMs": 30000}
+    initial = _put(client, session, csrf, dict(scope="PAPER", parameters=parameters,
+                   expectedRevision=before["configuredRevision"]))
+    assert initial.status_code == 200
+    service.promote_if_safe("PAPER", safe_to_promote=True)
+    parameters["maximumHoldMs"] = 90000
+    response = _put(client, session, csrf, dict(scope="PAPER", parameters=parameters,
+                    expectedRevision=initial.json()["configuredRevision"]))
+    assert response.status_code == 200, response.text
+    revision = response.json()["configuredRevision"]
+    disk = StrategyParameterStore(service.store.base_directory).load(ParameterScope.PAPER)
+    assert disk.parameter_set.parameters["maximumHoldMs"] == 90000
+    assert disk.parameter_set.configuredRevision == revision
+    for _ in range(2):
+        configured = _configured_parameters(client, "PAPER")
+        effective = client.get("/api/parameter-settings/effective?scope=PAPER").json()
+        assert configured["parameters"]["maximumHoldMs"] == 90000
+        assert configured["configuredRevision"] == revision
+        assert configured["pending"] is (not promote)
+        assert effective["parameters"]["maximumHoldMs"] == (90000 if promote else 30000)
+
+
+@pytest.mark.parametrize("failure", ["missing", "stale", "wrong_value"])
+def test_save_does_not_accept_unpersisted_readback(client, monkeypatch, failure):
+    from dataclasses import replace
+    from backend.strategy.parameters.store import StoreSaveResult, StoreSaveStatus
+
+    service = client.app.state.parameter_settings_service
+    session, csrf = _login(client)
+    before = _configured_parameters(client, "PAPER")
+    parameters = {**before["parameters"], "maximumHoldMs": 90000}
+    original_save = service.store.save
+    def broken_save(record, variant=None):
+        if variant is not None:
+            return original_save(record, variant)
+        if failure == "missing":
+            return StoreSaveResult(StoreSaveStatus.SAVED)
+        if failure == "stale":
+            record = replace(record, configuredRevision=record.configuredRevision - 1)
+        else:
+            record = replace(record, parameters={**record.parameters, "maximumHoldMs": 30000})
+        return original_save(record)
+    monkeypatch.setattr(service.store, "save", broken_save)
+    response = _put(client, session, csrf, dict(scope="PAPER", parameters=parameters,
+                    expectedRevision=before["configuredRevision"]))
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "CONFIGURATION_READBACK_FAILED"
