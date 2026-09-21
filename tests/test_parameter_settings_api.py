@@ -569,6 +569,8 @@ def test_write_does_not_mutate_order_or_runtime_authority(client):
     # The accepted payload carries no order/bot authority keys.
     body = resp.json()
     assert set(body) <= {
+        "configuredSaveSuccess",
+        "promotion",
         "code",
         "message",
         "scope",
@@ -598,8 +600,8 @@ def test_stopped_bot_write_promotes_configuration(client, monkeypatch):
         _running = False
         lifecycle_state = "STOPPED"
 
-        def promote_parameter_revision_if_safe(self, *, bot_stopped=None):
-            return service.promote_if_safe("PAPER", safe_to_promote=True)
+        def promote_parameter_revision_if_safe(self, *, bot_stopped=None, scope=None):
+            return service.promote_if_safe(scope, safe_to_promote=True)
 
     monkeypatch.setattr(
         bot_manager_module,
@@ -722,3 +724,65 @@ def test_save_does_not_accept_unpersisted_readback(client, monkeypatch, failure)
                     expectedRevision=before["configuredRevision"]))
     assert response.status_code == 503, response.text
     assert response.json()["code"] == "CONFIGURATION_READBACK_FAILED"
+
+
+def test_save_empty_runtime_config_promotes_without_start(client, monkeypatch):
+    from backend.bot_manager import bot_manager as module
+    manager = module.BotManager.__new__(module.BotManager)
+    manager.config = {}
+    manager._running = False
+    manager.lifecycle_state = "STOPPED"
+    manager.engine = None
+    manager._execution_control_position_state = lambda: {"side": "FLAT"}
+    manager._parameter_promotion_service = client.app.state.parameter_settings_service.promotion
+    monkeypatch.setattr(module, "get_existing_bot_manager", lambda: manager)
+    session, csrf = _login(client)
+    config = _configured_parameters(client, "PAPER")
+    response = _put(client, session, csrf, {
+        "scope": "PAPER", "expectedRevision": config["configuredRevision"],
+        "parameters": dict(config["parameters"], maximumHoldMs=60000),
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configuredSaveSuccess"] is True
+    assert body["promotion"]["outcome"] == "PROMOTED"
+    assert body["effective"]["parameters"]["maximumHoldMs"] == 60000
+    assert body["effectiveRevision"] == body["configuredRevision"]
+    assert manager._running is False and manager.engine is None
+    assert manager.config == {}
+
+
+@pytest.mark.parametrize("outcome", ["INVALID_SCOPE", "PROMOTION_ERROR", "PERSISTENCE_FAILURE", "DEFERRED_OPEN_POSITION", "DEFERRED_NOT_SAFE"])
+def test_save_success_reports_unsuccessful_promotion(client, monkeypatch, outcome):
+    from backend.api import parameter_settings as api
+    monkeypatch.setattr(api, "_attempt_stopped_promotion", lambda scope: {
+        "outcome": outcome, "promoted": False, "scope": scope,
+    })
+    session, csrf = _login(client)
+    config = _configured_parameters(client, "PAPER")
+    response = _put(client, session, csrf, {
+        "scope": "PAPER", "expectedRevision": config["configuredRevision"],
+        "parameters": dict(config["parameters"], maximumHoldMs=60000),
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configuredSaveSuccess"] is True
+    assert body["promotion"]["outcome"] == outcome
+    assert body["promotion"]["promoted"] is False
+    assert body["status"] == "PENDING"
+    assert _configured_parameters(client, "PAPER")["parameters"]["maximumHoldMs"] == 60000
+
+
+@pytest.mark.parametrize("scope", [None, "", "UNKNOWN", 42])
+def test_stopped_helper_rejects_invalid_scope(scope):
+    from backend.api.parameter_settings import _attempt_stopped_promotion
+    assert _attempt_stopped_promotion(scope)["outcome"] == "INVALID_SCOPE"
+
+
+def test_stopped_helper_exposes_manager_failure(monkeypatch):
+    from backend.api.parameter_settings import _attempt_stopped_promotion
+    from backend.bot_manager import bot_manager as module
+    def unavailable():
+        raise RuntimeError("manager unavailable")
+    monkeypatch.setattr(module, "get_existing_bot_manager", unavailable)
+    assert _attempt_stopped_promotion("PAPER")["outcome"] == "PROMOTION_ERROR"

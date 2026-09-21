@@ -4970,7 +4970,7 @@ class BotManager:
             return False
         return True
 
-    def promote_parameter_revision_if_safe(self, *, bot_stopped=None):
+    def promote_parameter_revision_if_safe(self, *, bot_stopped=None, scope=None):
         """Attempt the safe PENDING -> EFFECTIVE promotion for the bot scope.
 
         The canonical promotion authority owns the transition; this method only
@@ -4978,7 +4978,22 @@ class BotManager:
         authority when a promotion actually happens.
         """
 
-        scope = self._parameter_promotion_scope()
+        runtime_scope = self._parameter_promotion_scope()
+        if scope is not None:
+            # Only the stopped SAVE path may supply its validated scope before
+            # a runtime config exists. Never override an active/conflicting mode.
+            scope = scope.strip().upper() if isinstance(scope, str) else None
+            if scope not in ("PAPER", "LIVE"):
+                return {"outcome": "INVALID_SCOPE", "promoted": False, "scope": None}
+            if (bot_stopped is not True
+                    or getattr(self, "_running", False)
+                    or self.lifecycle_state != "STOPPED"):
+                return {"outcome": "DEFERRED_NOT_SAFE", "promoted": False, "scope": scope}
+            if (self.config.get("mode") is not None
+                    and runtime_scope != scope):
+                return {"outcome": "INVALID_SCOPE", "promoted": False, "scope": scope}
+        else:
+            scope = runtime_scope
         if scope is None:
             return {
                 "outcome": "INVALID_SCOPE",
@@ -5005,7 +5020,7 @@ class BotManager:
                 "scope": scope,
             }
         payload = result.to_dict()
-        if result.promoted:
+        if result.promoted and runtime_scope == scope:
             payload["runtimeRebuilt"] = (
                 self._rebuild_microstructure_parameter_authority()
             )
