@@ -66,3 +66,23 @@ test('LIVE and same-page query Back restoration',async({page})=>{
  await expect(page.getByTestId('th-filter-revision')).toHaveValue('3');await page.goBack();await expect(page.getByTestId('th-filter-revision')).toHaveValue('4');
  await expect.poll(()=>requests.some(r=>r.query.scope==='LIVE'&&r.query.revision==='4')).toBeTruthy();
 });
+test('custom period gates incomplete and reversed ranges without invalid requests',async({page})=>{
+ const {requests,errors}=await setup(page);await page.goto('/trade-history?scope=PAPER&revision=3');
+ const listRequests=()=>requests.filter(r=>r.path==='/api/trade-history');
+ await expect.poll(()=>listRequests().length).toBe(1);
+ await page.getByTestId('th-filter-period').selectOption('custom');
+ await page.waitForTimeout(100);expect(listRequests()).toHaveLength(1);
+ await page.getByTestId('th-filter-from').fill('2026-09-21');
+ await page.waitForTimeout(100);expect(listRequests()).toHaveLength(1);
+ await page.getByTestId('th-filter-to').fill('2026-09-20');
+ await page.waitForTimeout(100);expect(listRequests()).toHaveLength(1);
+ await page.getByTestId('th-filter-to').fill('2026-09-22');
+ await expect.poll(()=>listRequests().length).toBe(2);
+ expect(listRequests().at(-1).query).toMatchObject({period:'custom'});
+ expect(Number(listRequests().at(-1).query.fromTimestamp)).toBeLessThan(Number(listRequests().at(-1).query.toTimestamp));
+ await page.getByTestId('th-filter-from').fill('2026-09-20');
+ await expect.poll(()=>listRequests().length).toBe(3);
+ for(const period of ['today','7d','30d','90d','all']) await page.getByTestId('th-filter-period').selectOption(period);
+ await expect.poll(()=>listRequests().length).toBe(8);
+ expect(errors).toEqual([]);expect(listRequests().every(r=>r.method==='GET')).toBeTruthy();
+});

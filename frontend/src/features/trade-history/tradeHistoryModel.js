@@ -183,6 +183,19 @@ export const buildTradeHistoryQuery = (filters = {}) => {
     return params.toString();
 };
 
+export const isTradeHistoryQueryReady = (filters = {}) => {
+    if (filters.period !== "custom") return true;
+    const from = filters.fromTimestamp;
+    const to = filters.toTimestamp;
+    return (
+        typeof from === "number"
+        && Number.isFinite(from)
+        && typeof to === "number"
+        && Number.isFinite(to)
+        && from <= to
+    );
+};
+
 export const buildTradeHistoryDeeplink = (scope, revision, extra = {}) => {
     const query = buildTradeHistoryQuery({
         ...DEFAULT_FILTERS,

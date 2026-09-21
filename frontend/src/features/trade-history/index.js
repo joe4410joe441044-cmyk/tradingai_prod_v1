@@ -17,6 +17,7 @@ export {
     buildTradeHistoryDeeplink,
     buildTradeHistoryQuery,
     buildTradeHistoryViewModel,
+    isTradeHistoryQueryReady,
     buildTradeRows,
     dateInputToEpoch,
     epochToDateInput,
