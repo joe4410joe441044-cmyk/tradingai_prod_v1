@@ -111,6 +111,8 @@ const loadPage = async () => {
         "export const fetchBotStatus=async()=>({data:{},receivedAt:0});",
     );
     const code = transformed.code
+        .replace('from "../features/trade-history";', `from "${pathToFileURL(join(directory, "../features/trade-history/tradeHistoryModel.js")).href}";`)
+        .replace('from "../utils/appNavigation";', `from "${pathToFileURL(join(directory, "../utils/appNavigation.js")).href}";`)
         .replace(
             'from "../features/parameter-settings";',
             `from "${featureStub}";`,

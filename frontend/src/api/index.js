@@ -163,6 +163,16 @@ export const API = {
     join("/parameter-settings/performance/compare"),
 
   // ==========================
+  // TRADE HISTORY
+  // ==========================
+
+  tradeHistory: () =>
+    join("/trade-history"),
+
+  tradeHistoryDetail: () =>
+    join("/trade-history/detail"),
+
+  // ==========================
   // PNL
   // ==========================
 

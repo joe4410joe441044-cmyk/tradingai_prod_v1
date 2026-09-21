@@ -718,6 +718,10 @@ from backend.api.parameter_settings import (
     router as parameter_settings_router,
 )
 
+from backend.api.trade_history import (
+    router as trade_history_router,
+)
+
 from backend.api.trade_preview import (
     router as preview_router
 )
@@ -765,6 +769,10 @@ app.include_router(
 
 app.include_router(
     parameter_settings_router
+)
+
+app.include_router(
+    trade_history_router
 )
 
 app.include_router(

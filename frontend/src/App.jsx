@@ -11,6 +11,7 @@ import MarketRecorderPage from "./pages/MarketRecorderPage";
 import MoneyManagementPage from "./pages/MoneyManagementPage";
 import ParameterSettingsPage from "./pages/ParameterSettingsPage";
 import SupervisorPage from "./pages/SupervisorPage";
+import TradeHistoryPage from "./pages/TradeHistoryPage";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import {
     startWebSocketRuntime,
@@ -24,6 +25,7 @@ const MARKET_RECORDER_PATH = "/market-recorder";
 const SUPERVISOR_PATH = "/supervisor";
 const ACCOUNT_STATUS_PATH = "/account-status";
 const PARAMETER_SETTINGS_PATH = "/parameter-settings";
+const TRADE_HISTORY_PATH = "/trade-history";
 
 const resolveAppPath = (pathname) => {
     if (pathname === MARKET_INTELLIGENCE_PATH) {
@@ -46,6 +48,9 @@ const resolveAppPath = (pathname) => {
     }
     if (pathname === PARAMETER_SETTINGS_PATH) {
         return PARAMETER_SETTINGS_PATH;
+    }
+    if (pathname === TRADE_HISTORY_PATH) {
+        return TRADE_HISTORY_PATH;
     }
     return "/";
 };
@@ -73,7 +78,9 @@ export default function App() {
                             ? SupervisorPage
                             : currentPath === PARAMETER_SETTINGS_PATH
                                 ? ParameterSettingsPage
-                                : Dashboard;
+                                : currentPath === TRADE_HISTORY_PATH
+                                    ? TradeHistoryPage
+                                    : Dashboard;
     const advisorActive = currentPath === AI_ADVISOR_PATH;
 
     useEffect(() => {

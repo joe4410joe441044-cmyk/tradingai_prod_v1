@@ -8,6 +8,7 @@ import { transformWithOxc } from "vite";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const loadModule = async () => {
+    globalThis.PopStateEvent = Event;
     const source = new URL("./AppNavigation.jsx", import.meta.url);
     const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source));
     const temporary = await mkdtemp(join(directory, ".navigation-test-"));
@@ -23,6 +24,7 @@ const loadModule = async () => {
     ].join(""))}`;
     try {
         await writeFile(output, transformed.code
+            .replace('from "../utils/appNavigation";', `from "${new URL("../utils/appNavigation.js", import.meta.url).href}";`)
             .replace('from "react";', `from "${reactStub}";`)
             .replace('from "./appNavigationModel";', `from "${modelUrl}";`));
         return await import(`${pathToFileURL(output).href}?test=navigation`);
@@ -51,6 +53,7 @@ test("navigation switches all pages, exposes active state, and calls no trading 
             },
             replaceState: (_state, _title, path) => { globalThis.window.location.pathname = path; },
         },
+        dispatchEvent: event => listeners.get(event.type)?.(),
         addEventListener: (type, listener) => listeners.set(type, listener),
         removeEventListener: (type) => listeners.delete(type),
     };
@@ -75,7 +78,7 @@ test("navigation switches all pages, exposes active state, and calls no trading 
 
     nodes = descendants(AppNavigation({ currentPath: "/ai-advisor", onPathChange: (path) => paths.push(path) }));
     buttons = nodes.filter(({ type }) => type === "button");
-    assert.equal(buttons.length, 7);
+    assert.equal(buttons.length, 9);
     assert.equal(buttons[0].props["aria-current"], undefined);
     assert.equal(buttons[1].props["aria-current"], undefined);
     assert.equal(buttons[2].props["aria-current"], "page");
@@ -137,6 +140,7 @@ test("navigation labels and paths remain unique and preserve existing items", as
     globalThis.window = {
         location: { pathname: "/" },
         history: { pushState() {}, replaceState() {} },
+        dispatchEvent() {},
         addEventListener() {},
         removeEventListener() {},
     };
@@ -151,19 +155,20 @@ test("navigation labels and paths remain unique and preserve existing items", as
     assert.deepEqual(labels, [
         "DASHBOARD", "MARKET INTELLIGENCE", "AI ADVISOR",
         "MONEY MANAGEMENT", "MARKET RECORDER", "SUPERVISOR",
-        "ACCOUNT STATUS",
+        "ACCOUNT STATUS", "PARAMETER SETTINGS", "TRADE HISTORY / 取引履歴",
     ]);
     assert.equal(new Set(labels).size, labels.length);
     assert.equal(new Set(paths).size, paths.length);
     assert.equal(new Set(labels).has("ACCOUNT STATUS"), true);
     assert.equal(new Set(paths).has("/account-status"), true);
-    assert.equal(paths.at(-1), "/account-status");
+    assert.equal(paths.at(-1), "/trade-history");
 });
 
 test("tabs reorder left and right without changing identity or routes", async () => {
     globalThis.window = {
         location: { pathname: "/money-management" },
         history: { pushState() {}, replaceState() {} },
+        dispatchEvent() {},
         addEventListener() {},
         removeEventListener() {},
         setTimeout: (callback) => callback(),
@@ -230,6 +235,7 @@ test("drag handlers suppress navigation and automatically persist path order", a
     globalThis.window = {
         location: { pathname: "/" },
         history: { pushState() {}, replaceState() {} },
+        dispatchEvent() {},
         addEventListener() {},
         removeEventListener() {},
         localStorage: {
@@ -274,7 +280,7 @@ test("drag handlers suppress navigation and automatically persist path order", a
         JSON.stringify([
             "/", "/money-management", "/market-intelligence",
             "/ai-advisor", "/market-recorder", "/supervisor",
-            "/account-status",
+            "/account-status", "/parameter-settings", "/trade-history",
         ]),
     ]]);
     buttons[1].props.onDrop({ preventDefault() {} });
@@ -292,6 +298,7 @@ test("saved order restores canonical tabs, routes, and active identity", async (
     globalThis.window = {
         location: { pathname: "/money-management" },
         history: { pushState() {}, replaceState() {} },
+        dispatchEvent() {},
         addEventListener() {},
         removeEventListener() {},
         localStorage: {
@@ -315,7 +322,7 @@ test("saved order restores canonical tabs, routes, and active identity", async (
     assert.deepEqual(buttons.map(({ props }) => props.children), [
         "DASHBOARD", "MONEY MANAGEMENT", "MARKET INTELLIGENCE",
         "AI ADVISOR", "MARKET RECORDER", "SUPERVISOR",
-        "ACCOUNT STATUS",
+        "ACCOUNT STATUS", "PARAMETER SETTINGS", "TRADE HISTORY / 取引履歴",
     ]);
     assert.equal(buttons[1].props["aria-current"], "page");
     buttons[1].props.onClick();
