@@ -50,7 +50,7 @@ export default function DiagnosticsPanel({ runtimeHealth, displayedBlockingReaso
     });
 
     if (!engineHealthy && isMeaningful(engineStatus)) {
-        diagnostics.push({ type: "ENGINE", label: "RUNTIME ENGINE", value: engineStatus, tone: "diag-danger" });
+        diagnostics.push({ type: "ENGINE", label: "STRATEGY LOOP", value: engineStatus, tone: "diag-danger" });
     }
 
     if (exchangeWsConnected === false && runtimeHealth?.running) {

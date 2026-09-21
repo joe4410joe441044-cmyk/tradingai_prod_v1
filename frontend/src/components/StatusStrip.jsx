@@ -4,7 +4,9 @@ export default function StatusStrip({ runtimeHealth }) {
 
     const botStatus = runtimeHealth.running ? "RUNNING" : "STOPPED";
     const wsStatus = runtimeHealth.browserWebSocket.status;
-    const engineStatus = runtimeHealth.runtimeEngine.status;
+    // The backend runtimeEngine field describes the strategy loop,
+    // independently of the attached ExecutionEngine and bot lifecycle.
+    const strategyLoopStatus = runtimeHealth.runtimeEngine.status;
     const latency = formatLatency(runtimeHealth.latencyMs);
     const mode = runtimeHealth.mode;
 
@@ -74,19 +76,19 @@ export default function StatusStrip({ runtimeHealth }) {
             </div>
 
             {/* ============================================= */}
-            {/* ENGINE */}
+            {/* STRATEGY LOOP */}
             {/* ============================================= */}
 
             <div className="status-item">
 
                 <span className="status-label">
-                    RUNTIME ENGINE
+                    STRATEGY LOOP
                 </span>
 
                 <span
                     className={
                         `status-value ${
-                            engineStatus === "ACTIVE"
+                            strategyLoopStatus === "ACTIVE"
                                 ? "online"
                                 : "warning"
                         }`
@@ -94,7 +96,7 @@ export default function StatusStrip({ runtimeHealth }) {
                 >
 
                     {
-                        engineStatus
+                        strategyLoopStatus
                     }
 
                 </span>
