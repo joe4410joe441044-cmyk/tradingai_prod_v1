@@ -6,6 +6,7 @@ import {
 } from "./tradeHistoryApi.js";
 import {
     DEFAULT_FILTERS,
+    isTradeHistoryQueryReady,
     parseTradeHistoryQuery,
 } from "./tradeHistoryModel.js";
 
@@ -38,6 +39,11 @@ export function useTradeHistory(initialSearch = "") {
     }, []);
 
     useEffect(() => {
+        if (!isTradeHistoryQueryReady(filters)) {
+            setLoading(false);
+            setError(null);
+            return undefined;
+        }
         let active = true;
         (async () => {
             setLoading(true);

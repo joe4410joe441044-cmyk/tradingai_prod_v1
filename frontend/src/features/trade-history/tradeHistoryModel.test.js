@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildTradeHistoryQuery, parseTradeHistoryQuery, buildTradeRows, buildFilterOptions, buildTradeHistoryViewModel, buildParameterSettingsDeeplink, buildTradeHistoryDeeplink } from './tradeHistoryModel.js';
+import { buildTradeHistoryQuery, parseTradeHistoryQuery, buildTradeRows, buildFilterOptions, buildTradeHistoryViewModel, buildParameterSettingsDeeplink, buildTradeHistoryDeeplink, isTradeHistoryQueryReady } from './tradeHistoryModel.js';
 
 test('all query filters roundtrip and exact scope/revision deeplink', () => {
     const input={period:'custom',scope:'PAPER',mode:'paper',symbol:'XRPUSDT',side:'BUY',result:'WIN',revision:3,exitReason:'MANUAL_CLOSE',controlSource:'MANUAL',fromTimestamp:10,toTimestamp:20,sort:'effectiveRevision',direction:'asc',page:2,pageSize:10};
@@ -30,4 +30,16 @@ test('loading error empty and filtered summary are preserved', () => {
     assert.equal(buildTradeHistoryViewModel().available,false);
     const view=buildTradeHistoryViewModel({data:{available:true,metrics:{tradeCount:20},records:[{}],pagination:{page:2,pageSize:10,total:20,pageCount:2}}});
     assert.equal(view.metrics.tradeCount,20); assert.equal(view.pagination.rangeStart,11);
+});
+
+test('custom history queries wait for a complete ordered finite range', () => {
+    assert.equal(isTradeHistoryQueryReady({period:'custom'}), false);
+    assert.equal(isTradeHistoryQueryReady({period:'custom',fromTimestamp:10}), false);
+    assert.equal(isTradeHistoryQueryReady({period:'custom',toTimestamp:20}), false);
+    assert.equal(isTradeHistoryQueryReady({period:'custom',fromTimestamp:20,toTimestamp:10}), false);
+    assert.equal(isTradeHistoryQueryReady({period:'custom',fromTimestamp:10,toTimestamp:20}), true);
+    assert.equal(isTradeHistoryQueryReady({period:'custom',fromTimestamp:10,toTimestamp:30}), true);
+    for (const period of ['today','7d','30d','90d','all']) {
+        assert.equal(isTradeHistoryQueryReady({period}), true);
+    }
 });
