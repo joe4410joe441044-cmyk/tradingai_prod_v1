@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { navigateTo } from "../utils/appNavigation";
+
 import {
     loadNavigationItems,
     reorderAndPersistNavigationItems,
@@ -13,6 +15,7 @@ const MARKET_RECORDER_PATH = "/market-recorder";
 const SUPERVISOR_PATH = "/supervisor";
 const ACCOUNT_STATUS_PATH = "/account-status";
 const PARAMETER_SETTINGS_PATH = "/parameter-settings";
+const TRADE_HISTORY_PATH = "/trade-history";
 
 const APP_PATHS = new Set([
     DASHBOARD_PATH,
@@ -23,6 +26,7 @@ const APP_PATHS = new Set([
     SUPERVISOR_PATH,
     ACCOUNT_STATUS_PATH,
     PARAMETER_SETTINGS_PATH,
+    TRADE_HISTORY_PATH,
 ]);
 
 const resolveAppPath = (pathname) => (
@@ -38,6 +42,7 @@ const NAVIGATION_ITEMS = [
     { label: "SUPERVISOR", path: SUPERVISOR_PATH },
     { label: "ACCOUNT STATUS", path: ACCOUNT_STATUS_PATH },
     { label: "PARAMETER SETTINGS", path: PARAMETER_SETTINGS_PATH },
+    { label: "TRADE HISTORY / 取引履歴", path: TRADE_HISTORY_PATH },
 ];
 
 export function NavigationTabs({
@@ -124,8 +129,7 @@ export default function AppNavigation({ currentPath, onPathChange }) {
             return;
         }
 
-        window.history.pushState({}, "", path);
-        onPathChange(path);
+        navigateTo(path);
     };
 
     const moveDraggedTab = (targetPath) => {

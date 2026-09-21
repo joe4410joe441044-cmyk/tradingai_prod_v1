@@ -79,7 +79,7 @@ def test_registry_units_and_ranges():
         "maximumStrategySpreadPct": ("percent (0-100 scale)", 0.0, 5.0, False, True),
         "momentumWindowSeconds": ("seconds", 5.0, 600.0, True, True),
         "minimumStrategyConfidence": ("normalized score (0.0-1.0)", 0.0, 1.0, True, True),
-        "maximumHoldMs": ("milliseconds", 100.0, 60000.0, True, True),
+        "maximumHoldMs": ("milliseconds", 100.0, None, True, True),
         "minimumHoldMs": ("milliseconds", 0.0, 60000.0, True, True),
         "exitMomentumMinimum": ("normalized score (0.0-1.0)", 0.0, 1.0, True, True),
         "exitLiquidityQualityMinimum": ("normalized score (0.0-1.0)", 0.0, 1.0, True, True),

@@ -111,6 +111,8 @@ const loadPage = async () => {
         "export const fetchBotStatus=async()=>({data:{},receivedAt:0});",
     );
     const code = transformed.code
+        .replace('from "../features/trade-history";', `from "${pathToFileURL(join(directory, "../features/trade-history/tradeHistoryModel.js")).href}";`)
+        .replace('from "../utils/appNavigation";', `from "${pathToFileURL(join(directory, "../utils/appNavigation.js")).href}";`)
         .replace(
             'from "../features/parameter-settings";',
             `from "${featureStub}";`,
@@ -136,7 +138,7 @@ const schema = {
         { name: "maximumStrategySpreadPct", labelEn: "Maximum Strategy Spread", labelJa: "最大スプレッド", unit: "percent (0-100 scale)", minimum: 0, maximum: 5, minimumInclusive: false, maximumInclusive: true, precision: 6, valueType: "float", tier: "PRIMARY", editable: true, description: "spread" },
         { name: "momentumWindowSeconds", labelEn: "Momentum Window", labelJa: "モメンタム窓", unit: "seconds", minimum: 5, maximum: 600, minimumInclusive: true, maximumInclusive: true, precision: 6, valueType: "float", tier: "PRIMARY", editable: true, description: "momentum" },
         { name: "minimumStrategyConfidence", labelEn: "Minimum Confidence", labelJa: "最小信頼度", unit: "normalized score (0.0-1.0)", minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true, precision: 6, valueType: "float", tier: "PRIMARY", editable: true, description: "confidence" },
-        { name: "maximumHoldMs", labelEn: "Maximum Hold", labelJa: "最大保有時間", unit: "milliseconds", minimum: 100, maximum: 60000, minimumInclusive: true, maximumInclusive: true, precision: 0, valueType: "int", tier: "PRIMARY", editable: true, description: "hold" },
+        { name: "maximumHoldMs", labelEn: "Maximum Hold", labelJa: "最大保有時間", unit: "milliseconds", minimum: 100, maximum: null, minimumInclusive: true, maximumInclusive: true, precision: 0, valueType: "int", tier: "PRIMARY", editable: true, description: "hold" },
         { name: "minimumHoldMs", labelEn: "Minimum Hold", labelJa: "最小保有時間", unit: "milliseconds", minimum: 0, maximum: 60000, minimumInclusive: true, maximumInclusive: true, precision: 0, valueType: "int", tier: "ADVANCED", editable: true, description: "min hold" },
         { name: "exitMomentumMinimum", labelEn: "Exit Momentum Minimum", labelJa: "決済モメンタム下限", unit: "normalized score (0.0-1.0)", minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true, precision: 6, valueType: "float", tier: "ADVANCED", editable: true, description: "exit momentum" },
         { name: "exitLiquidityQualityMinimum", labelEn: "Exit Liquidity Quality Minimum", labelJa: "決済流動性品質下限", unit: "normalized score (0.0-1.0)", minimum: 0, maximum: 1, minimumInclusive: true, maximumInclusive: true, precision: 6, valueType: "float", tier: "ADVANCED", editable: true, description: "exit liquidity" },
@@ -575,6 +577,55 @@ test("409 conflict and 422 validation are rendered", async (context) => {
         /configuration failed canonical validation/,
     );
     assert.match(textOf(invalidTree), /must be >= 0/);
+});
+
+test("canonical validation errors show the parameter and safe reason", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        saveState: {
+            phase: "INVALID",
+            backend: {
+                code: "INVALID_CONFIGURATION",
+                message: "configuration failed canonical validation",
+                validation: {
+                    isValid: false,
+                    errors: [{
+                        code: "INVALID_TYPE",
+                        parameter: "maximumHoldMs",
+                        message: "maximumHoldMs must be a finite numeric value, got str",
+                    }],
+                    warnings: [],
+                },
+            },
+        },
+    });
+    assert.ok(findByTestId(tree, "save-invalid"));
+    assert.ok(findByTestId(tree, "save-invalid-details"));
+    const text = textOf(tree);
+    assert.match(text, /maximumHoldMs:\s+maximumHoldMs must be a finite numeric value, got str/);
+    assert.doesNotMatch(text, /stack|Traceback|token|cookie/i);
+});
+
+test("unknown canonical validation failure falls back safely", async (context) => {
+    const page = await loadPage();
+    if (!page) {
+        context.skip("vite is not installed in this workspace");
+        return;
+    }
+    const tree = page.ParameterSettingsView({
+        ...baseProps,
+        saveState: { phase: "INVALID" },
+    });
+    assert.match(
+        textOf(tree),
+        /Validation failed\. Fix the highlighted values\./,
+    );
+    assert.equal(findByTestId(tree, "save-invalid-details"), null);
 });
 
 const ADVANCED_NAMES = [

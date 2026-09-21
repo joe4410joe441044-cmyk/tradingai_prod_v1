@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
     getParameterSettingsConfiguration,
@@ -37,7 +37,10 @@ export function useParameterSettings(initialScope = "PAPER") {
     const [saveState, setSaveState] = useState({ phase: "IDLE" });
     const [conflict, setConflict] = useState(null);
 
+    const generation = useRef(0);
+
     const loadScope = useCallback(async (nextScope) => {
+        const requestGeneration = ++generation.current;
         setLoading(true);
         const [configurationResult, effectiveResult, runtimeResult] = (
             await Promise.all([
@@ -46,6 +49,7 @@ export function useParameterSettings(initialScope = "PAPER") {
                 getParameterSettingsRuntime(nextScope),
             ])
         );
+        if (requestGeneration !== generation.current) return;
         const configurationBody = configurationResult?.ok
             ? configurationResult.body
             : null;
@@ -74,13 +78,17 @@ export function useParameterSettings(initialScope = "PAPER") {
 
     useEffect(() => {
         loadScope(scope);
+        return () => { generation.current += 1; };
     }, [scope, loadScope]);
 
     const setScope = useCallback((nextScope) => {
+        if (normalizeScope(nextScope) === scope) return;
+        generation.current += 1;
+        setLoading(true);
         setSaveState({ phase: "IDLE" });
         setConflict(null);
         setScopeState(normalizeScope(nextScope));
-    }, []);
+    }, [scope]);
 
     const changeDraft = useCallback((name, value) => {
         setDraft((current) => applyDraftChange(current, name, value));
@@ -94,22 +102,34 @@ export function useParameterSettings(initialScope = "PAPER") {
             setSaveState({ phase: "INVALID", fieldErrors });
             return { ok: false, reason: "FRONTEND_VALIDATION" };
         }
+        const saveGeneration = ++generation.current;
         setSaveState({ phase: "SAVING" });
         const result = await performSave({
             scope,
             parameters: draft,
             expectedRevision: configuration?.configuredRevision,
             confirmLive,
+            schema,
             api: {
                 updateConfiguration: updateParameterSettingsConfiguration,
+                getConfiguration: getParameterSettingsConfiguration,
             },
         });
+        if (saveGeneration !== generation.current) return { ok: false, reason: "SCOPE_CHANGED" };
         if (result.ok) {
+            const [effectiveResult, runtimeResult] = await Promise.all([
+                getParameterSettingsEffective(scope),
+                getParameterSettingsRuntime(scope),
+            ]);
+            if (saveGeneration !== generation.current) return { ok: false, reason: "SCOPE_CHANGED" };
+            setConfiguration(result.configuration);
+            setDraft(draftFromConfiguration(result.configuration));
+            setEffective(effectiveResult?.ok ? effectiveResult.body : null);
+            setRuntime(runtimeResult?.ok ? runtimeResult.body : null);
             setSaveState({
                 phase: "SAVED",
                 warnings: result.body?.warnings ?? [],
             });
-            await loadScope(scope);
             return { ok: true, body: result.body };
         }
         if (result.status === 409) {
@@ -123,7 +143,7 @@ export function useParameterSettings(initialScope = "PAPER") {
         }
         setSaveState({ phase: "ERROR", message: result.message });
         return { ok: false, reason: "ERROR", body: result.body };
-    }, [scope, draft, schema, configuration, loadScope]);
+    }, [scope, draft, schema, configuration]);
 
     return {
         scope,

@@ -641,3 +641,19 @@ def test_safety_exit_precedence_preserved(tmp_path):
     assert len(engine.trade_history) == 1
     # SL retains precedence over any canonical strategy exit threshold.
     assert engine.trade_history[0]["reason"] == "SL"
+
+
+@pytest.mark.parametrize("hold", [60000, 90000, 120000])
+def test_max_hold_uses_configured_value_above_old_ceiling(hold):
+    strategy = MicrostructureEdgeStrategy()
+    snapshot = _snapshot(maximumHoldMs=hold, minimumHoldMs=500)
+    for age, expected in [(hold - 1, "HOLD"), (hold, "MAX_HOLD")]:
+        now = 1000.0 + age / 1000.0
+        decision = strategy.evaluate_exit(
+            _exit_state(timestamp=now),
+            _exit_position(evaluatedAt=now, parameterSnapshot=snapshot),
+        )
+        if expected == "HOLD":
+            assert decision.decision == "HOLD"
+        else:
+            assert decision.reason == "MAX_HOLD"

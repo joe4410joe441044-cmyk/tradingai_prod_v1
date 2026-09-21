@@ -157,6 +157,9 @@ export const formatParameterValue = (metadata, value) => {
 export const describeParameterConstraint = (metadata) => {
     if (!metadata) return null;
     const lower = metadata.minimumInclusive === false ? ">" : ">=";
+    if (metadata.maximum == null) {
+        return `${lower} ${metadata.minimum} ${metadata.unit ?? ""}`.trim();
+    }
     const upper = metadata.maximumInclusive === false ? "<" : "<=";
     return `${lower} ${metadata.minimum} and ${upper} ${metadata.maximum} ${metadata.unit ?? ""}`.trim();
 };
@@ -178,9 +181,9 @@ export const validateDraftValue = (metadata, value) => {
     if (!aboveMinimum) {
         return `must be ${metadata?.minimumInclusive === false ? ">" : ">="} ${metadata.minimum}`;
     }
-    const belowMaximum = metadata?.maximumInclusive === false
+    const belowMaximum = metadata?.maximum == null || (metadata.maximumInclusive === false
         ? numeric < metadata.maximum
-        : numeric <= metadata.maximum;
+        : numeric <= metadata.maximum);
     if (!belowMaximum) {
         return `must be ${metadata?.maximumInclusive === false ? "<" : "<="} ${metadata.maximum}`;
     }
@@ -259,15 +262,60 @@ export const countAdvancedParameters = (schema) => (
     splitSchema(schema).advanced.length
 );
 
+/* The canonical schema metadata (valueType) is the single authority for the
+   serialized JSON type. DOM inputs always yield strings, so the draft is
+   normalized to the canonical type before it is placed on the wire. Invalid
+   input is preserved verbatim rather than coerced (never to 0/NaN/null) so it
+   remains detectable and the backend canonical validator stays authoritative. */
+const canonicalValueType = (metadata) => {
+    const valueType = metadata?.valueType;
+    return typeof valueType === "string" ? valueType.trim().toLowerCase() : null;
+};
+
+export const normalizeParameterValue = (metadata, value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value === "string" && value.trim() === "") return value;
+
+    const valueType = canonicalValueType(metadata);
+    if (valueType === "int" || valueType === "float") {
+        const numeric = typeof value === "number" ? value : Number(value);
+        if (!Number.isFinite(numeric)) return value;
+        if (valueType === "int") {
+            return Number.isInteger(numeric) ? numeric : value;
+        }
+        return numeric;
+    }
+    if (valueType === "bool" || valueType === "boolean") {
+        if (typeof value === "boolean") return value;
+        if (value === "true" || value === 1 || value === "1") return true;
+        if (value === "false" || value === 0 || value === "0") return false;
+        return value;
+    }
+    return value;
+};
+
+export const normalizeDraftForSave = (schema, parameters = {}) => {
+    const normalized = { ...(parameters ?? {}) };
+    for (const metadata of schemaParameters(schema)) {
+        if (!(metadata.name in normalized)) continue;
+        normalized[metadata.name] = normalizeParameterValue(
+            metadata,
+            normalized[metadata.name],
+        );
+    }
+    return normalized;
+};
+
 export const buildConfigurationPayload = ({
     scope,
     parameters,
     expectedRevision,
     confirmLive = false,
+    schema = null,
 }) => {
     const payload = {
         scope: normalizeScope(scope),
-        parameters: { ...(parameters ?? {}) },
+        parameters: normalizeDraftForSave(schema, parameters),
         expectedRevision,
     };
     if (isLiveScope(scope)) {
@@ -384,6 +432,7 @@ export const performSave = async ({
     parameters,
     expectedRevision,
     confirmLive = false,
+    schema = null,
     api,
 }) => {
     if (typeof api?.updateConfiguration !== "function") {
@@ -394,13 +443,42 @@ export const performSave = async ({
         parameters,
         expectedRevision,
         confirmLive,
+        schema,
     });
     const response = await api.updateConfiguration(payload);
     if (response?.ok) {
+        const accepted = response.body?.configuration;
+        const matches = (configuration) => (
+            configuration?.scope === payload.scope
+            && configuration?.storeStatus === "VALID"
+            && configuration?.configuredRevision === payload.expectedRevision + 1
+            && Object.entries(payload.parameters).every(([name, value]) => (
+                configuration?.parameters?.[name] === value
+            ))
+        );
+        const failed = () => ({
+            ok: false,
+            status: 0,
+            code: "CONFIGURATION_READBACK_FAILED",
+            message: "Save could not be verified against configured state. Reload before retrying.",
+            body: response.body,
+        });
+        if (response.body?.code !== "CONFIGURATION_ACCEPTED"
+            || response.body?.configuredRevision !== accepted?.configuredRevision
+            || !matches(accepted)
+            || typeof api.getConfiguration !== "function") return failed();
+        let readback;
+        try {
+            readback = await api.getConfiguration(payload.scope);
+        } catch {
+            return failed();
+        }
+        if (!readback?.ok || !matches(readback.body)) return failed();
         return {
             ok: true,
             status: response.status,
             body: response.body,
+            configuration: readback.body,
         };
     }
     return {

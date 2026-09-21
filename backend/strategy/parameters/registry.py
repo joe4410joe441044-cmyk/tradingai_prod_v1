@@ -55,7 +55,7 @@ class ParameterMetadata:
     label_ja: str
     unit: str
     minimum: float
-    maximum: float
+    maximum: Optional[float]
     minimum_inclusive: bool
     maximum_inclusive: bool
     precision: int
@@ -75,6 +75,8 @@ class ParameterMetadata:
                 return False
         elif value <= self.minimum:
             return False
+        if self.maximum is None:
+            return True
         if self.maximum_inclusive:
             if value > self.maximum:
                 return False
@@ -96,7 +98,7 @@ def _meta(
     label_ja: str,
     unit: str,
     minimum: float,
-    maximum: float,
+    maximum: Optional[float],
     *,
     minimum_inclusive: bool = True,
     maximum_inclusive: bool = True,
@@ -208,7 +210,7 @@ class StrategyParameterRegistry:
             "最大保有時間",
             "milliseconds",
             100.0,
-            60000.0,
+            None,
             precision=0,
             value_type=ValueType.INTEGER,
             coupling_group=CouplingGroup.HOLDING_TIME,

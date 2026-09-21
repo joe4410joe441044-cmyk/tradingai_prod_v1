@@ -93,6 +93,26 @@ ORIGIN_PRODUCTION = "PRODUCTION"
 ORIGIN_NON_PRODUCTION = "NON_PRODUCTION"
 SUPPORTED_ORIGINS = (ORIGIN_PRODUCTION, ORIGIN_NON_PRODUCTION)
 
+# ---------------------------------------------------------------------------
+# Control-source contract
+# ---------------------------------------------------------------------------
+# A completed-trade record carries an explicit ``controlSource`` describing who
+# controlled the ENTRY of the trade:
+#
+#   controlSource = "BOT"     -> automatic strategy entry (default runtime)
+#   controlSource = "MANUAL"  -> human MANUAL entry authority
+#
+# The value is normalized once, at write time, from an explicit source field.
+# It is never inferred from the tradeId string and it is never recomputed at
+# read time.  Legacy records written before this field existed have no
+# ``controlSource``; they are reported as unavailable rather than assumed BOT.
+CONTROL_SOURCE_FIELD = "controlSource"
+CONTROL_SOURCE_BOT = "BOT"
+CONTROL_SOURCE_MANUAL = "MANUAL"
+SUPPORTED_CONTROL_SOURCES = (CONTROL_SOURCE_BOT, CONTROL_SOURCE_MANUAL)
+_CONTROL_SOURCE_MANUAL_ALIASES = ("MANUAL", "HUMAN")
+_CONTROL_SOURCE_BOT_ALIASES = ("BOT", "AUTO", "AUTOMATIC", "STRATEGY")
+
 
 def resolve_record_origin() -> str:
     """Resolve the durable origin for a newly written completed-trade record."""
@@ -127,7 +147,8 @@ def is_production_eligible(record: Mapping[str, Any]) -> bool:
     origin = record.get(ORIGIN_FIELD)
     if origin == ORIGIN_PRODUCTION:
         return True
-    if origin == ORIGIN_NON_PRODUCTION:
+    if ORIGIN_FIELD in record:
+        # Explicit TEST/unknown provenance must never use the legacy rule.
         return False
     revision = record.get("effectiveRevision")
     if isinstance(revision, bool) or not isinstance(revision, int):
@@ -166,6 +187,35 @@ def _first(record: Mapping[str, Any], keys) -> Any:
         if value is not None:
             return value
     return None
+
+
+def normalize_control_source(record: Mapping[str, Any]) -> str:
+    """Normalize the entry control source to ``BOT`` / ``MANUAL`` / ``UNKNOWN``.
+
+    Accepts the canonical ``controlSource`` plus the engine's ``entryAuthority``
+    / ``entry_authority`` signals.  An absent or unrecognized value returns
+    ``UNKNOWN`` (unavailable); it is never guessed.
+    """
+
+    if not isinstance(record, Mapping):
+        return "UNKNOWN"
+    raw = _first(
+        record,
+        (
+            CONTROL_SOURCE_FIELD,
+            "control_source",
+            "entryAuthority",
+            "entry_authority",
+        ),
+    )
+    if not isinstance(raw, str):
+        return "UNKNOWN"
+    normalized = raw.strip().upper()
+    if normalized in _CONTROL_SOURCE_MANUAL_ALIASES:
+        return CONTROL_SOURCE_MANUAL
+    if normalized in _CONTROL_SOURCE_BOT_ALIASES:
+        return CONTROL_SOURCE_BOT
+    return "UNKNOWN"
 
 
 def build_completed_trade_record(
@@ -210,6 +260,7 @@ def build_completed_trade_record(
         source_record, ("effectiveRevision", "parameterRevision")
     )
     configured_revision = source_record.get("configuredRevision")
+    control_source = normalize_control_source(source_record)
 
     entry_timestamp = _first(source_record, ("openedAt", "entry_time"))
     exit_timestamp = _first(source_record, ("closedAt", "exit_time"))
@@ -271,6 +322,7 @@ def build_completed_trade_record(
         "mode": mode,
         "symbol": source_record.get("symbol"),
         "side": source_record.get("side"),
+        "controlSource": control_source,
         "parameterSetId": source_record.get("parameterSetId"),
         "configuredRevision": configured_revision,
         "effectiveRevision": effective_revision,

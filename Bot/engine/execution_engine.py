@@ -2895,6 +2895,16 @@ class ExecutionEngine:
         if not isinstance(record, dict) or not isinstance(position_before, dict):
             return record
 
+        # Explicit entry control source: a human MANUAL entry is distinguished
+        # from the automatic BOT strategy entry.  Metadata only; it never changes
+        # an order, a close, a quantity or any authority.
+        entry_authority = str(
+            position_before.get("entry_authority") or ""
+        ).strip().upper()
+        record["controlSource"] = (
+            entry_authority if entry_authority in ("MANUAL", "BOT") else "UNKNOWN"
+        )
+
         snapshot = position_before.get("parameter_snapshot")
         if not isinstance(snapshot, dict) or not snapshot:
             return record

@@ -30,6 +30,8 @@ import {
     useParameterPerformance,
     useParameterSettings,
 } from "../features/parameter-settings";
+import { buildTradeHistoryDeeplink } from "../features/trade-history";
+import { navigateTo } from "../utils/appNavigation";
 
 /* =================================================
    PARAMETER SETTINGS（パラメーター設定）
@@ -1015,10 +1017,20 @@ function PerformanceMetric({ metric }) {
     );
 }
 
-function RevisionHistoryCard({ revision }) {
+function RevisionHistoryCard({ revision, focusRevision = null }) {
+    const focused = (
+        focusRevision !== null
+        && focusRevision !== undefined
+        && Number(focusRevision) === Number(revision.effectiveRevision)
+    );
     return (
         <li
-            className="ps-performance__revision"
+            className={
+                "ps-performance__revision"
+                + (focused ? " ps-performance__revision--focused" : "")
+            }
+            tabIndex={focused ? -1 : undefined}
+            data-focused={focused ? "true" : undefined}
             data-testid={`performance-revision-${revision.scope}-${revision.effectiveRevision}`}
         >
             <header className="ps-performance__revision-head">
@@ -1085,6 +1097,7 @@ function ParameterPerformanceSection({
     onRevisionBChange = () => {},
     comparisonLoading = false,
     comparisonError = null,
+    focusRevision = null,
 }) {
     const canCompare = view.revisionOptions.length >= 2;
     return (
@@ -1099,6 +1112,19 @@ function ParameterPerformanceSection({
                     </span>
                     <h2>PARAMETER PERFORMANCE（パラメーター実績）</h2>
                 </div>
+                <button
+                    type="button"
+                    className="ps-performance__cross-link"
+                    data-testid="parameter-settings-to-trade-history"
+                    onClick={() => navigateTo(
+                        buildTradeHistoryDeeplink(
+                            view.scope,
+                            view.selectedRevision,
+                        ),
+                    )}
+                >
+                    OPEN IN TRADE HISTORY（取引履歴で開く）
+                </button>
                 <span className="semantic-badge">READ ONLY</span>
             </header>
 
@@ -1187,6 +1213,7 @@ function ParameterPerformanceSection({
                                     <RevisionHistoryCard
                                         key={revision.key}
                                         revision={revision}
+                                        focusRevision={focusRevision}
                                     />
                                 ))}
                             </ul>
@@ -1436,6 +1463,7 @@ export function ParameterSettingsView({
     revisionB = null,
     onRevisionAChange = () => {},
     onRevisionBChange = () => {},
+    focusRevision = null,
 }) {
     const sources = { configured: configuration, effective, runtime };
     const rows = buildParameterRows(schema, sources);
@@ -1735,17 +1763,47 @@ export function ParameterSettingsView({
                         )}
                         {saveState?.phase === "SAVED" && (
                             <span data-testid="save-saved">
-                                Saved (revision pending).
+                                {!Number.isInteger(effective?.effectiveRevision)
+                                    ? "Saved (effective state unavailable)."
+                                    : effective.effectiveRevision >= configuration?.configuredRevision
+                                        ? "Saved (effective)."
+                                        : "Saved (effective promotion pending)."}
                             </span>
                         )}
                         {saveState?.phase === "INVALID" && (
-                            <span
+                            <div
                                 className="ps-save__error"
                                 data-testid="save-invalid"
                             >
-                                {saveState?.backend?.message
-                                    ?? "Validation failed. Fix the highlighted values."}
-                            </span>
+                                <span>
+                                    {saveState?.backend?.message
+                                        ?? "Validation failed. Fix the highlighted values."}
+                                </span>
+                                {Array.isArray(
+                                    saveState?.backend?.validation?.errors,
+                                )
+                                    && saveState.backend.validation.errors.length > 0 && (
+                                    <ul
+                                        className="ps-save__validation"
+                                        data-testid="save-invalid-details"
+                                    >
+                                        {saveState.backend.validation.errors.map(
+                                            (error, index) => (
+                                                <li
+                                                    key={`${error?.code ?? "ERROR"}-${error?.parameter ?? index}`}
+                                                >
+                                                    {error?.parameter
+                                                        ? `${error.parameter}: `
+                                                        : ""}
+                                                    {error?.message
+                                                        ?? error?.code
+                                                        ?? "invalid value"}
+                                                </li>
+                                            ),
+                                        )}
+                                    </ul>
+                                )}
+                            </div>
                         )}
                         {saveState?.phase === "ERROR" && (
                             <span
@@ -1816,6 +1874,7 @@ export function ParameterSettingsView({
             {/* PARAMETER PERFORMANCE — read-only observed history */}
             <ParameterPerformanceSection
                 view={performanceView}
+                focusRevision={focusRevision}
                 revisionA={revisionA}
                 revisionB={revisionB}
                 onRevisionAChange={onRevisionAChange}
@@ -1940,11 +1999,22 @@ export function ParameterSettingsView({
 }
 
 export default function ParameterSettingsPage() {
-    const controller = useParameterSettings(PARAMETER_SETTINGS_SCOPE.PAPER);
+    const [search, setSearch] = useState(() => window.location.search);
+    const query = new URLSearchParams(search);
+    const queryScope = query.get("scope") === "LIVE" ? "LIVE" : "PAPER";
+    const queryRevision = query.get("revision");
+    const focusRevision = /^\d+$/.test(queryRevision ?? "") && Number(queryRevision) > 0 ? Number(queryRevision) : null;
+    const controller = useParameterSettings(queryScope);
+    useEffect(() => {
+        const sync = () => setSearch(window.location.search);
+        window.addEventListener("popstate", sync);
+        return () => window.removeEventListener("popstate", sync);
+    }, []);
+    useEffect(() => { controller.setScope(queryScope); }, [queryScope, controller.setScope]);
     // The headline Parameter Performance population is the currently selected
     // parameter set (the effective revision), never a scope-wide aggregate.
     const selectedRevision = (
-        controller.effective?.effectiveRevision
+        focusRevision ?? controller.effective?.effectiveRevision
         ?? controller.configuration?.effectiveRevision
         ?? null
     );
@@ -1952,6 +2022,12 @@ export default function ParameterSettingsPage() {
         controller.scope,
         selectedRevision,
     );
+    useEffect(() => {
+        if (focusRevision === null || performance.loading) return;
+        const target = document.querySelector(`[data-testid="performance-revision-${controller.scope}-${focusRevision}"]`);
+        target?.scrollIntoView?.({ block: "center" });
+        target?.focus?.();
+    }, [focusRevision, controller.scope, performance.loading]);
     const { data } = usePolling(fetchBotStatus, 5000);
     const [liveConfirmationOpen, setLiveConfirmationOpen] = useState(false);
     const [authorityExpanded, setAuthorityExpanded] = useState(false);
@@ -2019,7 +2095,8 @@ export default function ParameterSettingsPage() {
     return (
         <ParameterSettingsView
             scope={controller.scope}
-            onScopeChange={controller.setScope}
+            onScopeChange={scope => navigateTo(`/parameter-settings?scope=${scope}`)}
+            focusRevision={focusRevision}
             schema={controller.schema}
             configuration={controller.configuration}
             effective={controller.effective}

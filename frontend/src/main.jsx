@@ -14,6 +14,7 @@ import "./styles/money-management.css";
 import "./styles/operation-preparation.css";
 import "./styles/help.css";
 import "./styles/parameter-settings.css";
+import "./styles/trade-history.css";
 
 const HTTPS_ENFORCEMENT_EXCLUDED_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 

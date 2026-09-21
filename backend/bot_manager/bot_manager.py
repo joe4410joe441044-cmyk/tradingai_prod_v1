@@ -56,6 +56,10 @@ from backend.utils.log_buffer import (
     ws_debug,
 )
 
+from backend.config import (
+    paper_manual_exit_grace_ms,
+)
+
 from backend.bot_manager.runtime_state import (
     BotRuntimeState
 )
@@ -4736,7 +4740,7 @@ class BotManager:
             return False
         return True
 
-    def promote_parameter_revision_if_safe(self, *, bot_stopped=None):
+    def promote_parameter_revision_if_safe(self, *, bot_stopped=None, scope=None):
         """Attempt the safe PENDING -> EFFECTIVE promotion for the bot scope.
 
         The canonical promotion authority owns the transition; this method only
@@ -4744,7 +4748,22 @@ class BotManager:
         authority when a promotion actually happens.
         """
 
-        scope = self._parameter_promotion_scope()
+        runtime_scope = self._parameter_promotion_scope()
+        if scope is not None:
+            # Only the stopped SAVE path may supply its validated scope before
+            # a runtime config exists. Never override an active/conflicting mode.
+            scope = scope.strip().upper() if isinstance(scope, str) else None
+            if scope not in ("PAPER", "LIVE"):
+                return {"outcome": "INVALID_SCOPE", "promoted": False, "scope": None}
+            if (bot_stopped is not True
+                    or getattr(self, "_running", False)
+                    or self.lifecycle_state != "STOPPED"):
+                return {"outcome": "DEFERRED_NOT_SAFE", "promoted": False, "scope": scope}
+            if (self.config.get("mode") is not None
+                    and runtime_scope != scope):
+                return {"outcome": "INVALID_SCOPE", "promoted": False, "scope": scope}
+        else:
+            scope = runtime_scope
         if scope is None:
             return {
                 "outcome": "INVALID_SCOPE",
@@ -4771,7 +4790,7 @@ class BotManager:
                 "scope": scope,
             }
         payload = result.to_dict()
-        if result.promoted:
+        if result.promoted and runtime_scope == scope:
             payload["runtimeRebuilt"] = (
                 self._rebuild_microstructure_parameter_authority()
             )
@@ -4787,17 +4806,87 @@ class BotManager:
         self._last_parameter_promotion_check = now
         self.promote_parameter_revision_if_safe()
 
+    def _paper_manual_exit_grace_active(self, engine):
+        """Acceptance-only bounded grace for MANUAL-origin PAPER positions.
+
+        Returns True only when EVERY condition holds.  Any unknown, missing or
+        malformed input fails closed (returns False), so default behaviour is
+        unchanged and LIVE is never affected:
+
+        * configured ``PAPER_MANUAL_EXIT_GRACE_MS`` > 0
+        * engine trade mode == paper
+        * control authority == MANUAL
+        * the open position's canonical provenance is a MANUAL entry
+          (``entry_authority``), never inferred from current control authority
+        * position age < configured grace
+
+        The grace defers ONLY the strategy/microstructure automatic exit
+        evaluator.  Manual close, emergency flatten, SL/TP, hard execution
+        safety, position-integrity and pending-order guards are untouched.
+        """
+
+        grace_ms = paper_manual_exit_grace_ms()
+        if grace_ms <= 0:
+            return False
+        if str(getattr(engine, "mode", "")).strip().lower() != "paper":
+            return False
+        if self.control_authority != CONTROL_AUTHORITY_MANUAL:
+            return False
+        position = getattr(engine, "actual_position", None)
+        if not isinstance(position, dict):
+            return False
+        origin = str(
+            position.get("entry_authority") or ""
+        ).strip().upper()
+        if origin != MANUAL_ENTRY_AUTHORITY:
+            return False
+        try:
+            age_ms = (time.time() - float(position.get("entry_time"))) * 1000.0
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(age_ms) or age_ms < 0:
+            return False
+        return age_ms < grace_ms
+
+    def _log_paper_manual_exit_grace(self, engine):
+        """Emit one observability line per deferred MANUAL position."""
+
+        position = getattr(engine, "actual_position", None)
+        position_id = (
+            position.get("order_id")
+            if isinstance(position, dict)
+            else None
+        )
+        if position_id == getattr(
+            self, "_exit_grace_logged_position_id", None
+        ):
+            return
+        self._exit_grace_logged_position_id = position_id
+        add_log(
+            "PAPER MANUAL EXIT GRACE ACTIVE "
+            f"(position={position_id}, "
+            f"grace_ms={paper_manual_exit_grace_ms()})"
+        )
+
     def _build_snapshot_aware_exit_evaluator(self, evaluate_exit):
         """Bind the entry parameter snapshot into the strategy exit evaluator.
 
         ExecutionEngine already carries the entry snapshot on its own position
         dict; this adapter copies it into ``position_info`` so the strategy's
         snapshot-at-entry semantics apply without changing ExecutionEngine.
+
+        The acceptance-only PAPER MANUAL exit grace is applied at this single
+        boundary: while active it returns ``None`` (no exit), so only the
+        strategy/microstructure automatic exit is deferred and normal
+        behaviour resumes automatically once the grace expires.
         """
 
         engine = self.engine
 
         def _exit_evaluator(microstructure_state, position_info):
+            if self._paper_manual_exit_grace_active(engine):
+                self._log_paper_manual_exit_grace(engine)
+                return None
             snapshot = None
             actual_position = getattr(engine, "actual_position", None)
             if isinstance(actual_position, dict):

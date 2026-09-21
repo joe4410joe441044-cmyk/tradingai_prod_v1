@@ -12,8 +12,11 @@ import {
     countAdvancedParameters,
     countPrimaryParameters,
     dedupeWarnings,
+    describeParameterConstraint,
     formatParameterValue,
     isLiveWritable,
+    normalizeDraftForSave,
+    normalizeParameterValue,
     performSave,
     splitSchema,
     unitSymbol,
@@ -57,7 +60,7 @@ const schema = {
             precision: 0,
             valueType: "int",
             minimum: 100,
-            maximum: 60000,
+            maximum: null,
         }),
         metadata("minimumHoldMs", {
             tier: "ADVANCED",
@@ -311,10 +314,15 @@ test("PAPER save returns success without confirmLive", async () => {
         parameters: { minimumCompositeScore: 0.4 },
         expectedRevision: 7,
         api: {
+            getConfiguration: async () => ({ok: true, body: {scope: "PAPER", storeStatus: "VALID", configuredRevision: 8, parameters: {minimumCompositeScore: 0.4}}}),
             updateConfiguration: async () => ({
                 ok: true,
                 status: 200,
-                body: { code: "CONFIGURATION_ACCEPTED", warnings: [] },
+                body: {
+                    code: "CONFIGURATION_ACCEPTED", configuredRevision: 8,
+                    configuration: {scope: "PAPER", storeStatus: "VALID", configuredRevision: 8, parameters: {minimumCompositeScore: 0.4}},
+                    warnings: [],
+                },
             }),
         },
     });
@@ -452,4 +460,245 @@ test("formatParameterValue never fabricates a value", () => {
     assert.equal(formatParameterValue(metadata("x"), undefined), "—");
     assert.equal(formatParameterValue(metadata("x"), "bad"), "—");
     assert.equal(formatParameterValue(metadata("x"), 0), "0");
+});
+
+/* =================================================
+   Canonical serialization contract.
+
+   The DOM input always yields a string; the outgoing payload must carry the
+   canonical JSON type declared by the schema valueType. Invalid input must
+   remain detectable and is never silently coerced to 0/NaN/null.
+================================================= */
+
+const integerMetadata = metadata("maximumHoldMs", {
+    unit: "milliseconds",
+    precision: 0,
+    valueType: "int",
+    minimum: 100,
+    maximum: null,
+});
+const floatMetadata = metadata("minimumCompositeScore");
+const booleanMetadata = metadata("flag", { valueType: "bool" });
+
+test("TEST A — INTEGER edit serializes as a JSON number", () => {
+    const value = normalizeParameterValue(integerMetadata, "30000");
+    assert.equal(value, 30000);
+    assert.equal(typeof value, "number");
+    assert.notEqual(value, "30000");
+
+    const payload = buildConfigurationPayload({
+        scope: "PAPER",
+        parameters: { maximumHoldMs: "30000" },
+        expectedRevision: 1,
+        schema,
+    });
+    assert.equal(payload.parameters.maximumHoldMs, 30000);
+    assert.equal(typeof payload.parameters.maximumHoldMs, "number");
+});
+
+test("TEST B — INTEGER decimal is never silently truncated", () => {
+    const value = normalizeParameterValue(integerMetadata, "3.5");
+    assert.equal(value, "3.5");
+    assert.equal(typeof value, "string");
+    // Frontend validation already blocks the mutation before it is sent.
+    assert.equal(
+        validateDraftValue(integerMetadata, "3.5"),
+        "value must be an integer",
+    );
+});
+
+test("TEST C — FLOAT edit serializes as a JSON number preserving decimals", () => {
+    const value = normalizeParameterValue(floatMetadata, "0.45");
+    assert.equal(value, 0.45);
+    assert.equal(typeof value, "number");
+});
+
+test("TEST D — BOOLEAN contract never sends strings", () => {
+    assert.equal(normalizeParameterValue(booleanMetadata, "true"), true);
+    assert.equal(normalizeParameterValue(booleanMetadata, "false"), false);
+    assert.equal(typeof normalizeParameterValue(booleanMetadata, "true"), "boolean");
+});
+
+test("TEST E — empty numeric input never becomes 0", () => {
+    assert.equal(normalizeParameterValue(integerMetadata, ""), "");
+    assert.equal(normalizeParameterValue(floatMetadata, "   "), "   ");
+    const payload = buildConfigurationPayload({
+        scope: "PAPER",
+        parameters: { maximumHoldMs: "" },
+        expectedRevision: 1,
+        schema,
+    });
+    assert.equal(payload.parameters.maximumHoldMs, "");
+});
+
+test("TEST F — non-finite input never becomes an accepted payload", () => {
+    assert.equal(normalizeParameterValue(floatMetadata, "abc"), "abc");
+    assert.equal(normalizeParameterValue(integerMetadata, "Infinity"), "Infinity");
+    const normalized = normalizeDraftForSave(schema, {
+        minimumCompositeScore: "abc",
+    });
+    assert.equal(normalized.minimumCompositeScore, "abc");
+    assert.equal(Number.isFinite(normalized.minimumCompositeScore), false);
+});
+
+test("TEST G — full draft mixes canonical types across all fields", () => {
+    const draft = {
+        minimumCompositeScore: "0.34",
+        maximumStrategySpreadPct: "0.5",
+        momentumWindowSeconds: "60",
+        minimumStrategyConfidence: "0.23",
+        maximumHoldMs: "30000",
+        minimumHoldMs: "500",
+        exitMomentumMinimum: "0.4",
+        exitLiquidityQualityMinimum: "0.3",
+        exitSpreadQualityMinimum: "0.3",
+        momentumMinimumWarmupSeconds: "20",
+        absorptionVolumePercentile: "0.9",
+        liquidityQualityPercentile: "0.9",
+    };
+    const normalized = normalizeDraftForSave(schema, draft);
+    for (const [name, value] of Object.entries(normalized)) {
+        assert.equal(typeof value, "number", name);
+    }
+    assert.equal(normalized.maximumHoldMs, 30000);
+    assert.equal(Number.isInteger(normalized.maximumHoldMs), true);
+    assert.equal(normalized.maximumHoldMs, 30000);
+    assert.equal(Number.isInteger(normalized.minimumHoldMs), true);
+    assert.equal(normalized.minimumCompositeScore, 0.34);
+    assert.equal(normalized.momentumWindowSeconds, 60);
+});
+
+test("TEST H — PAPER payload serialization carries canonical types", () => {
+    const payload = buildConfigurationPayload({
+        scope: "PAPER",
+        parameters: {
+            ...configuration.parameters,
+            maximumHoldMs: "30000",
+        },
+        expectedRevision: configuration.configuredRevision,
+        schema,
+    });
+    assert.equal(payload.scope, "PAPER");
+    assert.equal(payload.confirmLive, undefined);
+    assert.equal(typeof payload.parameters.maximumHoldMs, "number");
+    assert.equal(payload.parameters.maximumHoldMs, 30000);
+    for (const value of Object.values(payload.parameters)) {
+        assert.equal(typeof value, "number");
+    }
+});
+
+test("TEST I — LIVE payload serialization uses the same shared contract", () => {
+    const payload = buildConfigurationPayload({
+        scope: "LIVE",
+        parameters: { minimumCompositeScore: "0.4", maximumHoldMs: "30000" },
+        expectedRevision: 5,
+        confirmLive: true,
+        schema,
+    });
+    assert.equal(payload.scope, "LIVE");
+    assert.equal(payload.confirmLive, true);
+    assert.equal(typeof payload.parameters.minimumCompositeScore, "number");
+    assert.equal(typeof payload.parameters.maximumHoldMs, "number");
+    assert.equal(payload.parameters.maximumHoldMs, 30000);
+});
+
+test("normalization is schema-driven and leaves unknown parameters untouched", () => {
+    const normalized = normalizeDraftForSave(schema, {
+        maximumHoldMs: "30000",
+        notInSchema: "1.5",
+    });
+    assert.equal(normalized.maximumHoldMs, 30000);
+    assert.equal(normalized.notInSchema, "1.5");
+    // Without schema metadata the payload is forwarded unchanged.
+    const passthrough = normalizeDraftForSave(null, { maximumHoldMs: "30000" });
+    assert.equal(passthrough.maximumHoldMs, "30000");
+});
+
+test("TEST J — canonical INVALID_CONFIGURATION detail is preserved for the UI", async () => {
+    const result = await performSave({
+        scope: "PAPER",
+        parameters: { maximumHoldMs: "30000" },
+        expectedRevision: 1,
+        schema,
+        api: {
+            updateConfiguration: async () => ({
+                ok: false,
+                status: 422,
+                body: {
+                    code: "INVALID_CONFIGURATION",
+                    message: "configuration failed canonical validation",
+                    validation: {
+                        isValid: false,
+                        errors: [{
+                            code: "INVALID_TYPE",
+                            parameter: "maximumHoldMs",
+                            message: "maximumHoldMs must be a finite numeric value, got str",
+                        }],
+                        warnings: [],
+                    },
+                },
+            }),
+        },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 422);
+    assert.equal(result.code, "INVALID_CONFIGURATION");
+    assert.equal(
+        result.body.validation.errors[0].parameter,
+        "maximumHoldMs",
+    );
+    assert.match(
+        result.body.validation.errors[0].message,
+        /finite numeric value/,
+    );
+});
+
+test("TEST K — revision conflict classification is preserved", async () => {
+    const result = await performSave({
+        scope: "PAPER",
+        parameters: { maximumHoldMs: 30000 },
+        expectedRevision: 1,
+        schema,
+        api: {
+            updateConfiguration: async () => ({
+                ok: false,
+                status: 409,
+                body: { code: "REVISION_CONFLICT", configuredRevision: 2 },
+            }),
+        },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 409);
+    assert.equal(result.code, "REVISION_CONFLICT");
+});
+
+test("TEST L — authentication failure classification is preserved", async () => {
+    const result = await performSave({
+        scope: "PAPER",
+        parameters: { maximumHoldMs: 30000 },
+        expectedRevision: 1,
+        schema,
+        api: {
+            updateConfiguration: async () => ({
+                ok: false,
+                status: 403,
+                body: { status: "UNAUTHENTICATED" },
+            }),
+        },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 403);
+    assert.equal(result.body.status, "UNAUTHENTICATED");
+});
+
+
+test("Maximum Hold has a minimum but no fixed upper bound", () => {
+    assert.equal(describeParameterConstraint(integerMetadata), ">= 100 milliseconds");
+    for (const hold of [60000, 90000, 120000, 1000000]) {
+        assert.equal(validateDraftValue(integerMetadata, String(hold)), null);
+        assert.equal(normalizeParameterValue(integerMetadata, String(hold)), hold);
+    }
+    for (const hold of [-1, 0, 99, "invalid", Infinity, NaN, 100.5]) {
+        assert.ok(validateDraftValue(integerMetadata, hold));
+    }
 });

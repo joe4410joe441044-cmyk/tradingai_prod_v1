@@ -268,8 +268,8 @@ export const PARAMETER_GUIDE = Object.freeze({
             ja: "正式な MAX_HOLD 決済が発生するまでの、ハードな最大保有時間です。",
         },
         valueMeaning: {
-            en: "An integer number of milliseconds (100 to 60000).",
-            ja: "ミリ秒単位の整数値（100〜60000）です。",
+            en: "An integer number of milliseconds (at least 100, with no fixed upper limit).",
+            ja: "ミリ秒単位の整数値（100以上、固定上限なし）です。",
         },
         increase: {
             en: "A position may be held longer before the hard MAX_HOLD bound forces an exit.",

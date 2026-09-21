@@ -135,6 +135,8 @@ def _validate_range(name: str, value: float, metadata, errors: list) -> None:
             )
         )
         return
+    if metadata.maximum is None:
+        return
     if metadata.maximum_inclusive:
         if value > metadata.maximum:
             errors.append(

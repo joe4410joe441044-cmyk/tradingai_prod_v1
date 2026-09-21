@@ -610,6 +610,22 @@ class ParameterSettingsService:
                 },
             )
 
+        # A successful atomic write is not sufficient if the authority cannot
+        # load the same revision/values. Never report a fallback as a saved set.
+        persisted = self._load_scope(resolved)
+        if (
+            persisted is None
+            or persisted.status is not StoreLoadStatus.VALID
+            or persisted.parameter_set != new_set
+        ):
+            return UpdateResult(
+                UpdateOutcome.STORE_FAILURE,
+                {
+                    "code": "CONFIGURATION_READBACK_FAILED",
+                    "message": "saved configuration could not be verified; reload before retrying",
+                },
+            )
+
         accepted_validation = validate_parameters(
             parameters, require_complete=True
         )

@@ -1,5 +1,7 @@
 """Validation tests for canonical strategy parameters (E-PARAM-1)."""
 
+import pytest
+
 from backend.strategy.parameters import (
     PAPER_MIGRATION_BASELINE,
     ValidationCode,
@@ -40,9 +42,6 @@ def test_require_complete_flags_missing_parameters():
 def test_range_rejection_below_and_above():
     assert ValidationCode.BELOW_MINIMUM in _codes(
         validate_parameters(values(maximumHoldMs=99))
-    )
-    assert ValidationCode.ABOVE_MAXIMUM in _codes(
-        validate_parameters(values(maximumHoldMs=60001))
     )
     assert ValidationCode.BELOW_MINIMUM in _codes(
         validate_parameters(values(momentumWindowSeconds=4.9))
@@ -165,3 +164,58 @@ def test_errors_and_warnings_are_distinct():
     assert payload["isValid"] is False
     assert payload["errors"]
     assert payload["warnings"]
+
+
+def test_frontend_serialized_full_draft_contract_passes():
+    """The normalized frontend payload (canonical JSON numbers) must validate.
+
+    This mirrors the Parameter Settings save path after type normalization:
+    every editable value is a JSON number, not a DOM string.
+    """
+
+    normalized_payload = {
+        "minimumCompositeScore": 0.34,
+        "maximumStrategySpreadPct": 0.5,
+        "momentumWindowSeconds": 60,
+        "minimumStrategyConfidence": 0.23,
+        "maximumHoldMs": 30000,
+        "minimumHoldMs": 500,
+        "exitMomentumMinimum": 0.4,
+        "exitLiquidityQualityMinimum": 0.3,
+        "exitSpreadQualityMinimum": 0.3,
+        "momentumMinimumWarmupSeconds": 20,
+        "absorptionVolumePercentile": 0.9,
+        "liquidityQualityPercentile": 0.9,
+    }
+
+    result = validate_parameters(normalized_payload, require_complete=True)
+    assert result.is_valid, result.to_dict()
+    assert result.errors == ()
+
+    # maximumHoldMs=30000 as a canonical JSON number is valid by itself.
+    assert validate_parameters(values(maximumHoldMs=30000)).is_valid
+
+
+def test_dom_string_serialization_is_rejected_as_invalid_type():
+    """Regression guard: a raw DOM string must remain rejected by the validator.
+
+    The frontend fix normalizes the payload; the backend must NOT be weakened
+    to accept numeric strings.
+    """
+
+    result = validate_parameters(
+        values(maximumHoldMs="30000"), require_complete=True
+    )
+    assert not result.is_valid
+    assert ValidationCode.INVALID_TYPE in _codes(result)
+    assert [issue.parameter for issue in result.errors] == ["maximumHoldMs"]
+
+
+@pytest.mark.parametrize("hold", [60000, 90000, 120000, 1000000])
+def test_maximum_hold_has_no_fixed_upper_limit(hold):
+    assert validate_parameters(values(maximumHoldMs=hold), require_complete=True).is_valid
+
+
+@pytest.mark.parametrize("hold", [-1, 0, 99, "90000", "invalid", None, True, [], {}, 100.5, float("nan"), float("inf"), float("-inf")])
+def test_maximum_hold_retains_fundamental_validation(hold):
+    assert not validate_parameters(values(maximumHoldMs=hold)).is_valid

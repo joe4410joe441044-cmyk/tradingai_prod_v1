@@ -31,6 +31,8 @@ const loadApp = async () => {
     );
     const code = transformed.code.replace('from "react";', `from "${reactStub}";`)
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
+        .replace('from "./pages/TradeHistoryPage";', `from "${moduleUrl("export default()=>({type:'main',props:{children:'TRADE HISTORY PAGE'}})")}";`)
+        .replace('from "./pages/ParameterSettingsPage";', `from "${moduleUrl("export default()=>({type:'main',props:{children:'PARAMETER SETTINGS PAGE'}})")}";`)
         .replace('from "./pages/AccountStatusPage";', `from "${accountStatusStub}";`)
         .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
@@ -118,3 +120,8 @@ test("AI Advisor route explicitly stops the global trading WebSocket", async () 
     assert.match(runtimeSource, /runtimeStopped = true/);
     assert.match(runtimeSource, /if \(!runtimeStopped && !intentionallyClosed\)/);
 });
+
+ test("App mounts independent Trade History", async () => {
+ globalThis.__appState=undefined; globalThis.window={location:{pathname:"/trade-history"}};
+ const module=await loadApp(); assert.match(textOf(module.default()),/TRADE HISTORY PAGE/);
+ });

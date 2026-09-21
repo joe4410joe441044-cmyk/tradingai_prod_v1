@@ -54,14 +54,13 @@ def _attempt_stopped_promotion(scope) -> dict:
     configuration write keeps its PENDING semantics.
     """
 
+    if not isinstance(scope, str) or scope.strip().upper() not in ("PAPER", "LIVE"):
+        return {"outcome": "INVALID_SCOPE", "promoted": False, "scope": None}
     try:
         from backend.bot_manager.bot_manager import get_existing_bot_manager
-    except Exception:
-        return {}
-    try:
         manager = get_existing_bot_manager()
     except Exception:
-        return {}
+        return {"outcome": "PROMOTION_ERROR", "promoted": False}
     if manager is None:
         return {}
     try:
@@ -69,10 +68,14 @@ def _attempt_stopped_promotion(scope) -> dict:
         lifecycle = str(getattr(manager, "lifecycle_state", "STOPPED"))
         if running and lifecycle != "STOPPED":
             return {}
-        result = manager.promote_parameter_revision_if_safe(bot_stopped=True)
+        result = manager.promote_parameter_revision_if_safe(
+            bot_stopped=True, scope=scope
+        )
     except Exception:
-        return {}
-    return result if isinstance(result, dict) else {}
+        return {"outcome": "PROMOTION_ERROR", "promoted": False}
+    return result if isinstance(result, dict) else {
+        "outcome": "PROMOTION_ERROR", "promoted": False,
+    }
 
 
 def _service(request: Request) -> ParameterSettingsService:
@@ -307,6 +310,13 @@ async def update_parameter_settings_configuration(
     content = result.payload
     if result.outcome is UpdateOutcome.ACCEPTED:
         promotion = _attempt_stopped_promotion(payload.get("scope"))
+        content = {
+            **content,
+            "configuredSaveSuccess": True,
+            "promotion": promotion or {
+                "outcome": "NOT_ATTEMPTED", "promoted": False,
+            },
+        }
         if promotion.get("promoted") is True:
             # The bot is STOPPED, so the safe promotion boundary was reached
             # without starting the bot.  Refresh the read models so the
