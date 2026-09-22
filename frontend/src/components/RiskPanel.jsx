@@ -113,7 +113,7 @@ export default function RiskPanel({
                         className="config-select"
                         type="number"
                         value={
-                            values.positionSize ?? 100
+                            values.positionSize ?? 0
                         }
                         onChange={(e) =>
                             handle(

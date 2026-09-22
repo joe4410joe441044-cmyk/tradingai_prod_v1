@@ -129,6 +129,8 @@ def _build_manager(price=100.0, position_size=100.0):
     engine.latest_price = price
 
     recorder = AdmissionRecorder()
+    from sizing_support import install_sizing
+    install_sizing(engine)
     engine.set_execution_entry_guard(recorder)
     engine.set_execution_authority_guard(manager._dispatch_execution_authority_guard)
 
@@ -268,7 +270,7 @@ def test_manual_entry_live_fails_closed_without_canonical_readiness():
     manager.config = {"mode": "live", "dry_run": False}
     result = _trade(manager, "BUY", "live-1")
     assert result["success"] is False
-    assert result["reason"] == "LIVE_ORDER_ENTRY_DISARMED"
+    assert result["reason"] == "SIZING_AUTHORITY_UNAVAILABLE"
     assert result["reason"] != "MANUAL_TRADE_PAPER_ONLY"
 
 

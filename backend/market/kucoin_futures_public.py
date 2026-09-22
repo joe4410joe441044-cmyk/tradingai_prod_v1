@@ -233,3 +233,24 @@ class KucoinMarketUniverseCache:
         with self._lock:
             self._last_good = snapshot
         return snapshot
+
+
+def get_order_contract_rules(symbol, *, session=None):
+    """Fresh public linear-contract constraints; no credentials or private API."""
+    symbol = to_kucoin_futures_symbol(symbol)
+    response = (session or requests).get(
+        KUCOIN_FUTURES_BASE_URL + "/api/v1/contracts/" + symbol, timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != "200000" or not isinstance(payload.get("data"), dict):
+        raise KucoinPublicMarketError("ORDER_CONTRACT_RULES_UNAVAILABLE")
+    data = payload["data"]
+    return {
+        "symbol": data.get("symbol"), "status": data.get("status"),
+        "settle_currency": data.get("settleCurrency"), "quote_currency": data.get("quoteCurrency"),
+        "isInverse": data.get("isInverse"), "min_size": data.get("lotSize"),
+        "qty_step": data.get("lotSize"), "multiplier": data.get("multiplier"),
+        "max_size": data.get("marketMaxOrderQty"), "max_leverage": data.get("maxLeverage"),
+        "taker_fee_rate": data.get("takerFeeRate"),
+    }

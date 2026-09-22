@@ -137,6 +137,8 @@ def _build_manager(price=100.0, position_size=100.0, selection_mode="MANUAL"):
     engine.latest_price = price
 
     recorder = AdmissionRecorder()
+    from sizing_support import install_sizing
+    install_sizing(engine)
     engine.set_execution_entry_guard(recorder)
     # Production installs the manager-owned shared authority boundary on the
     # engine. Installing it here exercises the full authority chain (BOT

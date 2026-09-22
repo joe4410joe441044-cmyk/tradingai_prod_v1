@@ -182,6 +182,9 @@ def ready_engine(mode="paper"):
     engine = ExecutionEngine(exchange=exchange, portfolio=portfolio)
     engine.mode = mode
     engine.symbol = "XRPUSDT"
+    from sizing_support import install_sizing
+    install_sizing(engine)
+    engine.config.update({"leverage": 5, "effective_leverage": 5})
     engine.status = "RUNNING"
     engine.price_ready = True
     engine.last_market_update = time.time()

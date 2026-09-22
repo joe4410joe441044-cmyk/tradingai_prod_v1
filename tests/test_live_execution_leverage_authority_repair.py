@@ -25,6 +25,20 @@ from backend.money_management.leverage_authority import (
 )
 from backend.portfolio.portfolio_manager import PortfolioManager
 from Bot.engine.execution_engine import ExecutionEngine
+from backend.money_management.order_sizing import OrderSizingAuthority
+from sizing_support import install_sizing, contract_rules
+
+
+def _sizing_validator(**final):
+    authority = OrderSizingAuthority(
+        symbol=final['symbol'], price=final['price'], equity=10000, available=10000,
+        risk_percent=.5, sl_percent=1, leverage=final['leverage'], fixed_notional=0,
+        position_cap=1000, symbol_capacity=1000, total_capacity=2000,
+        multiplier=final['rules']['multiplier'], minimum=final['rules']['min_size'],
+        step=final['rules'].get('qty_step', final['rules']['min_size']), maximum=1000000)
+    authority.validate(final['contracts'])
+    return True
+
 
 
 class _FakeResponse:
@@ -77,6 +91,7 @@ def test_live_order_uses_canonical_5x_authority(monkeypatch):
     captured = _capture_post(monkeypatch, client)
 
     result = client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=1,
@@ -108,6 +123,7 @@ def test_live_order_uses_exact_canonical_authority(
     captured = _capture_post(monkeypatch, client)
 
     result = client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=1,
@@ -127,6 +143,7 @@ def test_missing_leverage_authority_fails_closed(monkeypatch):
     captured = _capture_post(monkeypatch, client)
 
     result = client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=1,
@@ -150,6 +167,7 @@ def test_invalid_leverage_authority_fails_closed(monkeypatch, authority):
     captured = _capture_post(monkeypatch, client)
 
     result = client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=1,
@@ -178,6 +196,7 @@ def test_effective_leverage_below_requested_is_the_authority_used(
     client = _live_client()
     captured = _capture_post(monkeypatch, client)
     client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=1,
@@ -201,7 +220,7 @@ def test_no_hidden_10x_fallback_when_authority_absent(monkeypatch):
     client = _live_client()
     captured = _capture_post(monkeypatch, client)
 
-    client.create_order(symbol="XRPUSDT", side="BUY", qty=1)
+    client.create_order(sizing_validator=_sizing_validator, symbol="XRPUSDT", side="BUY", qty=1)
 
     assert captured["posts"] == 0
     assert all(
@@ -223,6 +242,8 @@ def test_paper_entry_never_calls_exchange_order(monkeypatch):
     )
     engine.mode = "paper"
     engine.symbol = "XRPUSDT"
+    install_sizing(engine)
+    engine.config["leverage"] = 5
     engine.price_ready = True
     engine.last_market_update = time.time()
     engine.latest_price = 100
@@ -285,7 +306,7 @@ def test_reduce_only_close_omits_leverage(monkeypatch):
 # I. contract normalization / quantity behavior unchanged
 # =========================
 
-def test_entry_quantity_normalization_unchanged(monkeypatch):
+def test_entry_quantity_normalization_respects_downward_lot_step(monkeypatch):
     client = _live_client()
     client.get_symbol_rules = lambda symbol: {
         "min_size": 2,
@@ -294,6 +315,7 @@ def test_entry_quantity_normalization_unchanged(monkeypatch):
     captured = _capture_post(monkeypatch, client)
 
     result = client.create_order(
+        sizing_validator=_sizing_validator,
         symbol="XRPUSDT",
         side="BUY",
         qty=6,
@@ -302,7 +324,7 @@ def test_entry_quantity_normalization_unchanged(monkeypatch):
 
     assert result["success"] is True
     body = captured["bodies"][0]
-    assert body["size"] == "3"
+    assert body["size"] == "2"
     assert body["leverage"] == "5"
     assert body["type"] == "market"
     assert body["marginMode"] == "ISOLATED"
@@ -327,6 +349,8 @@ def test_engine_live_entry_passes_canonical_effective_leverage():
     )
     engine.mode = "live"
     engine.symbol = "XRPUSDT"
+    install_sizing(engine)
+    engine.config["leverage"] = 5
     engine.price_ready = True
     engine.last_market_update = time.time()
     engine.latest_price = 100
@@ -351,7 +375,7 @@ def test_engine_live_entry_passes_canonical_effective_leverage():
     assert exchange.place_order.call_args.kwargs["leverage"] == 5
 
 
-def test_engine_live_entry_without_canonical_authority_passes_none():
+def test_engine_live_entry_without_canonical_authority_rejects_before_adapter():
     exchange = Mock()
     exchange.get_symbol_rules.return_value = {"multiplier": 1}
     exchange.place_order.return_value = {"success": True}
@@ -361,6 +385,8 @@ def test_engine_live_entry_without_canonical_authority_passes_none():
     )
     engine.mode = "live"
     engine.symbol = "XRPUSDT"
+    install_sizing(engine)
+    engine.config["leverage"] = 5
     engine.price_ready = True
     engine.last_market_update = time.time()
     engine.latest_price = 100
@@ -380,8 +406,7 @@ def test_engine_live_entry_without_canonical_authority_passes_none():
 
     engine.try_entry({"id": "live-2", "side": "BUY", "qty": 1})
 
-    exchange.place_order.assert_called_once()
-    assert exchange.place_order.call_args.kwargs["leverage"] is None
+    exchange.place_order.assert_not_called()
 
 
 def test_set_config_propagates_canonical_effective_leverage():
@@ -433,6 +458,8 @@ def _engine_with_real_kucoin(
     )
     engine.mode = "live"
     engine.symbol = "XRPUSDT"
+    install_sizing(engine)
+    engine.config["leverage"] = 5
     engine.price_ready = True
     engine.last_market_update = time.time()
     engine.latest_price = 100
@@ -530,7 +557,7 @@ def test_legacy_close_position_without_authority_fails_closed(monkeypatch):
     assert captured["posts"] == 0
 
 
-def test_legacy_close_position_with_authority_posts(monkeypatch):
+def test_legacy_non_reduce_only_close_without_sizing_authority_fails_closed(monkeypatch):
     client = _live_client()
     client.get_positions = lambda symbol: {
         "side": "BUY",
@@ -541,6 +568,6 @@ def test_legacy_close_position_with_authority_posts(monkeypatch):
 
     result = client.close_position("XRPUSDT", leverage=5)
 
-    assert result["success"] is True
-    assert captured["posts"] == 1
-    assert captured["bodies"][0]["leverage"] == "5"
+    assert result["success"] is False
+    assert result["error"] == "FINAL_SIZING_AUTHORITY_UNAVAILABLE"
+    assert captured["posts"] == 0

@@ -156,6 +156,8 @@ def _build_manager(price=100.0):
     engine.latest_price = price
 
     recorder = AdmissionRecorder()
+    from sizing_support import install_sizing
+    install_sizing(engine)
     engine.set_execution_entry_guard(recorder)
     engine.set_execution_authority_guard(
         manager._dispatch_execution_authority_guard

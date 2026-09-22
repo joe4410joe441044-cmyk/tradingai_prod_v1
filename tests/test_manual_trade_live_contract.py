@@ -193,6 +193,8 @@ def _build_live_manager(exchange=None):
     engine.real_equity = 1000.0
 
     recorder = AdmissionRecorder()
+    from sizing_support import install_sizing
+    install_sizing(engine)
     engine.set_execution_entry_guard(recorder)
     engine.set_execution_authority_guard(
         manager._dispatch_execution_authority_guard
@@ -679,4 +681,22 @@ def test_same_request_id_cannot_rebind_new_control_revision():
     assert _trade(manager, "BUY", "same")["success"] is False
     manager.control_revision += 1
     assert _trade(manager, "BUY", "same")["reason"] == "REQUEST_ID_REUSED"
+    exchange.place_order.assert_not_called()
+
+
+def test_manual_preapproval_expiring_during_fresh_sizing_is_not_reapproved():
+    manager, engine, exchange, recorder = _build_live_manager()
+    original = engine._order_sizing_authority
+
+    def expire_while_refreshing(**kwargs):
+        result = original(**kwargs)
+        if kwargs.get("fresh") and engine.execution_entry_preapproval:
+            engine.execution_entry_preapproval["expiresAt"] = 0
+        return result
+
+    engine._order_sizing_authority = expire_while_refreshing
+    result = _trade(manager, "BUY", "sizing-expired")
+    assert result["success"] is False
+    assert result["reason"] == "DENY_STALE_INTENT"
+    assert len(recorder.intents) == 1
     exchange.place_order.assert_not_called()

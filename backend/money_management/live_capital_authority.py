@@ -5,7 +5,6 @@ from decimal import Decimal
 
 from .capital_eligibility import (
     build_capital_eligibility_contract,
-    resolve_compounding_capital_basis,
 )
 from .models import MoneyManagementConfig
 from .position_risk import calculate_risk_budget
@@ -57,9 +56,7 @@ def build_live_capital_eligibility(
     current_risk = Decimal("0") if position_state == "FLAT" else None
     reserved_risk = Decimal("0") if pending_state == "NONE" else None
     available_capital = getattr(snapshot, "available_capital", None)
-    capital_basis = resolve_compounding_capital_basis(
-        config, available_capital
-    )
+    capital_basis = getattr(snapshot, "equity", None)
     risk = calculate_risk_budget(
         capital_basis,
         config.risk_per_trade_pct,

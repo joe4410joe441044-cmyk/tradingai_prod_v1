@@ -746,7 +746,11 @@ class MoneyManagementHttpBoundary:
                 "Risk percent exceeds active configuration.",
             )
         capital = metrics.available_balance
-        capital_basis = resolve_compounding_capital_basis(config, capital)
+        capital_basis = (
+            metrics.equity
+            if metrics.accounting_authority_source == "REAL_LIVE_ACCOUNT_EQUITY"
+            else resolve_compounding_capital_basis(config, capital)
+        )
         exposure = metrics.open_exposure
         risk_budget = calculate_risk_budget(
             capital_basis,
@@ -1360,6 +1364,8 @@ class MoneyManagementHttpBoundary:
             if isinstance(metrics, LossRuntimeMetrics)
             else None,
         )
+        if actual_runtime_mode is TradingMode.LIVE:
+            capital_basis = metrics.equity if isinstance(metrics, LossRuntimeMetrics) else None
         risk_budget = calculate_risk_budget(
             capital_basis,
             base_config.risk_per_trade_pct

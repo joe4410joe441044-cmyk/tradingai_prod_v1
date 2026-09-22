@@ -1681,7 +1681,7 @@ test("FINAL PREPARATION setting values carry a dedicated warm-gold class; readin
     // setting class and are never semantic statuses.
     const settingLabels = [
         "MODE", "MARKET", "SYMBOL", "RISK / Trade（1取引リスク）",
-        "REQUESTED LEVERAGE", "POSITION SIZE CAP", "STOP LOSS", "TAKE PROFIT",
+        "REQUESTED LEVERAGE", "POSITION SIZE (0 = RISK %)", "STOP LOSS", "TAKE PROFIT",
         "TRAILING STOP", "TIMEFRAME", "LOOP ON START", "AUTO TRADE ON START",
     ];
     for (const label of settingLabels) {

@@ -548,6 +548,8 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
             portfolio=PortfolioManager(1000),
             price_manager=price_manager,
         )
+        from sizing_support import install_sizing
+        install_sizing(engine)
         engine.set_execution_entry_guard(
             self._allow_money_management_entry
         )
@@ -873,9 +875,9 @@ class ExchangeOrderBookSourceTest(unittest.TestCase):
 
         fallback_preview = fallback.get_result()["preview"]
         self.assertEqual(fallback_preview["sizing_mode"], "risk_percent")
-        self.assertEqual(fallback_preview["position_size"], 10)
-        self.assertEqual(fallback_preview["qty"], 5)
-        self.assertEqual(fallback_preview["required_margin"], 2)
+        self.assertEqual(fallback_preview["position_size"], 100)
+        self.assertEqual(fallback_preview["qty"], 50)
+        self.assertEqual(fallback_preview["required_margin"], 20)
 
     def test_tp_sl_prices_and_paper_close_are_direction_aware(self):
         long_engine, long_price = self._paper_engine(price=2.0)

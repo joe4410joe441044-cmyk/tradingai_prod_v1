@@ -235,6 +235,8 @@ def test_execution_leverage_only_changes_margin_not_notional_or_risk():
             "position_size": 0,
             "leverage": leverage,
         })
+        from sizing_support import install_sizing
+        install_sizing(engine)
         engine.start()
         return engine.get_result()
 
@@ -247,13 +249,13 @@ def test_execution_leverage_only_changes_margin_not_notional_or_risk():
     assert results[1]["risk_percent"] == 0.5
     assert results[3]["risk_percent"] == 0.5
     assert results[5]["risk_percent"] == 0.5
-    assert results[1]["preview"]["required_margin"] == 5.0
-    assert results[3]["preview"]["required_margin"] == pytest.approx(5.0 / 3.0)
-    assert results[5]["preview"]["required_margin"] == 1.0
+    assert results[1]["preview"]["required_margin"] == 100.0
+    assert results[3]["preview"]["required_margin"] == pytest.approx(100.0 / 3.0)
+    assert results[5]["preview"]["required_margin"] == 20.0
     # Position notional and quantity do not scale with leverage.
-    assert results[1]["preview"]["position_size"] == 5.0
-    assert results[3]["preview"]["position_size"] == 5.0
-    assert results[5]["preview"]["position_size"] == 5.0
+    assert results[1]["preview"]["position_size"] == 100.0
+    assert results[3]["preview"]["position_size"] == 100.0
+    assert results[5]["preview"]["position_size"] == 100.0
     assert results[1]["preview"]["qty"] == results[3]["preview"]["qty"]
     assert results[3]["preview"]["qty"] == results[5]["preview"]["qty"]
 

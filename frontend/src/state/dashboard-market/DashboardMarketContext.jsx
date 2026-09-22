@@ -10,7 +10,7 @@ export const INITIAL_DASHBOARD_TRADE_SETTINGS = Object.freeze({
     symbol: "XRPUSDTM",
     leverage: 5,
     timeframe: "1m",
-    positionSize: 100,
+    positionSize: 0,
     tp: 1.0,
     sl: 1.0,
     maxDd: 5,

@@ -17,6 +17,9 @@ from backend.money_management.loss_execution_integration import (
     LossExecutionIntent,
 )
 
+from backend.money_management.order_sizing import OrderSizingAuthority, SizingRejected, number
+from backend.money_management.models import MoneyManagementConfig
+
 import backend.config as backend_config
 import copy
 import math
@@ -51,6 +54,10 @@ class ExecutionEngine:
         price_manager=None
     ):
 
+        self._sizing_account_cache = None
+        self._sizing_contract_cache = None
+        self.sizing_policy_provider = None
+        self.sizing_contract_provider = None
         self.exchange = exchange
         self.logger = logger or app_logger
         self.portfolio = portfolio
@@ -2214,6 +2221,13 @@ class ExecutionEngine:
             "traceId": signal.get("traceId"),
         }
 
+        try:
+            authority = self._order_sizing_authority(price=price, fresh=True)
+            authority.validate(number(qty) / authority.multiplier, approved_base=preview.get("qty"))
+        except Exception as exc:
+            return self._entry_rejection(str(exc) if isinstance(exc, SizingRejected)
+                                         else "SIZING_AUTHORITY_UNAVAILABLE")
+
         # A manual entry may only commit the exact MM admission that was
         # reserved for this request.  An expired or mismatched admission must
         # never fall through to a fresh Money Management recalculation.
@@ -2352,6 +2366,8 @@ class ExecutionEngine:
                     qty=order["qty"],
                     price=order["price"],
                     leverage=self.config.get("effective_leverage"),
+                    sizing_validator=lambda **final: self._validate_final_entry_quantity(
+                        **final, approved_base=qty, side=order["side"], trace_id=order.get("traceId")),
                 )
 
                 runtime_debug("Live execution raw result=%s", raw_res)
@@ -3254,6 +3270,86 @@ class ExecutionEngine:
     # RESULT
     # =====================================
 
+    def _order_sizing_authority(self, *, price, rules=None, fresh=False):
+        """Read current MM policy and mode-specific order capital, never reference capital."""
+        policy = self.sizing_policy_provider() if callable(self.sizing_policy_provider) else None
+        if not isinstance(policy, MoneyManagementConfig):
+            raise SizingRejected("SIZING_MM_POLICY_UNAVAILABLE")
+        live = self.mode == "live"
+        if live:
+            cached = self._sizing_account_cache
+            if not fresh and cached and 0 <= time.time() - cached[0] <= 2:
+                account = cached[1]
+            else:
+                account = self.exchange.get_account_overview()
+                self._sizing_account_cache = (time.time(), account)
+            if not isinstance(account, dict) or account.get("source") != "KUCOIN_FUTURES_READ_ONLY" or account.get("currency") != "USDT":
+                raise SizingRejected("LIVE_SIZING_CAPITAL_UNAVAILABLE")
+            age = time.time() - float(account.get("lastSync", 0))
+            if not 0 <= age <= 5:
+                raise SizingRejected("LIVE_SIZING_CAPITAL_STALE")
+            equity = number(account.get("equity"))
+            available = number(account.get("availableBalance"), zero=True)
+        else:
+            if self.portfolio is None:
+                raise SizingRejected("PAPER_SIZING_CAPITAL_UNAVAILABLE")
+            equity = number(self.portfolio.balance) + number(self.unrealized_pnl, zero=True)
+            available = number(self.portfolio.balance, zero=True)
+        # The entry contract permits one position, only from FLAT. Do not guess
+        # cross-symbol exposure from the local portfolio in LIVE mode.
+        if self.actual_position is not None:
+            raise SizingRejected("SIZING_REQUIRES_FLAT_POSITION")
+        if live and (number(account.get("positionMargin"), zero=True) != 0
+                     or number(account.get("orderMargin"), zero=True) != 0):
+            raise SizingRejected("SIZING_ACCOUNT_EXPOSURE_NOT_FLAT")
+        if rules is None:
+            cached = self._sizing_contract_cache
+            if not fresh and cached and cached[0] == self.symbol and 0 <= time.time() - cached[1] <= 2:
+                rules = cached[2]
+            else:
+                provider = self.exchange.get_symbol_rules if live else self.sizing_contract_provider
+                if not callable(provider):
+                    raise SizingRejected("SIZING_CONTRACT_UNAVAILABLE")
+                rules = provider(self.symbol)
+                self._sizing_contract_cache = (self.symbol, time.time(), rules)
+        if not isinstance(rules, dict) or rules.get("status") != "Open":
+            raise SizingRejected("SIZING_CONTRACT_UNAVAILABLE")
+        from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+        symbol = to_kucoin_futures_symbol(self.symbol)
+        if (rules.get("symbol") != symbol or rules.get("isInverse") is not False
+                or rules.get("settle_currency") != "USDT" or rules.get("quote_currency") != "USDT"):
+            raise SizingRejected("SIZING_CONTRACT_MISMATCH")
+        leverage = number(self.config.get("effective_leverage") if live else self.config.get("leverage"))
+        if leverage > min(policy.maximum_leverage, number(rules.get("max_leverage"))):
+            raise SizingRejected("SIZING_LEVERAGE_EXCEEDS_AUTHORITY")
+        return OrderSizingAuthority(
+            symbol=symbol, price=price, equity=equity, available=available,
+            risk_percent=min(number(self.config.get("risk_percent")), policy.risk_per_trade_pct),
+            sl_percent=self.config.get("sl_percent"), leverage=leverage,
+            fixed_notional=self.config.get("position_size"),
+            position_cap=policy.maximum_position_notional,
+            symbol_capacity=equity * policy.single_symbol_exposure_pct / 100,
+            total_capacity=equity * policy.total_exposure_pct / 100,
+            multiplier=rules.get("multiplier"), minimum=rules.get("min_size"),
+            step=rules.get("qty_step"), maximum=rules.get("max_size"),
+            cost_percent=number(rules.get("taker_fee_rate"), zero=True) * 200,
+        )
+
+    def _validate_final_entry_quantity(self, *, symbol, contracts, price, rules,
+                                       leverage, approved_base, side, trace_id):
+        """Adapter callback: recheck the exact wire quantity with fresh capital/MM."""
+        authority = self._order_sizing_authority(price=price, rules=rules, fresh=True)
+        if symbol != authority.symbol or number(leverage) != authority.leverage:
+            raise SizingRejected("FINAL_SIZING_CONTEXT_CHANGED")
+        base, _ = authority.validate(contracts, approved_base=approved_base)
+        allowed, _ = self._evaluate_execution_entry_guard({
+            "symbol": self.symbol, "side": side, "qty": float(base),
+            "price": float(price), "traceId": trace_id,
+        })
+        if not allowed:
+            raise SizingRejected("FINAL_QUANTITY_MM_REJECTED")
+        return True
+
     def get_result(self):
 
         balance = (
@@ -3268,151 +3364,11 @@ class ExecutionEngine:
 
         price = self.get_price()
 
-        if not price or price <= 0:
-
-            preview = {
-                "valid": False,
-                "reason": "invalid_price"
-            }
-
-        else:
-
-            risk = balance * (
-                self.config["risk_percent"] / 100
-            )
-
-            configured_position_size = float(
-                self.config.get("position_size", 0) or 0
-            )
-
-            if configured_position_size > 0:
-
-                base_position_size = (
-                    configured_position_size
-                )
-
-                sizing_mode = "fixed_position_size"
-
-            else:
-
-                # Leverage is margin-only.  It must not amplify the risk
-                # budget into a larger position notional or quantity.
-                base_position_size = risk
-
-                sizing_mode = "risk_percent"
-
-            pos_size = base_position_size
-
-            # =====================================
-            # CONTRACT-AWARE MIN SIZE
-            # =====================================
-
-            if self.exchange:
-
-                rules = self.exchange.get_symbol_rules(
-                    self.symbol
-                )
-
-            else:
-
-                rules = {
-                    "multiplier": 0.001,
-                    "min_size": 1
-                }
-
-            multiplier = rules.get(
-                "multiplier",
-                0.001
-            )
-
-            min_contracts = rules.get(
-                "min_size",
-                1
-            )
-
-            coin_qty = (
-                min_contracts * multiplier
-            )
-
-            min_position_value = (
-                coin_qty * price
-            )
-
-            pos_size = max(
-                pos_size,
-                min_position_value
-            )
-
-            # =====================================
-            # MINIMUM BALANCE SAFETY
-            # =====================================
-
-            required_margin = (
-                pos_size
-                / self.config["leverage"]
-            )
-
-            safety_ratio = 0.8
-
-            safe_limit = (
-                balance * safety_ratio
-            )
-
-            if required_margin > safe_limit:
-
-                preview = {
-                    "valid": False,
-                    "reason": (
-                        "insufficient_balance_for_position_size"
-                        if configured_position_size > 0
-                        else "insufficient_balance_for_min_contract"
-                    )
-                }
-
-            else:
-
-                qty = pos_size / price
-
-                preview = {
-                    "qty": round(qty, 6),
-                    "valid": True,
-                    "position_size": round(pos_size, 6),
-                    "configured_position_size": (
-                        configured_position_size
-                    ),
-                    "sizing_mode": sizing_mode,
-                    "required_margin": round(
-                        required_margin,
-                        6,
-                    ),
-                }
-
-
-
-            runtime_debug(
-                "Execution preview balance=%s price=%s risk_percent=%s "
-                "leverage=%s risk=%s sizing_mode=%s configured_position_size=%s "
-                "position_size=%s multiplier=%s "
-                "min_contracts=%s coin_qty=%s min_position_value=%s "
-                "required_margin=%s safe_limit=%s raw_qty=%s",
-                balance,
-                price,
-                self.config["risk_percent"],
-                self.config["leverage"],
-                risk,
-                sizing_mode,
-                configured_position_size,
-                pos_size,
-                multiplier,
-                min_contracts,
-                coin_qty,
-                min_position_value,
-                required_margin,
-                safe_limit,
-                locals().get("qty"),
-            )
-
-
+        try:
+            preview = self._order_sizing_authority(price=price).size()
+        except Exception as exc:
+            preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected)
+                       else "SIZING_AUTHORITY_UNAVAILABLE"}
 
         risk_state = self.update_drawdown_state()
 

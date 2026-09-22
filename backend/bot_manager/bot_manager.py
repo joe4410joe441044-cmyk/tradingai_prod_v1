@@ -5737,6 +5737,9 @@ class BotManager:
                 notifier=None,
                 price_manager=self.ob_manager
             )
+            self.engine.sizing_policy_provider = self.money_management_config_provider
+            from backend.market.kucoin_futures_public import get_order_contract_rules
+            self.engine.sizing_contract_provider = get_order_contract_rules
             self.engine.set_execution_entry_guard(
                 self._dispatch_money_management_execution_entry_guard
             )

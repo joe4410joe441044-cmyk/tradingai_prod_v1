@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from .base import BaseClient
+from backend.money_management.order_sizing import floor_contracts, number, SizingRejected
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -2006,40 +2007,8 @@ class KucoinTradeClient(BaseClient):
         symbol: str
     ):
 
-        symbol = self.normalize_symbol(symbol)
-
-        endpoint = (
-            f"/api/v1/contracts/{symbol}"
-        )
-
-        res = self.session.get(
-            self.base_url + endpoint
-        )
-
-        data = res.json()
-
-        if data.get("code") != "200000":
-            raise Exception(
-                f"KUCOIN SYMBOL ERROR: {data}"
-            )
-
-        d = data["data"]
-
-        rules = {
-            "min_size": int(
-                float(d["lotSize"])
-            ),
-            "multiplier": float(
-                d.get(
-                    "multiplier",
-                    1
-                )
-            )
-        }
-
-        runtime_debug("KuCoin symbol rules=%s", rules)
-
-        return rules
+        from backend.market.kucoin_futures_public import get_order_contract_rules
+        return get_order_contract_rules(symbol, session=self.session)
 
     # =========================
     # MIN QTY
@@ -2068,10 +2037,10 @@ class KucoinTradeClient(BaseClient):
 
         min_size = rules["min_size"]
 
-        qty = max(
-            min_size,
-            int(round(qty))
-        )
+        qty = floor_contracts(qty, rules.get("qty_step", min_size))
+        if qty < number(min_size):
+            return 0
+        qty = int(qty)
 
         return qty
 
@@ -2151,7 +2120,8 @@ class KucoinTradeClient(BaseClient):
         side,
         qty,
         price=None,
-        leverage=None
+        leverage=None,
+        sizing_validator=None
     ):
 
         if not self.live_order_allowed:
@@ -2232,9 +2202,7 @@ class KucoinTradeClient(BaseClient):
 
             price_now = float(ticker)
 
-            contracts = qty / multiplier
-
-            original_qty = qty
+            contracts = number(qty) / number(multiplier)
 
             # =====================================
             # MIN CONTRACT SAFETY
@@ -2271,38 +2239,19 @@ class KucoinTradeClient(BaseClient):
 
                 return result
 
-            qty = int(round(contracts))
-
-            runtime_debug(
-                "KuCoin contract conversion coin_qty=%s price=%s "
-                "multiplier=%s contracts=%s final_size=%s",
-                original_qty,
-                price_now,
-                multiplier,
-                contracts,
-                qty,
-            )
-
-            qty = self.normalize_qty(
-                symbol,
-                qty
-            )
-
-            if qty <= 0:
-
-                result = {
-                    "success": False,
-                    "exchange": "kucoin",
-                    "symbol": symbol,
-                    "side": side,
-                    "qty": qty,
-                    "error": "🚨 INVALID QTY (0)",
-                    "timestamp": time.time(),
-                }
-
-                runtime_debug("KuCoin normalized result=%s", result)
-
-                return result
+            qty = floor_contracts(contracts, rules.get("qty_step", min_size))
+            if qty < number(min_size):
+                raise SizingRejected("NO_VALID_QUANTITY_FOR_EXCHANGE_CONSTRAINTS")
+            if not callable(sizing_validator):
+                raise SizingRejected("FINAL_SIZING_AUTHORITY_UNAVAILABLE")
+            # This is the exact integer contract size serialized below. Nothing
+            # may round, clamp or otherwise increase it after this validation.
+            if qty != qty.to_integral_value():
+                raise SizingRejected("INVALID_INTEGER_CONTRACT_QUANTITY")
+            qty = int(qty)
+            if sizing_validator(symbol=symbol, contracts=qty, price=price_now,
+                                rules=rules, leverage=leverage) is not True:
+                raise SizingRejected("FINAL_NORMALIZED_QUANTITY_REJECTED")
 
             endpoint = "/api/v1/orders"
 
@@ -2395,7 +2344,8 @@ class KucoinTradeClient(BaseClient):
         side,
         qty,
         price=None,
-        leverage=None
+        leverage=None,
+        sizing_validator=None
     ):
 
         return self.create_order(
@@ -2403,7 +2353,8 @@ class KucoinTradeClient(BaseClient):
             side,
             qty,
             price,
-            leverage
+            leverage,
+            sizing_validator=sizing_validator
         )
 
     # =========================
