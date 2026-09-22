@@ -258,7 +258,7 @@ ROUTE_CASES = [
     ("/api/bot/live-order-entry/disarm", "POST", None,
      "set_live_order_entry_authority"),
     ("/api/bot/manual-trade", "POST",
-     {"action": "BUY", "requestId": "auth-manual-1"},
+     {"action": "BUY", "requestId": "auth-manual-1", "expectedMode": "paper", "expectedSymbol": "XRPUSDTM", "expectedControlRevision": 0},
      "execute_manual_trade"),
     ("/api/bot/paper-account/capital", "POST", {"capital": "100"},
      "reset_paper_capital"),

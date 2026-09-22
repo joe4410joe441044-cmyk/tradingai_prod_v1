@@ -338,7 +338,11 @@ def test_engine_live_entry_passes_canonical_effective_leverage():
     engine.get_price = lambda: 100
     engine.get_result = lambda: {"preview": {"qty": 1, "valid": True}}
     engine.refresh_balance = lambda: None
-    engine._live_order_allowed = lambda: True
+    # This suite isolates leverage propagation after a trusted BOT admission.
+    engine.set_execution_authority_guard(
+        lambda signal: {"allowed": True, "entryAuthority": "BOT"}
+    )
+    engine._live_order_allowed = lambda authority_context: True
     engine._evaluate_execution_entry_guard = lambda order: (True, None)
 
     engine.try_entry({"id": "live-1", "side": "BUY", "qty": 1})
@@ -367,7 +371,11 @@ def test_engine_live_entry_without_canonical_authority_passes_none():
     engine.get_price = lambda: 100
     engine.get_result = lambda: {"preview": {"qty": 1, "valid": True}}
     engine.refresh_balance = lambda: None
-    engine._live_order_allowed = lambda: True
+    # This suite isolates leverage propagation after a trusted BOT admission.
+    engine.set_execution_authority_guard(
+        lambda signal: {"allowed": True, "entryAuthority": "BOT"}
+    )
+    engine._live_order_allowed = lambda authority_context: True
     engine._evaluate_execution_entry_guard = lambda order: (True, None)
 
     engine.try_entry({"id": "live-2", "side": "BUY", "qty": 1})
@@ -439,7 +447,11 @@ def _engine_with_real_kucoin(
     engine.get_price = lambda: 100
     engine.get_result = lambda: {"preview": {"qty": 1, "valid": True}}
     engine.refresh_balance = lambda: None
-    engine._live_order_allowed = lambda: True
+    # This suite isolates leverage propagation after a trusted BOT admission.
+    engine.set_execution_authority_guard(
+        lambda signal: {"allowed": True, "entryAuthority": "BOT"}
+    )
+    engine._live_order_allowed = lambda authority_context: True
     engine._evaluate_execution_entry_guard = lambda order: (True, None)
     return engine, client, captured
 

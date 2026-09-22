@@ -130,6 +130,7 @@ def _build_manager(price=100.0, position_size=100.0):
 
     recorder = AdmissionRecorder()
     engine.set_execution_entry_guard(recorder)
+    engine.set_execution_authority_guard(manager._dispatch_execution_authority_guard)
 
     manager.engine = engine
     manager.config = {"mode": "paper", "dry_run": True}
@@ -162,7 +163,12 @@ def _build_manager(price=100.0, position_size=100.0):
 
 
 def _trade(manager, action, request_id, **extra):
-    payload = {"action": action, "requestId": request_id}
+    payload = {
+        "action": action, "requestId": request_id,
+        "expectedMode": manager.config["mode"],
+        "expectedSymbol": manager.activeSymbol,
+        "expectedControlRevision": manager.control_revision,
+    }
     payload.update(extra)
     return manager.execute_manual_trade(payload)
 
@@ -434,35 +440,20 @@ def test_stale_symbol_denied():
     assert engine.actual_position is None
 
 
-def test_manual_entry_never_recalculates_after_approval():
-    """An expired/consumed admission must fail closed, not recalc."""
-    manager, engine, _portfolio, _price, _rec = _build_manager()
-    trace_id = "manual-stale-quantity"
-    preflight = engine.preflight_execution_entry("BUY", trace_id)
-    assert preflight["allowed"] is True
-    approved = preflight["approvedQuantity"]
+def test_manual_entry_never_recalculates_after_approval(monkeypatch):
+    """Lose MM approval inside a real reservation, not before admission."""
+    manager, engine, _portfolio, _price, recorder = _build_manager()
+    original = engine.try_entry
 
-    # Simulate the admission being lost before commit.
-    engine.clear_execution_entry_preflight(trace_id)
+    def expired(signal):
+        engine.clear_execution_entry_preflight(signal["traceId"])
+        return original(signal)
 
-    result = engine.try_entry({
-        "id": trace_id,
-        "side": "BUY",
-        "traceId": trace_id,
-        "entryAuthority": "MANUAL",
-        "boundQuantity": approved,
-        "requestId": "stale-quantity",
-        "runtimeSymbolContext": {
-            "symbol": SYMBOL,
-            "runtimeId": RUNTIME_ID,
-            "contextKey": CONTEXT_KEY,
-            "runtimeInstanceId": RUNTIME_ID,
-            "exchangeSymbol": EXCHANGE_SYMBOL,
-        },
-    })
-    assert isinstance(result, dict)
-    assert result["submitted"] is False
+    monkeypatch.setattr(engine, "try_entry", expired)
+    result = _trade(manager, "BUY", "stale-quantity")
+    assert result["success"] is False
     assert result["reason"] == "DENY_STALE_INTENT"
+    assert len(recorder.intents) == 1
     assert engine.actual_position is None
 
 

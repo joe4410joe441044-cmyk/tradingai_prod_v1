@@ -12,6 +12,7 @@ from backend.strategy.normalized_parameters import (
 
 from backend.runtime import runtime_registry
 from backend.runtime.governance_runtime import (
+    GovernanceRuntime,
     EMERGENCY_ACTION_REQUIRED,
     EMERGENCY_LOCKED,
     EMERGENCY_PROCESSING,
@@ -1626,6 +1627,7 @@ class BotManager:
                 block_reasons.append("EMERGENCY_STOP_ACTIVE")
 
             readiness = {
+                "entryAuthority": self.control_authority,
                 "ready": not block_reasons,
                 "realOrderAllowed": not block_reasons,
                 "checks": checks,
@@ -2647,6 +2649,9 @@ class BotManager:
         ):
             return self._authorize_manual_execution_entry(signal)
 
+        if not isinstance(signal, dict) or signal.get("entryAuthority") not in (None, "BOT"):
+            return {"allowed": False, "reason": "EXECUTION_AUTHORITY_UNKNOWN"}
+
         with self.execution_authority_lock:
             authority = self.control_authority
             revision = self.control_revision
@@ -2722,9 +2727,15 @@ class BotManager:
                     "controlRevision": revision,
                 }
 
+            if self.lifecycle_state != "RUNNING" or self.loop_state != "RUNNING":
+                return {"allowed": False, "reason": "BOT_RUNTIME_LOOP_REQUIRED"}
+            if governance_state.get("execution_enabled") is not True:
+                return {"allowed": False, "reason": "EXECUTION_DISABLED"}
+
             return {
                 "allowed": True,
                 "reason": "BOT_ENTRY_AUTHORIZED",
+                "entryAuthority": CONTROL_AUTHORITY_BOT,
                 "controlAuthority": authority,
                 "controlRevision": revision,
             }
@@ -2825,9 +2836,36 @@ class BotManager:
                     "controlRevision": revision,
                 }
 
+            snapshot = reservation.get("snapshot") or {}
+            pending = self._execution_control_pending_state()
+            if (
+                self.lifecycle_state != "RUNNING"
+                or self._manual_trade_mode() != snapshot.get("mode")
+                or self.activeSymbol != snapshot.get("symbol")
+                or self.runtime_instance_id != snapshot.get("runtimeInstanceId")
+                or self.active_runtime_id != snapshot.get("runtimeId")
+                or signal.get("traceId") != reservation.get("traceId")
+                or signal.get("side") != reservation.get("side")
+                or signal.get("boundQuantity") != reservation.get("quantity")
+                or pending.get("known") is not True
+                or pending.get("pending") is not False
+                or pending.get("safe") is not True
+            ):
+                return {"allowed": False, "reason": "DENY_STALE_INTENT"}
+            if (reservation.get("governanceDecision") or {}).get("allowed") is not True:
+                return {"allowed": False, "reason": "GOVERNANCE_REQUIRED"}
+            # Recheck the same canonical rules at the final commit boundary.
+            decision = GovernanceRuntime().evaluate_entry(
+                reservation["side"], entry_authority=MANUAL_ENTRY_AUTHORITY
+            )
+            if decision.get("allowed") is not True:
+                return {"allowed": False, "reason": decision.get("reason") or "GOVERNANCE_DENIED"}
+
             return {
                 "allowed": True,
                 "reason": "MANUAL_ENTRY_AUTHORIZED",
+                "entryAuthority": MANUAL_ENTRY_AUTHORITY,
+                "governanceDecision": decision,
                 "controlAuthority": authority,
                 "controlRevision": revision,
             }
@@ -3214,6 +3252,19 @@ class BotManager:
                     request_id=request_id,
                 )
 
+            decision = GovernanceRuntime().evaluate_entry(
+                action, entry_authority=MANUAL_ENTRY_AUTHORITY
+            )
+            if decision.get("allowed") is not True:
+                engine.clear_execution_entry_preflight(trace_id)
+                return self._manual_trade_deny(
+                    decision.get("reason") or "GOVERNANCE_DENIED",
+                    operation=operation, request_id=request_id,
+                )
+            reservation["governanceDecision"] = dict(decision)
+            reservation["side"] = action
+            reservation["quantity"] = approved
+
             reservation["snapshot"] = (
                 self._manual_entry_authority_snapshot(
                     engine, active_symbol, preflight, mode
@@ -3297,6 +3348,8 @@ class BotManager:
                 "authoritySnapshot": reservation.get("snapshot"),
             }
         finally:
+            # Clear approval on every exit, including Governance exceptions.
+            engine.clear_execution_entry_preflight(trace_id)
             self._end_execution_admission(reservation)
 
     def _manual_close_locked(
@@ -3510,8 +3563,18 @@ class BotManager:
         expected_revision = request.get("expectedControlRevision")
         expected_position_id = request.get("expectedPositionId")
 
+        if (
+            type(expected_revision) is not int or expected_revision < 0
+            or not isinstance(expected_symbol, str) or not expected_symbol.strip()
+            or expected_mode not in ("paper", "live")
+        ):
+            return self._manual_trade_deny(
+                "MANUAL_INTENT_CONTEXT_REQUIRED", request_id=request_id
+            )
+
         signature = (
             action,
+            expected_revision,
             (
                 str(expected_symbol).strip().upper()
                 if expected_symbol is not None
@@ -3692,6 +3755,12 @@ class BotManager:
                         "PENDING_ORDER_REMAINING",
                         request_id=request_id,
                     ),
+                )
+
+            if pending.get("safe") is not True or pending.get("pending") is not False:
+                return self._record_manual_trade(
+                    request_id, signature,
+                    self._manual_trade_deny("PENDING_ORDER_UNSAFE", request_id=request_id),
                 )
 
             position_state = self._execution_control_position_state()

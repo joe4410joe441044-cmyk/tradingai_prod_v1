@@ -224,17 +224,19 @@ def _build_live_manager(exchange=None):
     result = manager.set_execution_control(CONTROL_AUTHORITY_MANUAL)
     assert result["success"] is True
 
-    # MANUAL selection forces the BOT auto-trade loop off.  Real-order entry
-    # remains governed by the canonical live authority; the operator enabling
-    # the canonical execution gate does not re-open BOT entry (the control
-    # authority guard denies it) but does satisfy the live readiness net.
-    governance_state["execution_enabled"] = True
+    manager.loop_state = "STOPPED"
+    assert governance_state["execution_enabled"] is False
 
     return manager, engine, exchange, recorder
 
 
 def _trade(manager, action, request_id, **extra):
-    payload = {"action": action, "requestId": request_id}
+    payload = {
+        "action": action, "requestId": request_id,
+        "expectedMode": manager.config["mode"],
+        "expectedSymbol": manager.activeSymbol,
+        "expectedControlRevision": manager.control_revision,
+    }
     payload.update(extra)
     return manager.execute_manual_trade(payload)
 
@@ -321,15 +323,18 @@ def test_live_manual_entry_blocked_when_disarmed():
     assert exchange.place_order.call_count == 0
 
 
-def test_live_manual_entry_blocked_when_execution_disabled():
+def test_live_manual_entry_allowed_with_loop_and_auto_trade_off():
     exchange = _fake_exchange()
-    manager, engine, exchange, _rec = _build_live_manager(exchange)
-    governance_state["execution_enabled"] = False
-
+    exchange.get_positions.return_value = _live_position("BUY", 10)
+    manager, engine, exchange, recorder = _build_live_manager(exchange)
+    assert manager.loop_state == "STOPPED"
+    assert governance_state["execution_enabled"] is False
     result = _trade(manager, "BUY", "live-exec-off-1")
-
-    assert result["success"] is False
-    assert exchange.place_order.call_count == 0
+    assert result["success"] is True
+    assert len(recorder.intents) == 1
+    exchange.place_order.assert_called_once()
+    assert manager.loop_state == "STOPPED"
+    assert governance_state["execution_enabled"] is False
 
 
 def test_live_manual_entry_blocked_by_emergency():
@@ -451,3 +456,227 @@ def test_live_manual_close_unconfirmed_preserves_position():
     assert result["success"] is False
     # Fail closed: the local position is preserved, never fabricated flat.
     assert engine.actual_position is not None
+
+
+# Work D authority/Governance repair: all exchange effects below are mocks.
+from backend.runtime.governance_runtime import GovernanceRuntime
+from backend.auto_market_selection.live_status_consistency import derive_live_readiness
+
+
+@pytest.mark.parametrize("side", ["BUY", "SELL"])
+def test_manual_mm_then_governance_then_execution_order(monkeypatch, side):
+    manager, engine, exchange, recorder = _build_live_manager()
+    exchange.get_positions.return_value = _live_position(side)
+    events = []
+    mm = engine.preflight_execution_entry
+    governance = GovernanceRuntime.evaluate_entry
+
+    def preflight(*args):
+        events.append("MM")
+        return mm(*args)
+
+    def decision(self, *args, **kwargs):
+        events.append("GOVERNANCE")
+        return governance(self, *args, **kwargs)
+
+    engine.preflight_execution_entry = preflight
+    monkeypatch.setattr(GovernanceRuntime, "evaluate_entry", decision)
+    exchange.place_order.side_effect = lambda **kw: (events.append("EXCHANGE") or {"success": True})
+    assert _trade(manager, side, "ordered-" + side)["success"] is True
+    assert events == ["MM", "GOVERNANCE", "GOVERNANCE", "EXCHANGE"]
+    assert engine.execution_entry_preapproval is None
+    assert manager.execution_admission_reservation is None
+
+
+@pytest.mark.parametrize("reason", ["NO_TRADE_ZONE", "GOVERNANCE_SUSPENDED"])
+def test_manual_canonical_governance_deny_clears_mm(monkeypatch, reason):
+    manager, engine, exchange, recorder = _build_live_manager()
+    if reason == "NO_TRADE_ZONE":
+        monkeypatch.setitem(governance_state, "no_trade_zone", True)
+    else:
+        monkeypatch.setattr(GovernanceRuntime, "evaluate_entry", lambda *a, **kw: {
+            "allowed": False, "reason": reason, "direction": None,
+        })
+    result = _trade(manager, "BUY", "gov-denied")
+    assert result["reason"] == reason
+    assert len(recorder.intents) == 1
+    assert engine.execution_entry_preapproval is None
+    assert manager.execution_admission_reservation is None
+    exchange.place_order.assert_not_called()
+
+
+def test_manual_mm_deny_never_reaches_governance(monkeypatch):
+    manager, engine, exchange, _ = _build_live_manager()
+    engine.set_execution_entry_guard(lambda intent: None)
+    decision = Mock(side_effect=AssertionError("Governance must follow MM ALLOW"))
+    monkeypatch.setattr(GovernanceRuntime, "evaluate_entry", decision)
+    assert _trade(manager, "BUY", "mm-denied")["success"] is False
+    decision.assert_not_called()
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["realOrderAllowed", "executionEntryAllowed", "liveOrderEntryAllowed"])
+def test_manual_each_live_permission_is_required(field):
+    manager, engine, exchange, _ = _build_live_manager()
+    engine.config[field] = False
+    assert _trade(manager, "BUY", field)["reason"] == "LIVE_ORDER_ENTRY_DISARMED"
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("context", [
+    {"expectedControlRevision": 0}, {"expectedMode": "paper"},
+    {"expectedSymbol": "BTCUSDTM"},
+])
+def test_manual_stale_identity_denied(context):
+    manager, engine, exchange, _ = _build_live_manager()
+    assert _trade(manager, "BUY", "stale", **context)["success"] is False
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["expectedMode", "expectedSymbol", "expectedControlRevision"])
+def test_manual_missing_identity_denied_in_schema_and_manager(missing):
+    from backend.api.bot_api import ManualTradeRequest
+    from pydantic import ValidationError
+    manager, engine, exchange, _ = _build_live_manager()
+    payload = {"action": "BUY", "requestId": "missing", "expectedMode": "live",
+               "expectedSymbol": SYMBOL, "expectedControlRevision": manager.control_revision}
+    del payload[missing]
+    with pytest.raises(ValidationError):
+        ManualTradeRequest(**payload)
+    assert manager.execute_manual_trade(payload)["reason"] == "MANUAL_INTENT_CONTEXT_REQUIRED"
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("pending", [
+    {"known": False, "pending": None, "safe": False},
+    {"known": True, "pending": False, "safe": False},
+])
+def test_manual_unknown_or_unsafe_pending_denied(pending):
+    manager, engine, exchange, _ = _build_live_manager()
+    manager.get_authoritative_pending_order_state = lambda **kw: pending
+    assert _trade(manager, "BUY", "unsafe")["success"] is False
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("origin", [None, "BOT", "MANUAL", "FORGED"])
+def test_unreserved_or_unknown_live_origin_cannot_submit(origin):
+    manager, engine, exchange, _ = _build_live_manager()
+    signal = {"side": "BUY", "id": "forged", "entryAuthority": origin,
+              "governanceAllowed": True, "boundQuantity": 1}
+    assert engine.try_entry(signal)["success"] is False
+    exchange.place_order.assert_not_called()
+    engine.set_execution_authority_guard(None)
+    assert engine.try_entry(signal)["reason"] == "EXECUTION_AUTHORITY_UNKNOWN"
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("loop,auto,allowed", [
+    ("STOPPED", False, False), ("STOPPED", True, False),
+    ("RUNNING", False, False), ("RUNNING", True, True),
+])
+def test_bot_admission_still_requires_automation(loop, auto, allowed):
+    manager, engine, exchange, _ = _build_live_manager()
+    manager.control_authority = "BOT"
+    manager.loop_state = loop
+    governance_state["execution_enabled"] = auto
+    manager._begin_execution_admission("BOT")
+    decision = manager._dispatch_execution_authority_guard({
+        "side": "BUY", "entryAuthority": "BOT",
+        "runtimeSymbolContext": manager._manual_runtime_symbol_context(SYMBOL),
+    })
+    assert decision["allowed"] is allowed
+    exchange.place_order.assert_not_called()
+
+
+@pytest.mark.parametrize("change", ["governance", "revision", "pending", "runtime", "quantity"])
+def test_manual_rechecks_context_at_execution_boundary(monkeypatch, change):
+    manager, engine, exchange, _ = _build_live_manager()
+    original = engine.try_entry
+
+    def changed(signal):
+        if change == "governance":
+            monkeypatch.setitem(governance_state, "no_trade_zone", True)
+        elif change == "revision":
+            manager.control_revision += 1
+        elif change == "pending":
+            manager.pending_order = True
+            manager.get_authoritative_pending_order_state = lambda **kw: {"known": True, "pending": True, "safe": False}
+        elif change == "runtime":
+            manager.lifecycle_state = "STOPPED"
+        elif change == "quantity":
+            signal["boundQuantity"] *= 2
+        return original(signal)
+
+    monkeypatch.setattr(engine, "try_entry", changed)
+    assert _trade(manager, "BUY", "changed")["success"] is False
+    exchange.place_order.assert_not_called()
+    assert engine.execution_entry_preapproval is None
+
+
+def test_manual_status_preserves_arm_and_auto_trade_separation():
+    manager, engine, exchange, _ = _build_live_manager()
+    readiness = derive_live_readiness(engine.build_live_readiness())
+    assert readiness["realOrderAllowed"] is True
+    assert readiness["executionEnabled"] is False
+    engine.config["liveOrderEntryAllowed"] = False
+    readiness = derive_live_readiness(engine.build_live_readiness())
+    assert readiness["realOrderAllowed"] is False
+    assert "LIVE_ORDER_ENTRY_DISARMED" in readiness["blockReasons"]
+
+
+def test_shared_governance_preserves_bot_and_manual_rules(monkeypatch):
+    runtime = GovernanceRuntime()
+    strategy = {"direction": "BUY", "executionAllowed": True}
+    assert runtime.process_governance(strategy)["reason"] == "EXECUTION_DISABLED"
+    assert runtime.evaluate_entry("BUY", entry_authority="MANUAL")["allowed"] is True
+    monkeypatch.setitem(governance_state, "execution_enabled", True)
+    assert runtime.process_governance(strategy)["allowed"] is True
+    monkeypatch.setitem(governance_state, "no_trade_zone", True)
+    assert runtime.process_governance(strategy)["reason"] == "NO_TRADE_ZONE"
+    assert runtime.evaluate_entry("BUY", entry_authority="MANUAL")["reason"] == "NO_TRADE_ZONE"
+    assert runtime.evaluate_entry("BUY", entry_authority="UNKNOWN")["allowed"] is False
+
+
+@pytest.mark.parametrize("failure", ["runtime", "local_risk", "credentials", "contract"])
+def test_manual_other_final_safety_gates_preserved(failure):
+    manager, engine, exchange, _ = _build_live_manager()
+    if failure == "runtime":
+        manager.lifecycle_state = "STOPPED"
+    elif failure == "local_risk":
+        engine.update_drawdown_state = lambda: {"riskTradingDisabled": True}
+    elif failure == "credentials":
+        engine._exchange_credentials_ready = lambda: False
+    else:
+        exchange.get_symbol_rules.return_value = {"multiplier": 0, "min_size": 1}
+    assert _trade(manager, "BUY", failure)["success"] is False
+    exchange.place_order.assert_not_called()
+
+
+def test_governance_exception_releases_reservation_and_mm(monkeypatch):
+    manager, engine, exchange, _ = _build_live_manager()
+    monkeypatch.setattr(GovernanceRuntime, "evaluate_entry", Mock(side_effect=RuntimeError("unavailable")))
+    with pytest.raises(RuntimeError):
+        _trade(manager, "BUY", "exception")
+    assert manager.execution_admission_reservation is None
+    assert engine.execution_entry_preapproval is None
+    exchange.place_order.assert_not_called()
+
+
+def test_manual_arm_does_not_allow_automatic_bot_intent():
+    manager, engine, exchange, _ = _build_live_manager()
+    manager._begin_execution_admission("BOT")
+    result = engine.try_entry({
+        "id": "automatic", "side": "BUY", "entryAuthority": "BOT",
+        "runtimeSymbolContext": manager._manual_runtime_symbol_context(SYMBOL),
+    })
+    assert result["reason"] == "BOT_ENTRY_LOCKED_MANUAL_CONTROL"
+    exchange.place_order.assert_not_called()
+
+
+def test_same_request_id_cannot_rebind_new_control_revision():
+    manager, engine, exchange, _ = _build_live_manager()
+    engine.config["liveOrderEntryAllowed"] = False
+    assert _trade(manager, "BUY", "same")["success"] is False
+    manager.control_revision += 1
+    assert _trade(manager, "BUY", "same")["reason"] == "REQUEST_ID_REUSED"
+    exchange.place_order.assert_not_called()

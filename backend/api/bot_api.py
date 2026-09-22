@@ -7,7 +7,7 @@ from backend.auth.dependencies import require_operator_session
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from decimal import Decimal
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from backend.utils.log_buffer import runtime_debug
 
 router = APIRouter()
@@ -68,9 +68,9 @@ class ManualTradeRequest(BaseModel):
 
     action: str = Field(..., min_length=1, max_length=8)
     requestId: str = Field(..., min_length=1, max_length=128)
-    expectedControlRevision: Optional[int] = Field(None, ge=0)
-    expectedSymbol: Optional[str] = Field(None, max_length=32)
-    expectedMode: Optional[str] = Field(None, max_length=16)
+    expectedControlRevision: int = Field(..., ge=0, strict=True)
+    expectedSymbol: str = Field(..., min_length=1, max_length=32)
+    expectedMode: Literal["paper", "live"]
     expectedPositionId: Optional[str] = Field(None, max_length=128)
 
 
@@ -543,13 +543,12 @@ def set_execution_control(
 
 
 # =========================
-# MANUAL PAPER TRADING
+# MANUAL TRADING
 # =========================
 # Human BUY/SELL is an explicit operator action. It reuses the existing
-# Money Management admission, Governance and PAPER execution lifecycle. The
+# Money Management admission, Governance and canonical execution lifecycle. The
 # backend owns the operation classification and the approved quantity; the
-# frontend never sends quantity or operation type. The endpoint is PAPER-only
-# at the backend boundary, never by frontend disabling alone.
+# frontend never sends quantity, operation type, or execution authority.
 @router.post("/manual-trade")
 def manual_trade(
     request: ManualTradeRequest,

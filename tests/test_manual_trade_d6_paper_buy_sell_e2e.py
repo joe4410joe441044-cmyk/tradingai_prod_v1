@@ -275,7 +275,9 @@ class Harness:
     def trade(self, action, request_id):
         resp = self.client.post(
             "/api/bot/manual-trade",
-            json={"action": action, "requestId": request_id},
+            json={"action": action, "requestId": request_id,
+                  "expectedMode": "paper", "expectedSymbol": SYMBOL,
+                  "expectedControlRevision": self.manager.control_revision},
             cookies=self._cookies(),
             headers={CSRF_TOKEN_HEADER: self.csrf},
         )
@@ -499,7 +501,9 @@ def test_d6_full_sequence_no_reversal(harness):
 def test_d6_manual_entry_denied_when_control_is_bot(harness):
     denied = harness.client.post(
         "/api/bot/manual-trade",
-        json={"action": "BUY", "requestId": "d6-bot-deny"},
+        json={"action": "BUY", "requestId": "d6-bot-deny",
+              "expectedMode": "paper", "expectedSymbol": SYMBOL,
+              "expectedControlRevision": harness.manager.control_revision},
         cookies=harness._cookies(),
         headers={CSRF_TOKEN_HEADER: harness.csrf},
     )

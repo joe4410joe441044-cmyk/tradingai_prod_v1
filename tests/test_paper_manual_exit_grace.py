@@ -53,7 +53,9 @@ def _manual_manager():
 
 def _open(manager, action, request_id):
     return manager.execute_manual_trade(
-        {"action": action, "requestId": request_id}
+        {"action": action, "requestId": request_id,
+         "expectedMode": "paper", "expectedSymbol": manager.activeSymbol,
+         "expectedControlRevision": manager.control_revision}
     )
 
 

@@ -260,7 +260,7 @@ def test_execution_engine_final_guard_blocks_disarmed_live_before_mm():
     with patch.object(backend_config, "ALLOW_LIVE", True), patch.object(
         backend_config, "TRADE_MODE", "live"
     ), _patch_live_globals(execution_enabled=False):
-        assert engine._live_order_allowed() is False
+        assert engine._live_order_allowed({"entryAuthority": "BOT"}) is False
 
 
 # =========================

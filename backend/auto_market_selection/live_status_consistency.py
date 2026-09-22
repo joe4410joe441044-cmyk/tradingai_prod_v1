@@ -16,6 +16,7 @@ REASON_ORDER = (
     ("pendingOrdersClear", "PENDING_ORDERS_EXIST"),
     ("mmFresh", "MM_STALE"),
     ("executionEnabled", "EXECUTION_DISABLED"),
+    ("liveOrderEntryAllowed", "LIVE_ORDER_ENTRY_DISARMED"),
     ("emergencyStopClear", "EMERGENCY_STOP_ACTIVE"),
     ("governanceAllow", "GOVERNANCE_BLOCK"),
 )
@@ -70,7 +71,11 @@ def derive_live_readiness(readiness, real_account=None, *, reported_reasons=None
     if "governanceAllow" not in checks and "governanceAllow" in result:
         checks["governanceAllow"] = result.get("governanceAllow") is True
 
-    reasons = [reason for key, reason in REASON_ORDER if key in checks and not checks[key]]
+    reasons = [
+        reason for key, reason in REASON_ORDER
+        if key in checks and not checks[key]
+        and not (key == "executionEnabled" and result.get("entryAuthority") == "MANUAL")
+    ]
     if position_valid and position_state == "OPEN":
         position_index = next(
             (index for index, reason in enumerate(reasons) if reason.startswith("PENDING_")),

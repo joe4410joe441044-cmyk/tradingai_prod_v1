@@ -177,7 +177,12 @@ def _build_manager(price=100.0, position_size=100.0, selection_mode="MANUAL"):
 
 
 def _trade(manager, action, request_id, **extra):
-    payload = {"action": action, "requestId": request_id}
+    payload = {
+        "action": action, "requestId": request_id,
+        "expectedMode": manager.config["mode"],
+        "expectedSymbol": manager.activeSymbol,
+        "expectedControlRevision": manager.control_revision,
+    }
     payload.update(extra)
     return manager.execute_manual_trade(payload)
 

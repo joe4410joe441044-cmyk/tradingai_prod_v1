@@ -604,7 +604,12 @@ class ExecutionEngine:
             and getattr(self.exchange, "passphrase", None)
         )
 
-    def build_live_readiness(self):
+    def build_live_readiness(self, *, entry_authority=None):
+        # Status uses the backend-owned control mirror. Actual submission passes
+        # the authority returned by the manager guard, never the signal label.
+        if entry_authority is None:
+            entry_authority = governance_state.get("control_authority", "BOT")
+
 
         selected_mode = str(
             self.config.get("mode", "paper")
@@ -665,7 +670,9 @@ class ExecutionEngine:
             block_reasons.append("BALANCE_CHECK_FAILED")
         if not checks["positionCheckOk"]:
             block_reasons.append("POSITION_CHECK_FAILED")
-        if not checks["executionEnabled"]:
+        if entry_authority not in {"BOT", "MANUAL"}:
+            block_reasons.append("EXECUTION_AUTHORITY_UNKNOWN")
+        if entry_authority != "MANUAL" and not checks["executionEnabled"]:
             block_reasons.append("EXECUTION_DISABLED")
         if not checks["liveOrderEntryAllowed"]:
             block_reasons.append("LIVE_ORDER_ENTRY_DISARMED")
@@ -726,6 +733,7 @@ class ExecutionEngine:
 
         return {
             "ready": real_order_allowed,
+            "entryAuthority": entry_authority,
             "realOrderAllowed": real_order_allowed,
             "checks": checks,
             "blockReasons": block_reasons,
@@ -768,9 +776,16 @@ class ExecutionEngine:
             "accountSnapshot": account_snapshot,
         }
 
-    def _live_order_allowed(self):
+    def _live_order_allowed(self, authority_context=None):
 
-        readiness = self.build_live_readiness()
+        origin = (authority_context or {}).get("entryAuthority")
+        if origin not in {"BOT", "MANUAL"} or (
+            origin == "MANUAL"
+            and (authority_context.get("governanceDecision") or {}).get("allowed") is not True
+        ):
+            self.last_live_block_reasons = ["EXECUTION_AUTHORITY_UNKNOWN"]
+            return False
+        readiness = self.build_live_readiness(entry_authority=origin)
         self.last_live_block_reasons = list(
             readiness["blockReasons"]
         )
@@ -1348,8 +1363,14 @@ class ExecutionEngine:
         with self.execution_authority_guard_lock:
             callback = self.execution_authority_guard
 
+        if not isinstance(signal, dict):
+            return False, self._entry_rejection("EXECUTION_AUTHORITY_UNKNOWN")
+        if signal.get("entryAuthority") not in (None, "BOT", "MANUAL"):
+            return False, self._entry_rejection("EXECUTION_AUTHORITY_UNKNOWN")
         if callback is None:
             self.last_execution_authority_guard = None
+            if self.mode == "live" or signal.get("entryAuthority") == "MANUAL":
+                return False, self._entry_rejection("EXECUTION_AUTHORITY_UNKNOWN")
             return True, None
 
         try:
@@ -1375,7 +1396,18 @@ class ExecutionEngine:
         self.last_execution_authority_guard = dict(result)
 
         if result.get("allowed") is True:
-            return True, None
+            origin = result.get("entryAuthority")
+            if self.mode == "live" or signal.get("entryAuthority") == "MANUAL":
+                if origin not in {"BOT", "MANUAL"}:
+                    return False, self._entry_rejection("EXECUTION_AUTHORITY_UNKNOWN")
+                if signal.get("entryAuthority") == "MANUAL" and origin != "MANUAL":
+                    return False, self._entry_rejection("EXECUTION_AUTHORITY_UNKNOWN")
+                if origin == "MANUAL" and (
+                    not isinstance(result.get("governanceDecision"), dict)
+                    or result["governanceDecision"].get("allowed") is not True
+                ):
+                    return False, self._entry_rejection("GOVERNANCE_REQUIRED")
+            return True, result
 
         return False, self._entry_rejection(
             result.get("reason") or "EXECUTION_AUTHORITY_DENIED"
@@ -1962,17 +1994,17 @@ class ExecutionEngine:
             self.execution_entry_admission_in_progress = True
 
         try:
-            authority_allowed, authority_rejection = (
+            authority_allowed, authority_context = (
                 self._evaluate_execution_authority_guard(signal)
             )
             if not authority_allowed:
-                return authority_rejection
-            return self._try_entry_candidate(signal)
+                return authority_context
+            return self._try_entry_candidate(signal, authority_context)
         finally:
             with self.execution_entry_admission_lock:
                 self.execution_entry_admission_in_progress = False
 
-    def _try_entry_candidate(self, signal):
+    def _try_entry_candidate(self, signal, authority_context=None):
         runtime_debug(
             "ExecutionEngine try_entry engine_id=%s symbol=%s signal=%s",
             self.engine_id,
@@ -2194,7 +2226,7 @@ class ExecutionEngine:
 
         live_order_allowed = None
         if self.mode != "paper" and not self.config["dry_run"]:
-            live_order_allowed = self._live_order_allowed()
+            live_order_allowed = self._live_order_allowed(authority_context)
             if not live_order_allowed:
                 add_log(
                     "LIVE ORDER BLOCKED: LIVE_NOT_READY",

@@ -694,32 +694,26 @@ class GovernanceRuntime:
                 "direction": None,
             }
 
-        if governance_state.get("emergency_stop", False):
+        return self.evaluate_entry(direction, entry_authority="BOT")
 
-            return {
-                "allowed": False,
-                "reason": "EMERGENCY_HALT",
-                "direction": None,
-            }
+    def evaluate_entry(self, direction, *, entry_authority):
+        """Canonical entry rules shared by automated and admitted human intents.
 
-        if not governance_state.get("execution_enabled", False):
-
-            return {
-                "allowed": False,
-                "reason": "EXECUTION_DISABLED",
-                "direction": None,
-            }
-
+        ``execution_enabled`` controls automated entry generation, not a
+        Governance approval. Callers must separately authenticate/reserve a
+        MANUAL intent; this decision alone never grants execution authority.
+        """
+        if entry_authority not in {"BOT", "MANUAL"}:
+            return {"allowed": False, "reason": "EXECUTION_AUTHORITY_UNKNOWN", "direction": None}
+        if direction not in {"BUY", "SELL", "LONG", "SHORT"}:
+            return {"allowed": False, "reason": "ENTRY_DIRECTION_INVALID", "direction": None}
+        if (
+            governance_state.get("emergency_stop") is not False
+            or governance_state.get("emergency_state") != EMERGENCY_READY
+        ):
+            return {"allowed": False, "reason": "EMERGENCY_HALT", "direction": None}
+        if entry_authority == "BOT" and not governance_state.get("execution_enabled", False):
+            return {"allowed": False, "reason": "EXECUTION_DISABLED", "direction": None}
         if governance_state.get("no_trade_zone", False):
-
-            return {
-                "allowed": False,
-                "reason": "NO_TRADE_ZONE",
-                "direction": None,
-            }
-
-        return {
-            "allowed": True,
-            "reason": None,
-            "direction": direction,
-        }
+            return {"allowed": False, "reason": "NO_TRADE_ZONE", "direction": None}
+        return {"allowed": True, "reason": None, "direction": direction}

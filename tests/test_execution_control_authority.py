@@ -469,7 +469,8 @@ def test_stale_symbol_context_denied_at_entry():
 def test_matching_symbol_context_allows_bot_entry():
     engine = Mock()
     engine.symbol = "XRPUSDT"
-    manager = _manager(engine=engine)
+    manager = _manager(engine=engine, lifecycle_state="RUNNING", loop_state="RUNNING")
+    governance_state["execution_enabled"] = True
     with manager.execution_authority_lock:
         manager._begin_execution_admission("BOT")
     decision = manager._authorize_bot_execution_entry({

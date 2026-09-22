@@ -187,6 +187,11 @@ def ready_engine(mode="paper"):
     engine.last_market_update = time.time()
     engine.latest_price = 100
     engine.config["dry_run"] = False
+    engine.config.update({
+        "realOrderAllowed": True,
+        "liveOrderEntryAllowed": True,
+        "executionEntryAllowed": True,
+    })
     engine.get_price = lambda: 100
     engine.update_drawdown_state = lambda *args: {
         "riskTradingDisabled": False
@@ -195,7 +200,10 @@ def ready_engine(mode="paper"):
         "preview": {"qty": 1, "valid": True}
     }
     engine.refresh_balance = lambda: None
-    engine._live_order_allowed = lambda: True
+    engine.set_execution_authority_guard(
+        lambda signal: {"allowed": True, "entryAuthority": "BOT"}
+    )
+    engine._live_order_allowed = lambda authority_context: True
     return engine, exchange, portfolio
 
 
@@ -781,7 +789,7 @@ class SharedExecutionBoundaryTests(unittest.TestCase):
     def test_live_governance_preflight_precedes_mm_and_submit(self):
         engine, exchange, _ = ready_engine("live")
         calls = []
-        engine._live_order_allowed = lambda: (
+        engine._live_order_allowed = lambda authority_context: (
             calls.append("governance") or True
         )
         engine.set_execution_entry_guard(
