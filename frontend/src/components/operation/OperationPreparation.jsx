@@ -788,7 +788,7 @@ return (
                         <DerivedRow hideSource label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
                         <div className="operation-prep-mm-save" data-testid="mm-save-controls">
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
-                            <small className="operation-prep-mm-save__hint">A valid edit auto-persists.（有効な編集は自動保存されます）</small>
+                            <small className="operation-prep-mm-save__hint">Changes require SAVE SETTINGS before START.（変更後は SAVE SETTINGS を押して確定してください）</small>
                             <button disabled={mmSaveDisabled} onClick={onMmReset} type="button">Reset MM</button>
                         </div>
                         {mmUpdateError && <p className="operation-prep-error" role="alert">{mmUpdateError.message ?? "Money Management update failed."}</p>}
@@ -834,56 +834,73 @@ return (
                         )}
                         <DerivedRow hideSource label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
                     </Section>
-                    {tradeSettingsOpen && (
-                        <button
-                            aria-controls="trade-settings-body"
-                            aria-expanded={tradeSettingsOpen}
-                            aria-label="Close Trade Settings"
-                            className="operation-trade-settings__bottom-toggle"
-                            data-testid="trade-settings-bottom-toggle"
-                            onClick={handleBottomTradeSettingsCollapse}
-                            type="button"
-                        >
-                            <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
-                            <span>CLOSE TRADE SETTINGS</span>
-                        </button>
-                    )}
                 </div>
             </div>
-                <div className="operation-prep-save-settings" data-testid="save-settings-controls">
-                    <span className="operation-prep-save-settings__state" data-testid="save-settings-state">
-                        {savingSettings
-                            ? "SAVING..."
-                            : settingsDirty
-                                ? "UNSAVED CHANGES"
-                                : settingsSaveNotice
-                                    ? "SETTINGS SAVED"
-                                    : "SAVED"}
-                    </span>
-                    <button
-                        className="operation-prep-save-settings__button"
-                        data-testid="save-settings-button"
-                        disabled={botRunning || savingSettings || typeof onSaveSettings !== "function"}
-                        onClick={() => onSaveSettings && onSaveSettings()}
-                        type="button"
-                    >
-                        {savingSettings ? "SAVING..." : "SAVE SETTINGS"}
-                    </button>
-                    {!settingsDirty && !savingSettings && (
-                        <small className="operation-prep-save-settings__hint">
-                            Trade Settings committed. START uses the saved revision.（設定は保存済み。STARTは保存済みRevisionを使用します）
-                        </small>
-                    )}
-                    {settingsDirty && !savingSettings && (
-                        <small className="operation-prep-save-settings__hint" data-testid="unsaved-changes-hint">
-                            Unsaved changes — SAVE SETTINGS to apply.（変更あり — SAVE SETTINGSで反映）
-                        </small>
-                    )}
-                    {settingsSaveError && (
-                        <p className="operation-prep-error" role="alert" data-testid="settings-save-error">
-                            {settingsSaveError.message ?? settingsSaveError.code ?? "Save settings failed."}
-                        </p>
-                    )}
+                <div className="operation-trade-settings__actions" data-testid="save-settings-controls">
+                    <div className="operation-prep-save-settings__status">
+                        <span className="operation-prep-save-settings__state" data-testid="save-settings-state">
+                            {savingSettings
+                                ? "SAVING..."
+                                : settingsDirty
+                                    ? "UNSAVED CHANGES"
+                                    : settingsSaveNotice
+                                        ? "SETTINGS SAVED"
+                                        : "SAVED"}
+                        </span>
+                        {!settingsDirty && !savingSettings && (
+                            <small className="operation-prep-save-settings__hint">
+                                Trade Settings committed. START uses the saved revision.（設定は保存済み。STARTは保存済みRevisionを使用します）
+                            </small>
+                        )}
+                        {settingsDirty && !savingSettings && (
+                            <small className="operation-prep-save-settings__hint" data-testid="unsaved-changes-hint">
+                                Unsaved changes — SAVE SETTINGS to apply.（変更あり — SAVE SETTINGSで反映）
+                            </small>
+                        )}
+                        {settingsSaveError && (
+                            <p className="operation-prep-error" role="alert" data-testid="settings-save-error">
+                                {settingsSaveError.message ?? settingsSaveError.code ?? "Save settings failed."}
+                            </p>
+                        )}
+                    </div>
+                    <div className="operation-trade-settings__actions-row">
+                        <button
+                            className="operation-prep-save-settings__button"
+                            data-testid="save-settings-button"
+                            disabled={botRunning || savingSettings || typeof onSaveSettings !== "function"}
+                            onClick={() => onSaveSettings && onSaveSettings()}
+                            type="button"
+                        >
+                            <span aria-hidden="true" className="operation-prep-save-settings__icon">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                    <path d="M17 21v-8H7v8" />
+                                    <path d="M7 3v5h8" />
+                                </svg>
+                            </span>
+                            <span className="operation-prep-save-settings__label">
+                                <span className="operation-prep-save-settings__label-en">{savingSettings ? "SAVING..." : "SAVE SETTINGS"}</span>
+                                <span className="operation-prep-save-settings__label-ja">（設定を保存）</span>
+                            </span>
+                        </button>
+                        {tradeSettingsOpen && (
+                            <button
+                                aria-controls="trade-settings-body"
+                                aria-expanded={tradeSettingsOpen}
+                                aria-label="Close Trade Settings"
+                                className="operation-trade-settings__bottom-toggle"
+                                data-testid="trade-settings-bottom-toggle"
+                                onClick={handleBottomTradeSettingsCollapse}
+                                type="button"
+                            >
+                                <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
+                                <span className="operation-trade-settings__bottom-label">
+                                    <span className="operation-trade-settings__bottom-label-en">CLOSE TRADE SETTINGS</span>
+                                    <span className="operation-trade-settings__bottom-label-ja">（取引設定を閉じる）</span>
+                                </span>
+                            </button>
+                        )}
+                    </div>
                 </div>
                 </div>
             </section>

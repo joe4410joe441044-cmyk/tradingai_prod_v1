@@ -2422,8 +2422,10 @@ test("SAVE SETTINGS: Trade Settings exposes a SAVE SETTINGS button and a SAVED s
         settingsRevision: 0,
         onSaveSettings: () => {},
     });
-    const button = findButton(renderer.root, "SAVE SETTINGS");
+    const button = findTestId(renderer.root, "save-settings-button");
     assert.ok(button, "SAVE SETTINGS button present");
+    assert.equal(normalizedText(button).includes("SAVE SETTINGS"), true, "button labels the primary save action");
+    assert.equal(normalizedText(button).includes("設定を保存"), true, "button keeps its bilingual label");
     assert.equal(button.props.disabled, false);
     assert.equal(normalizedText(findTestId(renderer.root, "save-settings-state")), "SAVED");
     assert.equal(findTestId(renderer.root, "unsaved-changes-hint"), undefined);
@@ -2459,7 +2461,7 @@ test("SAVE SETTINGS: clicking SAVE SETTINGS invokes the save handler exactly onc
         settingsRevision: 0,
         onSaveSettings: () => { saves += 1; },
     });
-    const button = findButton(renderer.root, "SAVE SETTINGS");
+    const button = findTestId(renderer.root, "save-settings-button");
     assert.ok(button, "SAVE SETTINGS button present");
     button.props.onClick();
     button.props.onClick();
@@ -2476,7 +2478,7 @@ test("SAVE SETTINGS: button is disabled while the bot is running", async () => {
         settingsRevision: 0,
         onSaveSettings: () => {},
     });
-    assert.equal(findButton(renderer.root, "SAVE SETTINGS").props.disabled, true);
+    assert.equal(findTestId(renderer.root, "save-settings-button").props.disabled, true);
 });
 
 test("SAVE SETTINGS: LIVE saved mode surfaces LIVE CAPITAL from the account read path", async () => {
@@ -2507,4 +2509,84 @@ test("SAVE SETTINGS: PAPER saved mode does NOT show a LIVE CAPITAL row", async (
     const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
     assert.equal(rowValue(modeSection, "MODE"), "PAPER");
     assert.equal(rowValue(modeSection, "LIVE CAPITAL"), null);
+});
+
+test("SAVE SETTINGS UI polish: exactly one SAVE SETTINGS and one CLOSE TRADE SETTINGS control", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    // SAVE SETTINGS is always present (rendered even while the disclosure is collapsed).
+    const saveButtons = descendants(renderer.root).filter(
+        (node) => node.props?.["data-testid"] === "save-settings-button",
+    );
+    assert.equal(saveButtons.length, 1, "exactly one SAVE SETTINGS button");
+
+    // CLOSE TRADE SETTINGS appears exactly once when the disclosure is expanded.
+    const topToggle = findTestId(renderer.root, "trade-settings-toggle");
+    topToggle.props.onClick();
+    renderer.render();
+    const closeButtons = descendants(renderer.root).filter(
+        (node) => node.props?.["data-testid"] === "trade-settings-bottom-toggle",
+    );
+    assert.equal(closeButtons.length, 1, "exactly one CLOSE TRADE SETTINGS button");
+});
+
+test("SAVE SETTINGS UI polish: SAVE and CLOSE are bilingual with icons", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    const saveButton = findTestId(renderer.root, "save-settings-button");
+    const saveText = normalizedText(saveButton);
+    assert.equal(saveText.includes("SAVE SETTINGS"), true, "SAVE keeps its English label");
+    assert.equal(saveText.includes("設定を保存"), true, "SAVE keeps its Japanese label");
+    assert.ok(
+        descendants(saveButton).some((node) => node?.type === "svg"),
+        "SAVE renders an inline SVG icon",
+    );
+
+    const topToggle = findTestId(renderer.root, "trade-settings-toggle");
+    topToggle.props.onClick();
+    renderer.render();
+    const closeButton = findTestId(renderer.root, "trade-settings-bottom-toggle");
+    const closeText = normalizedText(closeButton);
+    assert.equal(closeText.includes("CLOSE TRADE SETTINGS"), true, "CLOSE keeps its English label");
+    assert.equal(closeText.includes("取引設定を閉じる"), true, "CLOSE keeps its Japanese label");
+    assert.equal(closeText.includes("▲"), true, "CLOSE keeps its collapse indicator icon");
+});
+
+test("SAVE SETTINGS UI polish: old auto-save wording removed, new SAVE instruction present", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    const topToggle = findTestId(renderer.root, "trade-settings-toggle");
+    topToggle.props.onClick();
+    renderer.render();
+    const content = normalizedText(descendants(renderer.root));
+    assert.equal(content.includes("auto-persists"), false, "old auto-persists wording removed");
+    assert.equal(content.includes("自動保存"), false, "old auto-save Japanese wording removed");
+    assert.equal(
+        content.includes("Changes require SAVE SETTINGS before START"),
+        true,
+        "new SAVE instruction present (English)",
+    );
+    assert.equal(
+        content.includes("変更後は SAVE SETTINGS を押して確定してください"),
+        true,
+        "new SAVE instruction present (Japanese)",
+    );
 });
