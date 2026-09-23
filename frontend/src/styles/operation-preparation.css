@@ -882,15 +882,11 @@
     align-items: start;
 }
 
-/* FINAL PREPARATION ①–⑤ mirror cards + a full-width START / READINESS block.
-   The numbered cards reuse the TRADE SETTINGS card language; readiness spans
-   the full width in a single block. */
+/* FINAL PREPARATION ①–⑤ mirror cards + a right-column START / READINESS card.
+   The numbered cards reuse the TRADE SETTINGS card language; START / READINESS
+   sits inside the right stack directly below ④ TRADE / EXECUTION. */
 .operation-prep-final--top .operation-prep-summary .operation-prep-section {
     height: auto;
-}
-
-.operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness {
-    grid-column: 1 / -1;
 }
 
 .operation-prep-final--top .operation-prep-summary .operation-prep-section--final-readiness > header {

@@ -1654,14 +1654,8 @@ test("FINAL PREPARATION orders the TRADE SETTINGS mirror sections ①–⑤ then
     assert.deepEqual(sectionTestIdsIn(stacks[1]), [
         "final-prep-market-selection",
         "final-prep-trade-execution",
-    ], "right column = ② MARKET SELECTION, ④ TRADE / EXECUTION");
-
-    const nodes = descendants(summarySection);
-    const readinessIdx = nodes.findIndex(
-        (node) => node.props?.["data-testid"] === "final-prep-start-readiness",
-    );
-    const rightStackIdx = nodes.findIndex((node) => node === stacks[1]);
-    assert.ok(readinessIdx > rightStackIdx, "START / READINESS follows the two columns");
+        "final-prep-start-readiness",
+    ], "right column = ② MARKET SELECTION, ④ TRADE / EXECUTION, START / READINESS");
 
     // Every mirror section body is present.
     assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-market-selection"))).includes("SELECTION RUNTIME"), true);

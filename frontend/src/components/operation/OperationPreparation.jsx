@@ -970,7 +970,6 @@ return (
                             <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} />
                             <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
                         </Section>
-                        </div>
 
                         <section className="operation-prep-section operation-prep-section--final-readiness" data-testid="final-prep-start-readiness">
                             <header><h3>START / READINESS（開始 / 準備状態）</h3></header>
@@ -1046,6 +1045,7 @@ return (
                                 </small>
                             )}
                         </section>
+                        </div>
                     </div>
                 </section>
 
