@@ -864,6 +864,23 @@ return (
                         )}
                     </div>
                     <div className="operation-trade-settings__actions-row">
+                        {tradeSettingsOpen && (
+                            <button
+                                aria-controls="trade-settings-body"
+                                aria-expanded={tradeSettingsOpen}
+                                aria-label="Close Trade Settings"
+                                className="operation-trade-settings__bottom-toggle"
+                                data-testid="trade-settings-bottom-toggle"
+                                onClick={handleBottomTradeSettingsCollapse}
+                                type="button"
+                            >
+                                <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
+                                <span className="operation-trade-settings__bottom-label">
+                                    <span className="operation-trade-settings__bottom-label-en">CLOSE TRADE SETTINGS</span>
+                                    <span className="operation-trade-settings__bottom-label-ja">（取引設定を閉じる）</span>
+                                </span>
+                            </button>
+                        )}
                         <button
                             className="operation-prep-save-settings__button"
                             data-testid="save-settings-button"
@@ -883,23 +900,6 @@ return (
                                 <span className="operation-prep-save-settings__label-ja">（設定を保存）</span>
                             </span>
                         </button>
-                        {tradeSettingsOpen && (
-                            <button
-                                aria-controls="trade-settings-body"
-                                aria-expanded={tradeSettingsOpen}
-                                aria-label="Close Trade Settings"
-                                className="operation-trade-settings__bottom-toggle"
-                                data-testid="trade-settings-bottom-toggle"
-                                onClick={handleBottomTradeSettingsCollapse}
-                                type="button"
-                            >
-                                <span aria-hidden="true" className="operation-trade-settings__bottom-indicator">▲</span>
-                                <span className="operation-trade-settings__bottom-label">
-                                    <span className="operation-trade-settings__bottom-label-en">CLOSE TRADE SETTINGS</span>
-                                    <span className="operation-trade-settings__bottom-label-ja">（取引設定を閉じる）</span>
-                                </span>
-                            </button>
-                        )}
                     </div>
                 </div>
                 </div>

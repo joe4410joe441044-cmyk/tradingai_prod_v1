@@ -2536,6 +2536,31 @@ test("SAVE SETTINGS UI polish: exactly one SAVE SETTINGS and one CLOSE TRADE SET
     assert.equal(closeButtons.length, 1, "exactly one CLOSE TRADE SETTINGS button");
 });
 
+test("SAVE/CLOSE position swap: CLOSE is LEFT and SAVE is RIGHT in the shared action row", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    const topToggle = findTestId(renderer.root, "trade-settings-toggle");
+    topToggle.props.onClick();
+    renderer.render();
+
+    const nodes = descendants(renderer.root);
+    const closeIndex = nodes.findIndex(
+        (node) => node.props?.["data-testid"] === "trade-settings-bottom-toggle",
+    );
+    const saveIndex = nodes.findIndex(
+        (node) => node.props?.["data-testid"] === "save-settings-button",
+    );
+    assert.ok(closeIndex >= 0, "CLOSE TRADE SETTINGS present when expanded");
+    assert.ok(saveIndex >= 0, "SAVE SETTINGS present");
+    assert.equal(closeIndex < saveIndex, true, "CLOSE renders LEFT of SAVE in the shared action row");
+});
+
 test("SAVE SETTINGS UI polish: SAVE and CLOSE are bilingual with icons", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, {
