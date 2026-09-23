@@ -2877,3 +2877,56 @@ test("Work D START confirm: PAPER CONFIRM sends exactly one start", async () => 
         mock.restore();
     }
 });
+
+test("SAVE SETTINGS: unsaved draft blocks START and shows SAVE SETTINGS REQUIRED", async () => {
+    const mock = installFetchMock((url) => {
+        throw new Error(`unexpected request: ${url}`);
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            settingsDirty: true,
+            settingsRevision: 0,
+        }));
+        const start = findButton(renderer.root, "START BOT");
+        assert.ok(start, "START BOT present");
+        assert.equal(start.props.disabled, true);
+        assert.ok(findTestId(renderer.root, "settings-save-required"), "SAVE SETTINGS REQUIRED notice present");
+        clickAndRender(renderer, start);
+        assert.equal(mock.requests.length, 0, "no start request while unsaved");
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("SAVE SETTINGS: START payload uses the saved revision, not the draft", async () => {
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: { status: "started" } });
+    });
+    setMmConfiguration();
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { selectionMode: "MANUAL", leverage: 75, positionSize: 100 },
+            savedConfig: {
+                symbol: "XRPUSDTM",
+                exchange: "kucoin",
+                mode: "paper",
+                selectionMode: "MANUAL",
+                leverage: 5,
+                positionSize: 0,
+            },
+            settingsDirty: false,
+            settingsRevision: 3,
+        }));
+        await startBot(renderer);
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.leverage, 5, "leverage from saved revision");
+        assert.equal(payload.position_size, 0, "position size from saved revision");
+        assert.equal(payload.mode, "paper");
+    } finally {
+        clearMmConfiguration();
+        mock.restore();
+    }
+});

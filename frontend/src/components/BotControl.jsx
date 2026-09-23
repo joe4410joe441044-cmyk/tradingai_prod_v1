@@ -318,6 +318,22 @@ export default function BotControl({
 
     config,
 
+    savedConfig,
+
+    settingsDirty = false,
+
+    settingsRevision = 0,
+
+    onSaveSettings,
+
+    savingSettings = false,
+
+    settingsSaveError = null,
+
+    settingsSaveNotice = null,
+
+    liveAccountCapital,
+
     executionEnabled,
 
     botRunning,
@@ -758,7 +774,12 @@ export default function BotControl({
                 : "unknown"
     );
 
-    const startSettings = createOperationPreparationSettings(config);
+    // SAVE SETTINGS authority boundary: START consumes the SAVED revision,
+    // never the in-progress draft. When the caller does not yet provide a
+    // saved revision (legacy callers / tests) the draft config is the fallback
+    // so existing behaviour is preserved.
+    const startConfig = savedConfig ?? config;
+    const startSettings = createOperationPreparationSettings(startConfig);
     // WF: Final Preparation must stay authoritative even when the one-shot
     // standalone configuration request has not populated mmConfiguration.
     // The polled money-management status carries the SAME normalized
@@ -824,9 +845,9 @@ export default function BotControl({
     // Problem 1/9: an invalid MM draft must never become authoritative and
     // must not be silently ignored. START fails closed while the draft cannot
     // be safely reconciled/persisted.
-    const startConfigSafe = startReady === true && mmDraftInvalid !== true;
+    const startConfigSafe = startReady === true && mmDraftInvalid !== true && !settingsDirty;
     const paperStartAllowed = !botRunning && !botPending && !isLiveMode && startConfigSafe;
-    const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !startConfirmOpen;
+    const liveStartTriggerAllowed = !botRunning && !botPending && isLiveMode && !startConfirmOpen && !settingsDirty;
     // START / runtime confirmation gate. Applies to both PAPER and LIVE; the
     // modal may open when the trigger is allowed, and CONFIRM requires the full
     // fail-closed readiness set.
@@ -986,15 +1007,15 @@ export default function BotControl({
                 body: JSON.stringify({
                     symbol: effectiveStartSymbol,
                     selection_mode: startSettings.selectionMode,
-                    exchange: String(config?.exchange || "KUCOIN").toLowerCase(),
+                    exchange: String(startConfig?.exchange || "KUCOIN").toLowerCase(),
                     risk_percent: riskPercentValue,
-                    position_size: config?.positionSize ?? 0,
+                    position_size: startConfig?.positionSize ?? 0,
                     max_drawdown_pct: maxDrawdownValue,
-                    sl_percent: config?.sl ?? 1,
+                    sl_percent: startConfig?.sl ?? 1,
                     leverage: startSettings.requestedLeverage,
-                    timeframe: config?.timeframe || "1m",
-                    tp_percent: config?.tp ?? 2,
-                    trailing_stop: config?.trailing === true,
+                    timeframe: startConfig?.timeframe || "1m",
+                    tp_percent: startConfig?.tp ?? 2,
+                    trailing_stop: startConfig?.trailing === true,
                     dry_run: startSettings.tradingMode === "PAPER",
                     mode: startSettings.tradingMode.toLowerCase(),
                     // LIVE is DISARMED by design. MANUAL holds entry authority,
@@ -1643,6 +1664,14 @@ export default function BotControl({
             <OperationPreparation
                 botRunning={botRunning}
                 config={config}
+                savedConfig={savedConfig ?? config}
+                settingsDirty={settingsDirty}
+                settingsRevision={settingsRevision}
+                onSaveSettings={onSaveSettings}
+                savingSettings={savingSettings}
+                settingsSaveError={settingsSaveError}
+                settingsSaveNotice={settingsSaveNotice}
+                liveAccountCapital={liveAccountCapital}
                 emergencyState={emergencyStateCode}
                 lockedFacts={lockedFacts}
                 actionWarnings={actionWarnings}
@@ -1721,6 +1750,11 @@ export default function BotControl({
                         {botPending ? (botRunning ? "STOPPING..." : "STARTING...") : (botRunning ? runtimeStopLabel : runtimeStartLabel)}
                     </button>
                     <div className="operation-bot-state">BOT {botRunning ? "RUNNING" : "STOPPED"}</div>
+                    {!botRunning && settingsDirty && (
+                        <div className="operation-inline-error" data-testid="settings-save-required" role="alert">
+                            SAVE SETTINGS REQUIRED — unsaved changes（未保存の変更があります。SAVE SETTINGSを行ってください）
+                        </div>
+                    )}
                     {botError && <div className="operation-inline-error" role="alert">{botError}</div>}
                     {loopError && <div className="operation-inline-error" role="alert">{loopError}</div>}
                     {autoTradeError && <div className="operation-inline-error" role="alert">{autoTradeError}</div>}

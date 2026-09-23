@@ -9,6 +9,8 @@ import {
     resolveEffectiveMmConfiguration,
     resolveOperationDisplaySymbol,
     selectionModeDisplayLabel,
+    snapshotTradeSettings,
+    tradeSettingsDiffer,
 } from "./operationPreparationModel.js";
 
 const readyInputs = (overrides = {}) => ({
@@ -592,4 +594,20 @@ test("Work D SELECT: the canonical internal selection mode stays MANUAL", () => 
         OPERATION_PREPARATION_OPTIONS.selectionModes.includes("SELECT"),
         false,
     );
+});
+
+test("snapshotTradeSettings normalizes missing keys to null", () => {
+    const snapshot = snapshotTradeSettings({ mode: "LIVE", leverage: 75 });
+    assert.equal(snapshot.mode, "LIVE");
+    assert.equal(snapshot.leverage, 75);
+    assert.equal(snapshot.symbol, null);
+    assert.equal(snapshot.trailing, null);
+});
+
+test("tradeSettingsDiffer detects only committed-field changes", () => {
+    const saved = snapshotTradeSettings({ mode: "PAPER", symbol: "XRPUSDTM", leverage: 5 });
+    assert.equal(tradeSettingsDiffer({ mode: "PAPER", symbol: "XRPUSDTM", leverage: 5 }, saved), false);
+    assert.equal(tradeSettingsDiffer({ mode: "LIVE", symbol: "XRPUSDTM", leverage: 5 }, saved), true);
+    // numeric vs string for the same value must not flag a spurious change
+    assert.equal(tradeSettingsDiffer({ mode: "PAPER", symbol: "XRPUSDTM", leverage: "5" }, saved), false);
 });

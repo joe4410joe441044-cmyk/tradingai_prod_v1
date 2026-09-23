@@ -2402,3 +2402,109 @@ test("Work D runtime control: BOT authority keeps the runtime block and active B
     );
 });
 
+
+const rowValue = (root, label) => {
+    const row = descendants(root).find((node) =>
+        node?.props?.className === "operation-prep-derived-row"
+        && descendants(node).some((child) => child?.type === "span" && text(child) === label),
+    );
+    if (!row) return null;
+    const strong = descendants(row).find((child) => child?.type === "strong");
+    return strong ? text(strong).trim() : null;
+};
+
+test("SAVE SETTINGS: Trade Settings exposes a SAVE SETTINGS button and a SAVED state when clean", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    const button = findButton(renderer.root, "SAVE SETTINGS");
+    assert.ok(button, "SAVE SETTINGS button present");
+    assert.equal(button.props.disabled, false);
+    assert.equal(normalizedText(findTestId(renderer.root, "save-settings-state")), "SAVED");
+    assert.equal(findTestId(renderer.root, "unsaved-changes-hint"), undefined);
+});
+
+test("SAVE SETTINGS: unsaved changes surface an indicator and Final Preparation keeps the saved revision", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "LIVE", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        savedConfig: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: true,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    assert.equal(normalizedText(findTestId(renderer.root, "save-settings-state")), "UNSAVED CHANGES");
+    assert.ok(findTestId(renderer.root, "unsaved-changes-hint"), "unsaved hint present");
+    assert.ok(findTestId(renderer.root, "trade-settings-unsaved-badge"), "collapsed-toggle badge present");
+    // Final Preparation is read-only and must reflect the SAVED revision, not the draft.
+    const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.equal(rowValue(modeSection, "MODE"), "PAPER");
+    assert.equal(rowValue(modeSection, "SETTINGS STATUS"), "UNSAVED CHANGES");
+    assert.equal(rowValue(modeSection, "SETTINGS REVISION"), "0");
+});
+
+test("SAVE SETTINGS: clicking SAVE SETTINGS invokes the save handler exactly once", async () => {
+    const Component = await loadComponent();
+    let saves = 0;
+    const renderer = createRenderer(Component, {
+        config: { mode: "LIVE", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: true,
+        settingsRevision: 0,
+        onSaveSettings: () => { saves += 1; },
+    });
+    const button = findButton(renderer.root, "SAVE SETTINGS");
+    assert.ok(button, "SAVE SETTINGS button present");
+    button.props.onClick();
+    button.props.onClick();
+    assert.equal(saves, 2);
+});
+
+test("SAVE SETTINGS: button is disabled while the bot is running", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        botRunning: true,
+        settingsDirty: true,
+        settingsRevision: 0,
+        onSaveSettings: () => {},
+    });
+    assert.equal(findButton(renderer.root, "SAVE SETTINGS").props.disabled, true);
+});
+
+test("SAVE SETTINGS: LIVE saved mode surfaces LIVE CAPITAL from the account read path", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "LIVE", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        savedConfig: { mode: "LIVE", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 1,
+        liveAccountCapital: 7.2345,
+    });
+    const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.equal(rowValue(modeSection, "MODE"), "LIVE");
+    assert.equal(rowValue(modeSection, "LIVE CAPITAL"), "7.2345 USDT");
+});
+
+test("SAVE SETTINGS: PAPER saved mode does NOT show a LIVE CAPITAL row", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, {
+        config: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        savedConfig: { mode: "PAPER", symbol: "XRPUSDTM", selectionMode: "AUTO" },
+        emergencyState: "READY",
+        settingsDirty: false,
+        settingsRevision: 1,
+        liveAccountCapital: 7.2345,
+    });
+    const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.equal(rowValue(modeSection, "MODE"), "PAPER");
+    assert.equal(rowValue(modeSection, "LIVE CAPITAL"), null);
+});

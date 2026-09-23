@@ -25,6 +25,7 @@ import {
     pendingOrderAuthorityValue,
     resolveOperationDisplaySymbol,
 } from "../components/operation/operationPreparationModel";
+import { performSaveSettings } from "../features/trade-settings/saveSettings";
 
 
 const fetchBotStatus = async () => {
@@ -69,6 +70,40 @@ const getPositionSide = (position) => {
     );
 };
 
+// Shared BotControl config builder. The DRAFT config is built from the live
+// editor state; the SAVED config is built from the last committed SAVE
+// SETTINGS revision. Runtime context fields (execution mode, real-order
+// authority, LIVE permission, display symbol) are appended identically to
+// both, but the authoritative trade values (mode / symbol / leverage / SL /
+// TP / size / timeframe / automation switches) come from the supplied base.
+const buildBotConfig = (base, botStatus, running) => ({
+    ...base,
+    ...(running ? {
+        positionSize: firstAvailable(botStatus?.positionSize, botStatus?.position_size, base.positionSize),
+        timeframe: firstAvailable(botStatus?.timeframe, base.timeframe),
+        tp: firstAvailable(botStatus?.tp_percent, botStatus?.tradeSettings?.tp_percent, base.tp),
+        sl: firstAvailable(botStatus?.sl_percent, botStatus?.tradeSettings?.sl_percent, base.sl),
+        trailing: firstAvailable(botStatus?.trailingStop, botStatus?.trailing_stop, botStatus?.tradeSettings?.trailing_stop, base.trailing) === true,
+        leverage: firstAvailable(botStatus?.leverage, botStatus?.tradeSettings?.leverage, base.leverage),
+    } : {}),
+    selectionMode: base.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
+    displaySymbol: resolveOperationDisplaySymbol(botStatus),
+    autoMarketState: botStatus?.autoMarketSelection?.productionIntegration?.status || "NOT AVAILABLE",
+    executionMode: botStatus?.executionMode || botStatus?.execution_mode,
+    realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,
+    realOrderAuthorityKnown: typeof botStatus?.realOrderAllowed === "boolean"
+        || typeof botStatus?.real_order_allowed === "boolean",
+    allowLive: botStatus?.allowLive,
+    tradeMode: botStatus?.tradeMode,
+    selectedMode: botStatus?.selectedMode,
+    dryRun: typeof botStatus?.dryRun === "boolean" ? botStatus.dryRun : undefined,
+    leverageAuthority: botStatus?.leverageAuthority ?? null,
+    paperBootstrapEligible: botStatus?.paperBootstrapEligible,
+    paperBootstrapStatus: botStatus?.paperBootstrapStatus,
+    paperBootstrapReasonCodes: botStatus?.paperBootstrapReasonCodes,
+    paperBootstrapSource: botStatus?.paperBootstrapSource,
+});
+
 /* =================================================
    DASHBOARD
 ================================================= */
@@ -81,11 +116,21 @@ const { data: botStatusSnapshot } = usePolling(
     5000,
 );
 
-const { tradeSettings, setTradeSettings } = useDashboardMarketContext();
+const {
+    tradeSettings,
+    setTradeSettings,
+    savedSettings,
+    settingsRevision,
+    settingsDirty,
+    commitSavedSettings,
+} = useDashboardMarketContext();
 const [, forceUpdate] = useState(0);
 const [executionEnabled, setExecutionEnabled] = useState(false);
 const [selectedStageId, setSelectedStageId] = useState("trading-runtime");
 const [manualBotStatusSnapshot, setManualBotStatusSnapshot] = useState(null);
+const [savingSettings, setSavingSettings] = useState(false);
+const [settingsSaveError, setSettingsSaveError] = useState(null);
+const [settingsSaveNotice, setSettingsSaveNotice] = useState(null);
 
 const refreshBotStatus = useCallback(async () => {
     const snapshot = await fetchBotStatus();
@@ -94,6 +139,41 @@ const refreshBotStatus = useCallback(async () => {
 
     return snapshot.data;
 }, []);
+
+// SAVE SETTINGS = the configuration authority boundary. It reads the current
+// draft, validates it, and (for LIVE) refreshes the authoritative LIVE account
+// context via the existing read-only status path. Only after a successful
+// read/validation does it commit a new saved revision. It NEVER starts the
+// runtime, arms execution, or creates an order. A failed LIVE context refresh
+// leaves the previous saved revision untouched.
+const handleSaveSettings = useCallback(async () => {
+    if (savingSettings) {
+        return { ok: false, inProgress: true };
+    }
+    setSavingSettings(true);
+    setSettingsSaveError(null);
+    setSettingsSaveNotice(null);
+    try {
+        const result = await performSaveSettings({
+            draft: tradeSettings,
+            refreshLiveContext: refreshBotStatus,
+        });
+        if (!result.ok) {
+            const message = {
+                INVALID_MODE: "Mode must be PAPER or LIVE.（モードはPAPERまたはLIVEにしてください）",
+                INVALID_SYMBOL: "Symbol is required.（シンボルを指定してください）",
+                LIVE_ACCOUNT_CONTEXT_UNAVAILABLE: "LIVE account context could not be refreshed. Saved settings were not changed.（LIVEアカウント情報を取得できませんでした。保存済み設定は変更されていません）",
+            }[result.code] || "SAVE FAILED（保存に失敗しました）";
+            setSettingsSaveError({ code: result.code, message });
+            return { ok: false, code: result.code };
+        }
+        commitSavedSettings(tradeSettings);
+        setSettingsSaveNotice("SETTINGS SAVED");
+        return { ok: true };
+    } finally {
+        setSavingSettings(false);
+    }
+}, [commitSavedSettings, refreshBotStatus, savingSettings, tradeSettings]);
 
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
@@ -131,6 +211,15 @@ const position = firstAvailable(
     getPositionSide(botStatus?.actual_position),
     getPositionSide(botStatus?.position),
     getPositionSide(wsMarketData?.position),
+);
+
+// LIVE account context read path (read-only). SAVE SETTINGS refreshes this via
+// /bot/status; Final Preparation surfaces it when the SAVED mode is LIVE so the
+// operator can confirm LIVE capital while the runtime is still STOPPED.
+const liveAccountCapital = firstAvailable(
+    botStatus?.realEquity,
+    botStatus?.realAvailableBalance,
+    botStatus?.realBalance,
 );
 
 const runtimeHealth = useMemo(() => deriveRuntimeHealth({
@@ -204,33 +293,23 @@ useEffect(() => {
 
                             <BotControl
 
-                            config={{
-                                ...tradeSettings,
-                                ...(runtimeHealth.running ? {
-                                    positionSize: firstAvailable(botStatus?.positionSize, botStatus?.position_size, tradeSettings.positionSize),
-                                    timeframe: firstAvailable(botStatus?.timeframe, tradeSettings.timeframe),
-                                    tp: firstAvailable(botStatus?.tp_percent, botStatus?.tradeSettings?.tp_percent, tradeSettings.tp),
-                                    sl: firstAvailable(botStatus?.sl_percent, botStatus?.tradeSettings?.sl_percent, tradeSettings.sl),
-                                    trailing: firstAvailable(botStatus?.trailingStop, botStatus?.trailing_stop, botStatus?.tradeSettings?.trailing_stop, tradeSettings.trailing) === true,
-                                    leverage: firstAvailable(botStatus?.leverage, botStatus?.tradeSettings?.leverage, tradeSettings.leverage),
-                                } : {}),
-                                selectionMode: tradeSettings.selectionMode || botStatus?.selectionMode || botStatus?.autoMarketSelection?.selectionMode || "NOT EXPOSED",
-                                displaySymbol: resolveOperationDisplaySymbol(botStatus),
-                                autoMarketState: botStatus?.autoMarketSelection?.productionIntegration?.status || "NOT AVAILABLE",
-                                executionMode: botStatus?.executionMode || botStatus?.execution_mode,
-                                realOrderAllowed: botStatus?.realOrderAllowed === true || botStatus?.real_order_allowed === true,
-                                realOrderAuthorityKnown: typeof botStatus?.realOrderAllowed === "boolean"
-                                    || typeof botStatus?.real_order_allowed === "boolean",
-                                allowLive: botStatus?.allowLive,
-                                tradeMode: botStatus?.tradeMode,
-                                selectedMode: botStatus?.selectedMode,
-                                dryRun: typeof botStatus?.dryRun === "boolean" ? botStatus.dryRun : undefined,
-                                leverageAuthority: botStatus?.leverageAuthority ?? null,
-                                paperBootstrapEligible: botStatus?.paperBootstrapEligible,
-                                paperBootstrapStatus: botStatus?.paperBootstrapStatus,
-                                paperBootstrapReasonCodes: botStatus?.paperBootstrapReasonCodes,
-                                paperBootstrapSource: botStatus?.paperBootstrapSource,
-                            }}
+                            config={buildBotConfig(tradeSettings, botStatus, runtimeHealth.running)}
+
+                            savedConfig={buildBotConfig(savedSettings, botStatus, runtimeHealth.running)}
+
+                            settingsDirty={settingsDirty}
+
+                            settingsRevision={settingsRevision}
+
+                            savingSettings={savingSettings}
+
+                            settingsSaveError={settingsSaveError}
+
+                            settingsSaveNotice={settingsSaveNotice}
+
+                            onSaveSettings={handleSaveSettings}
+
+                            liveAccountCapital={liveAccountCapital}
 
                             executionEnabled={
                                 executionEnabled

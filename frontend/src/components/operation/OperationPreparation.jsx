@@ -113,6 +113,14 @@ export default function OperationPreparation({
     botRunning = false,
     children,
     config = {},
+    savedConfig,
+    settingsDirty = false,
+    settingsRevision = 0,
+    onSaveSettings,
+    savingSettings = false,
+    settingsSaveError = null,
+    settingsSaveNotice = null,
+    liveAccountCapital,
     emergencyState = "UNKNOWN",
     executionEnabled = false,
     governanceStatus = "UNKNOWN",
@@ -183,6 +191,11 @@ export default function OperationPreparation({
     handleReturnToNormal,
 }) {
     const settings = createOperationPreparationSettings(config);
+    // SAVE SETTINGS authority boundary: the read-only Final Preparation reads
+    // the SAVED revision, while the editable Trade Settings controls above keep
+    // reading the DRAFT. When no saved revision is provided the draft is the
+    // fallback so legacy callers are unchanged.
+    const savedSettings = createOperationPreparationSettings(savedConfig ?? config);
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
     // MANUAL TRADING execution confirmation preference. Presentation-only:
@@ -356,7 +369,7 @@ export default function OperationPreparation({
         paperBootstrapEligible: config.paperBootstrapEligible,
     });
     const summary = operationPreparationSummary(
-        settings,
+        savedSettings,
         selectedRuntimeSymbol,
         // WF: the read-only Final Preparation summary must show the
         // authoritative saved configuration even when the local unsaved MM
@@ -693,6 +706,11 @@ return (
                     type="button"
                 >
                     <span className="operation-trade-settings__title">TRADE SETTINGS（取引設定）</span>
+                    {settingsDirty && (
+                        <span className="operation-trade-settings__badge" data-testid="trade-settings-unsaved-badge">
+                            UNSAVED CHANGES
+                        </span>
+                    )}
                     <span aria-hidden="true" className="operation-trade-settings__indicator">
                         {tradeSettingsOpen ? "▲" : "▼"}
                     </span>
@@ -832,6 +850,41 @@ return (
                     )}
                 </div>
             </div>
+                <div className="operation-prep-save-settings" data-testid="save-settings-controls">
+                    <span className="operation-prep-save-settings__state" data-testid="save-settings-state">
+                        {savingSettings
+                            ? "SAVING..."
+                            : settingsDirty
+                                ? "UNSAVED CHANGES"
+                                : settingsSaveNotice
+                                    ? "SETTINGS SAVED"
+                                    : "SAVED"}
+                    </span>
+                    <button
+                        className="operation-prep-save-settings__button"
+                        data-testid="save-settings-button"
+                        disabled={botRunning || savingSettings || typeof onSaveSettings !== "function"}
+                        onClick={() => onSaveSettings && onSaveSettings()}
+                        type="button"
+                    >
+                        {savingSettings ? "SAVING..." : "SAVE SETTINGS"}
+                    </button>
+                    {!settingsDirty && !savingSettings && (
+                        <small className="operation-prep-save-settings__hint">
+                            Trade Settings committed. START uses the saved revision.（設定は保存済み。STARTは保存済みRevisionを使用します）
+                        </small>
+                    )}
+                    {settingsDirty && !savingSettings && (
+                        <small className="operation-prep-save-settings__hint" data-testid="unsaved-changes-hint">
+                            Unsaved changes — SAVE SETTINGS to apply.（変更あり — SAVE SETTINGSで反映）
+                        </small>
+                    )}
+                    {settingsSaveError && (
+                        <p className="operation-prep-error" role="alert" data-testid="settings-save-error">
+                            {settingsSaveError.message ?? settingsSaveError.code ?? "Save settings failed."}
+                        </p>
+                    )}
+                </div>
                 </div>
             </section>
 
@@ -842,10 +895,15 @@ return (
                     <div className="operation-prep-summary">
                         <Section number="1" testId="final-prep-trading-mode" title="TRADING MODE">
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
+                            {savedSettings.tradingMode === "LIVE" && (
+                                <DerivedRow label="LIVE CAPITAL" source={liveAccountCapital !== undefined ? "LIVE ACCOUNT" : "NOT CONNECTED"} value={liveAccountCapital !== undefined ? `${Number(liveAccountCapital)} USDT` : "UNAVAILABLE"} valueClass="operation-prep-value--setting" />
+                            )}
                             <DerivedRow label="CURRENT EXECUTION" source={executionSource} value={executionMode} />
                             <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
                             <DerivedRow label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
                             <DerivedRow label="CONTROL REVISION" source="RUNTIME" value={String(controlRevision)} />
+                            <DerivedRow label="SETTINGS REVISION" source="SAVED" value={String(settingsRevision)} />
+                            <DerivedRow label="SETTINGS STATUS" source={settingsDirty ? "DRAFT" : "SAVED"} status value={settingsDirty ? "UNSAVED CHANGES" : "SAVED"} />
                             {requestedModeDiffersFromExecution && (
                                 <p className="operation-prep-mode-divergence__note" data-testid="mode-divergence">
                                     LIVE is selected for the next START. Real-order authority is not active.（LIVEは次のSTARTに選択されています。実注文権限は有効ではありません）
@@ -886,11 +944,11 @@ return (
                         </Section>
 
                         <Section number="5" testId="final-prep-automation" title="AUTOMATION">
-                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={settings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={settings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={savedSettings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={savedSettings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
                             <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} />
                             <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={settings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
+                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={savedSettings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
                         </Section>
 
                         <section className="operation-prep-section operation-prep-section--final-readiness" data-testid="final-prep-start-readiness">

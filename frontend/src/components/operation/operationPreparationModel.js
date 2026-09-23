@@ -64,6 +64,45 @@ export const createOperationPreparationSettings = (config = {}) => ({
     autoTradeOnStart: Boolean(config.autoTradeOnStart),
 });
 
+// SAVE SETTINGS authority boundary: the fields that START consumes and that
+// the SAVE SETTINGS button commits. These are the non-MM trade settings; the
+// MM fields (risk / exposure / drawdown / compounding) are already owned by
+// the separate Money Management configuration authority (auto-persisted).
+export const TRADE_SETTINGS_SNAPSHOT_KEYS = Object.freeze([
+    "mode",
+    "selectionMode",
+    "symbol",
+    "leverage",
+    "positionSize",
+    "sl",
+    "tp",
+    "trailing",
+    "timeframe",
+    "loopOnStart",
+    "autoTradeOnStart",
+]);
+
+// Normalize a raw trade-settings object into a comparable SAVE SETTINGS
+// snapshot. Missing keys normalize to null so a fresh draft and an empty saved
+// revision never compare as "changed" merely because a key is absent.
+export const snapshotTradeSettings = (config = {}) => {
+    const snapshot = {};
+    for (const key of TRADE_SETTINGS_SNAPSHOT_KEYS) {
+        const value = config == null ? undefined : config[key];
+        snapshot[key] = value === undefined || value === null ? null : value;
+    }
+    return snapshot;
+};
+
+// Draft != Saved only when a committed field actually differs. Coerces to
+// string so numeric 5 vs "5" (leverage select) do not produce a spurious
+// unsaved state.
+export const tradeSettingsDiffer = (left, right) => {
+    const a = snapshotTradeSettings(left);
+    const b = snapshotTradeSettings(right);
+    return TRADE_SETTINGS_SNAPSHOT_KEYS.some((key) => String(a[key]) !== String(b[key]));
+};
+
 export const operationPreparationSummary = (settings, selectedSymbol, riskPerTradePercent) => ({
     mode: settings.tradingMode,
     market: settings.selectionMode,
