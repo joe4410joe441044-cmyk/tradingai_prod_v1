@@ -969,6 +969,16 @@
     gap: 0 12px;
 }
 
+/* Each numbered card column is an independent vertical stack so a tall left
+   card (③ MONEY MANAGEMENT) can never push the right column (④ TRADE /
+   EXECUTION) down — columns keep their own height. */
+.operation-prep-summary .operation-prep-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
 .operation-prep-summary .operation-prep-derived-row {
     grid-template-columns: minmax(0, 1fr) auto;
 }

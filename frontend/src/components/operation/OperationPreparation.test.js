@@ -1633,24 +1633,36 @@ test("FINAL PREPARATION orders the TRADE SETTINGS mirror sections ①–⑤ then
     const renderer = createRenderer(Component, readyProps());
     const summarySection = findTestId(renderer.root, "operation-preparation-summary");
     assert.ok(summarySection, "FINAL PREPARATION summary present");
-    const orderedTestIds = [
-        "final-prep-trading-mode",
-        "final-prep-market-selection",
-        "final-prep-money-management",
-        "final-prep-trade-execution",
-        "final-prep-automation",
-        "final-prep-start-readiness",
-    ];
-    const nodes = descendants(summarySection);
-    const indexes = orderedTestIds.map((testId) => nodes.findIndex(
-        (node) => node.props?.["data-testid"] === testId,
-    ));
-    assert.deepEqual(orderedTestIds.filter((testId, index) => indexes[index] < 0), []);
-    assert.deepEqual(
-        indexes,
-        [...indexes].sort((left, right) => left - right),
-        "FINAL PREPARATION sections appear in ①–⑤ then START / READINESS order",
+
+    // ①–⑤ are arranged in two independent vertical stacks so a tall left
+    // card can never push the right column (④ TRADE / EXECUTION) down.
+    const stacks = descendants(summarySection).filter(
+        (node) => node.type === "div" && String(node.props?.className || "").includes("operation-prep-stack"),
     );
+    assert.equal(stacks.length, 2, "FINAL PREPARATION has a left and a right column stack");
+
+    const sectionTestIdsIn = (node) => descendants(node)
+        .filter((child) => String(child.props?.["data-testid"] || "").startsWith("final-prep-"))
+        .map((child) => child.props["data-testid"]);
+
+    assert.deepEqual(sectionTestIdsIn(stacks[0]), [
+        "final-prep-trading-mode",
+        "final-prep-money-management",
+        "final-prep-automation",
+    ], "left column = ① TRADING MODE, ③ MONEY MANAGEMENT, ⑤ AUTOMATION");
+
+    assert.deepEqual(sectionTestIdsIn(stacks[1]), [
+        "final-prep-market-selection",
+        "final-prep-trade-execution",
+    ], "right column = ② MARKET SELECTION, ④ TRADE / EXECUTION");
+
+    const nodes = descendants(summarySection);
+    const readinessIdx = nodes.findIndex(
+        (node) => node.props?.["data-testid"] === "final-prep-start-readiness",
+    );
+    const rightStackIdx = nodes.findIndex((node) => node === stacks[1]);
+    assert.ok(readinessIdx > rightStackIdx, "START / READINESS follows the two columns");
+
     // Every mirror section body is present.
     assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-market-selection"))).includes("SELECTION RUNTIME"), true);
     assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-automation"))).includes("AUTO SELECTION START"), true);
