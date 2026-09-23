@@ -941,36 +941,6 @@ return (
                             <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                             <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                         </Section>
-
-                        <Section number="5" testId="final-prep-automation" title="AUTOMATION">
-                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={savedSettings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={savedSettings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} />
-                            <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} />
-                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={savedSettings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
-                        </Section>
-                        </div>
-
-                        <div className="operation-prep-stack">
-                        <Section number="2" testId="final-prep-market-selection" title="MARKET SELECTION">
-                            <DerivedRow label="MARKET" source="OPERATOR" value={selectionModeDisplayLabel(summary.market)} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
-                        </Section>
-
-                        <Section number="4" testId="final-prep-trade-execution" title="TRADE / EXECUTION">
-                            <DerivedRow label="REQUESTED LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="MM LEVERAGE LIMIT" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
-                            <DerivedRow label="EFFECTIVE LEVERAGE" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
-                            <DerivedRow label="POSITION SIZE (0 = RISK %)" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} />
-                            <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
-                        </Section>
-
                         <section className="operation-prep-section operation-prep-section--final-readiness" data-testid="final-prep-start-readiness">
                             <header><h3>START / READINESS（開始 / 準備状態）</h3></header>
                             <div className="operation-prep-section__body">
@@ -1045,6 +1015,36 @@ return (
                                 </small>
                             )}
                         </section>
+
+                        </div>
+
+                        <div className="operation-prep-stack">
+                        <Section number="2" testId="final-prep-market-selection" title="MARKET SELECTION">
+                            <DerivedRow label="MARKET" source="OPERATOR" value={selectionModeDisplayLabel(summary.market)} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="SYMBOL" source={summary.symbol === "AUTO SELECT" ? "DERIVED" : "OPERATOR"} value={summary.symbol} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="SELECTION RUNTIME" source="RUNTIME" status value={selectionRuntime} />
+                        </Section>
+
+                        <Section number="4" testId="final-prep-trade-execution" title="TRADE / EXECUTION">
+                            <DerivedRow label="REQUESTED LEVERAGE" source="OPERATOR" value={summary.requestedLeverage} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="MM LEVERAGE LIMIT" source={maximumLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM CONFIG"} value={maximumLeverage} />
+                            <DerivedRow label="EFFECTIVE LEVERAGE" source={effectiveLeverage === "UNAVAILABLE" ? "NOT CONNECTED" : "MM START"} status value={effectiveLeverageDisplay} />
+                            <DerivedRow label="POSITION SIZE (0 = RISK %)" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.positionSize} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="STOP LOSS" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.stopLoss} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="TAKE PROFIT" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.takeProfit} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="TRAILING STOP" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.trailingStop} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="TIMEFRAME" source={botRunning ? "RUNTIME" : "OPERATOR"} value={summary.timeframe} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="EXECUTION" source={executionSource} value={executionMode} />
+                            <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
+                        </Section>
+                        <Section number="5" testId="final-prep-automation" title="AUTOMATION">
+                            <DerivedRow label="LOOP ON START" source="OPERATOR" value={savedSettings.loopOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="AUTO TRADE ON START" source="OPERATOR" value={savedSettings.autoTradeOnStart ? "ON" : "OFF"} valueClass="operation-prep-value--setting" />
+                            <DerivedRow label="RUNTIME LOOP" source="RUNTIME" status={botRunning} value={runtimeLoopValue} />
+                            <DerivedRow label="RUNTIME AUTO TRADE" source="RUNTIME" status={autoTradeStatus} value={autoTradeValue} />
+                            <DerivedRow label="AUTO SELECTION START" source="DERIVED" value={savedSettings.selectionMode === "AUTO" ? "AUTO MODE → ON START" : "SELECT MODE"} />
+                        </Section>
+
                         </div>
                     </div>
                 </section>

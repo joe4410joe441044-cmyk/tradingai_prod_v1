@@ -1648,14 +1648,14 @@ test("FINAL PREPARATION orders the TRADE SETTINGS mirror sections ①–⑤ then
     assert.deepEqual(sectionTestIdsIn(stacks[0]), [
         "final-prep-trading-mode",
         "final-prep-money-management",
-        "final-prep-automation",
-    ], "left column = ① TRADING MODE, ③ MONEY MANAGEMENT, ⑤ AUTOMATION");
+        "final-prep-start-readiness",
+    ], "left column = ① TRADING MODE, ③ MONEY MANAGEMENT, START / READINESS");
 
     assert.deepEqual(sectionTestIdsIn(stacks[1]), [
         "final-prep-market-selection",
         "final-prep-trade-execution",
-        "final-prep-start-readiness",
-    ], "right column = ② MARKET SELECTION, ④ TRADE / EXECUTION, START / READINESS");
+        "final-prep-automation",
+    ], "right column = ② MARKET SELECTION, ④ TRADE / EXECUTION, ⑤ AUTOMATION");
 
     // Every mirror section body is present.
     assert.equal(normalizedText(descendants(findTestId(renderer.root, "final-prep-market-selection"))).includes("SELECTION RUNTIME"), true);
