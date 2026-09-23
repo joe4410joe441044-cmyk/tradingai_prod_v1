@@ -332,3 +332,50 @@ async def update_parameter_settings_configuration(
             }
     status_code = _OUTCOME_STATUS.get(result.outcome, 500)
     return JSONResponse(status_code=status_code, content=content)
+
+
+@router.post("/persist-baseline")
+async def persist_parameter_settings_baseline(
+    request: Request,
+    _operator: str = Depends(require_operator_session),
+):
+    """Persist exact named baseline when store is MISSING (no invented values).
+
+    Does not start bot, arm LIVE, enable execution, or create orders.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    scope = body.get("scope")
+    confirm_live = body.get("confirmLive") is True
+    if isinstance(scope, str) and scope.strip().upper() == "LIVE" and not confirm_live:
+        return _safe_error(
+            422,
+            "LIVE_CONFIRMATION_REQUIRED",
+            "LIVE baseline persistence requires confirmLive=true",
+            scope=scope,
+        )
+    service = _service(request)
+    try:
+        result = service.persist_baseline_if_missing(scope)
+    except Exception:
+        return _safe_error(
+            503,
+            "PARAMETER_SETTINGS_UNAVAILABLE",
+            "Parameter settings baseline persistence is unavailable.",
+        )
+    status = 200
+    if result.get("outcome") == "INVALID_SCOPE":
+        status = 422
+    elif result.get("outcome") == "STORE_FAILURE":
+        status = 503
+    # Safe stopped promotion after first persist so EFFECTIVE matches CONFIGURED.
+    if result.get("persisted") is True and isinstance(scope, str):
+        promotion = _attempt_stopped_promotion(scope.strip().upper())
+        if isinstance(promotion, dict) and promotion:
+            result = dict(result)
+            result["promotion"] = promotion
+    return JSONResponse(status_code=status, content=result)

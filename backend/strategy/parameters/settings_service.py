@@ -28,7 +28,17 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from .spread_unit_classification import (
+    LIVE_SPREAD_CLASSIFICATION,
+    LIVE_SPREAD_NOTE,
+    LIVE_SPREAD_PERCENT_INTERPRETATION_BLOCKED,
+    LIVE_SPREAD_RECORDED_VALUE,
+    LIVE_SPREAD_SETTINGS_FIELD_UNIT,
+    LIVE_SPREAD_STRATEGY_COMPARISON_UNIT,
+    PAPER_SPREAD_CLASSIFICATION,
+)
 from .baselines import (
+
     LIVE_BASELINE_EXACT_KEYS,
     LIVE_CLASS_CONSTANT_BASELINE,
     PAPER_MIGRATION_BASELINE,
@@ -320,6 +330,7 @@ class ParameterSettingsService:
                 for issue in self._warnings(configured)
             ],
             "parameters": self._parameters_map(configured),
+            "unitProvenance": self._scope_provenance(resolved),
         }
 
     def effective(self, scope: Any) -> dict:
@@ -688,6 +699,96 @@ class ParameterSettingsService:
         )
         save_result = self.store.save(record, variant=EFFECTIVE_VARIANT)
         return save_result.status.value == "SAVED"
+
+
+    def persist_baseline_if_missing(self, scope: Any) -> dict:
+        """Idempotently persist the named migration baseline when store is MISSING.
+
+        Never invents trading values. Persists the exact named baseline bytes
+        (LIVE_CLASS_CONSTANT_BASELINE or PAPER_MIGRATION_BASELINE) as both
+        configured and effective revision 1 so LIVE is no longer indefinitely
+        fallback-only. Safe to call repeatedly.
+        """
+        try:
+            resolved = _coerce_scope(scope)
+        except (ValueError, TypeError):
+            return {
+                "outcome": "INVALID_SCOPE",
+                "persisted": False,
+                "scope": scope,
+            }
+        load = self._load_scope(resolved)
+        if load is not None and load.status is StoreLoadStatus.VALID:
+            configured = load.parameter_set
+            return {
+                "outcome": "ALREADY_PERSISTED",
+                "persisted": False,
+                "scope": resolved.value,
+                "storeStatus": StoreLoadStatus.VALID.value,
+                "configuredRevision": configured.configuredRevision,
+                "effectiveRevision": configured.effectiveRevision,
+                "source": configured.source.value,
+            }
+        baseline_set = materialize_parameter_set(
+            _baseline_for(resolved),
+            configured_revision=1,
+            effective_revision=1,
+            status=ParameterStatus.ACTIVE,
+            now=self._captured_at(),
+        )
+        save_configured = self.store.save(baseline_set)
+        if save_configured.status.value != "SAVED":
+            return {
+                "outcome": "STORE_FAILURE",
+                "persisted": False,
+                "scope": resolved.value,
+                "failure": getattr(save_configured, "failure_code", None),
+            }
+        effective_ok = self._ensure_effective_record(resolved, baseline_set)
+        # Clear baseline cache so subsequent reads load from store.
+        self._baseline_cache.pop(resolved, None)
+        return {
+            "outcome": "PERSISTED",
+            "persisted": True,
+            "scope": resolved.value,
+            "storeStatus": StoreLoadStatus.VALID.value,
+            "configuredRevision": baseline_set.configuredRevision,
+            "effectiveRevision": baseline_set.effectiveRevision,
+            "source": baseline_set.source.value,
+            "effectivePersisted": bool(effective_ok),
+            "authorityStatus": "PERSISTED",
+            "spreadUnitProvenance": (
+                LIVE_SPREAD_CLASSIFICATION.value
+                if resolved is ParameterScope.LIVE
+                else PAPER_SPREAD_CLASSIFICATION.value
+            ),
+        }
+
+
+    @staticmethod
+    def _scope_provenance(scope: ParameterScope) -> dict:
+        """Observability-only unit provenance; never changes trading values."""
+        if scope is ParameterScope.LIVE:
+            return {
+                "maximumStrategySpreadPct": {
+                    "classification": LIVE_SPREAD_CLASSIFICATION.value,
+                    "strategyComparisonUnit": LIVE_SPREAD_STRATEGY_COMPARISON_UNIT,
+                    "settingsFieldUnit": LIVE_SPREAD_SETTINGS_FIELD_UNIT,
+                    "recordedValue": LIVE_SPREAD_RECORDED_VALUE,
+                    "percentInterpretationBlocked": (
+                        LIVE_SPREAD_PERCENT_INTERPRETATION_BLOCKED
+                    ),
+                    "liveWritable": False,
+                    "note": LIVE_SPREAD_NOTE,
+                }
+            }
+        return {
+            "maximumStrategySpreadPct": {
+                "classification": PAPER_SPREAD_CLASSIFICATION.value,
+                "strategyComparisonUnit": "percent",
+                "percentInterpretationBlocked": False,
+            }
+        }
 
 
 def _issue_to_dict(issue) -> dict:
