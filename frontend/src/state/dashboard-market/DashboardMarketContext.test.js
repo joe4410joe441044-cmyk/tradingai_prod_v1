@@ -171,3 +171,65 @@ test("Dashboard market hook rejects use outside its Provider", async () => {
         internals.H = previous;
     }
 });
+
+
+test("SAVE SETTINGS durable revision survives provider remount (localStorage)", async () => {
+    const {
+        DashboardMarketContextProvider,
+        DASHBOARD_SAVED_TRADE_SETTINGS_KEY,
+        useDashboardMarketContext,
+    } = await loadModule();
+    const store = new Map();
+    globalThis.window = {
+        localStorage: {
+            getItem: (key) => (store.has(key) ? store.get(key) : null),
+            setItem: (key, value) => { store.set(key, String(value)); },
+            removeItem: (key) => { store.delete(key); },
+        },
+    };
+    const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    const dispatcher = createDispatcher();
+    const Render = () => {
+        const previous = internals.H;
+        dispatcher.beginRender();
+        internals.H = dispatcher;
+        try {
+            const provider = DashboardMarketContextProvider({ children: null });
+            dispatcher.contextRef.current = provider.props.value;
+            return useDashboardMarketContext();
+        } finally {
+            dispatcher.contextRef.current = null;
+            internals.H = previous;
+        }
+    };
+    let value = Render();
+    value.setTradeSettings((current) => ({ ...current, mode: "LIVE", symbol: "C98USDTM" }));
+    value = Render();
+    value.commitSavedSettings(value.tradeSettings);
+    value = Render();
+    assert.equal(value.settingsRevision, 1);
+    assert.equal(value.savedSettings.mode, "LIVE");
+    assert.equal(value.savedSettings.symbol, "C98USDTM");
+    assert.ok(store.get(DASHBOARD_SAVED_TRADE_SETTINGS_KEY));
+
+    // Remount with a fresh dispatcher -> must restore durable saved, not INITIAL.
+    const dispatcher2 = createDispatcher();
+    const Render2 = () => {
+        const previous = internals.H;
+        dispatcher2.beginRender();
+        internals.H = dispatcher2;
+        try {
+            const provider = DashboardMarketContextProvider({ children: null });
+            dispatcher2.contextRef.current = provider.props.value;
+            return useDashboardMarketContext();
+        } finally {
+            dispatcher2.contextRef.current = null;
+            internals.H = previous;
+        }
+    };
+    const restored = Render2();
+    assert.equal(restored.settingsRevision, 1);
+    assert.equal(restored.savedSettings.mode, "LIVE");
+    assert.equal(restored.tradeSettings.symbol, "C98USDTM");
+    assert.equal(restored.settingsDirty, false);
+});

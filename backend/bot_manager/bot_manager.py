@@ -90,6 +90,12 @@ from backend.execution.kucoin_trade import (
     account_status_total_pnl_today,
 )
 
+from backend.money_management.risk_percent_authority import (
+    RiskPercentAuthorityError,
+    resolve_executability_risk_percent,
+    resolve_risk_percent_authority,
+    status_risk_percent_authority,
+)
 from backend.money_management.loss_authoritative_runtime_metrics import (
     AuthoritativeLossRuntimeMetricsState,
 )
@@ -1974,6 +1980,13 @@ class BotManager:
                 "trailing_stop_distance_percent"
             ),
         }
+        risk_authority = self._status_risk_percent_authority(
+            engine_config.get("risk_percent")
+        )
+        if risk_authority is not None:
+            risk_config["risk_percent"] = risk_authority["value"]
+            risk_config["riskPercentSource"] = risk_authority["source"]
+            risk_config["riskPercentAuthority"] = risk_authority["value"]
 
         risk_state = (
             self.engine.get_risk_state()
@@ -4174,8 +4187,16 @@ class BotManager:
                 )
             return number
 
+        provider = getattr(self, "money_management_config_provider", None)
+        mm_config = provider() if callable(provider) else None
+        risk_percent = resolve_executability_risk_percent(
+            config=config,
+            mm_config=mm_config,
+            live_runtime=live_runtime,
+            legacy_default="0.5",
+        )
         return {
-            "risk_percent": positive_decimal("risk_percent", "0.5"),
+            "risk_percent": risk_percent,
             "stop_loss_percent": positive_decimal("sl_percent", "1"),
             "effective_leverage": positive_decimal("effective_leverage", "1"),
         }
@@ -4201,6 +4222,21 @@ class BotManager:
             config.get("leverage"),
             maximum_leverage,
         )
+
+
+    def _status_risk_percent_authority(self, engine_risk_percent):
+        provider = getattr(self, "money_management_config_provider", None)
+        mm_config = provider() if callable(provider) else None
+        return status_risk_percent_authority(
+            engine_risk_percent=engine_risk_percent,
+            mm_config=mm_config,
+            running=bool(getattr(self, "_running", False)),
+        )
+
+    def _resolve_risk_percent_authority(self, config):
+        provider = self.money_management_config_provider
+        mm_config = provider() if callable(provider) else None
+        return resolve_risk_percent_authority(config, mm_config)
 
     def _resolve_max_drawdown_authority(self, config):
         """Resolve canonical maximum drawdown from saved MM configuration.
@@ -5286,6 +5322,25 @@ class BotManager:
                 "completed": False,
                 "stateUnknown": True,
             }
+
+        try:
+            risk_percent_authority = (
+                self._resolve_risk_percent_authority(config)
+            )
+        except (ValueError, RiskPercentAuthorityError) as exc:
+            reason = str(exc)
+            if "UNAVAILABLE" in reason or "INVALID" in reason:
+                reason = "MONEY_MANAGEMENT_RISK_PER_TRADE_UNAVAILABLE"
+            return {
+                "status": "error",
+                "reason": reason,
+                "success": False,
+                "completed": False,
+                "stateUnknown": True,
+            }
+        config = dict(config)
+        config["risk_percent"] = risk_percent_authority
+        config["max_drawdown_pct"] = max_drawdown_authority
 
         try:
             requested_mode = str(
@@ -12848,6 +12903,13 @@ class BotManager:
                 "trailing_stop_distance_percent"
             ),
         }
+        risk_authority = self._status_risk_percent_authority(
+            engine_config.get("risk_percent")
+        )
+        if risk_authority is not None:
+            risk_config["risk_percent"] = risk_authority["value"]
+            risk_config["riskPercentSource"] = risk_authority["source"]
+            risk_config["riskPercentAuthority"] = risk_authority["value"]
 
         risk_state = (
             self.engine.get_risk_state()

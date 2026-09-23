@@ -677,6 +677,7 @@ if _auth_configured:
         "/api/bot/paper-account/capital",
         "/api/money-management/configuration",
         "/api/parameter-settings/configuration",
+        "/api/parameter-settings/persist-baseline",
         "/api/governance/mode",
         "/api/governance/execution",
         "/api/governance/risk-profile",

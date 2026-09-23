@@ -138,3 +138,5 @@ __all__ = [
     "serialize_parameter_envelope",
     "validate_parameters",
 ]
+
+from .spread_unit_classification import SpreadUnitClassification  # noqa: F401

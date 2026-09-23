@@ -46,7 +46,7 @@ from backend.strategy.parameters.settings_service import (
 SESSION_SECRET = "c" * 32
 TEST_CREDENTIAL = "parameter-settings-operator-1"
 TEST_CREDENTIAL_HASH = hash_operator_credential(TEST_CREDENTIAL)
-CSRF_PATHS = frozenset({"/api/parameter-settings/configuration"})
+CSRF_PATHS = frozenset({"/api/parameter-settings/configuration", "/api/parameter-settings/persist-baseline"})
 
 CANONICAL_PARAMETER_NAMES = (
     "minimumCompositeScore",
@@ -643,8 +643,12 @@ def test_only_one_write_route_is_registered():
         methods = getattr(route, "methods", set()) or set()
         if methods & {"POST", "PUT", "PATCH", "DELETE"}:
             write_routes.append((path, sorted(methods)))
+    # configuration PUT remains the sole arbitrary-parameter write path.
+    # persist-baseline POST only seeds the exact named migration baseline when
+    # the store is MISSING; it never invents operator parameter values.
     assert write_routes == [
-        ("/api/parameter-settings/configuration", ["PUT"])
+        ("/api/parameter-settings/configuration", ["PUT"]),
+        ("/api/parameter-settings/persist-baseline", ["POST"]),
     ], write_routes
 
 
@@ -786,3 +790,45 @@ def test_stopped_helper_exposes_manager_failure(monkeypatch):
         raise RuntimeError("manager unavailable")
     monkeypatch.setattr(module, "get_existing_bot_manager", unavailable)
     assert _attempt_stopped_promotion("PAPER")["outcome"] == "PROMOTION_ERROR"
+
+
+
+def test_persist_baseline_live_requires_confirm_and_is_idempotent(client):
+    session, csrf = _login(client)
+    cookies = {COOKIE_NAME: session, CSRF_TOKEN_COOKIE: csrf}
+    headers = {CSRF_TOKEN_HEADER: csrf}
+    denied = client.post(
+        "/api/parameter-settings/persist-baseline",
+        headers=headers,
+        cookies=cookies,
+        json={"scope": "LIVE"},
+    )
+    assert denied.status_code == 422
+    assert denied.json()["code"] == "LIVE_CONFIRMATION_REQUIRED"
+
+    ok = client.post(
+        "/api/parameter-settings/persist-baseline",
+        headers=headers,
+        cookies=cookies,
+        json={"scope": "LIVE", "confirmLive": True},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["outcome"] == "PERSISTED"
+    assert body["spreadUnitProvenance"] == "LEGACY_UNIT_REPRESENTATION"
+    assert body["source"] == "MIGRATED_CLASS_CONSTANT"
+
+    status = client.get("/api/parameter-settings/status").json()
+    live = status["scopes"]["LIVE"]
+    assert live["storeStatus"] == "VALID"
+    assert live["authorityStatus"] == "PERSISTED"
+    assert live["fallbackActive"] is False
+
+    again = client.post(
+        "/api/parameter-settings/persist-baseline",
+        headers=headers,
+        cookies=cookies,
+        json={"scope": "LIVE", "confirmLive": True},
+    )
+    assert again.status_code == 200
+    assert again.json()["outcome"] == "ALREADY_PERSISTED"
