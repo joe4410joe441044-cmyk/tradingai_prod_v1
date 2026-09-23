@@ -1194,11 +1194,19 @@ test("Problem 2/3: Final Preparation distinguishes requested mode from current e
 
     const tradingMode = findTestId(renderer.root, "final-prep-trading-mode");
     assert.ok(tradingMode, "TRADING MODE summary present");
-    // LIVE requested mode == current execution SIMULATION and REAL ORDER DISABLED
-    // must coexist as authoritative distinct values in the TRADING MODE card.
+    // CARD SCOPE (G4): execution status lives only in ④ TRADE / EXECUTION.
+    // ① keeps MODE / CONTROL* / SETTINGS*; CURRENT EXECUTION and REAL ORDER are absent from ①.
     assert.equal(rowValueIn(rowByLabelIn(tradingMode, "MODE")), "LIVE", "requested MODE is LIVE");
-    assert.equal(rowValueIn(rowByLabelIn(tradingMode, "CURRENT EXECUTION")), "SIMULATION", "current execution authority is SIMULATION");
-    assert.equal(rowValueIn(rowByLabelIn(tradingMode, "REAL ORDER")), "DISABLED", "real order authority stays DISABLED");
+    assert.equal(rowByLabelIn(tradingMode, "CURRENT EXECUTION"), undefined, "CURRENT EXECUTION absent from ① TRADING MODE");
+    assert.equal(rowByLabelIn(tradingMode, "REAL ORDER"), undefined, "REAL ORDER absent from ① TRADING MODE");
+    assert.ok(rowByLabelIn(tradingMode, "CONTROL AUTHORITY"), "CONTROL AUTHORITY preserved in ①");
+    assert.ok(rowByLabelIn(tradingMode, "CONTROL REVISION"), "CONTROL REVISION preserved in ①");
+    assert.ok(rowByLabelIn(tradingMode, "SETTINGS REVISION"), "SETTINGS REVISION preserved in ①");
+    assert.ok(rowByLabelIn(tradingMode, "SETTINGS STATUS"), "SETTINGS STATUS preserved in ①");
+    const tradeExecution = findTestId(renderer.root, "final-prep-trade-execution");
+    assert.ok(tradeExecution, "TRADE / EXECUTION summary present");
+    assert.equal(rowValueIn(rowByLabelIn(tradeExecution, "EXECUTION")), "SIMULATION", "EXECUTION preserved in ④");
+    assert.equal(rowValueIn(rowByLabelIn(tradeExecution, "REAL ORDER")), "DISABLED", "REAL ORDER preserved in ④");
     // The divergence is surfaced as a single concise explanatory note, not a
     // repetitive START REQUEST / CURRENT EXECUTION AUTHORITY provenance block.
     const divergence = findTestId(renderer.root, "mode-divergence");
@@ -1799,8 +1807,14 @@ test("FINAL PREPARATION remains simplified and unchanged by the Trade Settings b
     );
     assert.equal(provenanceNodes.length, 0, "no REQUEST/CURRENT provenance chips in FINAL PREPARATION");
     const summaryText = normalizedText(descendants(summary));
-    assert.equal(summaryText.includes("CURRENT EXECUTION SIMULATION"), true, "CURRENT EXECUTION SIMULATION row preserved");
-    assert.equal(summaryText.includes("REAL ORDER DISABLED"), true, "REAL ORDER DISABLED row preserved");
+    // CARD SCOPE (G4): CURRENT EXECUTION removed from ①; EXECUTION + REAL ORDER stay in ④.
+    const tradingMode = findTestId(renderer.root, "final-prep-trading-mode");
+    const tradeExecution = findTestId(renderer.root, "final-prep-trade-execution");
+    assert.equal(normalizedText(descendants(tradingMode)).includes("CURRENT EXECUTION"), false, "CURRENT EXECUTION absent from ①");
+    assert.equal(normalizedText(descendants(tradingMode)).includes("REAL ORDER"), false, "REAL ORDER absent from ①");
+    assert.equal(normalizedText(descendants(tradeExecution)).includes("EXECUTION SIMULATION"), true, "EXECUTION preserved in ④");
+    assert.equal(normalizedText(descendants(tradeExecution)).includes("REAL ORDER DISABLED"), true, "REAL ORDER preserved in ④");
+    assert.equal(summaryText.includes("REAL ORDER DISABLED"), true, "REAL ORDER still present in FINAL PREPARATION via ④");
 });
 
 // D4: manual BUY/SELL buttons must reflect the authoritative position and

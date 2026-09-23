@@ -916,8 +916,6 @@ return (
                             {savedSettings.tradingMode === "LIVE" && (
                                 <DerivedRow label="LIVE CAPITAL" source={liveAccountCapital !== undefined ? "LIVE ACCOUNT" : "NOT CONNECTED"} value={liveAccountCapital !== undefined ? `${Number(liveAccountCapital)} USDT` : "UNAVAILABLE"} valueClass="operation-prep-value--setting" />
                             )}
-                            <DerivedRow label="CURRENT EXECUTION" source={executionSource} value={executionMode} />
-                            <DerivedRow label="REAL ORDER" source={realOrderSource} status value={realOrderAllowed ? "ALLOWED" : "DISABLED"} />
                             <DerivedRow label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
                             <DerivedRow label="CONTROL REVISION" source="RUNTIME" value={String(controlRevision)} />
                             <DerivedRow label="SETTINGS REVISION" source="SAVED" value={String(settingsRevision)} />
