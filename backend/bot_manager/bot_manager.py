@@ -13058,6 +13058,15 @@ class BotManager:
 
             "tradeSettings": trade_settings,
 
+            # Top-level ARM / LIVE-entry latch projection (same owner as tradeSettings).
+            # Required: StatusResponse defaults these to False when omitted, which made
+            # /api/bot/status report DISARMED after a successful ARM (E2E #002).
+            "liveRuntimeStartAllowed": trade_settings.get("liveRuntimeStartAllowed") is True,
+
+            "liveOrderEntryAllowed": trade_settings.get("liveOrderEntryAllowed") is True,
+
+            "executionEntryAllowed": trade_settings.get("executionEntryAllowed") is True,
+
             "liveReadiness": live_readiness,
 
             "liveBlockReasons": live_readiness.get(
