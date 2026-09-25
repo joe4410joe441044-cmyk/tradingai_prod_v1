@@ -290,6 +290,21 @@ class LivePeakAuthorityRecoveryTests(unittest.TestCase):
                 self.assertIs(result.status, LivePeakRecoveryStatus.REJECTED)
                 self.assertIn(reason, result.safe_reasons)
 
+    def test_live_equity_future_timestamp_tolerance_is_bounded(self):
+        # The post-collect clock judges freshness; only clock granularity may
+        # place the live read after it, never a genuinely future timestamp.
+        within = build(contaminated_store(),
+                       live_evaluated_at=CUR_DAY + timedelta(seconds=121))
+        self.assertIs(within.status, LivePeakRecoveryStatus.ACCEPTED, within.safe_reasons)
+        self.assertEqual(within.record.observed_at, CUR_DAY + timedelta(seconds=121))
+        self.assertLessEqual(within.record.observed_at,
+                             within.update.next_state.captured_at)
+        beyond = build(contaminated_store(),
+                       live_evaluated_at=CUR_DAY + timedelta(seconds=123))
+        self.assertIs(beyond.status, LivePeakRecoveryStatus.REJECTED)
+        self.assertIn("LIVE_EQUITY_NOT_FRESH", beyond.safe_reasons)
+        self.assertIn("LIVE_EQUITY_TIMESTAMP_IN_FUTURE", beyond.safe_reasons)
+
     def test_operational_safety_is_required(self):
         for overrides, reason in (
             ({"bot_stopped": False}, "BOT_NOT_STOPPED"),
@@ -516,6 +531,24 @@ class StoreLifecycle(Lifecycle):
         ))
 
 
+def replace_namespace(namespace, **changes):
+    return SimpleNamespace(**{**vars(namespace), **changes})
+
+
+class AdvancingClock:
+    """Monotonic UTC clock: every reading is strictly later than the last."""
+
+    def __init__(self, start, step=timedelta(milliseconds=250)):
+        self.current = start
+        self.step = step
+        self.readings = []
+
+    def __call__(self):
+        self.current = self.current + self.step
+        self.readings.append(self.current)
+        return self.current
+
+
 class FakeBotManager:
     def __init__(self, metrics, account, **overrides):
         self.runtime_instance_id = RUNTIME
@@ -523,12 +556,21 @@ class FakeBotManager:
         self.account = account
         self.overrides = overrides
         self.evidence_calls = 0
+        self.account_clock = None
+        self.account_age = timedelta(0)
 
     def set_money_management_runtime_hook(self, callback):
         return True
 
     def live_peak_recovery_evidence(self):
         self.evidence_calls += 1
+        if self.account_clock is not None:
+            # Real call order: the GET-only account read completes during
+            # collect(), i.e. strictly after the handler's entry time.
+            self.account = replace_namespace(
+                self.account,
+                evaluated_at=self.account_clock() - self.account_age,
+            )
         values = {
             "botStopped": True, "executionDisabled": True,
             "emergencyClear": True, "internalPendingOrder": False,
@@ -550,7 +592,8 @@ class TimelineStore:
 
 
 class BoundaryRecoveryTests(unittest.TestCase):
-    def boundary(self, store, account_equity=LIVE_EQUITY, checkpoint_ok=True, **overrides):
+    def boundary(self, store, account_equity=LIVE_EQUITY, checkpoint_ok=True,
+                 clock=None, account_age=None, **overrides):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         lifecycle = StoreLifecycle(store, checkpoint_ok)
@@ -563,12 +606,17 @@ class BoundaryRecoveryTests(unittest.TestCase):
             reason_codes=(),
         )
         bot = FakeBotManager(metrics, account, **overrides)
+        if clock is not None:
+            bot.account_clock = clock
+            bot.account_age = account_age if account_age is not None else timedelta(0)
         dispatcher = LossRuntimeUpdateDispatcher(Source([]))
         hook = MoneyManagementRuntimeHook(app, dispatcher, timestamp_source=lambda: now)
         app.state.money_management_runtime_hook = MoneyManagementRuntimeHookRegistration(
             hook, bot, now
         )
-        boundary = MoneyManagementHttpBoundary(app, dispatcher, timestamp_source=lambda: now)
+        boundary = MoneyManagementHttpBoundary(
+            app, dispatcher, timestamp_source=clock if clock is not None else (lambda: now)
+        )
         epoch_ids = live_epoch_rebase_ids(store.get_snapshot().snapshot.state)
         event = lambda equity, peak: SimpleNamespace(
             observation={"accountingRebaseId": epoch_ids[0],
@@ -625,6 +673,52 @@ class BoundaryRecoveryTests(unittest.TestCase):
         self.assertTrue(self.recorded[0]["correlation_id"].startswith(
             "live-peak-authority-recovery:"))
         self.assertNotIn("timelineRecordFailed", response["audit"])
+
+    def test_boundary_accepts_fresh_live_read_completed_after_handler_entry(self):
+        # Real call order (Production regression, LIVE_EQUITY_NOT_FRESH): the
+        # handler reads its clock on entry, collect() performs the live read
+        # later, so the live timestamp is newer than the entry time.
+        from datetime import datetime, timezone
+        clock = AdvancingClock(datetime.now(timezone.utc))
+        store = contaminated_store()
+        boundary, _, lifecycle, metrics, bot = self.boundary(store, clock=clock)
+        response = boundary.recover_live_peak_authority(
+            {"operation": RECOVERY_OPERATION, "authorizationState": "EXPLICITLY_AUTHORIZED"}
+        )
+        entry = datetime.fromisoformat(response["audit"]["requestedAt"])
+        live_at = bot.account.evaluated_at
+        evaluated = datetime.fromisoformat(response["audit"]["evaluatedAt"])
+        self.assertLess(entry, live_at)
+        self.assertLess(live_at, evaluated)
+        self.assertEqual(response["audit"]["liveEvaluatedAt"], live_at.isoformat())
+        self.assertTrue(response["accepted"], response)
+        self.assertTrue(response["persisted"])
+        self.assertEqual(response["audit"]["safeReasons"], [])
+        self.assertEqual(response["audit"]["recoveredHighWaterMark"], "7.91836966")
+        self.assertEqual(lifecycle.apply_calls, 1)
+        state = store.get_snapshot().snapshot.state
+        self.assertEqual(state.drawdown_state.high_water_mark, LIVE_EQUITY)
+        self.assertIs(state.risk_state, RiskState.NORMAL)
+        self.assertEqual(state.accounting_rebases[-1].observed_at, live_at)
+        self.assertEqual(metrics.snapshot().peak_equity, LIVE_EQUITY)
+
+    def test_boundary_rejects_genuinely_stale_live_equity_in_real_call_order(self):
+        from datetime import datetime, timezone
+        clock = AdvancingClock(datetime.now(timezone.utc))
+        store = contaminated_store()
+        boundary, _, lifecycle, metrics, _ = self.boundary(
+            store, clock=clock, account_age=timedelta(seconds=31)
+        )
+        response = boundary.recover_live_peak_authority(
+            {"operation": RECOVERY_OPERATION, "authorizationState": "EXPLICITLY_AUTHORIZED"}
+        )
+        self.assertFalse(response["accepted"])
+        self.assertFalse(response["persisted"])
+        self.assertIn("LIVE_EQUITY_NOT_FRESH", response["audit"]["safeReasons"])
+        self.assertEqual(lifecycle.apply_calls, 0)
+        self.assertEqual(store.get_snapshot().snapshot.state.drawdown_state.high_water_mark,
+                         PAPER_EQUITY)
+        self.assertEqual(metrics.snapshot().peak_equity, PAPER_EQUITY)
 
     def test_boundary_rejects_unsafe_evidence_without_mutation(self):
         for overrides in ({"botStopped": False}, {"internalPendingOrder": True},
