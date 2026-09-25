@@ -6889,6 +6889,64 @@ class BotManager:
             )
             return None
 
+    def live_peak_recovery_evidence(self):
+        """Collect GET-only evidence for a validated REAL_LIVE MM peak recovery.
+
+        The canonical Live account authority is read through its existing
+        preflight (real orders, execution and auto trading must be disabled).
+        Nothing here places, cancels or modifies orders or state.
+        """
+
+        from backend.auto_market_selection import (
+            ExistingKucoinLiveAccountAuthority,
+        )
+
+        evidence = {
+            "botStopped": bool(
+                self._running is False
+                and self.lifecycle_state == "STOPPED"
+                and self.engine is None
+            ),
+            "executionDisabled": bool(
+                governance_state.get("execution_enabled") is False
+                and self.config.get("realOrderAllowed", False) is False
+                and self.config.get("executionRealOrderEnabled", False)
+                is False
+                and self.config.get("autoTradeEnabled", False) is False
+            ),
+            "emergencyClear": governance_state.get("emergency_stop") is False,
+            "internalPendingOrder": self.pending_order is not False,
+            "paperEquity": (
+                self.paper_account_state.get("equity")
+                if isinstance(self.paper_account_state, dict)
+                else None
+            ),
+            "liveAccount": None,
+            "liveAccountFailure": None,
+        }
+        try:
+            if not KucoinTradeClient.credentials_present():
+                raise RuntimeError("KUCOIN_CREDENTIALS_MISSING")
+            client = self.account_read_client or KucoinTradeClient()
+            self.account_read_client = client
+            self.account_read_client_exchange = self.exchange_name
+            authority = ExistingKucoinLiveAccountAuthority(
+                client,
+                safety_provider=lambda: self._production_ams_safety_state(
+                    requested_mode="live",
+                    requested_dry_run=False,
+                ),
+            )
+            evidence["liveAccount"] = authority.read()
+        except Exception as error:
+            evidence["liveAccountFailure"] = (
+                str(error)
+                if isinstance(error, RuntimeError)
+                and str(error).isupper()
+                else type(error).__name__
+            )
+        return evidence
+
     def initialize_money_management_runtime_metrics(
         self,
         persisted_state,

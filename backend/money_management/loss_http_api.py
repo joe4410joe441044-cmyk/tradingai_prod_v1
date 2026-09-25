@@ -2034,6 +2034,190 @@ class MoneyManagementHttpBoundary:
             "newEntryAllowed": dispatch.new_entry_allowed if dispatch is not None else False,
         }
 
+    def _live_epoch_observations(self, rebase_ids):
+        """REAL_LIVE equity/peak observations recorded for the current epoch."""
+
+        store = (
+            self._timeline_recorder.store
+            if self._timeline_recorder is not None
+            else None
+        )
+        if store is None or not rebase_ids:
+            return False, ()
+        wanted = set(rebase_ids)
+        observations = []
+        before = None
+        for _ in range(100):
+            page = store.query(
+                limit=500,
+                before=before,
+                event_type="RUNTIME_METRICS_UPDATED",
+                authority="LIVE",
+            )
+            for event in page.events:
+                observation = event.observation or {}
+                if observation.get("accountingRebaseId") not in wanted:
+                    continue
+                if (
+                    observation.get("accountingAuthoritySource")
+                    != "REAL_LIVE_ACCOUNT_EQUITY"
+                ):
+                    continue
+                metrics = event.metrics or {}
+                observations.append(
+                    (metrics.get("equity"), metrics.get("peakEquity"))
+                )
+            if not page.has_more or not page.next_cursor:
+                return True, tuple(observations)
+            before = page.next_cursor
+        return False, ()
+
+    def recover_live_peak_authority(self, payload):
+        """Repair a REAL_LIVE HWM contaminated by PAPER equity (validated only).
+
+        The request carries no values: every recovered number is derived from
+        the persisted REAL_LIVE state, its rebase history, the MM timeline,
+        the PAPER account domain value and a fresh GET-only REAL_LIVE account
+        proof.  A legitimate REAL_LIVE drawdown is never relaxed.
+        """
+
+        from .live_peak_authority_recovery import (
+            RECOVERY_OPERATION,
+            LivePeakRecoveryEvidence,
+            LivePeakRecoveryStatus,
+            build_live_peak_authority_recovery,
+            live_epoch_rebase_ids,
+        )
+
+        now = self._now()
+        expected = {
+            "operation": RECOVERY_OPERATION,
+            "authorizationState": "EXPLICITLY_AUTHORIZED",
+        }
+        if not isinstance(payload, Mapping) or dict(payload) != expected:
+            self._error(
+                422,
+                "LIVE_PEAK_RECOVERY_INVALID",
+                "Live peak recovery accepts only the explicit operation authorization.",
+            )
+        registration = self._base_registration
+        lifecycle = registration.lifecycle_adapter if registration is not None else None
+        hook_registration = self._hook_registration()
+        bot_manager = getattr(hook_registration, "bot_manager", None)
+        metrics_state = getattr(bot_manager, "money_management_runtime_metrics", None)
+        collect = getattr(bot_manager, "live_peak_recovery_evidence", None)
+        if lifecycle is None or metrics_state is None or not callable(collect):
+            self._error(
+                503,
+                "LIVE_PEAK_RECOVERY_UNAVAILABLE",
+                "Live peak recovery authority is unavailable.",
+                True,
+            )
+        with self._lock:
+            if self._recovery_in_progress:
+                self._error(409, "RECOVERY_ALREADY_RUNNING", "Recovery is already running.", True)
+            self._recovery_in_progress = True
+            maximum_drawdown_pct = self._configuration.maximum_drawdown_pct
+        try:
+            snapshot = lifecycle.get_snapshot()
+            state = getattr(snapshot, "state", None)
+            raw = collect()
+            account = raw.get("liveAccount")
+            rebase_ids = live_epoch_rebase_ids(state) if state is not None else ()
+            history_available, observations = self._live_epoch_observations(rebase_ids)
+            evidence = LivePeakRecoveryEvidence(
+                bot_stopped=raw.get("botStopped") is True,
+                execution_disabled=raw.get("executionDisabled") is True,
+                emergency_clear=raw.get("emergencyClear") is True,
+                internal_pending_order=raw.get("internalPendingOrder"),
+                live_account_ready=bool(account is not None and account.ready),
+                live_capital_authority=getattr(account, "capital_authority", None),
+                live_open_position_state=getattr(account, "open_position_state", None),
+                live_pending_order_state=getattr(account, "pending_order_state", None),
+                live_equity=getattr(account, "equity", None),
+                live_evaluated_at=getattr(account, "evaluated_at", None),
+                paper_equity=raw.get("paperEquity"),
+                live_epoch_history_available=history_available,
+                live_epoch_observations=observations,
+            )
+            result = build_live_peak_authority_recovery(
+                snapshot,
+                evidence,
+                requested_at=now,
+                runtime_instance_id=getattr(bot_manager, "runtime_instance_id", None),
+                maximum_drawdown_pct=maximum_drawdown_pct,
+            )
+            audit = {
+                "requestedAt": now.isoformat(),
+                "liveAccountFailure": raw.get("liveAccountFailure"),
+                "liveAccountReasonCodes": list(getattr(account, "reason_codes", ()) or ()),
+                "liveEpochObservationCount": len(observations),
+                "liveEpochHistoryAvailable": history_available,
+                **result.to_dict(),
+            }
+            if result.status is not LivePeakRecoveryStatus.ACCEPTED:
+                return {
+                    "accepted": False,
+                    "persisted": False,
+                    "status": "LIVE_PEAK_RECOVERY_REJECTED",
+                    "audit": audit,
+                    "revision": getattr(snapshot, "revision", None),
+                    "sequence": getattr(snapshot, "sequence", None),
+                }
+            if hook_registration is not None:
+                hook_registration.hook.invalidate_evaluation()
+            lifecycle_result = lifecycle.apply_update(result.update)
+            coordination = lifecycle_result.coordination_result
+            persisted = bool(
+                coordination is not None
+                and coordination.checkpoint_succeeded
+                and not coordination.durability_pending
+            )
+            if not persisted:
+                return {
+                    "accepted": False,
+                    "persisted": False,
+                    "status": "LIVE_PEAK_RECOVERY_PERSISTENCE_FAILED",
+                    "audit": audit,
+                    "revision": None,
+                    "sequence": None,
+                }
+            drawdown = result.update.next_state.drawdown_state
+            metrics_state.apply_validated_peak_recovery(
+                authority_source=result.record.authority_source,
+                high_water_mark=drawdown.high_water_mark,
+                current_equity=drawdown.current_equity,
+                as_of=now,
+            )
+            dispatch_money_management_governance_projection(
+                self._app,
+                self._projection_dispatcher,
+            )
+            if self._timeline_recorder is not None:
+                try:
+                    self._timeline_recorder.record_recovery(
+                        previous_state="LOCKED",
+                        current_state="NORMAL",
+                        version=self.configuration_revision,
+                        correlation_id=result.record.rebase_id,
+                    )
+                except Exception:
+                    # Audit timeline is secondary evidence; the durable
+                    # checkpoint above already carries the recovery record.
+                    audit["timelineRecordFailed"] = True
+            after = lifecycle.get_snapshot()
+            return {
+                "accepted": True,
+                "persisted": True,
+                "status": "LIVE_PEAK_RECOVERY_ACCEPTED",
+                "audit": audit,
+                "revision": getattr(after, "revision", None),
+                "sequence": getattr(after, "sequence", None),
+            }
+        finally:
+            with self._lock:
+                self._recovery_in_progress = False
+
 
 def register_money_management_http_boundary(
     app,

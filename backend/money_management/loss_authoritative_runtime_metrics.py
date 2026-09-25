@@ -596,9 +596,21 @@ class AuthoritativeLossRuntimeMetricsState:
                 and self._equity > 0
                 and source_state == "RUNNING"
             )
+            cross_authority = bool(
+                authority is not None
+                and self._accounting_authority_source is not None
+                and authority is not self._accounting_authority_source
+            )
             if authority_transition:
                 self._peak_equity = self._equity
                 self._accounting_authority_source = authority
+            elif cross_authority:
+                # An observation from another equity authority that could not
+                # establish a validated transition (not RUNNING, invalid, ...)
+                # never raises the high-water mark owned by the stored
+                # authority.  PAPER equity cannot lift a REAL_LIVE peak and
+                # REAL_LIVE equity cannot lift a PAPER peak.
+                pass
             else:
                 candidates = tuple(
                     item
@@ -668,13 +680,27 @@ class AuthoritativeLossRuntimeMetricsState:
         position,
         mark_price,
     ):
-        """Observe a stopped PAPER account without rolling restored periods."""
+        """Observe a stopped PAPER account without rolling restored periods.
+
+        PAPER account equity belongs to the PAPER_RUNTIME_EQUITY domain only.
+        When the restored loss state is owned by another equity authority
+        (for example REAL_LIVE_ACCOUNT_EQUITY) the observation is refused
+        before any field is mutated, so a PAPER balance can never raise a
+        REAL_LIVE high-water mark.
+        """
 
         at = _utc("as_of", as_of)
         _count("session_id", session_id)
         with self._lock:
             if not self._initialized:
                 raise ValueError("persisted loss state not restored")
+            if (
+                self._accounting_authority_source
+                is not AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY
+            ):
+                raise ValueError(
+                    "stopped paper maintenance requires PAPER equity authority"
+                )
             normalized_balance = _runtime_decimal(balance, nonnegative=True)
             normalized_equity = _runtime_decimal(equity, nonnegative=True)
             normalized_available = _runtime_decimal(
@@ -723,6 +749,41 @@ class AuthoritativeLossRuntimeMetricsState:
             self._as_of = at
             self._source_state = "STOPPED_PAPER_MAINTENANCE"
             self._observed = True
+            self._revision += 1
+            return self._snapshot_locked()
+
+    def apply_validated_peak_recovery(
+        self,
+        *,
+        authority_source,
+        high_water_mark,
+        current_equity,
+        as_of,
+    ):
+        """Mirror an already persisted, validated same-authority HWM recovery.
+
+        This never decides anything: the caller must have persisted a
+        validated recovery checkpoint first.  The in-memory accumulator only
+        adopts the recovered peak when it is owned by the same authority, the
+        peak is positive, it lowers (never raises) the current peak and it is
+        not below the authoritative current equity.
+        """
+
+        at = _utc("as_of", as_of)
+        authority = AccountingRebaseAuthoritySource(authority_source)
+        peak = _decimal("high_water_mark", high_water_mark, nonnegative=True)
+        equity = _decimal("current_equity", current_equity, nonnegative=True)
+        with self._lock:
+            if not self._initialized:
+                raise ValueError("persisted loss state not restored")
+            if self._accounting_authority_source is not authority:
+                raise ValueError("peak recovery authority mismatch")
+            if peak <= 0 or peak < equity:
+                raise ValueError("peak recovery value invalid")
+            if self._peak_equity is not None and peak > self._peak_equity:
+                raise ValueError("peak recovery cannot raise the peak")
+            self._peak_equity = peak
+            self._as_of = max(self._as_of, at)
             self._revision += 1
             return self._snapshot_locked()
 

@@ -226,6 +226,25 @@ async def rebase_money_management_accounting(request: Request):
         return _boundary_error(error)
     except Exception:
         return _safe_error(503, "INTERNAL_STATE_UNAVAILABLE", "Money Management accounting rebase failed.", True)
+@router.post("/recovery/live-peak-authority")
+async def recover_money_management_live_peak_authority(
+    request: Request,
+    _operator: str = Depends(require_operator_session),
+):
+    """Validated REAL_LIVE HWM authority recovery (authenticated, CSRF protected)."""
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(503, "MONEY_MANAGEMENT_UNAVAILABLE", "Money Management live peak recovery is unavailable.", True)
+    try:
+        payload = await request.json()
+    except Exception:
+        return _safe_error(400, "LIVE_PEAK_RECOVERY_INVALID", "Request body must contain valid JSON.")
+    try:
+        return boundary.recover_live_peak_authority(payload)
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(503, "INTERNAL_STATE_UNAVAILABLE", "Money Management live peak recovery failed.", True)
 @router.post("/position-size/preview")
 async def preview_money_management_position_size(request: Request):
     boundary = _boundary(request)

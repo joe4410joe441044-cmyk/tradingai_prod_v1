@@ -59,6 +59,54 @@ def _validated_authority_rebase(current, update):
          and drawdown.current_equity==record.authoritative_equity
          and drawdown.drawdown_amount==0
          and drawdown.drawdown_percent==0)
+def _validated_peak_recovery(current, update):
+ """Same-authority REAL_LIVE peak repair built by live_peak_authority_recovery.
+
+ Only a drawdown-only LOCKED REAL_LIVE state may be relaxed, only by lowering
+ the high-water mark to the durable rebase record equity, and only while every
+ period baseline, cash-flow state and the authority itself stay unchanged.
+ """
+ if (current is None or update.next_state is None
+     or update.validated_accounting_rebase_id is None
+     or SaveTrigger.ACCOUNTING_REBASE not in update.save_triggers
+     or update.governance_projection is not GovernanceProjection.CONTINUE):
+  return False
+ from .loss_persistence_models import AccountingRebaseAuthoritySource
+ from .loss_reason_models import BlockReason
+ live=AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+ next_state=update.next_state
+ if (current.accounting_authority_source is not live
+     or next_state.accounting_authority_source is not live):
+  return False
+ old_records=current.accounting_rebases; new_records=next_state.accounting_rebases
+ if len(new_records)!=len(old_records)+1 or new_records[:-1]!=old_records:
+  return False
+ record=new_records[-1]
+ if (record.rebase_id!=update.validated_accounting_rebase_id
+     or record.authority_source is not live
+     or record.account_scope!=current.account_scope
+     or next_state.account_scope!=current.account_scope
+     or record.authorization_state is not AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED
+     or record.reason is not AccountingRebaseReason.LIVE_PEAK_AUTHORITY_CONTAMINATION_RECOVERY
+     or record.continuity_status is not AccountingContinuityStatus.PEAK_AUTHORITY_REPAIRED
+     or record.audit_marker is not AccountingRebaseAuditMarker.DURABLE_CHECKPOINT_REQUIRED
+     or record.authoritative_equity<=0):
+  return False
+ decision=current.last_decision
+ if (decision.decision_state is not RiskState.LOCKED
+     or tuple(decision.block_reasons)!=(BlockReason.DRAWDOWN_BLOCK,)
+     or decision.warning_reasons or decision.hold_reasons or decision.diagnostic_reasons
+     or next_state.last_decision.decision_state is not RiskState.NORMAL):
+  return False
+ if (next_state.daily_state!=current.daily_state
+     or next_state.weekly_state!=current.weekly_state
+     or next_state.monthly_state!=current.monthly_state
+     or next_state.cash_flow_state!=current.cash_flow_state
+     or current.cash_flow_state.has_unresolved_cash_flow):
+  return False
+ drawdown=next_state.drawdown_state
+ return (drawdown.high_water_mark==record.authoritative_equity
+         and drawdown.high_water_mark<current.drawdown_state.high_water_mark)
 _ALLOWED={(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.READY),(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.UNINITIALIZED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.READY,RuntimeLifecycle.READY),(RuntimeLifecycle.READY,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.READY,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.READY,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.RESTRICTED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.RESTRICTED,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.RECOVERY_REQUIRED,RuntimeLifecycle.RECOVERY_REQUIRED),(RuntimeLifecycle.RECOVERY_REQUIRED,RuntimeLifecycle.STOPPED),(RuntimeLifecycle.STOPPED,RuntimeLifecycle.STOPPED)}
 def _failure(code,msg): return LossLimitRuntimeStoreResult(StoreResultStatus.FAILED,None,LossLimitRuntimeStoreFailure(code,msg),False,False)
 class LossLimitRuntimeStateStore:
@@ -108,7 +156,7 @@ class LossLimitRuntimeStateStore:
     if cur.lifecycle is RuntimeLifecycle.RECOVERY_REQUIRED and not update.recovery_requirement.required: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_RECOVERY_REQUIRED,"recovery required")
     next_l=RuntimeLifecycle.RECOVERY_REQUIRED if update.recovery_requirement.required else (RuntimeLifecycle.RESTRICTED if update.governance_projection in (GovernanceProjection.HOLD_NEW_ENTRIES,GovernanceProjection.BLOCK_EXECUTION) else RuntimeLifecycle.READY)
     if update.next_state is not None and _projection(update.next_state) is not update.governance_projection: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_STATE_CONFLICT,"projection mismatch")
-    authority_rebase=_validated_authority_rebase(cur.state,update)
+    authority_rebase=_validated_authority_rebase(cur.state,update) or _validated_peak_recovery(cur.state,update)
     if (cur.lifecycle,next_l) not in _ALLOWED and not (authority_rebase and cur.lifecycle is RuntimeLifecycle.RESTRICTED and next_l is RuntimeLifecycle.READY): return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"invalid lifecycle transition")
     if cur.state is not None and update.next_state is not None and _rank(update.next_state)<_rank(cur.state) and not authority_rebase: return _failure(StoreFailureCode.LOSS_RUNTIME_STORE_INVALID_TRANSITION,"automatic relaxation forbidden")
     at=_dt(update.occurred_at)

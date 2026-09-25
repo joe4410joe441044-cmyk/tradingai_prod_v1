@@ -676,6 +676,7 @@ if _auth_configured:
         "/api/bot/set_mode",
         "/api/bot/paper-account/capital",
         "/api/money-management/configuration",
+        "/api/money-management/recovery/live-peak-authority",
         "/api/parameter-settings/configuration",
         "/api/parameter-settings/persist-baseline",
         "/api/governance/mode",
