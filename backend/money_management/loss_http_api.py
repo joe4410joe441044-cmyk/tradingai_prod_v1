@@ -2089,7 +2089,7 @@ class MoneyManagementHttpBoundary:
             live_epoch_rebase_ids,
         )
 
-        now = self._now()
+        requested_at = self._now()
         expected = {
             "operation": RECOVERY_OPERATION,
             "authorizationState": "EXPLICITLY_AUTHORIZED",
@@ -2125,6 +2125,11 @@ class MoneyManagementHttpBoundary:
             account = raw.get("liveAccount")
             rebase_ids = live_epoch_rebase_ids(state) if state is not None else ()
             history_available, observations = self._live_epoch_observations(rebase_ids)
+            # Judge freshness against a clock reading taken AFTER the GET-only
+            # account collection: the live read always completes after the
+            # request entry time, so the entry time cannot be the reference.
+            now = self._now()
+            live_evaluated_at = getattr(account, "evaluated_at", None)
             evidence = LivePeakRecoveryEvidence(
                 bot_stopped=raw.get("botStopped") is True,
                 execution_disabled=raw.get("executionDisabled") is True,
@@ -2135,7 +2140,7 @@ class MoneyManagementHttpBoundary:
                 live_open_position_state=getattr(account, "open_position_state", None),
                 live_pending_order_state=getattr(account, "pending_order_state", None),
                 live_equity=getattr(account, "equity", None),
-                live_evaluated_at=getattr(account, "evaluated_at", None),
+                live_evaluated_at=live_evaluated_at,
                 paper_equity=raw.get("paperEquity"),
                 live_epoch_history_available=history_available,
                 live_epoch_observations=observations,
@@ -2148,7 +2153,12 @@ class MoneyManagementHttpBoundary:
                 maximum_drawdown_pct=maximum_drawdown_pct,
             )
             audit = {
-                "requestedAt": now.isoformat(),
+                "requestedAt": requested_at.isoformat(),
+                "evaluatedAt": now.isoformat(),
+                "liveEvaluatedAt": (
+                    live_evaluated_at.isoformat()
+                    if hasattr(live_evaluated_at, "isoformat") else None
+                ),
                 "liveAccountFailure": raw.get("liveAccountFailure"),
                 "liveAccountReasonCodes": list(getattr(account, "reason_codes", ()) or ()),
                 "liveEpochObservationCount": len(observations),

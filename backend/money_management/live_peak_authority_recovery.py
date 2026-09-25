@@ -53,6 +53,10 @@ RECOVERY_REASON = AccountingRebaseReason.LIVE_PEAK_AUTHORITY_CONTAMINATION_RECOV
 RECOVERY_OPERATION = "LIVE_PEAK_AUTHORITY_CONTAMINATION_RECOVERY"
 RECOVERY_TRANSITION_REASON = "VALIDATED_LIVE_PEAK_AUTHORITY_RECOVERY"
 MAXIMUM_LIVE_EVIDENCE_AGE = timedelta(seconds=30)
+# The GET-only account read completes before the post-collect clock reading
+# that judges it, so a live timestamp after that reading is only legitimate
+# within a small clock-granularity tolerance.
+MAXIMUM_LIVE_EVIDENCE_FUTURE_SKEW = timedelta(seconds=2)
 
 
 class LivePeakRecoveryStatus(str, Enum):
@@ -203,8 +207,14 @@ def build_live_peak_authority_recovery(
     runtime_instance_id,
     maximum_drawdown_pct,
     maximum_evidence_age=MAXIMUM_LIVE_EVIDENCE_AGE,
+    maximum_future_skew=MAXIMUM_LIVE_EVIDENCE_FUTURE_SKEW,
 ):
-    """Validate the contamination signature and build (never apply) an update."""
+    """Validate the contamination signature and build (never apply) an update.
+
+    ``requested_at`` must be a clock reading taken *after* the live account
+    evidence was collected; live equity is fresh when it is no older than
+    ``maximum_evidence_age`` and no newer than ``maximum_future_skew``.
+    """
 
     if not isinstance(runtime_snapshot, LossLimitRuntimeSnapshot) or not isinstance(
         runtime_snapshot.state, PersistedLossState
@@ -248,14 +258,20 @@ def build_live_peak_authority_recovery(
         reasons.append("LIVE_PENDING_ORDER_NOT_CLEAR")
     if live_equity is None or live_equity <= 0:
         reasons.append("LIVE_EQUITY_UNAVAILABLE")
+    live_in_future = live_at is not None and live_at - at > maximum_future_skew
     if (
         live_at is None
-        or live_at > at
+        or live_in_future
         or at - live_at > maximum_evidence_age
     ):
         reasons.append("LIVE_EQUITY_NOT_FRESH")
+        if live_in_future:
+            reasons.append("LIVE_EQUITY_TIMESTAMP_IN_FUTURE")
     elif live_at < state.captured_at:
         reasons.append("LIVE_EQUITY_PREDATES_PERSISTED_STATE")
+    elif live_at > at:
+        # Within the tolerance: never persist evidence newer than its checkpoint.
+        at = live_at
 
     # 3. The persisted state must be a REAL_LIVE drawdown-only lock.
     decision = state.last_decision
