@@ -18,9 +18,9 @@ test.describe("AUTO MARKET SELECTION operator view", () => {
     test("essential view shows full critical values with diagnostics collapsed", async ({ page }) => {
         const essential = page.getByTestId("auto-market-selection-essential");
         await expect(essential).toBeVisible();
-        await expect(essential.getByText("ACTIVE SYMBOL")).toBeVisible();
+        await expect(essential.getByText("ACTIVE SYMBOL / 現在銘柄")).toBeVisible();
         await expect(essential.getByText("DYMUSDT").first()).toBeVisible();
-        await expect(essential.getByText("TOP CANDIDATE · PREVIEW")).toBeVisible();
+        await expect(essential.getByText("TOP CANDIDATE / 最有力候補 · PREVIEW")).toBeVisible();
         await expect(essential.getByText("MEWUSDT")).toBeVisible();
         await expect(essential.getByText("OBSERVING")).toBeVisible();
         await expect(essential.getByText("LAST EVALUATED")).toBeVisible();
@@ -30,9 +30,9 @@ test.describe("AUTO MARKET SELECTION operator view", () => {
         await expect(page.getByTestId("auto-market-selection-current-reasons")).toBeVisible();
 
         await expect(page.getByTestId("auto-market-selection-details")).toHaveCount(0);
-        await expect(page.getByText("SCANNER", { exact: true })).toHaveCount(0);
-        await expect(page.getByText("SYMBOL SWITCH", { exact: true })).toHaveCount(0);
-        await expect(page.getByText("LAST CYCLE REASONS", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("SCANNER / スキャナー", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("SYMBOL SWITCH / 銘柄切替", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("LAST CYCLE REASONS / 前回サイクルの理由", { exact: true })).toHaveCount(0);
 
         expect(await overflowedCriticalValues(page)).toEqual([]);
         const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -45,15 +45,15 @@ test.describe("AUTO MARKET SELECTION operator view", () => {
         await page.getByTestId("auto-market-selection-details-toggle").click();
         const details = page.getByTestId("auto-market-selection-details");
         await expect(details).toBeVisible();
-        await expect(details.getByText("NEXT REQUESTED SYMBOL")).toBeVisible();
+        await expect(details.getByText("NEXT REQUESTED SYMBOL / 次回要求銘柄")).toBeVisible();
         await expect(details.getByText("XRPUSDTM")).toBeVisible();
         await expect(details.getByText("LIVE_READ_ONLY")).toBeVisible();
         await expect(details.getByText("CAPITAL_PROTECTION_STANDARD")).toBeVisible();
-        await expect(details.getByText("SCANNER", { exact: true })).toBeVisible();
-        await expect(details.getByText("RANKING", { exact: true })).toBeVisible();
-        await expect(details.getByText("CAPITAL DETAILS", { exact: true })).toBeVisible();
-        await expect(details.getByText("SYMBOL SWITCH", { exact: true })).toBeVisible();
-        await expect(details.getByText("LAST CYCLE REASONS", { exact: true })).toBeVisible();
+        await expect(details.getByText("SCANNER / スキャナー", { exact: true })).toBeVisible();
+        await expect(details.getByText("RANKING / ランキング", { exact: true })).toBeVisible();
+        await expect(details.getByText("CAPITAL DETAILS / 資金詳細", { exact: true })).toBeVisible();
+        await expect(details.getByText("SYMBOL SWITCH / 銘柄切替", { exact: true })).toBeVisible();
+        await expect(details.getByText("LAST CYCLE REASONS / 前回サイクルの理由", { exact: true })).toBeVisible();
 
         expect(await overflowedCriticalValues(page)).toEqual([]);
         await page.screenshot({ path: `${EVIDENCE_DIR}/g5-details-expanded.png`, fullPage: true });

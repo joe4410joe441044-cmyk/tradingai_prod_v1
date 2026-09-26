@@ -118,7 +118,7 @@ test("DOM display controls are local callbacks and marker rows remain read-only"
         onDisplayModeChange: (mode) => modes.push(mode), onRowLimitChange: (limit) => limits.push(limit),
     onTradeRowLimitChange: (limit) => tradeLimits.push(limit) }));
     const buttons = nodes.filter(({ type }) => type === "button");
-    assert.deepEqual(buttons.map(textOf), ["BOTH", "BIDS", "ASKS"]);
+    assert.deepEqual(buttons.map(textOf), ["BOTH / 両方", "BIDS / 買板", "ASKS / 売板"]);
     assert.equal(buttons[0].props["aria-pressed"], true);
     buttons[1].props.onClick();
     const selects = nodes.filter(({ type }) => type === "select");
@@ -171,7 +171,7 @@ test("recent trades render formal columns, row limits, and explicit empty states
     const nodes = descendants(ReplayMarketViewContent({ model: buildReplayMarketViewModel(engine) }));
     const tradeTable = nodes.filter(({ type }) => type === "table")[2];
     const tableText = textOf(tradeTable);
-    assert.match(tableText, /TIME \(LOCAL\)PRICESIZESIDE/);
+    assert.match(tableText, /TIME \(LOCAL\) \/ 時刻PRICE \/ 価格SIZE \/ 数量SIDE \/ 売買MARKER \/ マーカー/);
     assert.match(tableText, /BUY|SELL/);
     const tradeSelect = nodes.filter(({ type }) => type === "select")[1];
     assert.deepEqual(descendants(tradeSelect).filter(({ type }) => type === "option").map(({ props }) => props.value), [10, 20, 50]);

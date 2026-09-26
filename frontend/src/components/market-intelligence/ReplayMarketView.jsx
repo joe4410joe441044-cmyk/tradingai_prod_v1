@@ -6,7 +6,7 @@ import { normalizeReplayMarketModel } from "../../features/market-intelligence/m
 import { createDashboardContextMarketModel, isReplayMarketContextActive } from "../../features/market-intelligence/market/marketContextSelection.js";
 import { useMarketIntelligence } from "../../state/market-intelligence/MarketIntelligenceProvider.jsx";
 import ReplayMarkerOverlay from "./ReplayMarkerOverlay.jsx";
-import { bilingual } from "./marketIntelligenceLabels.js";
+import { bilingual, bilingualSlash, bilingualSlashText } from "./marketIntelligenceLabels.js";
 
 const FieldGrid = ({ fields }) => (
     <dl className="mi-market-view__fields">
@@ -19,27 +19,27 @@ const booleanValue = (value) => value === true ? "YES" : value === false ? "NO" 
 
 export const MarkerInspector = ({ marker, marketContext }) => {
     const required = marker ? [
-        ["Marker Type", marker.label], ["Timestamp", marketTimestamp(marker.timestamp)],
-        ["Price", formatMarketPrice(marker.numericPrice, marketContext)], ["Side", marker.side],
-        ["Quantity", formatMarketQuantity(marker.numericQuantity, marketContext)],
-        ["Source", marker.source], ["Data Quality", marker.dataQuality],
+        [bilingualSlash("markerType"), marker.label], [bilingualSlash("timestamp"), marketTimestamp(marker.timestamp)],
+        [bilingualSlash("price"), formatMarketPrice(marker.numericPrice, marketContext)], [bilingualSlash("side"), marker.side],
+        [bilingualSlash("quantity"), formatMarketQuantity(marker.numericQuantity, marketContext)],
+        [bilingualSlash("source"), marker.source], [bilingualSlash("dataQuality"), marker.dataQuality],
     ] : [];
     const optional = marker ? [
         ["Marker ID", marker.id, "id"],
-        ["Reason", marker.reason, "reason"], ["Order ID", marker.orderId, "id"],
+        [bilingualSlash("reason"), marker.reason, "reason"], ["Order ID", marker.orderId, "id"],
         ["Event ID", marker.eventId, "id"], ["Trade ID", marker.tradeId, "id"],
         ["Decision ID", marker.decisionId, "id"], ["Position ID", marker.positionId, "id"],
-        ["Sequence", marker.sequence], ["Reduce Only", booleanValue(marker.reduceOnly)],
-        ["Flatten", booleanValue(marker.flatten)], ["Blocked", booleanValue(marker.blocked)],
-        ["Failed", booleanValue(marker.failed)],
+        [bilingualSlash("sequence"), marker.sequence], ["Reduce Only / 縮小のみ", booleanValue(marker.reduceOnly)],
+        ["Flatten / 全決済", booleanValue(marker.flatten)], ["Blocked / 遮断", booleanValue(marker.blocked)],
+        ["Failed / 失敗", booleanValue(marker.failed)],
         ["Context", marker.contextKey, "id"],
         ["Runtime Instance", marker.runtimeInstanceId, "id"],
     ].filter(([, value]) => present(value)) : [];
     return <section aria-labelledby="mi-marker-inspector-title" className={`mi-marker-inspector${marker ? "" : " mi-marker-inspector--empty"}`}>
-        <header><h3 id="mi-marker-inspector-title">MARKER INSPECTOR</h3>
+        <header><h3 id="mi-marker-inspector-title">{bilingualSlash("markerInspector")}</h3>
             {marker && <strong>{marker.label}</strong>}</header>
-        {!marker ? <div className="mi-marker-inspector__empty"><strong>SELECT A MARKER</strong>
-            <span>Select a marker in DOM or Recent Trades to inspect its details.</span></div>
+        {!marker ? <div className="mi-marker-inspector__empty"><strong>{bilingualSlash("selectMarker")}</strong>
+            <span>Select a marker in DOM or Recent Trades to inspect its details.（DOMまたは約定履歴のマーカーを選択すると詳細を表示します。）</span></div>
             : <dl className="mi-marker-inspector__fields">{[...required, ...optional].map(([label, value, kind]) => (
                 <div className={kind ? `mi-marker-inspector__field--${kind}` : undefined} key={label}>
                     <dt>{label}</dt><dd title={kind ? String(value) : undefined}>{present(value) ? value : "—"}</dd>
@@ -69,10 +69,10 @@ const MarkerStack = ({ allMarkers, expanded = false, groupKey, onSelectMarker, o
 const BookTable = ({ expandedMarkerGroupKey, label, markerModel, onMarkerGroupToggle, onMarkerSelect,
     rows, selectedMarkerId }) => (
     <div className={`mi-market-view__book-side mi-market-view__book-side--${label.toLowerCase()}`}>
-        <h4>{label} LEVELS（{label === "ASK" ? "売板" : "買板"}）</h4>
+        <h4>{bilingualSlashText(`${label} LEVELS`, label === "ASK" ? "売板" : "買板")}</h4>
         <div className="mi-market-view__table-wrap">
             <table>
-                <thead><tr><th>{bilingual("price")}</th><th>{bilingual("size")}</th><th>{bilingual("total")}</th><th>{bilingual("marker")}</th></tr></thead>
+                <thead><tr><th>{bilingualSlash("price")}</th><th>{bilingualSlash("size")}</th><th>{bilingualSlash("total")}</th><th>{bilingualSlash("marker")}</th></tr></thead>
                 <tbody>{rows.map((row) => {
                     const group = markerModel.domMarkerGroups.find(({ price }) => price === row.numericPrice);
                     return (
@@ -106,12 +106,12 @@ export const CurrentPriceSummary = ({ summary }) => (
             <strong>{summary.displaySymbol}</strong>
         </div>
         <div className="mi-current-price-summary__price">
-            <span>CURRENT PRICE</span><strong>{summary.currentPrice}</strong>
+            <span>{bilingualSlash("currentPrice")}</span><strong>{summary.currentPrice}</strong>
         </div>
         <dl className="mi-current-price-summary__quotes">
-            <div><dt>BEST BID</dt><dd>{summary.bestBid}</dd></div>
-            <div><dt>BEST ASK</dt><dd>{summary.bestAsk}</dd></div>
-            <div><dt>SPREAD</dt><dd>{summary.spread}</dd></div>
+            <div><dt>{bilingualSlash("bestBid")}</dt><dd>{summary.bestBid}</dd></div>
+            <div><dt>{bilingualSlash("bestAsk")}</dt><dd>{summary.bestAsk}</dd></div>
+            <div><dt>{bilingualSlash("spread")}</dt><dd>{summary.spread}</dd></div>
         </dl>
         <span aria-label={`Market data state: ${summary.state}`}
             className={`mi-current-price-summary__state mi-current-price-summary__state--${summary.state.toLowerCase().replaceAll(" ", "-")}`}>
@@ -142,7 +142,7 @@ export function ReplayMarketViewContent({
         <section aria-labelledby="mi-market-view-title" className={`mi-market-view${model.isEmpty ? " mi-market-view--empty" : ""}`}>
             <section aria-label="Market summary" className="mi-market-view__market-header">
                 <div className="mi-market-view__heading">
-                    <h2 id="mi-market-view-title">MARKET VIEW</h2>
+                    <h2 id="mi-market-view-title">{bilingualSlash("marketView")}</h2>
                 </div>
                 <CurrentPriceSummary summary={model.currentPriceSummary} />
             </section>
@@ -153,65 +153,65 @@ export function ReplayMarketViewContent({
                     {model.orderBook.hasData && model.orderBook.state !== "UNAVAILABLE" && <div className="mi-order-book__toolbar">
                         <div aria-label="Order book display mode" className="mi-order-book__modes">
                             {["BOTH", "BIDS", "ASKS"].map((mode) => <button aria-pressed={dom.mode === mode}
-                                key={mode} onClick={() => onDisplayModeChange(mode)} type="button">{mode}</button>)}
+                                key={mode} onClick={() => onDisplayModeChange(mode)} type="button">{bilingualSlash(mode.toLowerCase())}</button>)}
                         </div>
-                        <label>ROWS（行数） <select aria-label="Displayed order book rows" onChange={(event) => onRowLimitChange(Number(event.target.value))}
+                        <label>{bilingualSlash("rows")} <select aria-label="Displayed order book rows" onChange={(event) => onRowLimitChange(Number(event.target.value))}
                             value={dom.rowLimit}>{[10, 20, 50].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
                     </div>}
                     {model.orderBook.state === "NO MARKET SELECTED" ? (
-                        <div className="mi-market-view__empty"><strong>NO MARKET SELECTED</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("NO MARKET SELECTED", "市場未選択")}</strong></div>
                     ) : model.orderBook.state === "LOADING" ? (
-                        <div className="mi-market-view__empty"><strong>LOADING MARKET DATA</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("LOADING MARKET DATA", "市場データ読込中")}</strong></div>
                     ) : model.orderBook.state === "UNAVAILABLE" ? (
-                        <div className="mi-market-view__empty"><strong>ORDER BOOK UNAVAILABLE</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("ORDER BOOK UNAVAILABLE", "板情報利用不可")}</strong></div>
                     ) : model.orderBook.state === "WAITING" ? (
-                        <div className="mi-market-view__empty"><strong>WAITING FOR MARKET DATA</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("WAITING FOR MARKET DATA", "市場データ待機中")}</strong></div>
                     ) : <>
                         {displayMode !== "BIDS" && (dom.asks.length > 0
                             ? <BookTable expandedMarkerGroupKey={expandedMarkerGroupKey} label="ASK" markerModel={markerModel}
                                 onMarkerGroupToggle={onMarkerGroupToggle} onMarkerSelect={onMarkerSelect}
                                 rows={dom.asks} selectedMarkerId={selectedMarkerId} />
-                            : <p className="mi-market-view__empty">NO ASK DATA</p>)}
+                            : <p className="mi-market-view__empty">{bilingualSlashText("NO ASK DATA", "売板データなし")}</p>)}
                         <div className="mi-order-book__current">
-                            <span>CURRENT PRICE · {model.header.currentPriceSource}</span>
+                            <span>{bilingualSlash("currentPrice")} · {model.header.currentPriceSource}</span>
                             <strong>{model.header.currentPrice}</strong>
                             <span>{model.header.priceDirection}</span>
-                            <small>SPREAD {model.orderBook.spread}</small>
+                            <small>{bilingualSlash("spread")} {model.orderBook.spread}</small>
                         </div>
                         {displayMode !== "ASKS" && (dom.bids.length > 0
                             ? <BookTable expandedMarkerGroupKey={expandedMarkerGroupKey} label="BID" markerModel={markerModel}
                                 onMarkerGroupToggle={onMarkerGroupToggle} onMarkerSelect={onMarkerSelect}
                                 rows={dom.bids} selectedMarkerId={selectedMarkerId} />
-                            : <p className="mi-market-view__empty">NO BID DATA</p>)}
+                            : <p className="mi-market-view__empty">{bilingualSlashText("NO BID DATA", "買板データなし")}</p>)}
                         <div className="mi-order-book__ratio" aria-label="Visible depth ratio">
-                            <span>VISIBLE DEPTH RATIO</span><strong>BUY {ratio.buy}</strong><strong>SELL {ratio.sell}</strong>
+                            <span>{bilingualSlash("visibleDepthRatio")}</span><strong>BUY {ratio.buy}</strong><strong>SELL {ratio.sell}</strong>
                         </div>
                     </>}
-                    {!model.isEmpty && <><h4>Book Summary</h4>
+                    {!model.isEmpty && <><h4>{bilingualSlash("bookSummary")}</h4>
                         <FieldGrid fields={[
-                            ["Best Ask", model.orderBook.bestAsk], ["Best Bid", model.orderBook.bestBid],
-                            ["Spread", model.orderBook.spread], ["Spread %", model.orderBook.spreadPct],
-                            ["Midpoint", model.orderBook.midpoint], ["Book Imbalance", model.orderBook.imbalance],
+                            [bilingualSlash("bestAsk"), model.orderBook.bestAsk], [bilingualSlash("bestBid"), model.orderBook.bestBid],
+                            [bilingualSlash("spread"), model.orderBook.spread], [bilingualSlashText("Spread %", "スプレッド%"), model.orderBook.spreadPct],
+                            [bilingualSlashText("Midpoint", "仲値"), model.orderBook.midpoint], [bilingualSlashText("Book Imbalance", "板不均衡"), model.orderBook.imbalance],
                         ]} /></>}
                 </section>
                 <section aria-labelledby="mi-market-trades-title" className="mi-market-view__card">
                     <h3 id="mi-market-trades-title">{bilingual("recentTrades")}</h3>
                     {model.marketContext.key && <SourceBadge marketContext={model.marketContext} />}
-                    {model.recentTrades.hasData && <div className="mi-recent-trades__toolbar"><label>ROWS（行数） <select aria-label="Displayed recent trade rows"
+                    {model.recentTrades.hasData && <div className="mi-recent-trades__toolbar"><label>{bilingualSlash("rows")} <select aria-label="Displayed recent trade rows"
                         onChange={(event) => onTradeRowLimitChange(Number(event.target.value))} value={trades.rowLimit}>
                         {[10, 20, 50].map((count) => <option key={count} value={count}>{count}</option>)}</select></label></div>}
                     {model.recentTrades.state === "NO MARKET SELECTED" ? (
-                        <div className="mi-market-view__empty"><strong>NO MARKET SELECTED</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("NO MARKET SELECTED", "市場未選択")}</strong></div>
                     ) : model.recentTrades.state === "LOADING" ? (
-                        <div className="mi-market-view__empty"><strong>LOADING TRADE DATA</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("LOADING TRADE DATA", "約定データ読込中")}</strong></div>
                     ) : model.recentTrades.state === "UNAVAILABLE" ? (
-                        <div className="mi-market-view__empty"><strong>TRADE DATA UNAVAILABLE</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("TRADE DATA UNAVAILABLE", "約定データ利用不可")}</strong></div>
                     ) : model.recentTrades.state === "NO TRADES" ? (
-                        <div className="mi-market-view__empty"><strong>NO TRADES</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("NO TRADES", "約定なし")}</strong></div>
                     ) : model.recentTrades.state === "WAITING" ? (
-                        <div className="mi-market-view__empty"><strong>WAITING FOR TRADE DATA</strong></div>
+                        <div className="mi-market-view__empty"><strong>{bilingualSlashText("WAITING FOR TRADE DATA", "約定データ待機中")}</strong></div>
                     ) : <div className="mi-market-view__table-wrap"><table>
-                        <thead><tr><th>TIME (LOCAL)</th><th>PRICE</th><th>SIZE</th><th>SIDE</th><th>MARKER</th></tr></thead>
+                        <thead><tr><th>{bilingualSlash("timeLocal")}</th><th>{bilingualSlash("priceUpper")}</th><th>{bilingualSlash("sizeUpper")}</th><th>{bilingualSlash("sideUpper")}</th><th>{bilingualSlash("markerUpper")}</th></tr></thead>
                         <tbody>{trades.rows.map((trade) => (
                             <tr key={`${trade.id}-${trade.inputIndex}`} aria-label={trade.isCurrent ? "Current trade" : undefined}
                                 className={`mi-market-view__trade--${trade.side.toLowerCase()}${trade.isCurrent ? " mi-market-view__trade--current" : ""}`}>
@@ -226,11 +226,15 @@ export function ReplayMarketViewContent({
                             </tr>
                         ))}</tbody>
                     </table></div>}
-                    {model.recentTrades.hasData && <><h4>Trade Summary</h4>
+                    {model.recentTrades.hasData && <><h4>{bilingualSlash("tradeSummary")}</h4>
                         <FieldGrid fields={[
-                            ["Visible Trades", trades.count], ["BUY Count", trades.buyCount], ["SELL Count", trades.sellCount],
-                            ["UNKNOWN Count", trades.unknownCount], ["Visible BUY Size", trades.buySize], ["Visible SELL Size", trades.sellSize],
-                            ["VISIBLE TRADE FLOW", trades.buyRatio === null ? "BUY — / SELL —"
+                            [bilingualSlashText("Visible Trades", "表示約定数"), trades.count],
+                            [bilingualSlashText("BUY Count", "買い件数"), trades.buyCount],
+                            [bilingualSlashText("SELL Count", "売り件数"), trades.sellCount],
+                            [bilingualSlashText("UNKNOWN Count", "不明件数"), trades.unknownCount],
+                            [bilingualSlashText("Visible BUY Size", "表示買い数量"), trades.buySize],
+                            [bilingualSlashText("Visible SELL Size", "表示売り数量"), trades.sellSize],
+                            [bilingualSlashText("VISIBLE TRADE FLOW", "表示約定フロー"), trades.buyRatio === null ? "BUY — / SELL —"
                                 : `BUY ${trades.buyRatio.toFixed(1)}% / SELL ${trades.sellRatio.toFixed(1)}%`],
                         ]} /></>}
                 </section>
@@ -238,32 +242,43 @@ export function ReplayMarketViewContent({
             <MarkerInspector marker={resolveSelectedMarker(markerModel, selectedMarkerId)}
                 marketContext={model.marketContext} />
             <details className="mi-advanced-disclosure mi-market-view__analysis-details">
-                <summary>Market Analysis Details（市場分析詳細）</summary>
+                <summary>{bilingual("marketAnalysisDetails")}</summary>
                 <section aria-labelledby="mi-market-metrics-title" className="mi-market-view__card mi-market-view__metrics">
-                    <h3 id="mi-market-metrics-title">Market Metrics</h3>
+                    <h3 id="mi-market-metrics-title">{bilingualSlash("marketMetrics")}</h3>
                     <FieldGrid fields={[
-                        ["Buy Pressure", model.metrics.buyPressure], ["Sell Pressure", model.metrics.sellPressure],
-                        ["Pressure Balance", model.metrics.pressureBalance], ["Liquidity", model.metrics.liquidity],
-                        ["Momentum", model.metrics.momentum], ["Spread", model.metrics.spread],
-                        ["Spread %", model.metrics.spreadPct], ["Volatility", model.metrics.volatility],
-                        ["Absorption", model.metrics.absorption], ["Fake Pressure", model.metrics.fakePressure],
-                        ["Spoofing", model.metrics.spoofing], ["Iceberg", model.metrics.iceberg],
-                        ["Market Data Quality", model.quality.market],
+                        [bilingualSlashText("Buy Pressure", "買い圧力"), model.metrics.buyPressure],
+                        [bilingualSlashText("Sell Pressure", "売り圧力"), model.metrics.sellPressure],
+                        [bilingualSlashText("Pressure Balance", "圧力バランス"), model.metrics.pressureBalance],
+                        [bilingualSlashText("Liquidity", "流動性"), model.metrics.liquidity],
+                        [bilingualSlashText("Momentum", "モメンタム"), model.metrics.momentum],
+                        [bilingualSlash("spread"), model.metrics.spread],
+                        [bilingualSlashText("Spread %", "スプレッド%"), model.metrics.spreadPct],
+                        [bilingualSlashText("Volatility", "ボラティリティ"), model.metrics.volatility],
+                        [bilingualSlashText("Absorption", "吸収"), model.metrics.absorption],
+                        [bilingualSlashText("Fake Pressure", "偽の圧力"), model.metrics.fakePressure],
+                        [bilingualSlashText("Spoofing", "スプーフィング"), model.metrics.spoofing],
+                        [bilingualSlashText("Iceberg", "アイスバーグ"), model.metrics.iceberg],
+                        [bilingualSlashText("Market Data Quality", "市場データ品質"), model.quality.market],
                     ]} />
-                    <h4>Data Quality</h4>
-                    <FieldGrid fields={[["Market Quality", model.quality.market], ["Order Book Quality", model.quality.orderBook],
-                        ["Trade Quality", model.quality.trades], ["Metrics Quality", model.quality.metrics]]} />
-                    <h4>Diagnostics</h4>
+                    <h4>{bilingualSlash("dataQuality")}</h4>
                     <FieldGrid fields={[
-                        ["Source Event Type", model.diagnostics.sourceEventType], ["Missing Field Count", model.diagnostics.missingFields],
-                        ["Invalid Order Book Row Count", model.diagnostics.invalidOrderBookRows],
-                        ["Duplicate Order Book Price Count", model.diagnostics.duplicateOrderBookPrices],
-                        ["Invalid Trade Row Count", model.diagnostics.invalidTradeRows],
-                        ["Duplicate Trade ID Count", model.diagnostics.duplicateTradeIds],
-                        ["Duplicate Trade Sequence Count", model.diagnostics.duplicateTradeSequences],
-                        ["Truncated Ask Count", model.diagnostics.truncatedAsks],
-                        ["Truncated Bid Count", model.diagnostics.truncatedBids],
-                        ["Truncated Trade Count", model.diagnostics.truncatedTrades],
+                        [bilingualSlashText("Market Quality", "市場品質"), model.quality.market],
+                        [bilingualSlashText("Order Book Quality", "板品質"), model.quality.orderBook],
+                        [bilingualSlashText("Trade Quality", "約定品質"), model.quality.trades],
+                        [bilingualSlashText("Metrics Quality", "指標品質"), model.quality.metrics],
+                    ]} />
+                    <h4>{bilingualSlash("diagnosticsSection")}</h4>
+                    <FieldGrid fields={[
+                        [bilingualSlashText("Source Event Type", "ソースイベント種別"), model.diagnostics.sourceEventType],
+                        [bilingualSlashText("Missing Field Count", "欠落フィールド数"), model.diagnostics.missingFields],
+                        [bilingualSlashText("Invalid Order Book Row Count", "無効な板行数"), model.diagnostics.invalidOrderBookRows],
+                        [bilingualSlashText("Duplicate Order Book Price Count", "重複板価格数"), model.diagnostics.duplicateOrderBookPrices],
+                        [bilingualSlashText("Invalid Trade Row Count", "無効な約定行数"), model.diagnostics.invalidTradeRows],
+                        [bilingualSlashText("Duplicate Trade ID Count", "重複約定ID数"), model.diagnostics.duplicateTradeIds],
+                        [bilingualSlashText("Duplicate Trade Sequence Count", "重複約定順序数"), model.diagnostics.duplicateTradeSequences],
+                        [bilingualSlashText("Truncated Ask Count", "切捨て売板数"), model.diagnostics.truncatedAsks],
+                        [bilingualSlashText("Truncated Bid Count", "切捨て買板数"), model.diagnostics.truncatedBids],
+                        [bilingualSlashText("Truncated Trade Count", "切捨て約定数"), model.diagnostics.truncatedTrades],
                     ]} />
                 </section>
             </details>

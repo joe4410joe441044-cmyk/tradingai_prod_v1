@@ -64,8 +64,8 @@ test("AUTO card labels last-cycle reasons as historical, not current blockers", 
 test("AUTO card keeps active symbol and top candidate preview separate", async () => {
     const { default: Card } = await loadCard();
     const html = renderToStaticMarkup(createElement(Card, { status }));
-    assert.match(html, />ACTIVE SYMBOL</);
-    assert.match(html, /TOP CANDIDATE · PREVIEW/);
+    assert.match(html, /ACTIVE SYMBOL/);
+    assert.match(html, /TOP CANDIDATE \/ 最有力候補 · PREVIEW/);
     assert.match(html, /XRPUSDTM/);
     assert.match(html, /ETHUSDT/);
 });
@@ -97,7 +97,7 @@ test("SKIP / RESELECT follows LAST EVALUATED in the essential view", async () =>
     const { default: Card } = await loadCard();
     const html = renderToStaticMarkup(createElement(Card, { status }));
     const gridIndex = html.indexOf('class="ams-essential-grid"');
-    const lastEvaluatedIndex = html.indexOf('>LAST EVALUATED<');
+    const lastEvaluatedIndex = html.indexOf('>LAST EVALUATED / 最終評価<');
     const reselectIndex = html.indexOf('data-testid="auto-market-selection-reselect"');
     const detailsIndex = html.indexOf('data-testid="auto-market-selection-details"');
     assert.ok(gridIndex !== -1 && lastEvaluatedIndex !== -1 && reselectIndex !== -1 && detailsIndex !== -1);

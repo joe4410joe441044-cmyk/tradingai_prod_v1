@@ -91,8 +91,8 @@ test("ESSENTIAL VIEW exposes only operator-critical values", async () => {
     const html = await renderStatic({ status: criticalStatus, collapsible: true });
     for (const expected of [
         "ACTIVE SYMBOL", "XRPUSDTM",
-        "TOP CANDIDATE · PREVIEW", "DYMUSDT",
-        ">STATUS<", "OBSERVING",
+        "TOP CANDIDATE / 最有力候補 · PREVIEW", "DYMUSDT",
+        ">STATUS / 状態<", "OBSERVING",
         "LAST EVALUATED", "2026-09-26 22:44:44",
         "SKIP / RESELECT",
         "CAPITAL", "ELIGIBLE", "AVAILABLE CAPITAL", "7.9184", "RISK BUDGET", "0.0396",
@@ -128,7 +128,7 @@ test("DETAILS / DIAGNOSTICS reveals every diagnostic group when expanded", async
         "RANKING", "TOP SCORE",
         "CAPITAL DETAILS", "REMAINING EXPOSURE", "POSITION CAPACITY", "MM REGIME",
         "SYMBOL SWITCH", "NEW ENTRIES PAUSED",
-        "ams-freshness", "UNIVERSE: FRESH",
+        "ams-freshness", "UNIVERSE / 対象市場: FRESH",
         "LAST CYCLE REASONS", "MM_STALE",
     ]) {
         assert.ok(html.includes(expected), `expanded diagnostics must include ${expected}`);
@@ -223,7 +223,7 @@ test("AUTHORITY: active symbol source, top candidate preview, and SKIP handler a
         collapsible: true,
     });
     assert.match(fallback, /ACTIVE SYMBOL/);
-    assert.match(fallback, /TOP CANDIDATE · PREVIEW/);
+    assert.match(fallback, /TOP CANDIDATE \/ 最有力候補 · PREVIEW/);
     assert.ok(fallback.includes("DYMUSDT"));
     assert.doesNotMatch(fallback, /XRPUSDTM/);
 });

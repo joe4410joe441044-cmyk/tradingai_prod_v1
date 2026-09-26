@@ -2077,3 +2077,14 @@
     padding: 10px;
     border-top: 1px solid var(--mi-border);
 }
+
+/* WORK-G6: bilingual fixed labels. Japanese accompaniment must wrap without
+   truncating critical operator values or forcing horizontal overflow. */
+.market-intelligence .mi-toolbar__field > span { white-space: normal; line-height: 1.25; }
+.market-intelligence .mi-market-view th { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.market-intelligence .mi-current-price-summary__price > span,
+.market-intelligence .mi-current-price-summary__quotes dt { white-space: normal; line-height: 1.25; }
+.market-intelligence .mi-order-book__modes button { white-space: normal; line-height: 1.2; }
+.market-intelligence .mi-order-book__toolbar label,
+.market-intelligence .mi-recent-trades__toolbar label { white-space: normal; line-height: 1.2; }
+.market-intelligence .mi-market-view__fields dt { line-height: 1.25; overflow-wrap: anywhere; }

@@ -6419,3 +6419,35 @@ Intelligence are unaffected.
         align-self: flex-start;
     }
 }
+
+/* WORK-G6: AUTO MARKET SELECTION bilingual labels. Labels wrap instead of
+   pushing critical values into ellipsis. */
+.ams-card-subtitle { display: block; }
+.ams-field-label { white-space: normal; line-height: 1.3; overflow-wrap: anywhere; }
+.ams-reselect {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    white-space: normal;
+    line-height: 1.2;
+}
+.ams-reselect-label-ja { font-size: 9px; }
+.ams-capital-title { line-height: 1.3; }
+/* Narrow diagnostic columns stack label over value so bilingual labels never
+   squeeze short numeric/status values into an ellipsis. */
+.ams-section .ams-field {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+}
+.ams-section .ams-field-value {
+    flex: 0 0 auto;
+    width: 100%;
+    overflow: visible;
+    text-align: left;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}

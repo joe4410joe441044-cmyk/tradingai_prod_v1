@@ -1,6 +1,9 @@
 import { useMarketIntelligence } from "../../state/market-intelligence/MarketIntelligenceProvider.jsx";
 import { REPLAY_ENGINE_COMMANDS } from "../../features/market-intelligence/replay/replayEngine.js";
-import { bilingual } from "./marketIntelligenceLabels.js";
+import { bilingualSlash, bilingualSlashText } from "./marketIntelligenceLabels.js";
+
+const replayStatusLabel = (status) => status === "NO REPLAY SELECTED"
+    ? bilingualSlashText("NO REPLAY SELECTED", "リプレイ未選択") : status;
 
 const timestampLabel = (value) => {
     const epoch = typeof value === "number" ? value : Date.parse(value);
@@ -25,17 +28,17 @@ export default function MarketIntelligenceToolbar() {
 
             {!hasReplay ? <>
                 <div className="mi-toolbar__field">
-                    <span>{bilingual("mode")}</span>
+                    <span>{bilingualSlash("mode")}</span>
                     <strong>REVIEW</strong>
                 </div>
                 <div className="mi-toolbar__field mi-toolbar__status">
-                    <span>REPLAY</span>
-                    <strong className="mi-status-text--missing">{status}</strong>
+                    <span>{bilingualSlashText("REPLAY", "リプレイ")}</span>
+                    <strong className="mi-status-text--missing">{replayStatusLabel(status)}</strong>
                     {hasError && <button onClick={() => applyReplayCommand({ type: REPLAY_ENGINE_COMMANDS.RETRY })}
                         type="button">RETRY（再試行）</button>}
                 </div>
             </> : <><label className="mi-toolbar__field">
-                <span>{bilingual("position")}</span>
+                <span>{bilingualSlash("position")}</span>
                 <select disabled value={replayEngine?.dataset?.datasetId ?? ""}>
                     <option value={replayEngine?.dataset?.datasetId ?? ""}>
                         {replayEngine.dataset.datasetId ?? "Replay loaded"}
@@ -44,21 +47,21 @@ export default function MarketIntelligenceToolbar() {
             </label>
 
             <div className="mi-toolbar__field">
-                <span>{bilingual("mode")}</span>
+                <span>{bilingualSlash("mode")}</span>
                 <strong>{replayEngine.machine?.state ?? "REVIEW"}</strong>
             </div>
 
             <div className="mi-toolbar__field">
-                <span>{bilingual("timestamp")}</span>
+                <span>{bilingualSlash("timestamp")}</span>
                 <strong>{timestampLabel(replayEngine?.replayCursor)}</strong>
             </div>
 
             <div className="mi-toolbar__field">
-                <span>{bilingual("quality")}</span>
+                <span>{bilingualSlash("quality")}</span>
                 <strong className={quality === "VALID" ? undefined : "mi-status-text--missing"}>{quality}</strong>
             </div>
             <div className="mi-toolbar__field mi-toolbar__status">
-                <span>{bilingual("status")}</span>
+                <span>{bilingualSlash("status")}</span>
                 <strong className={status === "REPLAY READY" ? undefined : "mi-status-text--missing"}>{status}</strong>
                 {hasError && <button onClick={() => applyReplayCommand({ type: REPLAY_ENGINE_COMMANDS.RETRY })}
                     type="button">RETRY（再試行）</button>}

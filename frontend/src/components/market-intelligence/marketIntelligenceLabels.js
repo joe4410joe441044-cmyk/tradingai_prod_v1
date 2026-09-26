@@ -13,6 +13,23 @@ export const MI_LABELS = Object.freeze({
     dataQuality: ["Data Quality", "データ品質"], currentEvent: ["Current Event", "現在イベント"],
     eventType: ["Event Type", "イベント種別"], sequence: ["Sequence", "順序"], progress: ["Progress", "進捗"],
     currentCursor: ["Current Cursor", "現在カーソル"], seek: ["Seek", "移動"],
+
+    /* G6 — Market Intelligence bilingual label additions (EN / 日本語). */
+    marketView: ["MARKET VIEW", "市場情報"],
+    currentPrice: ["CURRENT PRICE", "現在価格"],
+    bestBid: ["BEST BID", "最良買値"], bestAsk: ["BEST ASK", "最良売値"], spread: ["SPREAD", "スプレッド"],
+    both: ["BOTH", "両方"], bids: ["BIDS", "買板"], asks: ["ASKS", "売板"],
+    rows: ["ROWS", "行数"], askLevels: ["ASK LEVELS", "売板"], bidLevels: ["BID LEVELS", "買板"],
+    timeLocal: ["TIME (LOCAL)", "時刻"], priceUpper: ["PRICE", "価格"], sizeUpper: ["SIZE", "数量"],
+    sideUpper: ["SIDE", "売買"], markerUpper: ["MARKER", "マーカー"],
+    visibleDepthRatio: ["VISIBLE DEPTH RATIO", "表示板厚比率"],
+    bookSummary: ["Book Summary", "板サマリー"], tradeSummary: ["Trade Summary", "約定サマリー"],
+    marketMetrics: ["Market Metrics", "市場指標"],
+    diagnosticsSection: ["Diagnostics", "診断"],
+    marketAnalysisDetails: ["Market Analysis Details", "市場分析詳細"],
+    markerDetails: ["Marker Details", "マーカー詳細"],
+    markerInspector: ["MARKER INSPECTOR", "マーカー検査"], selectMarker: ["SELECT A MARKER", "マーカーを選択"],
+    markerType: ["Marker Type", "マーカー種別"], quantity: ["Quantity", "数量"],
 });
 
 export const bilingual = (key) => {
@@ -21,3 +38,11 @@ export const bilingual = (key) => {
 };
 
 export const bilingualText = (english, japanese) => `${english}（${japanese}）`;
+
+/* Preferred G6 standard: ENGLISH / 日本語. */
+export const bilingualSlash = (key) => {
+    const [english, japanese] = MI_LABELS[key];
+    return `${english} / ${japanese}`;
+};
+
+export const bilingualSlashText = (english, japanese) => `${english} / ${japanese}`;
