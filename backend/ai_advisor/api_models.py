@@ -40,6 +40,7 @@ class AdvisorHTTPResponse(AdvisorProviderContractModel):
     advisorResponse: Optional[AdvisorResponseEnvelope] = None
     failureCode: Optional[AdvisorServiceFailureCode] = None
     safeMessage: Optional[str] = Field(default=None, max_length=128)
+    knowledgeHistory: Optional[dict] = None
 
     @model_validator(mode="after")
     def validate_result(self) -> "AdvisorHTTPResponse":

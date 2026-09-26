@@ -170,6 +170,7 @@ class AdvisorServiceResult(AdvisorServiceContractModel):
     status: AdvisorServiceStatus
     response: Optional[AdvisorResponseEnvelope] = None
     failure: Optional[AdvisorServiceFailure] = None
+    knowledgeHistory: Optional[dict] = None
 
     @model_validator(mode="after")
     def validate_result(self) -> "AdvisorServiceResult":
