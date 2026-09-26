@@ -64,7 +64,7 @@ test("AUTO card labels last-cycle reasons as historical, not current blockers", 
 test("AUTO card keeps active symbol and top candidate preview separate", async () => {
     const { default: Card } = await loadCard();
     const html = renderToStaticMarkup(createElement(Card, { status }));
-    assert.match(html, /ACTIVE SYMBOL · RUNTIME/);
+    assert.match(html, />ACTIVE SYMBOL</);
     assert.match(html, /TOP CANDIDATE · PREVIEW/);
     assert.match(html, /XRPUSDTM/);
     assert.match(html, /ETHUSDT/);
@@ -80,26 +80,30 @@ test("AUTO card renders exactly one red SKIP / RESELECT button in the status gri
     assert.match(html, /ams-reselect-cell/);
 });
 
-test("SKIP / RESELECT is not rendered inside the header", async () => {
+test("SKIP / RESELECT stays in the essential view, not the header or diagnostics", async () => {
     const { default: Card } = await loadCard();
     const html = renderToStaticMarkup(createElement(Card, { status }));
     const headerIndex = html.indexOf('class="ams-card-header"');
-    const gridIndex = html.indexOf('class="ams-symbol-grid"');
+    const essentialIndex = html.indexOf('data-testid="auto-market-selection-essential"');
+    const detailsIndex = html.indexOf('data-testid="auto-market-selection-details"');
     const reselectIndex = html.indexOf('data-testid="auto-market-selection-reselect"');
-    assert.ok(headerIndex !== -1 && gridIndex !== -1 && reselectIndex !== -1);
-    assert.ok(gridIndex > headerIndex);
-    assert.ok(reselectIndex > gridIndex);
+    assert.ok(headerIndex !== -1 && essentialIndex !== -1 && detailsIndex !== -1 && reselectIndex !== -1);
+    assert.ok(reselectIndex > headerIndex);
+    assert.ok(reselectIndex > essentialIndex);
+    assert.ok(reselectIndex < detailsIndex);
 });
 
-test("SKIP / RESELECT sits right of LAST EVALUATED and below CYCLE ID", async () => {
+test("SKIP / RESELECT follows LAST EVALUATED in the essential view", async () => {
     const { default: Card } = await loadCard();
     const html = renderToStaticMarkup(createElement(Card, { status }));
-    const cycleIdIndex = html.indexOf('>CYCLE ID<');
+    const gridIndex = html.indexOf('class="ams-essential-grid"');
     const lastEvaluatedIndex = html.indexOf('>LAST EVALUATED<');
     const reselectIndex = html.indexOf('data-testid="auto-market-selection-reselect"');
-    assert.ok(cycleIdIndex !== -1 && lastEvaluatedIndex !== -1 && reselectIndex !== -1);
-    assert.ok(lastEvaluatedIndex > cycleIdIndex);
+    const detailsIndex = html.indexOf('data-testid="auto-market-selection-details"');
+    assert.ok(gridIndex !== -1 && lastEvaluatedIndex !== -1 && reselectIndex !== -1 && detailsIndex !== -1);
+    assert.ok(lastEvaluatedIndex > gridIndex);
     assert.ok(reselectIndex > lastEvaluatedIndex);
+    assert.ok(reselectIndex < detailsIndex);
 });
 
 test("AUTO card keeps AVAILABLE and collapse control in the header", async () => {

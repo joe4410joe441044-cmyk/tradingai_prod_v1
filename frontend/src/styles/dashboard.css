@@ -5268,11 +5268,14 @@ Collapsed by default; expands to show runtime diagnostics.
 }
 
 .ams-field-label {
+    white-space: nowrap;
     color: #788394;
     letter-spacing: 0.4px;
 }
 
 .ams-field-value {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     color: #d7dce4;
     text-align: right;
@@ -5300,6 +5303,109 @@ Collapsed by default; expands to show runtime diagnostics.
     color: #d7dce4;
 }
 
+/* WORK-G5: AUTO MARKET SELECTION operator view — essential view plus one
+   collapsible DETAILS / DIAGNOSTICS section. Critical operator values wrap in
+   full; only long machine identifiers keep the single-line ellipsis. */
+.ams-essential {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.ams-essential-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.ams-essential-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ams-capital-summary {
+    display: grid;
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid #1a2330;
+    background: #0d131c;
+}
+
+.ams-capital-title {
+    color: #8d96a5;
+    font-family: "Consolas", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+}
+
+.ams-capital-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.ams-capital-grid .ams-field {
+    border: 1px solid #1a2330;
+    background: #0b1019;
+}
+
+.ams-field--wrap {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-height: 44px;
+}
+
+.ams-field--wrap .ams-field-value {
+    overflow: visible;
+    max-width: 100%;
+    text-align: left;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.ams-reasons--current {
+    padding: 9px;
+    border: 1px solid #1a2330;
+    background: #0d131c;
+}
+
+.ams-details-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid #1a2330;
+    background: #0d131c;
+    color: #9badc6;
+    font-family: "Consolas", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ams-details-toggle:hover {
+    border-color: #2d3d52;
+    color: #d7dce4;
+}
+
+.ams-details-toggle:focus-visible {
+    outline: 2px solid #57b8ff;
+    outline-offset: 2px;
+}
+
+.ams-details {
+    margin-top: 10px;
+}
+
 @media (max-width: 1439px) {
     .ams-section-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5316,7 +5422,9 @@ Collapsed by default; expands to show runtime diagnostics.
 @media (max-width: 760px) {
     .ams-symbol-grid,
     .ams-section-grid,
-    .ams-summary {
+    .ams-summary,
+    .ams-essential-grid,
+    .ams-capital-grid {
         grid-template-columns: minmax(0, 1fr);
     }
 }
