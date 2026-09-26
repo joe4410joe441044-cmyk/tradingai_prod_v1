@@ -29,6 +29,30 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 
+LIVE_POSITION_PROTECTION_UNAVAILABLE = "LIVE_POSITION_PROTECTION_UNAVAILABLE"
+LIVE_POSITION_PROTECTION_SOURCE = "LIVE_POSITION_PROTECTION_AUTHORITY"
+# A confirmed LIVE close whose local PnL could not be computed (no authoritative
+# contract multiplier).  Local balance/PnL/drawdown are then unknown, not 0.
+LIVE_PNL_ACCOUNTING_UNAVAILABLE = "LIVE_PNL_ACCOUNTING_UNAVAILABLE"
+
+
+def _positive_finite(value):
+    """Return ``value`` as a positive finite float, otherwise ``None``.
+
+    Used to distinguish "a valid level/multiplier at X" from "unavailable";
+    missing, zero, negative, NaN, infinite and boolean inputs are unavailable.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number_value = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number_value) or number_value <= 0:
+        return None
+    return number_value
+
+
 def adjust_qty_to_step(qty, step_size):
     if step_size <= 0:
         return qty
@@ -97,6 +121,14 @@ class ExecutionEngine:
 
         # realtime pnl state
         self.unrealized_pnl = 0
+        # False when a LIVE position has no authoritative contract multiplier:
+        # unrealized PnL is then unavailable (reported as 0.0, never estimated).
+        self.unrealized_pnl_available = True
+        # Set (dict) after a confirmed LIVE close whose PnL was unavailable.
+        # While set, local balance/PnL are not authoritative: drawdown is not
+        # recomputed from them and new LIVE entries fail closed until an
+        # authoritative exchange balance/equity resync clears it.
+        self.live_pnl_accounting_unavailable = None
 
         # duplicate prevention
         self.pending_order = False
@@ -262,6 +294,10 @@ class ExecutionEngine:
                     if self.portfolio:
                         self.portfolio.balance = balance
 
+                    self._resolve_live_pnl_accounting(
+                        "START_ACCOUNT_SYNC"
+                    )
+
             except Exception as e:
 
                 self.balance_check_ok = False
@@ -285,7 +321,14 @@ class ExecutionEngine:
                     self.symbol
                 )
 
-                self.actual_position = pos
+                # The exchange position carries no SL/TP/multiplier; attach
+                # the canonical LIVE protection (or an explicit UNAVAILABLE).
+                self.actual_position = (
+                    self._attach_live_position_protection(
+                        pos,
+                        previous=self.actual_position,
+                    )
+                )
                 self.real_position = pos
                 self.real_position_state = (
                     "OPEN"
@@ -348,6 +391,10 @@ class ExecutionEngine:
                     self.portfolio.balance = (
                         balance
                     )
+
+                self._resolve_live_pnl_accounting(
+                    "EXCHANGE_BALANCE_REFRESH"
+                )
 
         except Exception as e:
 
@@ -427,6 +474,18 @@ class ExecutionEngine:
         ):
             return False
 
+        if (
+            self.live_pnl_accounting_unavailable
+            and not self.actual_position
+        ):
+            # Flat after a close whose local PnL was unavailable: the canonical
+            # exchange equity (REAL_LIVE_ACCOUNT_EQUITY) is the authoritative
+            # balance; the stale local balance is never used for drawdown.
+            self.balance = initial
+            if self.portfolio:
+                self.portfolio.balance = initial
+            self._resolve_live_pnl_accounting("REAL_LIVE_ACCOUNT_EQUITY")
+
         self.initial_equity = initial
         self.peak_equity = peak
         self.risk_trading_disabled = False
@@ -434,7 +493,37 @@ class ExecutionEngine:
         self.update_drawdown_state(self._current_equity())
         return True
 
+    def _live_accounting_unavailable_reason(self):
+        """Reason local LIVE equity is not authoritative, else ``None``."""
+
+        if not self._is_live_execution():
+            return None
+        if self.live_pnl_accounting_unavailable:
+            return LIVE_PNL_ACCOUNTING_UNAVAILABLE
+        if self.actual_position and self.unrealized_pnl_available is False:
+            return "LIVE_UNREALIZED_PNL_UNAVAILABLE"
+        return None
+
+    def _resolve_live_pnl_accounting(self, source):
+        """Clear the unavailable-PnL flag after an authoritative resync."""
+
+        if not self.live_pnl_accounting_unavailable:
+            return False
+        if self.actual_position:
+            return False
+        add_log(
+            f"✅ {LIVE_PNL_ACCOUNTING_UNAVAILABLE} resolved by {source}"
+        )
+        self.live_pnl_accounting_unavailable = None
+        return True
+
     def update_drawdown_state(self, equity=None):
+
+        if self._live_accounting_unavailable_reason() is not None:
+            # LIVE local equity is unknown (unavailable PnL): keep the last
+            # authoritative drawdown state instead of computing it from a
+            # fabricated 0.  New LIVE entries fail closed via live readiness.
+            return self.get_risk_state()
 
         if equity is None:
             equity = self._current_equity()
@@ -501,9 +590,16 @@ class ExecutionEngine:
                 position.get("qty", 0) or 0
             )
 
-            multiplier = float(
-                position.get("multiplier", 1) or 1
+            multiplier = _positive_finite(
+                position.get("multiplier")
             )
+
+            if multiplier is None:
+                if self._is_live_execution():
+                    # No authoritative LIVE contract multiplier: size and
+                    # notional are unavailable, never estimated.
+                    raise ValueError("LIVE_POSITION_MULTIPLIER_UNAVAILABLE")
+                multiplier = 1.0
 
             real_qty = float(
                 position.get(
@@ -563,6 +659,13 @@ class ExecutionEngine:
             "maxDrawdownPct": self.config["max_drawdown_pct"],
             "riskTradingDisabled": self.risk_trading_disabled,
             "riskBlockReason": self.risk_block_reason,
+            "pnlAccountingAvailable": (
+                self._live_accounting_unavailable_reason() is None
+            ),
+            "pnlAccountingBlockReason": (
+                self._live_accounting_unavailable_reason()
+            ),
+            "unrealizedPnlAvailable": bool(self.unrealized_pnl_available),
             "positionSize": self.config["position_size"],
             "tpPercent": self.config["tp_percent"],
             "slPercent": self.config["sl_percent"],
@@ -686,6 +789,26 @@ class ExecutionEngine:
         if not checks["emergencyStopClear"]:
             block_reasons.append("EMERGENCY_STOP_ACTIVE")
 
+        live_position_protection = self.live_position_protection_status()
+        # Also expressed as checks so the bot-status projection
+        # (derive_live_readiness, which rebuilds reasons from checks) keeps the
+        # fail-closed reasons visible in liveReadiness / liveBlockReasons.
+        checks["livePositionProtectionAvailable"] = (
+            live_position_protection.get("state") != "UNAVAILABLE"
+        )
+        checks["livePnlAccountingAvailable"] = (
+            not self.live_pnl_accounting_unavailable
+        )
+        if live_position_protection.get("state") == "UNAVAILABLE":
+            # An open LIVE position without protection authority fails closed
+            # for new entries/ARM; close paths do not consult readiness.
+            block_reasons.append(LIVE_POSITION_PROTECTION_UNAVAILABLE)
+        if self.live_pnl_accounting_unavailable:
+            # Local LIVE PnL/balance/drawdown are unknown after a close whose
+            # PnL could not be computed: new entries fail closed until an
+            # authoritative exchange resync (close paths skip readiness).
+            block_reasons.append(LIVE_PNL_ACCOUNTING_UNAVAILABLE)
+
         real_order_allowed = not block_reasons
         account_snapshot = dict(self.real_account_snapshot or {})
         account_type = account_snapshot.get(
@@ -781,6 +904,12 @@ class ExecutionEngine:
             "balanceReason": balance_reason,
             "positionReason": position_reason,
             "accountSnapshot": account_snapshot,
+            "livePositionProtection": live_position_protection,
+            "livePnlAccounting": (
+                dict(self.live_pnl_accounting_unavailable, state="UNAVAILABLE")
+                if self.live_pnl_accounting_unavailable
+                else {"state": "AVAILABLE"}
+            ),
         }
 
     def _live_order_allowed(self, authority_context=None):
@@ -1054,6 +1183,255 @@ class ExecutionEngine:
             "tp": price * (1 + tp_distance),
         }
 
+    # =====================================
+    # LIVE POSITION PROTECTION AUTHORITY
+    # =====================================
+
+    def _is_live_execution(self):
+
+        return (
+            str(self.mode or "").strip().lower() == "live"
+            or str(self.config.get("mode", "") or "").strip().upper() == "LIVE"
+        )
+
+    def _position_multiplier(self, position):
+        """Contract multiplier for PnL/size. LIVE: authoritative or ``None``."""
+
+        multiplier = _positive_finite(
+            (position or {}).get("multiplier")
+        )
+
+        if multiplier is not None:
+            return multiplier
+
+        if self._is_live_execution():
+            return None
+
+        # PAPER positions always carry a multiplier; legacy default retained.
+        return 0.001
+
+    @staticmethod
+    def _position_protection_levels(position):
+        """Return ``(sl, tp)``; each is a valid positive level or ``None``."""
+
+        position = position or {}
+        return (
+            _positive_finite(position.get("sl")),
+            _positive_finite(position.get("tp")),
+        )
+
+    def _live_contract_multiplier(self, position_symbol=None):
+        """Resolve the KuCoin contract multiplier for ``self.symbol``.
+
+        Authority: ``exchange.get_symbol_rules`` (KuCoin public contract
+        metadata, ``get_order_contract_rules``); falls back to the engine's
+        sizing contract cache for the same symbol when the fresh read fails.
+        Returns ``(multiplier, reason)``; ``multiplier`` is ``None`` when
+        unavailable.
+        """
+
+        from backend.market.kucoin_futures_public import (
+            to_kucoin_futures_symbol,
+        )
+
+        if not self.symbol:
+            return None, "LIVE_POSITION_SYMBOL_UNAVAILABLE"
+
+        expected = to_kucoin_futures_symbol(self.symbol)
+
+        if position_symbol and str(position_symbol) != expected:
+            return None, "LIVE_POSITION_SYMBOL_MISMATCH"
+
+        rules = None
+        provider = getattr(self.exchange, "get_symbol_rules", None)
+
+        if callable(provider):
+            try:
+                rules = provider(self.symbol)
+            except Exception:
+                rules = None
+
+        if not isinstance(rules, dict):
+            cached = self._sizing_contract_cache
+            if (
+                cached
+                and cached[0] == self.symbol
+                and isinstance(cached[2], dict)
+            ):
+                rules = cached[2]
+
+        if not isinstance(rules, dict):
+            return None, "LIVE_CONTRACT_METADATA_UNAVAILABLE"
+
+        if rules.get("symbol") != expected or rules.get("isInverse") is True:
+            return None, "LIVE_CONTRACT_METADATA_MISMATCH"
+
+        multiplier = _positive_finite(rules.get("multiplier"))
+
+        if multiplier is None:
+            return None, "LIVE_CONTRACT_MULTIPLIER_INVALID"
+
+        return multiplier, None
+
+    def _attach_live_position_protection(self, position, previous=None):
+        """Single canonical LIVE position protection authority.
+
+        The KuCoin position (``KucoinTradeClient.get_positions``) carries only
+        symbol/qty/side/entry_price.  This attaches, following the PAPER
+        position layout, the SL/TP levels derived by ``_target_prices`` from
+        the exchange entry price and the configured SL%/TP%, and the
+        authoritative contract multiplier.
+
+        * A re-sync of the same position (same side and entry price) keeps the
+          existing levels, so a trailed SL is never reset.
+        * Invalid or missing inputs never produce levels: the position is
+          marked ``protection_state=UNAVAILABLE`` (fail closed; exposed as
+          ``LIVE_POSITION_PROTECTION_UNAVAILABLE`` in live readiness).
+        * Nothing is invented: no hard-coded percentage or multiplier.
+        """
+
+        if not isinstance(position, dict) or not position:
+            return position
+
+        protected = dict(position)
+        protected.setdefault("state", "OPEN")
+
+        side = protected.get("side")
+        entry = _positive_finite(protected.get("entry_price"))
+        contracts = _positive_finite(protected.get("qty"))
+        multiplier, multiplier_reason = self._live_contract_multiplier(
+            protected.get("symbol")
+        )
+
+        same_lifecycle = bool(
+            isinstance(previous, dict)
+            and previous.get("protection_state") == "ACTIVE"
+            and entry is not None
+            and str(previous.get("side") or "").upper()
+            == str(side or "").upper()
+            and _positive_finite(previous.get("entry_price")) == entry
+        )
+
+        if same_lifecycle:
+            previous_sl, previous_tp = self._position_protection_levels(previous)
+            previous_multiplier = _positive_finite(previous.get("multiplier"))
+            if (
+                previous_sl is not None
+                and previous_tp is not None
+                and (multiplier or previous_multiplier) is not None
+            ):
+                merged = dict(previous)
+                # Exchange facts win; protection state is preserved.
+                merged.update(position)
+                merged["state"] = previous.get("state") or "OPEN"
+                merged["multiplier"] = multiplier or previous_multiplier
+                if contracts is not None:
+                    merged["coin_qty"] = contracts * merged["multiplier"]
+                merged["protection_state"] = "ACTIVE"
+                merged["protection_reason"] = None
+                return merged
+
+        reasons = []
+
+        if str(side or "").upper() not in ("BUY", "SELL", "LONG", "SHORT"):
+            reasons.append("LIVE_POSITION_SIDE_UNKNOWN")
+        if entry is None:
+            reasons.append("LIVE_POSITION_ENTRY_PRICE_INVALID")
+        if contracts is None:
+            reasons.append("LIVE_POSITION_QTY_INVALID")
+        if _positive_finite(self.config.get("sl_percent")) is None:
+            reasons.append("LIVE_SL_PERCENT_INVALID")
+        if _positive_finite(self.config.get("tp_percent")) is None:
+            reasons.append("LIVE_TP_PERCENT_INVALID")
+        if multiplier is None:
+            reasons.append(multiplier_reason)
+
+        if reasons:
+            for key in ("sl", "tp", "trailing_stop_price"):
+                protected.pop(key, None)
+            if multiplier is None:
+                protected.pop("multiplier", None)
+                protected.pop("coin_qty", None)
+            else:
+                protected["multiplier"] = multiplier
+            protected["trailing"] = False
+            protected["protection_state"] = "UNAVAILABLE"
+            protected["protection_reason"] = reasons
+            protected["protection_source"] = LIVE_POSITION_PROTECTION_SOURCE
+            add_log(
+                f"⛔ {LIVE_POSITION_PROTECTION_UNAVAILABLE}: "
+                f"{','.join(reasons)}",
+                "error",
+            )
+            return protected
+
+        target_prices = self._target_prices(side, entry)
+        trailing_enabled = bool(self.config.get("trailing_stop"))
+
+        protected.update({
+            "multiplier": multiplier,
+            "coin_qty": contracts * multiplier,
+            "entry_time": protected.get("entry_time") or time.time(),
+            "sl": target_prices["sl"],
+            "tp": target_prices["tp"],
+            "tp_percent": self.config["tp_percent"],
+            "sl_percent": self.config["sl_percent"],
+            "trailing": trailing_enabled,
+            "trailing_distance_percent": self._trailing_distance_percent(),
+            "trailing_reference_price": entry,
+            "trailing_stop_price": (
+                target_prices["sl"] if trailing_enabled else None
+            ),
+            "protection_state": "ACTIVE",
+            "protection_reason": None,
+            "protection_source": LIVE_POSITION_PROTECTION_SOURCE,
+            "protection_basis": "EXCHANGE_ENTRY_PRICE_X_CONFIGURED_PERCENT",
+        })
+
+        return protected
+
+    def live_position_protection_status(self):
+        """Read-only protection status of the current LIVE position."""
+
+        position = self.actual_position
+
+        if not isinstance(position, dict) or not position:
+            return {"state": "NO_POSITION", "protected": None, "reasons": []}
+
+        if not self._is_live_execution():
+            return {"state": "NOT_LIVE", "protected": None, "reasons": []}
+
+        stop_loss, take_profit = self._position_protection_levels(position)
+        multiplier = _positive_finite(position.get("multiplier"))
+        reasons = list(position.get("protection_reason") or [])
+
+        if position.get("protection_state") == "UNAVAILABLE" and not reasons:
+            reasons.append(LIVE_POSITION_PROTECTION_UNAVAILABLE)
+        if stop_loss is None and "LIVE_POSITION_SL_UNAVAILABLE" not in reasons:
+            reasons.append("LIVE_POSITION_SL_UNAVAILABLE")
+        if take_profit is None and "LIVE_POSITION_TP_UNAVAILABLE" not in reasons:
+            reasons.append("LIVE_POSITION_TP_UNAVAILABLE")
+        if multiplier is None and "LIVE_POSITION_MULTIPLIER_UNAVAILABLE" not in reasons:
+            reasons.append("LIVE_POSITION_MULTIPLIER_UNAVAILABLE")
+
+        protected = (
+            position.get("protection_state") != "UNAVAILABLE"
+            and stop_loss is not None
+            and take_profit is not None
+            and multiplier is not None
+        )
+
+        return {
+            "state": "ACTIVE" if protected else "UNAVAILABLE",
+            "protected": protected,
+            "reasons": [] if protected else reasons,
+            "stopLoss": stop_loss,
+            "takeProfit": take_profit,
+            "multiplier": multiplier,
+            "source": position.get("protection_source"),
+            "monitoring": "ENGINE_ON_PRICE",
+        }
+
     def _trailing_distance_percent(self):
 
         return float(
@@ -1237,32 +1615,42 @@ class ExecutionEngine:
                     0
                 )
 
-                multiplier = self.actual_position.get(
-                    "multiplier",
-                    0.001
-                )
-
-                coin_qty = (
-                    contracts * multiplier
+                multiplier = self._position_multiplier(
+                    self.actual_position
                 )
 
                 side = self.actual_position.get(
                     "side"
                 )
 
-                if self._is_short(side):
+                if multiplier is None:
 
-                    self.unrealized_pnl = (
-                        (entry - price)
-                        * coin_qty
-                    )
+                    # LIVE without an authoritative contract multiplier:
+                    # unrealized PnL is unavailable, never estimated.
+                    self.unrealized_pnl = 0.0
+                    self.unrealized_pnl_available = False
 
                 else:
 
-                    self.unrealized_pnl = (
-                        (price - entry)
-                        * coin_qty
+                    coin_qty = (
+                        contracts * multiplier
                     )
+
+                    self.unrealized_pnl_available = True
+
+                    if self._is_short(side):
+
+                        self.unrealized_pnl = (
+                            (entry - price)
+                            * coin_qty
+                        )
+
+                    else:
+
+                        self.unrealized_pnl = (
+                            (price - entry)
+                            * coin_qty
+                        )
 
                 self.update_drawdown_state()
 
@@ -1277,27 +1665,38 @@ class ExecutionEngine:
                     self.unrealized_pnl,
                 )
 
-                stop_loss = self.actual_position.get(
-                    "sl",
-                    0,
+                stop_loss, take_profit = (
+                    self._position_protection_levels(
+                        self.actual_position
+                    )
                 )
 
-                take_profit = self.actual_position.get(
-                    "tp",
-                    0,
-                )
-
+                # A missing / non-positive level is "unavailable", never 0:
+                # it can neither trigger nor look healthy (see
+                # live_position_protection_status / live readiness).
                 if self._is_short(side):
 
-                    sl_hit = price >= stop_loss
+                    sl_hit = (
+                        stop_loss is not None
+                        and price >= stop_loss
+                    )
 
-                    tp_hit = price <= take_profit
+                    tp_hit = (
+                        take_profit is not None
+                        and price <= take_profit
+                    )
 
                 else:
 
-                    sl_hit = price <= stop_loss
+                    sl_hit = (
+                        stop_loss is not None
+                        and price <= stop_loss
+                    )
 
-                    tp_hit = price >= take_profit
+                    tp_hit = (
+                        take_profit is not None
+                        and price >= take_profit
+                    )
 
                 if sl_hit:
 
@@ -2584,7 +2983,11 @@ class ExecutionEngine:
                         self.symbol
                     )
 
-                    self.actual_position = pos
+                    # New lifecycle: reconstruct protection from the exchange
+                    # entry price and the configured SL/TP authority.
+                    self.actual_position = (
+                        self._attach_live_position_protection(pos)
+                    )
 
                     if pos:
                         # A newly observed exchange position begins a new
@@ -3015,36 +3418,64 @@ class ExecutionEngine:
             0
         )
 
-        multiplier = self.actual_position.get(
-            "multiplier",
-            0.001
-        )
-
-        coin_qty = (
-            contracts * multiplier
+        multiplier = self._position_multiplier(
+            self.actual_position
         )
 
         side = self.actual_position.get(
             "side"
         )
 
-        if self._is_short(side):
+        pnl_available = multiplier is not None
 
-            pnl = (
-                (entry - price)
-                * coin_qty
-            )
+        if not pnl_available:
+
+            # LIVE without an authoritative contract multiplier: the local
+            # PnL estimate is unavailable (recorded as None, never guessed).
+            coin_qty = None
+            pnl = 0.0
 
         else:
 
-            pnl = (
-                (price - entry)
-                * coin_qty
+            coin_qty = (
+                contracts * multiplier
             )
+
+            if self._is_short(side):
+
+                pnl = (
+                    (entry - price)
+                    * coin_qty
+                )
+
+            else:
+
+                pnl = (
+                    (price - entry)
+                    * coin_qty
+                )
 
         position_before = copy.deepcopy(self.actual_position)
 
-        self.pnl += pnl
+        if not pnl_available:
+            # Do NOT book a fabricated 0 into cumulative PnL / balance /
+            # drawdown.  Mark local accounting unavailable (visible in risk
+            # state and live readiness) until an authoritative resync.
+            self.live_pnl_accounting_unavailable = {
+                "reason": LIVE_PNL_ACCOUNTING_UNAVAILABLE,
+                "cause": "LIVE_CONTRACT_MULTIPLIER_UNAVAILABLE",
+                "symbol": self.symbol,
+                "closeReason": reason,
+                "at": time.time(),
+            }
+            add_log(
+                f"⛔ {LIVE_PNL_ACCOUNTING_UNAVAILABLE}: close PnL not "
+                f"computable (no contract multiplier); entries blocked "
+                f"until exchange resync",
+                "error",
+            )
+        else:
+            self.pnl += pnl
 
         paper_portfolio_position = bool(
             self.mode == "paper"
@@ -3063,7 +3494,7 @@ class ExecutionEngine:
             )
             self.balance = self.portfolio.balance
             pnl = portfolio_pnl
-        else:
+        elif pnl_available:
             self.balance += pnl
             if self.mode == "paper" and self.portfolio:
                 self.portfolio.balance = self.balance
@@ -3083,7 +3514,9 @@ class ExecutionEngine:
             self._current_equity()
         )
 
-        add_log(f"💰 PnL: {pnl:.4f}")
+        add_log(
+            f"💰 PnL: {pnl:.4f}" if pnl_available else "💰 PnL: UNAVAILABLE"
+        )
 
         if self.mode == "paper":
             closed_at = time.time()
@@ -3200,7 +3633,8 @@ class ExecutionEngine:
                 "qty": coin_qty,
                 "entryPrice": entry,
                 "exitPrice": price,
-                "estimatedPnl": pnl,
+                "estimatedPnl": pnl if pnl_available else None,
+                "estimatedPnlAvailable": pnl_available,
                 "estimatedPnlAuthoritative": False,
                 "reason": reason,
                 "orderId": live_close.get("order_id"),
@@ -3376,6 +3810,7 @@ class ExecutionEngine:
             "status": self.status,
             "price": price,
             "pnl": self.pnl,
+            "pnlAvailable": self._live_accounting_unavailable_reason() is None,
             "balance": balance,
             "equity": equity,
             "preview": preview,

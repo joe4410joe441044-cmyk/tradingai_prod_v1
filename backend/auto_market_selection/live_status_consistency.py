@@ -19,6 +19,10 @@ REASON_ORDER = (
     ("liveOrderEntryAllowed", "LIVE_ORDER_ENTRY_DISARMED"),
     ("emergencyStopClear", "EMERGENCY_STOP_ACTIVE"),
     ("governanceAllow", "GOVERNANCE_BLOCK"),
+    # Engine LIVE position protection / PnL accounting authority (fail closed
+    # for new entries; only present when the engine reports the check).
+    ("livePositionProtectionAvailable", "LIVE_POSITION_PROTECTION_UNAVAILABLE"),
+    ("livePnlAccountingAvailable", "LIVE_PNL_ACCOUNTING_UNAVAILABLE"),
 )
 
 REAL_ACCOUNT_SOURCES = frozenset({
