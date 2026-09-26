@@ -311,6 +311,21 @@ class TradingRuntime:
             microstructure_state["runtimeId"] = symbol_context.runtime_id
             microstructure_state["runtimeSymbolContext"] = symbol_context_payload
 
+        # WORK I Phase A (observational): observe the confirmed market-data
+        # context (Stage 2) and feature/detector output (Stage 3) at the common
+        # runtime boundary shared by the WS and PAPER production ingest paths.
+        # Disabled by default, never raises and never alters the state.
+        try:
+            from backend.runtime.cycle_evidence_phase_a import (
+                observe_feature_evidence,
+                observe_market_context,
+            )
+
+            observe_market_context(microstructure_state, runtime=self)
+            observe_feature_evidence(microstructure_state, runtime=self)
+        except Exception:
+            pass
+
         debug_result = build_runtime_debug_result()
         debug_result["runtimeSymbolContext"] = symbol_context_payload
         _record_runtime_stage(

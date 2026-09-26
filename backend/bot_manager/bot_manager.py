@@ -5093,6 +5093,18 @@ class BotManager:
         except Exception:
             return
 
+        # WORK I Phase A (observational): link the resolved snapshot to the
+        # canonical cycle-evidence store.  Disabled by default, never raises,
+        # and never changes the resolved snapshot or the trading cycle.
+        try:
+            from backend.runtime.cycle_evidence_phase_a import (
+                observe_parameter_context,
+            )
+
+            observe_parameter_context(scope, snapshot)
+        except Exception:
+            return
+
     def _parameter_promotion_service_instance(self):
         service = getattr(self, "_parameter_promotion_service", None)
         if service is None:
