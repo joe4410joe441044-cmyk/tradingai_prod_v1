@@ -19,6 +19,42 @@ export function buildAutoMarketSelectionReasons(model) {
     };
 }
 
+const RESELECT_BLOCKED_SWITCH_STATES = new Set([
+    "PREPARING", "SUBSCRIBING", "VALIDATING", "COMMITTING", "CLEANUP", "IN_PROGRESS",
+]);
+
+export function deriveReselectControl(status, overrides = {}) {
+    const model = buildAutoMarketSelectionModel(status);
+    if (model.availability !== "AVAILABLE") {
+        return { disabled: true, reason: "SELECTION_UNAVAILABLE" };
+    }
+    if (model.selectionMode !== "AUTO") {
+        return { disabled: true, reason: "NOT_AUTO_MODE" };
+    }
+    if (!model.activeSymbol) {
+        return { disabled: true, reason: "NO_ACTIVE_SYMBOL" };
+    }
+    const switchState = String(model.switch?.state || "").toUpperCase();
+    if (RESELECT_BLOCKED_SWITCH_STATES.has(switchState)) {
+        return { disabled: true, reason: "RESELECT_IN_PROGRESS" };
+    }
+    if (overrides.disabled) {
+        return { disabled: true, reason: overrides.reason || "RESELECT_UNAVAILABLE" };
+    }
+    return { disabled: false, reason: null };
+}
+
+export function deriveReselectBlocker(botStatus) {
+    const positionOpen = botStatus?.position_active === true || Boolean(botStatus?.position);
+    if (positionOpen) return { disabled: true, reason: "POSITION_OPEN" };
+    if (botStatus?.pendingOrder === true) return { disabled: true, reason: "PENDING_ORDER" };
+    const emergencyActive = botStatus?.emergencyStop === true
+        || botStatus?.emergencyLocked === true
+        || String(botStatus?.emergencyState || "").toUpperCase() === "LOCKED";
+    if (emergencyActive) return { disabled: true, reason: "EMERGENCY_ACTIVE" };
+    return { disabled: false, reason: null };
+}
+
 export function buildAutoMarketSelectionModel(status, requestedSymbol) {
     if (!status || typeof status !== "object") {
         return {

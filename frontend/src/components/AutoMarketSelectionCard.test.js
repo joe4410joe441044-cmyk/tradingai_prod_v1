@@ -69,3 +69,86 @@ test("AUTO card keeps active symbol and top candidate preview separate", async (
     assert.match(html, /XRPUSDTM/);
     assert.match(html, /ETHUSDT/);
 });
+
+test("AUTO card renders exactly one red SKIP / RESELECT button in the status grid", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(Card, { status }));
+    const matches = html.match(/data-testid="auto-market-selection-reselect"/g);
+    assert.equal(matches.length, 1);
+    assert.match(html, /SKIP \/ RESELECT/);
+    assert.match(html, /class="ams-reselect"/);
+    assert.match(html, /ams-reselect-cell/);
+});
+
+test("SKIP / RESELECT is not rendered inside the header", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(Card, { status }));
+    const headerIndex = html.indexOf('class="ams-card-header"');
+    const gridIndex = html.indexOf('class="ams-symbol-grid"');
+    const reselectIndex = html.indexOf('data-testid="auto-market-selection-reselect"');
+    assert.ok(headerIndex !== -1 && gridIndex !== -1 && reselectIndex !== -1);
+    assert.ok(gridIndex > headerIndex);
+    assert.ok(reselectIndex > gridIndex);
+});
+
+test("SKIP / RESELECT sits right of LAST EVALUATED and below CYCLE ID", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(Card, { status }));
+    const cycleIdIndex = html.indexOf('>CYCLE ID<');
+    const lastEvaluatedIndex = html.indexOf('>LAST EVALUATED<');
+    const reselectIndex = html.indexOf('data-testid="auto-market-selection-reselect"');
+    assert.ok(cycleIdIndex !== -1 && lastEvaluatedIndex !== -1 && reselectIndex !== -1);
+    assert.ok(lastEvaluatedIndex > cycleIdIndex);
+    assert.ok(reselectIndex > lastEvaluatedIndex);
+});
+
+test("AUTO card keeps AVAILABLE and collapse control in the header", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(Card, { status, collapsible: true }));
+    assert.match(html, /AVAILABLE/);
+    assert.match(html, /ams-disclosure-icon/);
+});
+
+test("AUTO card keeps cycle metadata and the 4-column grid intact", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(Card, { status }));
+    assert.match(html, /LAST CYCLE STATUS/);
+    assert.match(html, /LAST CYCLE ID/);
+    assert.match(html, /LAST EVALUATED/);
+    assert.match(html, /ams-symbol-grid/);
+});
+
+test("AUTO card disables SKIP / RESELECT without an active symbol", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(
+        Card,
+        { status: { ...status, activeSymbol: null }, onReselect: () => {} },
+    ));
+    assert.match(html, /disabled=""/);
+    assert.match(html, /NO_ACTIVE_SYMBOL/);
+    assert.match(html, /ams-reselect--disabled/);
+    assert.match(html, /SKIP \/ RESELECT/);
+    assert.match(html, /aria-label="SKIP \/ RESELECT \(NO_ACTIVE_SYMBOL\)"/);
+});
+
+test("AUTO card honors an external reselect blocker", async () => {
+    const { default: Card } = await loadCard();
+    const html = renderToStaticMarkup(createElement(
+        Card,
+        { status, onReselect: () => {}, reselectDisabled: true, reselectReason: "POSITION_OPEN" },
+    ));
+    assert.match(html, /disabled=""/);
+    assert.match(html, /POSITION_OPEN/);
+});
+
+test("reselect disabled style stays visible and never collapses to zero opacity or hidden", async () => {
+    const css = await readFile(new URL("../styles/dashboard.css", import.meta.url), "utf8");
+    const disabledBlock = css.match(/\.ams-reselect:disabled,\s*\.ams-reselect--disabled\s*\{[^}]*\}/);
+    assert.ok(disabledBlock, "disabled selector block must exist");
+    assert.match(disabledBlock[0], /background:\s*#4a2126/);
+    assert.match(disabledBlock[0], /color:\s*#d7a9ad/);
+    assert.match(disabledBlock[0], /cursor:\s*not-allowed/);
+    assert.doesNotMatch(disabledBlock[0], /opacity:\s*0\b/);
+    assert.doesNotMatch(disabledBlock[0], /visibility:\s*hidden/);
+    assert.doesNotMatch(disabledBlock[0], /display:\s*none/);
+});

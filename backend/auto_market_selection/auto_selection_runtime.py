@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from hashlib import sha256
 import json
@@ -13,7 +13,9 @@ from .bot_manager_switch_runtime import (
     BotManagerSwitchRuntime, InitialBotManagerCommitRuntime,
 )
 from .candidate_ranking import CandidateRankingEngine
-from .market_scanner import MarketScanner, ScannerInput, ScannerStatus
+from .market_scanner import (
+    DEFAULT_SNAPSHOT_MAX_AGE, MarketScanner, ScannerInput, ScannerStatus,
+)
 from .safe_switch import InitialSymbolCommit, SafeSymbolSwitch, SwitchState
 from .selection_audit import build_selection_audit_event
 from .selection_proposal import build_selection_proposal, snapshot_active_symbol_authority
@@ -45,6 +47,23 @@ def _utc(value):
 
 def _time(value):
     return _utc(value).isoformat().replace("+00:00", "Z") if value else None
+
+
+@dataclass(frozen=True)
+class FreshSelectionSnapshot:
+    """Immutable completed observation snapshot reused by START.
+
+    Holds the authoritative scan/rank/audit/capital objects produced by the
+    read-only observer.  Reuse never promotes topCandidate to activeSymbol;
+    the canonical commit authority still runs from this snapshot.
+    """
+
+    evaluated_at: datetime
+    capital: object
+    scanner_result: object
+    ranking: object
+    audit: object
+    top_candidate_symbol: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -99,6 +118,7 @@ class AutoMarketSelectionRuntime:
         eligibility_provider, position_provider, pending_order_provider,
         emergency_provider, scanner=None, ranking_engine=None,
         safe_switch_factory=None, initial_commit_factory=None, clock=None,
+        skip_cooldown_seconds=300, snapshot_max_age=None,
     ):
         providers = (
             universe_provider, ticker_provider, capital_provider,
@@ -122,6 +142,38 @@ class AutoMarketSelectionRuntime:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._cycle_lock = threading.Lock()
         self._last_result = None
+        self._skip_cooldown_seconds = skip_cooldown_seconds
+        self._temporary_skips = {}
+        self._skip_lock = threading.Lock()
+        self._snapshot_max_age = snapshot_max_age or DEFAULT_SNAPSHOT_MAX_AGE
+        self._fresh_snapshot = None
+
+    def record_temporary_skip(self, symbol, *, now=None):
+        """Temporarily exclude a symbol from the next selection preview/commit.
+
+        A skip is a bounded cooldown, never a permanent blacklist.  Expired
+        skips are dropped lazily on read.
+        """
+        normalized = str(symbol).strip().upper() if symbol else None
+        if not normalized:
+            return None
+        evaluated = _utc(now or self.clock())
+        with self._skip_lock:
+            self._temporary_skips[normalized] = evaluated + timedelta(
+                seconds=self._skip_cooldown_seconds
+            )
+        return normalized
+
+    def active_temporary_skips(self, *, now=None):
+        evaluated = _utc(now or self.clock())
+        with self._skip_lock:
+            expired = [
+                symbol for symbol, until in self._temporary_skips.items()
+                if until <= evaluated
+            ]
+            for symbol in expired:
+                del self._temporary_skips[symbol]
+            return frozenset(self._temporary_skips)
 
     def get_status(self):
         if self._last_result is None:
@@ -138,7 +190,122 @@ class AutoMarketSelectionRuntime:
             "readOnly": True,
         }
 
-    def run_cycle(self, *, started_at=None):
+    def observe_cycle(self, *, started_at=None):
+        """Read-only observation refresh.
+
+        Refreshes universe → scanner → ranking → eligibility → top-candidate
+        preview and publishes a fresh snapshot.  It never builds a proposal,
+        never switches the active symbol, and never creates or commits an
+        order, so a STOPPED bot keeps an up-to-date selection preview.
+        """
+        started = _utc(started_at or self.clock())
+        if not self._cycle_lock.acquire(blocking=False):
+            return {"accepted": False,
+                    "reasonCodes": ["AUTO_SELECTION_ALREADY_IN_PROGRESS"],
+                    "topCandidateSymbol": None, "evaluatedAt": None}
+        try:
+            safety_reason = self._safety_reason()
+            if safety_reason:
+                self._fresh_snapshot = None
+                return {"accepted": False, "reasonCodes": [safety_reason],
+                        "topCandidateSymbol": None, "evaluatedAt": None}
+            universe = self.universe_provider()
+            ticker = self.ticker_provider()
+            capital = self.capital_provider()
+            eligibility = self.eligibility_provider(universe, capital)
+            evaluated = _utc(self.clock())
+            scanner_result = self.scanner.scan(ScannerInput(
+                universe=universe, ticker_snapshot=ticker, capital=capital,
+                per_market_eligibility=eligibility, evaluated_at=evaluated,
+                started_at=started,
+            ))
+            update = {
+                "scannerResult": scanner_result.to_dict(),
+                "selectionObservation": {
+                    "evaluatedAt": _time(evaluated),
+                    "topCandidateSymbol": None,
+                    "readOnly": True,
+                },
+            }
+            self._fresh_snapshot = None
+            if scanner_result.status is ScannerStatus.CANDIDATES_AVAILABLE:
+                ranking = self._rank(
+                    scanner_result, evaluated_at=evaluated,
+                    excluded_symbols=self.active_temporary_skips(now=evaluated),
+                )
+                update["rankingResult"] = ranking.to_dict()
+                if ranking.top_candidate is not None:
+                    audit = build_selection_audit_event(
+                        universe, capital, scanner_result, ranking,
+                    )
+                    update["auditEvent"] = audit.to_dict()
+                    update["selectionObservation"]["topCandidateSymbol"] = (
+                        ranking.top_candidate.symbol
+                    )
+                    self._fresh_snapshot = FreshSelectionSnapshot(
+                        evaluated_at=evaluated, capital=capital,
+                        scanner_result=scanner_result, ranking=ranking,
+                        audit=audit,
+                        top_candidate_symbol=ranking.top_candidate.symbol,
+                    )
+            self._publish_observation(update)
+            top = update["selectionObservation"]["topCandidateSymbol"]
+            return {"accepted": True, "reasonCodes": [],
+                    "topCandidateSymbol": top, "evaluatedAt": _time(evaluated)}
+        except Exception:
+            self._fresh_snapshot = None
+            return {"accepted": False,
+                    "reasonCodes": ["AUTO_SELECTION_OBSERVATION_FAILED"],
+                    "topCandidateSymbol": None, "evaluatedAt": None}
+        finally:
+            self._cycle_lock.release()
+
+    def request_skip_and_reselect(self, *, started_at=None):
+        """Temporarily skip the active symbol and select the next candidate.
+
+        A running bot commits the next eligible candidate through the existing
+        SafeSwitch authority.  A stopped bot only refreshes the read-only
+        selection preview (no switch, no order).  The skipped symbol is never
+        blacklisted permanently: it is only suppressed for a bounded cooldown.
+        """
+        started = _utc(started_at or self.clock())
+        active = self._active_symbol()
+        if active is None:
+            return {"accepted": False, "reasonCodes": ["ACTIVE_SYMBOL_UNAVAILABLE"],
+                    "skippedSymbol": None, "runtime": self.get_status(), "result": None}
+        safety_reason = self._safety_reason()
+        if safety_reason:
+            return {"accepted": False, "reasonCodes": [safety_reason],
+                    "skippedSymbol": active, "runtime": self.get_status(), "result": None}
+        skipped = self.record_temporary_skip(active, now=started)
+        running = bool(
+            getattr(self.manager, "_running", False)
+            and getattr(self.manager, "active_runtime_id", None)
+        )
+        if running:
+            result = self.run_cycle(
+                started_at=started,
+                excluded_symbols=self.active_temporary_skips(now=started),
+                reuse_snapshot=False,
+            )
+            return {"accepted": True, "reasonCodes": list(result.reason_codes),
+                    "skippedSymbol": skipped, "runtime": self.get_status(),
+                    "result": result.to_dict()}
+        observation = self.observe_cycle(started_at=started)
+        return {"accepted": observation.get("accepted", False),
+                "reasonCodes": list(observation.get("reasonCodes") or []),
+                "skippedSymbol": skipped, "runtime": self.get_status(), "result": None}
+
+    def _publish_observation(self, update):
+        observation = deepcopy(
+            getattr(self.manager, "auto_market_selection_observation", None)
+        ) or {}
+        observation.update(update)
+        publisher = getattr(self.manager, "set_auto_market_selection_observation", None)
+        if callable(publisher):
+            publisher(observation)
+
+    def run_cycle(self, *, started_at=None, excluded_symbols=None, reuse_snapshot=True):
         started = _utc(started_at or self.clock())
         active = self._active_symbol()
         cycle_id = self._cycle_identity(started, active)
@@ -156,7 +323,10 @@ class AutoMarketSelectionRuntime:
                     (safety_reason,), active=active,
                     mode=AutoSelectionRuntimeMode.MANUAL,
                 ))
-            return self._run_locked(cycle_id, started, active)
+            return self._run_locked(
+                cycle_id, started, active, excluded_symbols=excluded_symbols,
+                reuse_snapshot=reuse_snapshot,
+            )
         except Exception:
             return self._finish(self._result(
                 cycle_id, started, AutoSelectionCycleStatus.FAILED,
@@ -165,7 +335,18 @@ class AutoMarketSelectionRuntime:
         finally:
             self._cycle_lock.release()
 
-    def _run_locked(self, cycle_id, started, active):
+    def _run_locked(self, cycle_id, started, active, *, excluded_symbols=None,
+                    reuse_snapshot=True):
+        snapshot = self._valid_fresh_snapshot(started) if reuse_snapshot else None
+        if snapshot is not None:
+            return self._propose_and_commit(
+                cycle_id, started, active,
+                capital=snapshot.capital,
+                scanner_result=snapshot.scanner_result,
+                ranking=snapshot.ranking,
+                audit=snapshot.audit,
+            )
+
         universe = self.universe_provider()
         ticker = self.ticker_provider()
         capital = self.capital_provider()
@@ -194,7 +375,10 @@ class AutoMarketSelectionRuntime:
                 reasons, active=active, scanner=scanner_result,
             ), scanner=scanner_result)
 
-        ranking = self.ranking_engine.rank(scanner_result, evaluated_at=evaluated)
+        ranking = self._rank(
+            scanner_result, evaluated_at=evaluated,
+            excluded_symbols=self._merged_exclusions(excluded_symbols, evaluated),
+        )
         if ranking.top_candidate is None:
             return self._finish(self._result(
                 cycle_id, started, AutoSelectionCycleStatus.NO_RANKABLE_MARKET,
@@ -203,6 +387,35 @@ class AutoMarketSelectionRuntime:
             ), scanner=scanner_result, ranking=ranking)
 
         audit = build_selection_audit_event(universe, capital, scanner_result, ranking)
+        return self._propose_and_commit(
+            cycle_id, started, active,
+            capital=capital, scanner_result=scanner_result,
+            ranking=ranking, audit=audit,
+        )
+
+    def _valid_fresh_snapshot(self, now):
+        """Return a reusable snapshot only when it is fresh and still valid.
+
+        Reuse is rejected (falling back to a full scan) when the snapshot is
+        missing, when its evaluated_at is absent or older than the canonical
+        AMS snapshot-max-age, or when its top candidate is currently excluded
+        by the temporary-skip cooldown.
+        """
+        snapshot = self._fresh_snapshot
+        if snapshot is None:
+            return None
+        if snapshot.top_candidate_symbol is None:
+            return None
+        age = (now - _utc(snapshot.evaluated_at)).total_seconds()
+        if age < 0 or age > self._snapshot_max_age.total_seconds():
+            return None
+        if snapshot.top_candidate_symbol in self.active_temporary_skips(now=now):
+            return None
+        return snapshot
+
+    def _propose_and_commit(self, cycle_id, started, active, *, capital,
+                            scanner_result, ranking, audit):
+        evaluated = _utc(self.clock())
         position = self.position_provider()
         pending = self.pending_order_provider()
         emergency = self.emergency_provider()
@@ -258,6 +471,26 @@ class AutoMarketSelectionRuntime:
             result, scanner=scanner_result, ranking=ranking, audit=audit,
             proposal=proposal, switch=switch_result,
         )
+
+    def _rank(self, scanner_result, *, evaluated_at, excluded_symbols=None):
+        excluded = frozenset(
+            str(item).strip().upper() for item in (excluded_symbols or ())
+            if item is not None and str(item).strip()
+        )
+        if excluded:
+            return self.ranking_engine.rank(
+                scanner_result, evaluated_at=evaluated_at,
+                excluded_symbols=excluded,
+            )
+        return self.ranking_engine.rank(scanner_result, evaluated_at=evaluated_at)
+
+    def _merged_exclusions(self, explicit, now):
+        excluded = set(
+            str(item).strip().upper() for item in (explicit or ())
+            if item is not None and str(item).strip()
+        )
+        excluded.update(self.active_temporary_skips(now=now))
+        return frozenset(excluded)
 
     def _default_safe_switch(self):
         adapter = BotManagerSwitchRuntime(

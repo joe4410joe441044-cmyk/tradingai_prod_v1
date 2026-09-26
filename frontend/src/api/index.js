@@ -106,6 +106,16 @@ export const API = {
     join("/bot/paper-account/capital"),
 
   // ==========================
+  // AUTO MARKET SELECTION
+  // ==========================
+
+  paperAutoObserve: () =>
+    join("/runtime/paper-auto/observe"),
+
+  paperAutoReselect: () =>
+    join("/runtime/paper-auto/reselect"),
+
+  // ==========================
   // SUMMARY
   // ==========================
 

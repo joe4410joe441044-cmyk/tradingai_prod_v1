@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, displayAmsValue } from "./autoMarketSelectionModel.js";
+import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, deriveReselectBlocker, deriveReselectControl, displayAmsValue } from "./autoMarketSelectionModel.js";
 
 test("active symbol never falls back to requested symbol or top candidate", () => {
     const status = { selectionMode: "MANUAL", activeSymbol: "ETHUSDT",
@@ -103,4 +103,55 @@ test("AUTO Paper cycle status remains visible without an action surface", () => 
     assert.equal(model.autoRuntime.status, "SWITCH_BLOCKED");
     assert.deepEqual(model.autoRuntime.reasonCodes, ["POSITION_NOT_FLAT"]);
     assert.equal(model.startAuto, undefined);
+});
+
+test("reselect control requires AUTO mode with an active symbol", () => {
+    assert.deepEqual(deriveReselectControl(null), { disabled: true, reason: "SELECTION_UNAVAILABLE" });
+    assert.deepEqual(
+        deriveReselectControl({ selectionMode: "MANUAL", activeSymbol: "ETHUSDT" }),
+        { disabled: true, reason: "NOT_AUTO_MODE" },
+    );
+    assert.deepEqual(
+        deriveReselectControl({ selectionMode: "AUTO", activeSymbol: null }),
+        { disabled: true, reason: "NO_ACTIVE_SYMBOL" },
+    );
+    assert.deepEqual(
+        deriveReselectControl({ selectionMode: "AUTO", activeSymbol: "ETHUSDT", switch: { state: "IDLE" } }),
+        { disabled: false, reason: null },
+    );
+});
+
+test("reselect control blocks during an in-flight switch and honors overrides", () => {
+    assert.deepEqual(
+        deriveReselectControl({
+            selectionMode: "AUTO", activeSymbol: "ETHUSDT",
+            switch: { state: "COMMITTING" },
+        }),
+        { disabled: true, reason: "RESELECT_IN_PROGRESS" },
+    );
+    assert.deepEqual(
+        deriveReselectControl(
+            { selectionMode: "AUTO", activeSymbol: "ETHUSDT", switch: { state: "IDLE" } },
+            { disabled: true, reason: "POSITION_OPEN" },
+        ),
+        { disabled: true, reason: "POSITION_OPEN" },
+    );
+});
+
+test("reselect blocker surfaces position, pending order, and emergency boundaries", () => {
+    assert.deepEqual(deriveReselectBlocker({}), { disabled: false, reason: null });
+    assert.deepEqual(deriveReselectBlocker({ position_active: true }),
+        { disabled: true, reason: "POSITION_OPEN" });
+    assert.deepEqual(deriveReselectBlocker({ position: "LONG" }),
+        { disabled: true, reason: "POSITION_OPEN" });
+    assert.deepEqual(deriveReselectBlocker({ pendingOrder: true }),
+        { disabled: true, reason: "PENDING_ORDER" });
+    assert.deepEqual(deriveReselectBlocker({ emergencyStop: true }),
+        { disabled: true, reason: "EMERGENCY_ACTIVE" });
+    assert.deepEqual(deriveReselectBlocker({ emergencyLocked: true }),
+        { disabled: true, reason: "EMERGENCY_ACTIVE" });
+    assert.deepEqual(deriveReselectBlocker({ emergencyState: "LOCKED" }),
+        { disabled: true, reason: "EMERGENCY_ACTIVE" });
+    assert.deepEqual(deriveReselectBlocker({ position_active: false, pendingOrder: false }),
+        { disabled: false, reason: null });
 });

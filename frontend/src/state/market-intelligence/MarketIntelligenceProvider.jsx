@@ -97,8 +97,9 @@ export function MarketIntelligenceProvider({ children }) {
         marketContextMode: activeMarket.mode,
         normalizedMarketModel,
         autoMarketSelectionStatus,
+        botStatus: runtimeTelemetry.runtime?.botStatus ?? null,
         marketViewDisplayState,
-    }), [activeMarket, applyReplayCommand, autoMarketSelectionStatus, marketViewDisplayState, normalizedMarketModel, state]);
+    }), [activeMarket, applyReplayCommand, autoMarketSelectionStatus, marketViewDisplayState, normalizedMarketModel, runtimeTelemetry.runtime, state]);
 
     return (
         <MarketIntelligenceContext.Provider value={contextValue}>

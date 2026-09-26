@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
+import { buildAutoMarketSelectionModel, buildAutoMarketSelectionReasons, deriveReselectControl, displayAmsValue } from "../features/auto-market-selection/autoMarketSelectionModel.js";
 import { selectionModeDisplayLabel } from "./operation/operationPreparationModel.js";
 
 const statusClass = (value) => {
@@ -18,7 +18,10 @@ const Field = ({ label, value, className = "" }) => (
     </div>
 );
 
-export default function AutoMarketSelectionCard({ status, requestedSymbol, collapsible = false }) {
+export default function AutoMarketSelectionCard({
+    status, requestedSymbol, collapsible = false,
+    onReselect, reselectDisabled = false, reselectBusy = false, reselectReason = null,
+}) {
     const [expanded, setExpanded] = useState(!collapsible);
     const model = buildAutoMarketSelectionModel(status, requestedSymbol);
     const top = model.topCandidate;
@@ -26,26 +29,35 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
     const switching = model.switch;
     const autoRuntime = model.autoRuntime;
     const { historical: lastCycleReasons, current: currentReasons } = buildAutoMarketSelectionReasons(model);
+    const reselect = deriveReselectControl(status, {
+        disabled: reselectDisabled,
+        reason: reselectReason,
+    });
+    const reselectBlocked = reselect.disabled || reselectBusy;
+    const reselectLabel = reselectBusy ? "↻ RESELECTING…" : "↻ SKIP / RESELECT";
+    const reselectTitle = reselectBlocked ? (reselect.reason || "RESELECT_UNAVAILABLE") : "SKIP / RESELECT";
 
     return (
         <section className={`panel-card ams-card${collapsible ? " ams-card--collapsible" : ""}`} aria-labelledby="ams-card-title" data-testid="auto-market-selection-card">
-            <button
-                className="ams-card-header"
-                type="button"
-                aria-expanded={expanded}
-                aria-controls="ams-card-details"
-                onClick={() => collapsible && setExpanded((value) => !value)}
-                disabled={!collapsible}
-            >
-                <span className="ams-card-heading">
-                    <span id="ams-card-title" className="governance-card-title">AUTO MARKET SELECTION</span>
-                    <span className="ams-card-subtitle">Market Scanner / Ranking / Selection</span>
-                </span>
+            <div className="ams-card-header">
+                <button
+                    className="ams-card-heading-toggle"
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls="ams-card-details"
+                    onClick={() => collapsible && setExpanded((value) => !value)}
+                    disabled={!collapsible}
+                >
+                    <span className="ams-card-heading">
+                        <span id="ams-card-title" className="governance-card-title">AUTO MARKET SELECTION</span>
+                        <span className="ams-card-subtitle">Market Scanner / Ranking / Selection</span>
+                    </span>
+                </button>
                 <span className="ams-card-header-status">
                     <span className={`ams-read-status ${statusClass(model.availability)}`}>{model.availability}</span>
                     {collapsible && <span className="ams-disclosure-icon" aria-hidden="true">{expanded ? "▴" : "▾"}</span>}
                 </span>
-            </button>
+            </div>
 
             {collapsible && !expanded && (
                 <div className="ams-summary" data-testid="auto-market-selection-summary">
@@ -70,6 +82,19 @@ export default function AutoMarketSelectionCard({ status, requestedSymbol, colla
                 <Field label="LAST CYCLE STATUS" value={autoRuntime.lastCycleStatus} className={statusClass(autoRuntime.lastCycleStatus)} />
                 <Field label="LAST CYCLE ID" value={autoRuntime.lastCycleId} />
                 <Field label="LAST EVALUATED" value={autoRuntime.evaluatedAt} />
+                <div className="ams-reselect-cell">
+                    <button
+                        className={`ams-reselect${reselectBlocked ? " ams-reselect--disabled" : ""}`}
+                        type="button"
+                        data-testid="auto-market-selection-reselect"
+                        title={reselectTitle}
+                        aria-label={`SKIP / RESELECT${reselectBlocked ? ` (${reselectTitle})` : ""}`}
+                        disabled={reselectBlocked}
+                        onClick={() => { if (typeof onReselect === "function") onReselect(); }}
+                    >
+                        {reselectLabel}
+                    </button>
+                </div>
             </div>
 
             <div className="ams-section-grid">

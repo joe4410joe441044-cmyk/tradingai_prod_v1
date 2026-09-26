@@ -55,3 +55,21 @@ def stop_paper_auto_selection(
     """Disable PAPER AUTO without interrupting an in-flight safe transaction."""
 
     return get_bot_manager().stop_auto_market_selection_runtime()
+
+
+@router.post("/paper-auto/observe")
+def observe_paper_auto_selection(
+    _operator: str = Depends(require_operator_session),
+):
+    """Refresh the read-only selection preview (no switch, no order)."""
+
+    return get_bot_manager().observe_auto_market_selection()
+
+
+@router.post("/paper-auto/reselect")
+def reselect_paper_auto_selection(
+    _operator: str = Depends(require_operator_session),
+):
+    """Temporarily skip the active symbol and select the next candidate."""
+
+    return get_bot_manager().request_auto_market_selection_reselect()

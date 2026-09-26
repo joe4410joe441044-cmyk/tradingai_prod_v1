@@ -192,19 +192,27 @@ class MarketScoreComparison:
 class CandidateRankingEngine:
     """Pure ranking over the eligible candidates in one scanner cycle."""
 
-    def rank(self, scanner_result: ScannerCycleResult, *, evaluated_at=None):
+    def rank(self, scanner_result: ScannerCycleResult, *, evaluated_at=None,
+             excluded_symbols=()):
         if not isinstance(scanner_result, ScannerCycleResult):
             raise TypeError("ScannerCycleResult required")
         now = _utc(evaluated_at or scanner_result.evaluated_at)
         if now < _utc(scanner_result.evaluated_at):
             raise ValueError("ranking evaluated_at cannot precede scanner evaluated_at")
 
+        excluded = frozenset(
+            str(item).strip().upper() for item in (excluded_symbols or ())
+            if item is not None and str(item).strip()
+        )
         scanner_eligible = tuple(sorted(
             (item for item in scanner_result.candidates if item.scanner_eligible),
             key=lambda item: item.symbol,
         ))
         extracted = tuple(self._extract(item, now) for item in scanner_eligible)
-        rankable = tuple(item for item in extracted if item.ranking_eligible)
+        rankable = tuple(
+            item for item in extracted
+            if item.ranking_eligible and item.symbol not in excluded
+        )
         scored = self._score(rankable)
         ordered = tuple(sorted(scored, key=self._sort_key))
         ranked = tuple(replace(item, rank=index) for index, item in enumerate(ordered, 1))

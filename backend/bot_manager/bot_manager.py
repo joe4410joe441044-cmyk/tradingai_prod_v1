@@ -278,6 +278,13 @@ class BotManager:
         # AMS lifecycle is explicitly composed after process startup. Restart
         # defaults to STOPPED/MANUAL and never auto-runs a selection cycle.
         self.auto_market_selection_lifecycle = None
+        # Continuous read-only selection observation.  Runs independently of
+        # the trading runtime so a STOPPED bot still refreshes its selection
+        # preview.  It never switches symbols and never places orders.
+        self.selection_observation_lock = threading.Lock()
+        self.selection_observation_stop = threading.Event()
+        self.selection_observation_thread = None
+        self.selection_observation_interval_seconds = 15
         self.live_auto_selection_runtime = LiveAutoSelectionRuntime(
             active_symbol_provider=lambda: self.activeSymbol,
         )
@@ -4829,6 +4836,68 @@ class BotManager:
                     "result": None}
         return self.auto_market_selection_lifecycle.run_one_cycle(started_at=started_at)
 
+    def observe_auto_market_selection(self, *, started_at=None):
+        """Read-only selection observation; no switch, no order, no trading."""
+        if self.auto_market_selection_lifecycle is None:
+            return {"accepted": False, "reasonCodes": ["AUTO_RUNTIME_UNAVAILABLE"],
+                    "topCandidateSymbol": None, "evaluatedAt": None}
+        observe = getattr(self.auto_market_selection_lifecycle, "observe_one_cycle", None)
+        if not callable(observe):
+            return {"accepted": False, "reasonCodes": ["AUTO_RUNTIME_UNAVAILABLE"],
+                    "topCandidateSymbol": None, "evaluatedAt": None}
+        return observe(started_at=started_at)
+
+    def request_auto_market_selection_reselect(self, *, started_at=None):
+        """Temporary skip + reselect via the canonical selection authority."""
+        if self.auto_market_selection_lifecycle is None:
+            return {"accepted": False, "reasonCodes": ["AUTO_RUNTIME_UNAVAILABLE"],
+                    "skippedSymbol": None,
+                    "runtime": self.get_auto_market_selection_runtime_status(),
+                    "result": None}
+        reselect = getattr(self.auto_market_selection_lifecycle, "request_reselect", None)
+        if not callable(reselect):
+            return {"accepted": False, "reasonCodes": ["AUTO_RUNTIME_UNAVAILABLE"],
+                    "skippedSymbol": None,
+                    "runtime": self.get_auto_market_selection_runtime_status(),
+                    "result": None}
+        return reselect(started_at=started_at)
+
+    def start_selection_observation(self):
+        """Start the read-only selection observation loop (safe while STOPPED)."""
+        with self.selection_observation_lock:
+            if (self.selection_observation_thread is not None
+                    and self.selection_observation_thread.is_alive()):
+                return {"accepted": False, "reason": "SELECTION_OBSERVATION_ALREADY_RUNNING"}
+            self.selection_observation_stop.clear()
+            thread = threading.Thread(
+                target=self._selection_observation_loop,
+                name="ams-selection-observation", daemon=True,
+            )
+            self.selection_observation_thread = thread
+            thread.start()
+        return {"accepted": True}
+
+    def stop_selection_observation(self):
+        """Stop the read-only selection observation loop."""
+        self.selection_observation_stop.set()
+        with self.selection_observation_lock:
+            thread = self.selection_observation_thread
+            self.selection_observation_thread = None
+        if (thread is not None and thread is not threading.current_thread()
+                and thread.is_alive()):
+            thread.join(timeout=5)
+        return {"accepted": True}
+
+    def _selection_observation_loop(self):
+        while not self.selection_observation_stop.is_set():
+            try:
+                self.observe_auto_market_selection()
+            except Exception:
+                pass
+            self.selection_observation_stop.wait(
+                self.selection_observation_interval_seconds
+            )
+
     def get_auto_market_selection_runtime_status(self):
         if self.auto_market_selection_lifecycle is None:
             return {
@@ -6569,6 +6638,7 @@ class BotManager:
         """Persist stopped-paper authority before process teardown."""
 
         with self.shutdown_lock:
+            self.stop_selection_observation()
             engine = self.engine
             if engine is not None:
                 mode = self._normalize_emergency_mode(

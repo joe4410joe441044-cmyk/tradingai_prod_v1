@@ -63,6 +63,8 @@ SUPPORTED_PROTECTED_PATHS = frozenset({
     "/api/runtime/paper-auto/start",
     "/api/runtime/paper-auto/cycle",
     "/api/runtime/paper-auto/stop",
+    "/api/runtime/paper-auto/observe",
+    "/api/runtime/paper-auto/reselect",
 })
 
 CSRF_PATHS = SUPPORTED_PROTECTED_PATHS | frozenset({
@@ -173,6 +175,14 @@ class FakeBotManager:
         self._record("stop_auto_market_selection_runtime")
         return {"success": True}
 
+    def observe_auto_market_selection(self):
+        self._record("observe_auto_market_selection")
+        return {"accepted": True}
+
+    def request_auto_market_selection_reselect(self):
+        self._record("request_auto_market_selection_reselect")
+        return {"accepted": True}
+
     def refresh_stopped_paper_safety_authority(self):
         self._record("refresh_stopped_paper_safety_authority")
         return {"success": True}
@@ -282,6 +292,10 @@ ROUTE_CASES = [
      "run_auto_market_selection_cycle"),
     ("/api/runtime/paper-auto/stop", "POST", None,
      "stop_auto_market_selection_runtime"),
+    ("/api/runtime/paper-auto/observe", "POST", None,
+     "observe_auto_market_selection"),
+    ("/api/runtime/paper-auto/reselect", "POST", None,
+     "request_auto_market_selection_reselect"),
 ]
 
 # Routes WITHOUT a payload body (used to keep denied requests body-free).

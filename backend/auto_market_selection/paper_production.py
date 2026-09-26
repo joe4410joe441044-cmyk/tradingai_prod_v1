@@ -358,3 +358,10 @@ def attach_production_paper_auto_selection(bot_manager):
         e2e_runtime,
         readiness_provider=readiness_provider,
     )
+
+    # Continuous read-only selection observation runs independently of the
+    # trading runtime so a STOPPED bot keeps a fresh selection preview.  It
+    # never switches the active symbol and never places orders.
+    start_observer = getattr(bot_manager, "start_selection_observation", None)
+    if callable(start_observer):
+        start_observer()

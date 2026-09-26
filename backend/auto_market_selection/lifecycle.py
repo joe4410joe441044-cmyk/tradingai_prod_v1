@@ -64,6 +64,16 @@ class PaperAutoSelectionLifecycle:
             self._current_cycle_id = None
         return self.get_status()
 
+    def observe_one_cycle(self, *, started_at=None):
+        """Read-only observation refresh; no switch, no order, no E2E stage."""
+        return self.e2e_runtime.auto_runtime.observe_cycle(started_at=started_at)
+
+    def request_reselect(self, *, started_at=None):
+        """Temporary skip + reselect through the canonical selection authority."""
+        return self.e2e_runtime.auto_runtime.request_skip_and_reselect(
+            started_at=started_at,
+        )
+
     def run_one_cycle(self, *, started_at=None):
         if self._state is AutoSelectionLifecycleState.RUNNING_CYCLE:
             self._reason_codes = ("AUTO_SELECTION_ALREADY_IN_PROGRESS",)

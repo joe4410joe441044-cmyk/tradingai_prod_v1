@@ -5102,6 +5102,11 @@ Collapsed by default; expands to show runtime diagnostics.
     justify-content: space-between;
     margin-bottom: 14px;
     width: 100%;
+}
+
+.ams-card-heading-toggle {
+    display: flex;
+    min-width: 0;
     padding: 0;
     border: 0;
     background: transparent;
@@ -5109,17 +5114,62 @@ Collapsed by default; expands to show runtime diagnostics.
     text-align: left;
 }
 
-.ams-card-header:disabled {
+.ams-card-heading-toggle:disabled {
     opacity: 1;
 }
 
-.ams-card--collapsible .ams-card-header {
+.ams-card--collapsible .ams-card-heading-toggle {
     cursor: pointer;
 }
 
-.ams-card--collapsible .ams-card-header:focus-visible {
+.ams-card--collapsible .ams-card-heading-toggle:focus-visible {
     outline: 2px solid #57b8ff;
     outline-offset: 5px;
+}
+
+.ams-reselect {
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    border: 1px solid #b3363c;
+    border-radius: 3px;
+    background: #7c2329;
+    color: #ffffff;
+    font-family: "Consolas", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.ams-reselect-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 34px;
+    padding: 7px 9px;
+    border: 1px solid #1a2330;
+    background: #0d131c;
+}
+
+.ams-reselect:hover:not(:disabled) {
+    background: #96282f;
+    border-color: #d14a52;
+}
+
+.ams-reselect:focus-visible {
+    outline: 2px solid #ff8a92;
+    outline-offset: 2px;
+}
+
+.ams-reselect:disabled,
+.ams-reselect--disabled {
+    background: #4a2126;
+    border-color: #6e3338;
+    color: #d7a9ad;
+    cursor: not-allowed;
 }
 
 .ams-card-heading,

@@ -690,6 +690,8 @@ if _auth_configured:
         "/api/runtime/paper-auto/start",
         "/api/runtime/paper-auto/cycle",
         "/api/runtime/paper-auto/stop",
+        "/api/runtime/paper-auto/observe",
+        "/api/runtime/paper-auto/reselect",
     })
     app.add_middleware(
         OperatorCsrfProtection,
