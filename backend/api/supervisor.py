@@ -8,6 +8,9 @@ import json
 from fastapi import APIRouter, Request, Response
 
 from backend.supervisor.failure_codes import SupervisorBoundaryError, SupervisorFailureCode
+from backend.supervisor.knowledge_history_consumer import (
+    SupervisorKnowledgeHistoryConsumer,
+)
 from backend.supervisor.runtime_snapshot_adapter import RuntimeSnapshotAdapter
 from backend.api.supervisor_conversation import create_supervisor_conversation_router
 from backend.api.supervisor_history import create_supervisor_history_router
@@ -36,9 +39,27 @@ def _failure_response(code: SupervisorFailureCode) -> Response:
     )
 
 
+def _snapshot_body(snapshot, knowledge_history_consumer) -> str:
+    """Serialize a snapshot, adding optional metadata only when available."""
+
+    body = snapshot.stable_json()
+    if knowledge_history_consumer is None:
+        return body
+    try:
+        metadata = knowledge_history_consumer.metadata_for_snapshot(snapshot)
+    except Exception:
+        return body
+    if metadata is None:
+        return body
+    payload = json.loads(body)
+    payload["knowledgeHistory"] = metadata
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def create_supervisor_router(
     adapter: RuntimeSnapshotAdapter | None = None,
     provider_configuration: object | None = None,
+    knowledge_history_consumer: SupervisorKnowledgeHistoryConsumer | None = None,
 ) -> APIRouter:
     """Create a router holding observation capability only, never commands."""
     snapshot_adapter = adapter or RuntimeSnapshotAdapter()
@@ -48,7 +69,10 @@ def create_supervisor_router(
     def get_supervisor_snapshot(request: Request) -> Response:
         try:
             snapshot = snapshot_adapter.build(request.app)
-            return Response(content=snapshot.stable_json(), media_type="application/json")
+            return Response(
+                content=_snapshot_body(snapshot, knowledge_history_consumer),
+                media_type="application/json",
+            )
         except SupervisorBoundaryError as exc:
             return _failure_response(exc.code)
         except Exception:
@@ -102,4 +126,6 @@ def create_supervisor_router(
     return router
 
 
-router = create_supervisor_router()
+router = create_supervisor_router(
+    knowledge_history_consumer=SupervisorKnowledgeHistoryConsumer()
+)

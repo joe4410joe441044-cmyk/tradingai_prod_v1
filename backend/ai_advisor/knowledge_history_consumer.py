@@ -359,6 +359,7 @@ def assemble_knowledge_history_context(
     *,
     max_items: int = ADVISOR_CONTEXT_MAX_ITEMS,
     max_characters: int = ADVISOR_CONTEXT_MAX_CHARACTERS,
+    requested_limit: Optional[int] = None,
 ) -> dict:
     """Convert one shared query result into a bounded, sanitized context block.
 
@@ -401,7 +402,11 @@ def assemble_knowledge_history_context(
         "knowledge_history_used": True,
         "query_summary": {
             "filters": query_scope,
-            "requested_limit": ADVISOR_QUERY_DEFAULT_LIMIT,
+            "requested_limit": (
+                ADVISOR_QUERY_DEFAULT_LIMIT
+                if requested_limit is None
+                else int(requested_limit)
+            ),
             "resolved_limit": result.get("limit"),
             "returned_count": result.get("returned_count", len(items)),
             "has_more": bool(result.get("has_more")),
