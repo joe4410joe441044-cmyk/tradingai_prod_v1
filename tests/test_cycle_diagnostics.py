@@ -261,3 +261,14 @@ def test_closed_position_projects_settlement_and_readiness():
     assert diagnostics["steps"][11]["status"] == StepStatus.COMPLETED
     assert diagnostics["steps"][12]["status"] == StepStatus.COMPLETED
     assert diagnostics["steps"][14]["status"] == StepStatus.ACTIVE
+
+
+def test_status_response_model_exposes_the_additive_diagnostics_field():
+    """The /api/bot/status response model must not strip the new contract."""
+
+    from backend.api.bot_api import StatusResponse
+
+    fields = StatusResponse.model_fields
+    assert "tradingDecision" in fields
+    assert "tradingCycleDiagnostics" in fields
+

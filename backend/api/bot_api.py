@@ -353,6 +353,8 @@ class StatusResponse(BaseModel):
 
     tradingDecision: dict = Field(default_factory=dict)
 
+    tradingCycleDiagnostics: dict = Field(default_factory=dict)
+
     latestRuntimeResult: Optional[dict] = None
 
     executionRuntimeReached: bool = False
