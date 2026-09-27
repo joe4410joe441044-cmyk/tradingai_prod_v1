@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { STAGES, STATUS, createTradingCycleModel } from './tradingCycleModel.js';
+import { STAGES, STATUS, createTradingCycleModel, createTradingCycleDiagnosticsModel } from './tradingCycleModel.js';
 
 test('tradingCycleModel - STAGES should have exactly 15 stages', () => {
     assert.equal(STAGES.length, 15);
@@ -156,4 +156,61 @@ test('tradingCycleModel - should handle AI disabled state', () => {
         tradingAiStatus: 'NOT_INSTALLED',
     });
     assert.ok(model.currentActivity);
+});
+
+const diagnosticsFixture = () => ({
+    schemaVersion: 1,
+    cycleState: 'BLOCKED',
+    rootBlocker: { step: 4, blockerType: 'PARAMETER' },
+    rootBlockerStep: 4,
+    steps: STAGES.map((stage) => ({
+        index: stage.index,
+        key: stage.key,
+        name: stage.label,
+        status: stage.index === 4
+            ? STATUS.BLOCKED
+            : stage.index === 5
+                ? STATUS.BYPASSED
+                : stage.index < 4
+                    ? STATUS.COMPLETED
+                    : STATUS.WAITING,
+        dependencyState: stage.index > 4 ? 'WAITING_FOR_STEP_4' : null,
+        rootBlockerStep: stage.index > 4 ? 4 : null,
+    })),
+});
+
+test('tradingCycleModel - diagnostics model exposes root blocker metadata', () => {
+    const model = createTradingCycleDiagnosticsModel(diagnosticsFixture());
+    assert.equal(model.available, true);
+    assert.equal(model.rootBlockerStep, 4);
+    assert.equal(model.cycleState, 'BLOCKED');
+    assert.equal(model.stepFor(4).status, STATUS.BLOCKED);
+});
+
+test('tradingCycleModel - diagnostics model is unavailable without 15 steps', () => {
+    const model = createTradingCycleDiagnosticsModel({ steps: [{ index: 0 }] });
+    assert.equal(model.available, false);
+    assert.equal(model.rootBlockerStep, null);
+    assert.equal(model.stepFor(0).index, 0);
+});
+
+test('tradingCycleModel - diagnostic status overrides positional status when supplied', () => {
+    const model = createTradingCycleModel(
+        { currentStageIndex: 4, currentActivity: 'EVALUATING_STRATEGY' },
+        diagnosticsFixture(),
+    );
+    assert.equal(model.stages[4].status, STATUS.BLOCKED);
+    assert.equal(model.stages[5].status, STATUS.BYPASSED);
+    assert.equal(model.stages[6].status, STATUS.WAITING);
+    assert.equal(model.stages[4].diagnostic.status, STATUS.BLOCKED);
+});
+
+test('tradingCycleModel - positional status remains without diagnostics', () => {
+    const model = createTradingCycleModel({
+        currentStage: 'MICRO EDGE STRATEGY',
+        currentStageIndex: 4,
+        currentActivity: 'ANALYZING MICRO EDGE',
+    });
+    assert.equal(model.stages[4].status, STATUS.CURRENT);
+    assert.equal(model.stages[4].diagnostic, null);
 });

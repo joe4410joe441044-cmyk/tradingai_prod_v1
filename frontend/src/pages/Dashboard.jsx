@@ -399,6 +399,7 @@ useEffect(() => {
 
         <TradingDecisionCard
             decision={botStatus?.tradingDecision}
+            diagnostics={botStatus?.tradingCycleDiagnostics}
             lastOrderActivity={lastExecutionActivity}
             lastOrderValue={formatActivityTime(lastExecutionActivity.timestamp)}
         />

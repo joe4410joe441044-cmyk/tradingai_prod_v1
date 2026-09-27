@@ -26,6 +26,9 @@ from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
     build_trading_decision_snapshot,
 )
+from backend.runtime.cycle_diagnostics import (
+    build_trading_cycle_diagnostics,
+)
 from backend.runtime.runtime_symbol_context import (
     symbol_context_matches,
 )
@@ -13604,6 +13607,15 @@ class BotManager:
 
             "maxDrawdownAuthority": self._max_drawdown_authority_projection(),
         }
+
+        status_payload["tradingCycleDiagnostics"] = (
+            build_trading_cycle_diagnostics(
+                trading_decision,
+                runtime_result=completed_runtime_result,
+                context=status_payload,
+                evaluated_at=status_payload.get("timestamp"),
+            )
+        )
 
         status_payload.update(account_status_fields)
 

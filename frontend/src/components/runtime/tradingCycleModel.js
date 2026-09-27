@@ -19,8 +19,10 @@ const STAGES = [
 const STATUS = {
     COMPLETED: 'COMPLETED',
     CURRENT: 'CURRENT',
+    ACTIVE: 'ACTIVE',
     BLOCKED: 'BLOCKED',
     WAITING: 'WAITING',
+    BYPASSED: 'BYPASSED',
     NOT_REACHED: 'NOT_REACHED',
     UNKNOWN: 'UNKNOWN',
 };
@@ -107,10 +109,35 @@ const determineCurrentStage = (decision) => {
     return 1; // MARKET SELECTION
 };
 
-const createTradingCycleModel = (decision) => {
+const createTradingCycleDiagnosticsModel = (diagnostics) => {
+    const root = diagnostics && typeof diagnostics === 'object' ? diagnostics : null;
+    const steps = root && Array.isArray(root.steps) ? root.steps : [];
+    const byIndex = new Map();
+
+    steps.forEach((step) => {
+        if (step && Number.isInteger(step.index)) {
+            byIndex.set(step.index, step);
+        }
+    });
+
+    const rootBlockerStep = root && Number.isInteger(root.rootBlockerStep)
+        ? root.rootBlockerStep
+        : null;
+
+    return {
+        available: byIndex.size === STAGES.length,
+        schemaVersion: root ? root.schemaVersion ?? null : null,
+        cycleState: root ? root.cycleState ?? null : null,
+        rootBlocker: root ? root.rootBlocker ?? null : null,
+        rootBlockerStep,
+        stepFor: (index) => byIndex.get(index) || null,
+        byIndex,
+    };
+};
+
+const createTradingCycleModel = (decision, diagnostics = null) => {
     const snapshot = decision || {};
-    const stages = snapshot.stages || {};
-    
+
     // Priority: Use backend-projected values if available
     let currentStageIndex = snapshot.currentStageIndex;
     let currentActivity = snapshot.currentActivity;
@@ -139,8 +166,6 @@ const createTradingCycleModel = (decision) => {
             status: determineStageStatus(stage.index, currentStageIndex, blockedStageIndex),
         }));
 
-        const currentStage = stageStatuses.find(s => s.index === currentStageIndex);
-        
         // Get next stage from backend or calculate
         if (snapshot.nextStage) {
             nextStage = STAGES.find(s => s.label === snapshot.nextStage);
@@ -149,16 +174,26 @@ const createTradingCycleModel = (decision) => {
         }
     }
 
+    const diagnosticsModel = createTradingCycleDiagnosticsModel(diagnostics);
+
     return {
-        stages: STAGES.map(stage => ({
-            ...stage,
-            status: currentStageIndex === null ? STATUS.NOT_REACHED : determineStageStatus(stage.index, currentStageIndex, snapshot.blockingStage ? currentStageIndex : -1),
-        })),
+        stages: STAGES.map(stage => {
+            const positionalStatus = currentStageIndex === null
+                ? STATUS.NOT_REACHED
+                : determineStageStatus(stage.index, currentStageIndex, snapshot.blockingStage ? currentStageIndex : -1);
+            const diagnostic = diagnosticsModel.stepFor(stage.index);
+            return {
+                ...stage,
+                status: diagnostic?.status || positionalStatus,
+                diagnostic: diagnostic || null,
+            };
+        }),
         currentStage: currentStageIndex === null ? null : STAGES.find(s => s.index === currentStageIndex),
         currentStageIndex,
         currentActivity,
         nextStage,
         selectedSymbol,
+        diagnostics: diagnosticsModel,
     };
 };
 
@@ -166,6 +201,7 @@ export {
     STAGES,
     STATUS,
     createTradingCycleModel,
+    createTradingCycleDiagnosticsModel,
     display,
     yesNo,
 };

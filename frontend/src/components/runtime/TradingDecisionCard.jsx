@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradingCycleModel';
 
@@ -23,68 +23,222 @@ const durationLabel = (value) => {
 const toneFor = (status) => {
     const normalized = String(status || '').toUpperCase();
     if (normalized === STATUS.COMPLETED) return 'pass';
-    if (normalized === STATUS.CURRENT) return 'active';
+    if (normalized === STATUS.CURRENT || normalized === STATUS.ACTIVE) return 'active';
     if (normalized === STATUS.BLOCKED) return 'blocked';
+    if (normalized === STATUS.BYPASSED) return 'bypassed';
     if (normalized === STATUS.WAITING || normalized === STATUS.NOT_REACHED) return 'idle';
     return 'unknown';
 };
 
-const TradingCycleFlow = ({ stages }) => {
+const EMPTY_VALUE = 'NOT AVAILABLE';
+
+const formatDiagnosticValue = (value) => {
+    if (value === null || value === undefined || value === '') return EMPTY_VALUE;
+    if (typeof value === 'boolean') return value ? 'YES' : 'NO';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : EMPTY_VALUE;
+    if (Array.isArray(value)) {
+        return value.length ? value.map(formatDiagnosticValue).join(', ') : EMPTY_VALUE;
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== '');
+        if (!entries.length) return EMPTY_VALUE;
+        return entries
+            .map(([key, item]) => `${key}: ${formatDiagnosticValue(item)}`)
+            .join(' / ');
+    }
+    return String(value);
+};
+
+const formatFreshness = (freshness) => {
+    if (!freshness || typeof freshness !== 'object') return EMPTY_VALUE;
+    const state = freshness.state || 'UNKNOWN';
+    const age = freshness.ageSeconds;
+    return Number.isFinite(age) ? `${state} (${age}s)` : String(state);
+};
+
+const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
+    const diagnostic = stage.diagnostic;
+
+    if (!diagnostic) {
+        return (
+            <div
+                className="step-diagnostics step-diagnostics--empty"
+                data-testid={`trading-cycle-step-${stage.index}-content`}
+                id={`trading-cycle-step-${stage.index}-content`}
+            >
+                <p className="step-diagnostics__empty">{EMPTY_VALUE}</p>
+            </div>
+        );
+    }
+
+    const isRootBlocker = Number.isInteger(rootBlockerStep) && rootBlockerStep === stage.index;
+    const blockerName = rootBlocker && Number.isInteger(rootBlockerStep)
+        ? (STAGES.find((item) => item.index === rootBlockerStep)?.label || `STEP ${rootBlockerStep}`)
+        : null;
+    const relatedParameters = Array.isArray(diagnostic.relatedParameters)
+        ? diagnostic.relatedParameters
+        : [];
+
+    return (
+        <div
+            className="step-diagnostics"
+            data-testid={`trading-cycle-step-${stage.index}-content`}
+            id={`trading-cycle-step-${stage.index}-content`}
+        >
+            <dl className="step-diagnostics__list">
+                <div className="step-diagnostics__row">
+                    <dt>WHY</dt>
+                    <dd>
+                        <span className="step-diagnostics__reason">
+                            {diagnostic.reasonText || diagnostic.reasonCode || EMPTY_VALUE}
+                        </span>
+                        {diagnostic.reasonCode && (
+                            <code className="step-diagnostics__code">{diagnostic.reasonCode}</code>
+                        )}
+                    </dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>CURRENT</dt>
+                    <dd><strong className="step-diagnostics__value">{formatDiagnosticValue(diagnostic.current)}</strong></dd>
+                </div>
+                <div className="step-diagnostics__row">
+                    <dt>REQUIRED</dt>
+                    <dd><strong className="step-diagnostics__value">{formatDiagnosticValue(diagnostic.required)}</strong></dd>
+                </div>
+                <div className="step-diagnostics__row">
+                    <dt>COMPARISON</dt>
+                    <dd><strong className="step-diagnostics__value">{diagnostic.comparison || EMPTY_VALUE}</strong></dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>ROOT BLOCKER</dt>
+                    <dd>
+                        {isRootBlocker ? (
+                            <strong className="step-diagnostics__root">THIS STEP (ROOT BLOCKER)</strong>
+                        ) : Number.isInteger(rootBlockerStep) ? (
+                            <strong className="step-diagnostics__waiting">
+                                WAITING FOR STEP {rootBlockerStep}
+                                {blockerName ? ` — ${blockerName}` : ''}
+                            </strong>
+                        ) : (
+                            <strong className="step-diagnostics__value">NONE</strong>
+                        )}
+                    </dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>BLOCKER TYPE</dt>
+                    <dd><strong className="step-diagnostics__value">{diagnostic.blockerType || 'UNKNOWN'}</strong></dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>OPERATOR ACTION</dt>
+                    <dd>
+                        <strong className="step-diagnostics__value">{diagnostic.actionable || 'UNKNOWN'}</strong>
+                        {diagnostic.actionable === 'YES' && (
+                            <span className="step-diagnostics__hint">Operator-changeable</span>
+                        )}
+                    </dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>RELATED PARAMETER</dt>
+                    <dd>
+                        {relatedParameters.length ? (
+                            <ul className="step-diagnostics__parameters">
+                                {relatedParameters.map((parameter) => (
+                                    <li key={`${stage.index}-${parameter.key}-${parameter.scope || 'NA'}`}>
+                                        <code>{parameter.key}</code>
+                                        <span>{formatDiagnosticValue(parameter.currentSetting)}</span>
+                                        <span className="step-diagnostics__scope">{parameter.scope || 'N/A'}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <strong className="step-diagnostics__value">NONE</strong>
+                        )}
+                    </dd>
+                </div>
+
+                <div className="step-diagnostics__row">
+                    <dt>NEXT CONDITION</dt>
+                    <dd><strong className="step-diagnostics__value">{formatDiagnosticValue(diagnostic.nextCondition)}</strong></dd>
+                </div>
+                <div className="step-diagnostics__row">
+                    <dt>NEXT STEP</dt>
+                    <dd><strong className="step-diagnostics__value">{formatDiagnosticValue(diagnostic.nextStep)}</strong></dd>
+                </div>
+            </dl>
+
+            <p className="step-diagnostics__meta">
+                SOURCE: {diagnostic.source || EMPTY_VALUE} · FRESHNESS: {formatFreshness(diagnostic.freshness)}
+            </p>
+        </div>
+    );
+};
+
+const TradingCycleStage = ({ stage, open, onToggle, rootBlocker, rootBlockerStep }) => (
+    <div className="trading-cycle-stage-wrapper">
+        <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
+            <div className="trading-cycle-stage-index">{stage.index}</div>
+            <div className="trading-cycle-stage-label">{stage.label}</div>
+            <div className="trading-cycle-stage-status">{stage.status}</div>
+        </div>
+        <div className="trading-cycle-stage-details">
+            <button
+                aria-controls={`trading-cycle-step-${stage.index}-content`}
+                aria-expanded={open}
+                className="trading-cycle-step-toggle"
+                data-testid={`trading-cycle-step-${stage.index}-toggle`}
+                onClick={onToggle}
+                type="button"
+            >
+                <span className="trading-cycle-step-toggle__label">DETAILS</span>
+                <span aria-hidden="true" className="trading-cycle-step-toggle__indicator">
+                    {open ? '▲' : '▼'}
+                </span>
+            </button>
+            {open && (
+                <StepDiagnosticsPanel
+                    stage={stage}
+                    rootBlocker={rootBlocker}
+                    rootBlockerStep={rootBlockerStep}
+                />
+            )}
+        </div>
+    </div>
+);
+
+const TradingCycleFlow = ({ stages, openSteps, onToggleStep, rootBlocker, rootBlockerStep }) => {
     // 布局分为三行：顶部行(0-4), 中间行(5-9), 底部行(10-14)
-    const topRow = stages.slice(0, 5);
-    const middleRow = stages.slice(5, 10); // 保持正确的顺序
-    const bottomRow = stages.slice(10, 15);
+    const rows = [stages.slice(0, 5), stages.slice(5, 10), stages.slice(10, 15)];
 
     return (
         <section className="trading-cycle-flow" aria-label="Trading Cycle Flow">
-            <div className="trading-cycle-row">
-                {topRow.map((stage, index) => (
-                    <div key={stage.key} className="trading-cycle-stage-wrapper">
-                        <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
-                            <div className="trading-cycle-stage-index">{stage.index}</div>
-                            <div className="trading-cycle-stage-label">{stage.label}</div>
-                            <div className="trading-cycle-stage-status">{stage.status}</div>
-                        </div>
-                        {index < topRow.length - 1 && (
-                            <div className="trading-cycle-connector" aria-hidden="true">→</div>
-                        )}
+            {rows.map((row, rowIndex) => (
+                <Fragment key={`row-${rowIndex}`}>
+                    {rowIndex > 0 && (
+                        <div className="trading-cycle-vertical-connector" aria-hidden="true">↓</div>
+                    )}
+                    <div className="trading-cycle-row">
+                        {row.map((stage, index) => (
+                            <Fragment key={stage.key}>
+                                <TradingCycleStage
+                                    stage={stage}
+                                    open={openSteps.has(stage.index)}
+                                    onToggle={() => onToggleStep(stage.index)}
+                                    rootBlocker={rootBlocker}
+                                    rootBlockerStep={rootBlockerStep}
+                                />
+                                {index < row.length - 1 && (
+                                    <div className="trading-cycle-connector" aria-hidden="true">→</div>
+                                )}
+                            </Fragment>
+                        ))}
                     </div>
-                ))}
-            </div>
-
-            <div className="trading-cycle-vertical-connector" aria-hidden="true">↓</div>
-
-            <div className="trading-cycle-row">
-                {middleRow.map((stage, index) => (
-                    <div key={stage.key} className="trading-cycle-stage-wrapper">
-                        <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
-                            <div className="trading-cycle-stage-index">{stage.index}</div>
-                            <div className="trading-cycle-stage-label">{stage.label}</div>
-                            <div className="trading-cycle-stage-status">{stage.status}</div>
-                        </div>
-                        {index < middleRow.length - 1 && (
-                            <div className="trading-cycle-connector" aria-hidden="true">→</div>
-                        )}
-                    </div>
-                ))}
-            </div>
-
-            <div className="trading-cycle-vertical-connector" aria-hidden="true">↓</div>
-
-            <div className="trading-cycle-row">
-                {bottomRow.map((stage, index) => (
-                    <div key={stage.key} className="trading-cycle-stage-wrapper">
-                        <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
-                            <div className="trading-cycle-stage-index">{stage.index}</div>
-                            <div className="trading-cycle-stage-label">{stage.label}</div>
-                            <div className="trading-cycle-stage-status">{stage.status}</div>
-                        </div>
-                        {index < bottomRow.length - 1 && (
-                            <div className="trading-cycle-connector" aria-hidden="true">→</div>
-                        )}
-                    </div>
-                ))}
-            </div>
+                </Fragment>
+            ))}
         </section>
     );
 };
@@ -194,11 +348,24 @@ const LowerStatusPanel = ({ decision, open, onToggle }) => {
     );
 };
 
-export default function TradingDecisionCard({ decision, lastOrderActivity = null, lastOrderValue = null }) {
-    const model = createTradingCycleModel(decision);
+export default function TradingDecisionCard({ decision, diagnostics = null, lastOrderActivity = null, lastOrderValue = null }) {
+    const model = createTradingCycleModel(decision, diagnostics);
     const [currentActivityOpen, setCurrentActivityOpen] = useState(false);
     const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
     const [thirdSectionOpen, setThirdSectionOpen] = useState(false);
+    const [openSteps, setOpenSteps] = useState(new Set());
+
+    const toggleStep = (index) => {
+        setOpenSteps((previous) => {
+            const next = new Set(previous);
+            if (next.has(index)) {
+                next.delete(index);
+            } else {
+                next.add(index);
+            }
+            return next;
+        });
+    };
 
     return (
         <section className="trading-decision-card" aria-labelledby="trading-decision-title">
@@ -209,7 +376,13 @@ export default function TradingDecisionCard({ decision, lastOrderActivity = null
             </header>
 
             {/* Main Trading Cycle Flow */}
-            <TradingCycleFlow stages={model.stages} />
+            <TradingCycleFlow
+                stages={model.stages}
+                openSteps={openSteps}
+                onToggleStep={toggleStep}
+                rootBlocker={model.diagnostics?.rootBlocker || diagnostics?.rootBlocker || null}
+                rootBlockerStep={model.diagnostics?.rootBlockerStep ?? null}
+            />
 
             {/* Current Activity Panel */}
             <CurrentActivityPanel
