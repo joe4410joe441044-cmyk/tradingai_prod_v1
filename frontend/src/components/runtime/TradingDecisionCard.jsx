@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradingCycleModel';
 
@@ -179,7 +179,7 @@ const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
 };
 
 const TradingCycleStage = ({ stage, open, onToggle }) => (
-    <div className="trading-cycle-stage-wrapper">
+    <div className="trading-cycle-stage-wrapper" data-step-index={stage.index}>
         <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
             <div className="trading-cycle-stage-index">{stage.index}</div>
             <div className="trading-cycle-stage-label">{stage.label}</div>
@@ -205,31 +205,29 @@ const TradingCycleStage = ({ stage, open, onToggle }) => (
 );
 
 const TradingCycleFlow = ({ stages, selectedStepIndex, onSelectStep }) => {
-    // 布局分为三行：顶部行(0-4), 中间行(5-9), 底部行(10-14)
-    const rows = [stages.slice(0, 5), stages.slice(5, 10), stages.slice(10, 15)];
+    // Left-aligned four-column grid: rows are 0-3 / 4-7 / 8-11 / 12-14.
+    // STEP order stays canonical (0..14); only the visual placement changes.
+    // The layout is viewport-driven and never reacts to the drawer, so the
+    // STEP card coordinates are identical whether the drawer is open or not.
+    const COLUMNS = 4;
+    const rows = [];
+    for (let index = 0; index < stages.length; index += COLUMNS) {
+        rows.push(stages.slice(index, index + COLUMNS));
+    }
 
     return (
         <section className="trading-cycle-flow" aria-label="Trading Cycle Flow">
             {rows.map((row, rowIndex) => (
-                <Fragment key={`row-${rowIndex}`}>
-                    {rowIndex > 0 && (
-                        <div className="trading-cycle-vertical-connector" aria-hidden="true">↓</div>
-                    )}
-                    <div className="trading-cycle-row">
-                        {row.map((stage, index) => (
-                            <Fragment key={stage.key}>
-                                <TradingCycleStage
-                                    stage={stage}
-                                    open={selectedStepIndex === stage.index}
-                                    onToggle={() => onSelectStep(stage.index)}
-                                />
-                                {index < row.length - 1 && (
-                                    <div className="trading-cycle-connector" aria-hidden="true">→</div>
-                                )}
-                            </Fragment>
-                        ))}
-                    </div>
-                </Fragment>
+                <div className="trading-cycle-row" data-row={rowIndex} key={`row-${rowIndex}`}>
+                    {row.map((stage) => (
+                        <TradingCycleStage
+                            key={stage.key}
+                            stage={stage}
+                            open={selectedStepIndex === stage.index}
+                            onToggle={() => onSelectStep(stage.index)}
+                        />
+                    ))}
+                </div>
             ))}
         </section>
     );

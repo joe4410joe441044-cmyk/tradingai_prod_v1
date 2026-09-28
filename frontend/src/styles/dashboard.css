@@ -5558,29 +5558,55 @@ Collapsed by default; expands to show runtime diagnostics.
 TRADING CYCLE
 ========================================================= */
 .trading-cycle-flow {
+    --tc-step-width: 156px;
+    --tc-arrow-gap: 24px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin: 16px 0;
+    gap: 10px;
+    margin: 12px 0;
+    padding: 0 12px;
 }
 
 .trading-cycle-row {
     display: flex;
-    align-items: center;
-    gap: 8px;
     flex-wrap: wrap;
-    justify-content: center;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px var(--tc-arrow-gap);
 }
 
 .trading-cycle-stage-wrapper {
+    position: relative;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 8px;
+    align-items: stretch;
+    gap: 6px;
+    width: var(--tc-step-width);
+    min-width: 0;
+}
+
+/* Row-local flow arrow.  Drawn in the column gap so it adds no
+   DOM weight and never influences the STEP card coordinates. */
+.trading-cycle-stage-wrapper::after {
+    content: "→";
+    position: absolute;
+    top: calc(50% - 12px);
+    right: calc(var(--tc-arrow-gap) / -2);
+    transform: translateX(50%);
+    color: #526176;
+    font-size: 12px;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.trading-cycle-row > .trading-cycle-stage-wrapper:last-child::after {
+    content: none;
 }
 
 .trading-cycle-stage {
-    min-width: 120px;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
     padding: 10px;
     border-radius: 8px;
     border: 1px solid #2a3139;
@@ -5634,25 +5660,13 @@ TRADING CYCLE
     color: #d7dde5;
     font-weight: 600;
     margin: 4px 0;
+    overflow-wrap: anywhere;
 }
 
 .trading-cycle-stage-status {
     font-size: 9px;
     color: #8d96a5;
     font-family: "Consolas", monospace;
-}
-
-.trading-cycle-connector {
-    color: #526176;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.trading-cycle-vertical-connector {
-    text-align: center;
-    color: #526176;
-    font-size: 12px;
-    font-weight: 700;
 }
 
 @keyframes pulse {
@@ -6139,18 +6153,14 @@ app header (9999) and help/market-intelligence overlays (10000+).
 RESPONSIVE DESIGN
 ========================================================= */
 @media (max-width: 768px) {
-    .trading-cycle-row {
-        flex-direction: column;
-        gap: 12px;
+    .trading-cycle-flow {
+        --tc-step-width: 140px;
+        --tc-arrow-gap: 18px;
+        padding: 0 8px;
     }
 
     .trading-cycle-stage-wrapper {
-        flex-direction: column;
         gap: 4px;
-    }
-
-    .trading-cycle-connector {
-        transform: rotate(90deg);
     }
 
     .current-activity-grid,
@@ -6161,8 +6171,12 @@ RESPONSIVE DESIGN
 }
 
 @media (max-width: 640px) {
+    .trading-cycle-flow {
+        --tc-step-width: 128px;
+        --tc-arrow-gap: 16px;
+    }
+
     .trading-cycle-stage {
-        min-width: 100px;
         padding: 8px;
     }
 

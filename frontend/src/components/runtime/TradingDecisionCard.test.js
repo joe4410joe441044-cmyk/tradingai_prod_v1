@@ -148,6 +148,42 @@ test("TradingDecisionCard renders all 15 stages", async () => {
     });
 });
 
+test("TradingDecisionCard lays the 15 stages out in canonical DOM order", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, { decision: {} });
+    const wrappers = descendants(renderer.root).filter(
+        (node) => typeof node.props?.className === "string"
+            && node.props.className.split(/\s+/).includes("trading-cycle-stage-wrapper"),
+    );
+    assert.equal(wrappers.length, 15);
+    assert.deepEqual(
+        wrappers.map((node) => node.props["data-step-index"]),
+        Array.from({ length: 15 }, (_, index) => index),
+    );
+});
+
+test("TradingDecisionCard groups the cycle into 4/4/4/3 left-aligned rows", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, { decision: {} });
+    const rows = descendants(renderer.root).filter(
+        (node) => typeof node.props?.className === "string"
+            && node.props.className.split(/\s+/).includes("trading-cycle-row"),
+    );
+    assert.equal(rows.length, 4);
+    const grouping = rows.map((row) => descendants(row)
+        .filter(
+            (node) => typeof node.props?.className === "string"
+                && node.props.className.split(/\s+/).includes("trading-cycle-stage-wrapper"),
+        )
+        .map((node) => node.props["data-step-index"]));
+    assert.deepEqual(grouping, [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+        [12, 13, 14],
+    ]);
+});
+
 test("TradingDecisionCard renders current activity panel", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, { decision: {} });

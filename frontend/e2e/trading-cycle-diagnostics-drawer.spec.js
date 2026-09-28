@@ -5,11 +5,42 @@ const EVIDENCE_DIR = globalThis.process?.env?.G4_EVIDENCE_DIR || "/tmp/opencode"
 
 const box = (locator) => locator.boundingBox();
 
+// Geometry is measured only after the complete cycle and fonts are ready.
+const waitForCycle = async (page) => {
+    await expect(page.locator(".trading-cycle-stage-wrapper")).toHaveCount(15);
+    await page.getByTestId("trading-cycle-step-14-toggle").waitFor();
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+};
+
+const captureGeometry = async (page, testInfo, label) => {
+    const geometry = await page.evaluate(() => {
+        const rect = (node) => {
+            const { x, y, width, height, right } = node.getBoundingClientRect();
+            return { x, y, width, height, right };
+        };
+        const cells = Array.from(document.querySelectorAll(".trading-cycle-stage-wrapper"))
+            .map((node) => ({ step: Number(node.dataset.stepIndex), ...rect(node) }));
+        return {
+            viewportWidth: window.innerWidth,
+            clientWidth: document.documentElement.clientWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            fontStatus: document.fonts.status,
+            cycle: rect(document.querySelector(".trading-cycle-flow")),
+            rightmostStep: cells.reduce((a, b) => b.right > a.right ? b : a),
+            cells,
+        };
+    });
+    await testInfo.attach(label, { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
+    console.log(`${label}: ${JSON.stringify(geometry)}`);
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+    return geometry;
+};
+
 test.describe("Trading Cycle diagnostics overlay drawer", () => {
     test.beforeEach(async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await page.goto(HARNESS);
-        await page.getByTestId("trading-cycle-step-4-toggle").waitFor();
+        await waitForCycle(page);
     });
 
     test("DETAILS opens a right-side overlay without moving the Trading Cycle", async ({ page }) => {
@@ -80,5 +111,140 @@ test.describe("Trading Cycle diagnostics overlay drawer", () => {
         await page.getByTestId("trading-cycle-drawer-close").click();
         await expect(page.getByTestId("trading-cycle-diagnostics-drawer")).toHaveCount(0);
         await page.screenshot({ path: `${EVIDENCE_DIR}/j4-D-drawer-closed-again.png`, fullPage: true });
+    });
+});
+
+test.describe("Trading Cycle left-aligned four-column layout", () => {
+    const STEP_INDICES = Array.from({ length: 15 }, (_, index) => index);
+
+    const stepWrapper = (page, index) => page.locator(`.trading-cycle-stage-wrapper[data-step-index="${index}"]`);
+
+    for (const width of [1920, 1440, 1024]) {
+        test(`rows are 0-3/4-7/8-11/12-14, left-aligned, no horizontal scroll at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 1000 });
+            await page.goto(HARNESS);
+            await waitForCycle(page);
+
+            const rowOrder = await page.locator(".trading-cycle-row").evaluateAll((rows) =>
+                rows.map((row) => Array.from(row.querySelectorAll(".trading-cycle-stage-wrapper"))
+                    .map((node) => Number(node.dataset.stepIndex))),
+            );
+            expect(rowOrder).toEqual([
+                [0, 1, 2, 3],
+                [4, 5, 6, 7],
+                [8, 9, 10, 11],
+                [12, 13, 14],
+            ]);
+
+            // Same DOM order 0..14 as the canonical cycle.
+            const domOrder = await page.locator(".trading-cycle-stage-wrapper").evaluateAll((nodes) =>
+                nodes.map((node) => Number(node.dataset.stepIndex)),
+            );
+            expect(domOrder).toEqual(STEP_INDICES);
+
+            // Left-aligned: STEP 0 sits near the panel's left inset and the
+            // first column of every row shares the same x coordinate.
+            const firstColumn = [];
+            for (const first of [0, 4, 8, 12]) {
+                const b = await stepWrapper(page, first).boundingBox();
+                expect(b).not.toBeNull();
+                firstColumn.push(b.x);
+            }
+            firstColumn.forEach((x) => expect(Math.abs(x - firstColumn[0])).toBeLessThanOrEqual(1));
+            expect(firstColumn[0]).toBeLessThan(80);
+
+            // Within a row x increases left-to-right; rows stack top-to-bottom.
+            for (const row of rowOrder) {
+                const boxes = await Promise.all(row.map((index) => stepWrapper(page, index).boundingBox()));
+                for (let i = 1; i < boxes.length; i += 1) {
+                    expect(boxes[i].x).toBeGreaterThan(boxes[i - 1].x + boxes[i - 1].width - 1);
+                }
+            }
+            const rowTops = [];
+            for (const first of [0, 4, 8, 12]) {
+                const b = await stepWrapper(page, first).boundingBox();
+                rowTops.push(b.y);
+            }
+            for (let i = 1; i < rowTops.length; i += 1) {
+                expect(rowTops[i]).toBeGreaterThan(rowTops[i - 1]);
+            }
+
+            const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+            expect(overflow).toBeLessThanOrEqual(1);
+
+            await page.screenshot({ path: `${EVIDENCE_DIR}/j4-E-${width}-4col-closed.png`, fullPage: true });
+        });
+    }
+
+    test("STEP card coordinates never shift when the drawer opens and closes", async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto(HARNESS);
+        await waitForCycle(page);
+
+        const indices = [0, 3, 4, 7, 8, 11, 12, 14];
+        const measure = async () => {
+            const result = {};
+            for (const index of indices) {
+                result[index] = await stepWrapper(page, index).boundingBox();
+            }
+            return result;
+        };
+
+        const before = await measure();
+        await page.getByTestId("trading-cycle-step-4-toggle").click();
+        await expect(page.getByTestId("trading-cycle-diagnostics-drawer")).toBeVisible();
+        const open = await measure();
+        await page.screenshot({ path: `${EVIDENCE_DIR}/j4-F-1440-step4-open.png`, fullPage: true });
+
+        await page.keyboard.press("Escape");
+        await expect(page.getByTestId("trading-cycle-diagnostics-drawer")).toHaveCount(0);
+        const closed = await measure();
+
+        for (const index of indices) {
+            expect(Math.abs(open[index].x - before[index].x)).toBeLessThanOrEqual(1);
+            expect(Math.abs(open[index].y - before[index].y)).toBeLessThanOrEqual(1);
+            expect(Math.abs(closed[index].x - before[index].x)).toBeLessThanOrEqual(1);
+            expect(Math.abs(closed[index].y - before[index].y)).toBeLessThanOrEqual(1);
+        }
+    });
+
+    test("the rightmost STEP DETAILS clear the open drawer at 1920 and 1440", async ({ page }, testInfo) => {
+        for (const width of [1920, 1440]) {
+            await page.setViewportSize({ width, height: 1000 });
+            await page.goto(HARNESS);
+            await waitForCycle(page);
+            await page.getByTestId("trading-cycle-step-4-toggle").click();
+            const drawer = page.getByTestId("trading-cycle-diagnostics-drawer");
+            await expect(drawer).toBeVisible();
+            const drawerBox = await drawer.boundingBox();
+            const geometry = await captureGeometry(page, testInfo, `clearance-${width}`);
+            console.log(`clearance-${width}: drawerLeft=${drawerBox.x}, gap=${drawerBox.x - geometry.rightmostStep.right}`);
+            await page.screenshot({ path: `${EVIDENCE_DIR}/j4-clearance-${width}.png`, fullPage: true });
+
+            for (const index of [3, 7, 11, 14]) {
+                const b = await stepWrapper(page, index).boundingBox();
+                expect(b.x + b.width).toBeLessThanOrEqual(drawerBox.x + 1);
+                await page.getByTestId(`trading-cycle-step-${index}-toggle`).click({ trial: true });
+            }
+
+            await page.keyboard.press("Escape");
+            await expect(drawer).toHaveCount(0);
+        }
+    });
+
+    test("narrower viewports wrap without horizontal scroll and keep STEP order", async ({ page }, testInfo) => {
+        for (const width of [820, 700, 560]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(HARNESS);
+            await waitForCycle(page);
+
+            const domOrder = await page.locator(".trading-cycle-stage-wrapper").evaluateAll((nodes) =>
+                nodes.map((node) => Number(node.dataset.stepIndex)),
+            );
+            expect(domOrder).toEqual(STEP_INDICES);
+
+            await captureGeometry(page, testInfo, `narrow-${width}`);
+            await page.screenshot({ path: `${EVIDENCE_DIR}/j4-narrow-${width}.png`, fullPage: true });
+        }
     });
 });
