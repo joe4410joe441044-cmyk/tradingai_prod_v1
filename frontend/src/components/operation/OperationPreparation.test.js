@@ -2635,3 +2635,94 @@ test("SAVE SETTINGS UI polish: old auto-save wording removed, new SAVE instructi
         "new SAVE instruction present (Japanese)",
     );
 });
+
+/* =================================================
+   CAPITAL AUTHORITY — mode-specific presentation
+   The displayed capital follows the SAVED mode. PAPER capital is never
+   presented as current LIVE capital, and reference capital stays separate.
+================================================= */
+
+const scopedRowValue = (section, label) => {
+    const row = descendants(section).find((node) =>
+        node?.props?.className === "operation-prep-derived-row"
+        && descendants(node).some((child) => child?.type === "span" && text(child) === label),
+    );
+    if (!row) return null;
+    const strong = descendants(row).find((child) => child?.type === "strong");
+    return strong ? text(strong).trim() : null;
+};
+
+test("CAPITAL AUTHORITY (LIVE): Final Preparation shows REAL account capital and a LIVE risk budget", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: { mode: "LIVE", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        savedConfig: { mode: "LIVE", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        capitalAuthorityLabel: "REAL_LIVE_ACCOUNT",
+        availableCapital: "7.91836966",
+        capitalBasis: "1000",
+        riskBudget: "0.0395918483",
+        liveAccountCapital: 7.91836966,
+        liveCapitalAuthority: {
+            source: "REAL_LIVE_ACCOUNT",
+            value: 7.91836966,
+            available: true,
+            stale: false,
+        },
+    }));
+    const mm = findTestId(renderer.root, "final-prep-money-management");
+    assert.equal(scopedRowValue(mm, "CAPITAL AUTHORITY"), "REAL_LIVE_ACCOUNT");
+    assert.equal(scopedRowValue(mm, "AVAILABLE CAPITAL"), "7.91836966");
+    assert.equal(scopedRowValue(mm, "CURRENT LIVE RISK BUDGET"), "0.0395918483");
+    assert.equal(scopedRowValue(mm, "REFERENCE CAPITAL"), "1000");
+    // The PAPER/reference concepts are absent while LIVE.
+    assert.equal(scopedRowValue(mm, "CAPITAL BASIS"), null);
+    assert.equal(scopedRowValue(mm, "RISK BUDGET"), null);
+    assert.equal(normalizedText(mm).includes("10000"), false, "PAPER capital is not shown while LIVE");
+    const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.equal(scopedRowValue(modeSection, "LIVE CAPITAL"), "7.91836966 USDT");
+});
+
+test("CAPITAL AUTHORITY (LIVE): unavailable REAL capital shows UNAVAILABLE with no PAPER fallback", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: { mode: "LIVE", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        savedConfig: { mode: "LIVE", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        capitalAuthorityLabel: "REAL_LIVE_ACCOUNT",
+        availableCapital: undefined,
+        capitalBasis: "1000",
+        riskBudget: undefined,
+        liveCapitalAuthority: {
+            source: "REAL_LIVE_ACCOUNT",
+            value: null,
+            available: false,
+            stale: true,
+        },
+    }));
+    const mm = findTestId(renderer.root, "final-prep-money-management");
+    assert.equal(scopedRowValue(mm, "CAPITAL AUTHORITY"), "REAL_LIVE_ACCOUNT");
+    assert.equal(scopedRowValue(mm, "AVAILABLE CAPITAL"), "UNAVAILABLE");
+    assert.equal(scopedRowValue(mm, "CURRENT LIVE RISK BUDGET"), "UNAVAILABLE");
+    assert.equal(scopedRowValue(mm, "REFERENCE CAPITAL"), "1000");
+    assert.equal(normalizedText(mm).includes("10000"), false, "no PAPER fallback while LIVE");
+    const modeSection = findTestId(renderer.root, "final-prep-trading-mode");
+    assert.equal(scopedRowValue(modeSection, "LIVE CAPITAL"), "UNAVAILABLE");
+});
+
+test("CAPITAL AUTHORITY (PAPER): PAPER account authority remains separate from reference capital", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        savedConfig: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        capitalAuthorityLabel: "PAPER_ACCOUNT",
+        availableCapital: "10000.00",
+        capitalBasis: "1000",
+        riskBudget: "5.00",
+    }));
+    const mm = findTestId(renderer.root, "final-prep-money-management");
+    assert.equal(scopedRowValue(mm, "CAPITAL AUTHORITY"), "PAPER_ACCOUNT");
+    assert.equal(scopedRowValue(mm, "AVAILABLE CAPITAL"), "10000.00");
+    assert.equal(scopedRowValue(mm, "CAPITAL BASIS"), "1000");
+    assert.equal(scopedRowValue(mm, "RISK BUDGET"), "5.00");
+    assert.equal(scopedRowValue(mm, "REFERENCE CAPITAL"), null);
+    assert.equal(scopedRowValue(mm, "CURRENT LIVE RISK BUDGET"), null);
+});

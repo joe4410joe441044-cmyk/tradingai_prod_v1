@@ -2930,3 +2930,148 @@ test("SAVE SETTINGS: START payload uses the saved revision, not the draft", asyn
         mock.restore();
     }
 });
+
+/* =================================================
+   CAPITAL AUTHORITY — mode-specific presentation
+   BotControl derives the Final Preparation capital rows from the SAVED
+   trading mode. Display only: the START payload and REAL execution
+   authority are unchanged.
+================================================= */
+
+const findPreparation = (renderer) => renderer.componentElements.find(
+    (element) => element.type?.name === "OperationPreparation",
+);
+
+test("CAPITAL AUTHORITY: saved LIVE derives capital rows from the REAL account, not the PAPER projection", async () => {
+    setMmStatus({
+        capitalEligibility: {
+            capitalSource: "PAPER_ACCOUNT",
+            availableCapital: "10000.00",
+            riskBudget: "5.00",
+            capitalBasis: "1000",
+        },
+    });
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+            liveCapitalAuthority: {
+                source: "REAL_LIVE_ACCOUNT",
+                value: 7.91836966,
+                available: true,
+                stale: false,
+            },
+        }));
+        const preparation = findPreparation(renderer);
+        assert.ok(preparation, "OperationPreparation present");
+        assert.equal(preparation.props.capitalAuthorityLabel, "REAL_LIVE_ACCOUNT");
+        assert.equal(preparation.props.availableCapital, "7.91836966");
+        assert.notEqual(preparation.props.availableCapital, "10000.00");
+        assert.equal(preparation.props.riskBudget, "0.0395918483");
+        // reference capital stays a separate concept
+        assert.equal(preparation.props.capitalBasis, "1000");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+    }
+});
+
+test("CAPITAL AUTHORITY: saved LIVE with unavailable REAL capital fails closed with no PAPER fallback", async () => {
+    setMmStatus({
+        capitalEligibility: {
+            capitalSource: "PAPER_ACCOUNT",
+            availableCapital: "10000.00",
+            riskBudget: "5.00",
+            capitalBasis: "1000",
+        },
+    });
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+            liveCapitalAuthority: {
+                source: "REAL_LIVE_ACCOUNT",
+                value: null,
+                available: false,
+                stale: true,
+            },
+        }));
+        const preparation = findPreparation(renderer);
+        assert.equal(preparation.props.capitalAuthorityLabel, "REAL_LIVE_ACCOUNT");
+        assert.equal(preparation.props.availableCapital, null);
+        assert.equal(preparation.props.riskBudget, null);
+        assert.notEqual(preparation.props.availableCapital, "10000.00");
+        assert.equal(preparation.props.capitalBasis, "1000");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+    }
+});
+
+test("CAPITAL AUTHORITY: saved PAPER keeps the canonical PAPER account projection", async () => {
+    setMmStatus({
+        capitalEligibility: {
+            capitalSource: "PAPER_ACCOUNT",
+            availableCapital: "10000.00",
+            riskBudget: "5.00",
+            capitalBasis: "1000",
+        },
+    });
+    setMmConfiguration({ riskPerTradePercent: "0.50" });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "PAPER", selectionMode: "MANUAL", symbol: "XRPUSDTM" },
+        }));
+        const preparation = findPreparation(renderer);
+        assert.equal(preparation.props.capitalAuthorityLabel, "PAPER_ACCOUNT");
+        assert.equal(preparation.props.availableCapital, "10000.00");
+        assert.equal(preparation.props.riskBudget, "5.00");
+        assert.equal(preparation.props.capitalBasis, "1000");
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+    }
+});
+
+test("CAPITAL AUTHORITY: LIVE START payload is unchanged (no capital presentation fields)", async () => {
+    setMmStatus({ executionEntryAllowed: false });
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        if (url === "/api/bot/start") {
+            return jsonResponse({ body: {
+                status: "started", loopState: "STOPPED", autoTradeEnabled: false,
+                liveOrderEntryAllowed: false, realOrderAllowed: false, executionEntryAllowed: false,
+            } });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+            liveCapitalAuthority: {
+                source: "REAL_LIVE_ACCOUNT",
+                value: 7.91836966,
+                available: true,
+                stale: false,
+            },
+        }));
+        await startBot(renderer);
+        assert.equal(mock.requests.length, 1);
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.mode, "live");
+        assert.equal(payload.dry_run, false);
+        // Presentation values never become START inputs.
+        assert.equal("availableCapital" in payload, false);
+        assert.equal("available_capital" in payload, false);
+        assert.equal("capitalBasis" in payload, false);
+        assert.equal("capital_basis" in payload, false);
+        assert.equal("riskBudget" in payload, false);
+        assert.equal("risk_budget" in payload, false);
+        // risk_percent remains the authoritative MM policy value.
+        assert.equal(payload.risk_percent, 0.5);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});

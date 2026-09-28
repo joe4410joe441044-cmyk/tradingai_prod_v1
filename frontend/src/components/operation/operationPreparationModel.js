@@ -250,6 +250,145 @@ export const savedMmConfigurationReadiness = (configuration) => {
     }) ? "READY" : "BLOCKED";
 };
 
+/* =================================================
+   CAPITAL AUTHORITY PRESENTATION
+   Presentation only. These helpers never become execution authority: the
+   SAVE contract and the START payload are unchanged, and REAL sizing stays
+   owned by the backend REAL_LIVE_ACCOUNT authority. They only make the
+   Final Preparation / Trade Settings capital rows follow the SAVED trading
+   mode so PAPER capital is never presented as LIVE capital.
+================================================= */
+
+export const CAPITAL_AUTHORITY_REAL_LIVE_ACCOUNT = "REAL_LIVE_ACCOUNT";
+export const CAPITAL_AUTHORITY_PAPER_ACCOUNT = "PAPER_ACCOUNT";
+export const REAL_LIVE_ACCOUNT_SOURCE = "KUCOIN_FUTURES_READ_ONLY";
+
+const ABSENT_CAPITAL_VALUES = new Set(["", "UNKNOWN", "NOT AVAILABLE", "NONE", "NULL"]);
+
+const firstCapitalCandidate = (values = []) => values.find((value) => (
+    value !== null
+    && value !== undefined
+    && !(typeof value === "number" && !Number.isFinite(value))
+));
+
+const toFiniteNumber = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+// Normalize a numeric capital amount for display without leaking binary
+// floating-point noise (e.g. 7.91836966 * 0.005 -> 0.0395918483).
+export const formatCapitalAmount = (value) => {
+    const parsed = toFiniteNumber(value);
+    return parsed === null ? null : String(parsed);
+};
+
+// The canonical current risk allowance for a mode's capital authority:
+// capital * riskPerTradePercent / 100 (mirrors calculate_risk_budget).
+export const calculateCurrentRiskBudget = (capital, riskPerTradePercent) => {
+    const capitalValue = toFiniteNumber(capital);
+    const riskValue = toFiniteNumber(riskPerTradePercent);
+    if (capitalValue === null || riskValue === null) return null;
+    const budget = (capitalValue * riskValue) / 100;
+    if (!Number.isFinite(budget)) return null;
+    return String(Number(budget.toFixed(12)));
+};
+
+// Canonical read-only LIVE account capital authority. Reuses the existing
+// bot-status real-account projection (accountRuntime.realAccount, source
+// KUCOIN_FUTURES_READ_ONLY); it never triggers a second exchange request and
+// fails closed (available=false) when the snapshot is missing, stale,
+// disconnected, or unauthenticated.
+export const deriveLiveCapitalAuthority = (botStatus = {}) => {
+    const realAccount = botStatus?.accountRuntime?.realAccount;
+    const candidate = firstCapitalCandidate([
+        botStatus?.realEquity,
+        botStatus?.realAvailableBalance,
+        botStatus?.realBalance,
+        realAccount?.equity,
+        realAccount?.availableBalance,
+        realAccount?.balance,
+    ]);
+    const hasValue = toFiniteNumber(candidate) !== null;
+    const stale = realAccount?.stale === true;
+    const disconnected = realAccount
+        ? (realAccount.connected === false || realAccount.authenticated === false)
+        : false;
+    return Object.freeze({
+        source: CAPITAL_AUTHORITY_REAL_LIVE_ACCOUNT,
+        exchangeSource: realAccount?.accountSource
+            || botStatus?.accountSource
+            || REAL_LIVE_ACCOUNT_SOURCE,
+        value: hasValue ? candidate : null,
+        available: hasValue && !stale && !disconnected,
+        stale,
+        disconnected,
+    });
+};
+
+const presentableCapital = (value) => {
+    if (value === null || value === undefined) return null;
+    const text = String(value);
+    if (ABSENT_CAPITAL_VALUES.has(text.trim().toUpperCase())) return null;
+    return text;
+};
+
+// Mode-specific capital authority projection for the operator display.
+// LIVE: AVAILABLE CAPITAL / current risk budget come from the REAL account
+// authority; PAPER projection can never win. PAPER: canonical PAPER account
+// projection is preserved verbatim. referenceCapital is always reported
+// separately so the compounding/reference basis is never confused with
+// available capital.
+export const deriveCapitalAuthorityPresentation = ({
+    mode,
+    paperCapitalSource,
+    paperAvailableCapital,
+    paperRiskBudget,
+    referenceCapital,
+    riskPerTradePercent,
+    liveCapitalAuthority,
+} = {}) => {
+    const normalizedMode = String(mode || "").trim().toUpperCase();
+    if (normalizedMode === "LIVE") {
+        const authority = (
+            liveCapitalAuthority
+            && typeof liveCapitalAuthority === "object"
+        ) ? liveCapitalAuthority : {};
+        const liveAvailable = authority.available === true;
+        const availableCapital = liveAvailable
+            ? formatCapitalAmount(authority.value)
+            : null;
+        const riskBudget = liveAvailable
+            ? calculateCurrentRiskBudget(authority.value, riskPerTradePercent)
+            : null;
+        return Object.freeze({
+            mode: "LIVE",
+            capitalAuthorityLabel: authority.source || CAPITAL_AUTHORITY_REAL_LIVE_ACCOUNT,
+            availableCapital,
+            availableCapitalUnavailable: availableCapital === null,
+            riskBudget,
+            riskBudgetUnavailable: riskBudget === null,
+            referenceCapital: presentableCapital(referenceCapital),
+            liveCapitalStale: authority.stale === true,
+            liveCapitalAvailable: liveAvailable,
+        });
+    }
+    const availableCapital = presentableCapital(paperAvailableCapital);
+    const riskBudget = presentableCapital(paperRiskBudget);
+    return Object.freeze({
+        mode: "PAPER",
+        capitalAuthorityLabel: paperCapitalSource || CAPITAL_AUTHORITY_PAPER_ACCOUNT,
+        availableCapital,
+        availableCapitalUnavailable: availableCapital === null,
+        riskBudget,
+        riskBudgetUnavailable: riskBudget === null,
+        referenceCapital: presentableCapital(referenceCapital),
+        liveCapitalStale: false,
+        liveCapitalAvailable: false,
+    });
+};
+
 export const deriveMmReadiness = ({
     executionEntryAllowed,
     recommendedAction,

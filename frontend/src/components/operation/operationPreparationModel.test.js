@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
     OPERATION_PREPARATION_OPTIONS,
+    calculateCurrentRiskBudget,
     createOperationPreparationSettings,
+    deriveCapitalAuthorityPresentation,
+    deriveLiveCapitalAuthority,
     deriveOperationReadiness,
     pendingOrderAuthorityValue,
     resolveEffectiveMmConfiguration,
@@ -610,4 +613,122 @@ test("tradeSettingsDiffer detects only committed-field changes", () => {
     assert.equal(tradeSettingsDiffer({ mode: "LIVE", symbol: "XRPUSDTM", leverage: 5 }, saved), true);
     // numeric vs string for the same value must not flag a spurious change
     assert.equal(tradeSettingsDiffer({ mode: "PAPER", symbol: "XRPUSDTM", leverage: "5" }, saved), false);
+});
+
+/* =================================================
+   CAPITAL AUTHORITY PRESENTATION (mode-specific)
+   Presentation only: proves the displayed capital follows the SAVED mode
+   and never lets PAPER capital become LIVE available capital.
+================================================= */
+
+const FRESH_REAL_STATUS = {
+    realEquity: 7.91836966,
+    realAvailableBalance: 7.91836966,
+    realBalance: 7.91836966,
+    accountSource: "KUCOIN_FUTURES_READ_ONLY",
+    accountRuntime: {
+        realAccount: {
+            connected: true,
+            authenticated: true,
+            stale: false,
+            accountSource: "KUCOIN_FUTURES_READ_ONLY",
+            equity: 7.91836966,
+            availableBalance: 7.91836966,
+        },
+    },
+};
+
+test("deriveLiveCapitalAuthority reads the fresh read-only REAL account", () => {
+    const authority = deriveLiveCapitalAuthority(FRESH_REAL_STATUS);
+    assert.equal(authority.source, "REAL_LIVE_ACCOUNT");
+    assert.equal(authority.available, true);
+    assert.equal(Number(authority.value), 7.91836966);
+    assert.equal(authority.stale, false);
+});
+
+test("deriveLiveCapitalAuthority fails closed when the REAL snapshot is stale, disconnected, or missing", () => {
+    const stale = deriveLiveCapitalAuthority({
+        ...FRESH_REAL_STATUS,
+        accountRuntime: { realAccount: { ...FRESH_REAL_STATUS.accountRuntime.realAccount, stale: true } },
+    });
+    assert.equal(stale.available, false);
+    assert.equal(stale.stale, true);
+
+    const disconnected = deriveLiveCapitalAuthority({
+        ...FRESH_REAL_STATUS,
+        accountRuntime: { realAccount: { ...FRESH_REAL_STATUS.accountRuntime.realAccount, connected: false } },
+    });
+    assert.equal(disconnected.available, false);
+
+    const missing = deriveLiveCapitalAuthority({});
+    assert.equal(missing.available, false);
+    assert.equal(missing.value, null);
+});
+
+test("PAPER presentation preserves the canonical PAPER account projection", () => {
+    const presentation = deriveCapitalAuthorityPresentation({
+        mode: "PAPER",
+        paperCapitalSource: "PAPER_ACCOUNT",
+        paperAvailableCapital: "10000.00",
+        paperRiskBudget: "5.00",
+        referenceCapital: "1000",
+        riskPerTradePercent: "0.50",
+    });
+    assert.equal(presentation.capitalAuthorityLabel, "PAPER_ACCOUNT");
+    assert.equal(presentation.availableCapital, "10000.00");
+    assert.equal(presentation.riskBudget, "5.00");
+    assert.equal(presentation.referenceCapital, "1000");
+});
+
+test("LIVE presentation uses REAL capital and never the PAPER projection", () => {
+    const presentation = deriveCapitalAuthorityPresentation({
+        mode: "LIVE",
+        paperCapitalSource: "PAPER_ACCOUNT",
+        paperAvailableCapital: "10000.00",
+        paperRiskBudget: "5.00",
+        referenceCapital: "1000",
+        riskPerTradePercent: "0.50",
+        liveCapitalAuthority: {
+            source: "REAL_LIVE_ACCOUNT",
+            value: 7.91836966,
+            available: true,
+            stale: false,
+        },
+    });
+    assert.equal(presentation.capitalAuthorityLabel, "REAL_LIVE_ACCOUNT");
+    assert.equal(presentation.availableCapital, "7.91836966");
+    assert.notEqual(presentation.availableCapital, "10000.00");
+    // 7.91836966 * 0.50% = 0.0395918483 (not the PAPER reference 5.00)
+    assert.equal(presentation.riskBudget, "0.0395918483");
+    // reference capital stays a separate concept and is unchanged
+    assert.equal(presentation.referenceCapital, "1000");
+});
+
+test("LIVE presentation fails closed to UNAVAILABLE with NO PAPER fallback", () => {
+    const presentation = deriveCapitalAuthorityPresentation({
+        mode: "LIVE",
+        paperCapitalSource: "PAPER_ACCOUNT",
+        paperAvailableCapital: "10000.00",
+        paperRiskBudget: "5.00",
+        referenceCapital: "1000",
+        riskPerTradePercent: "0.50",
+        liveCapitalAuthority: {
+            source: "REAL_LIVE_ACCOUNT",
+            value: null,
+            available: false,
+            stale: true,
+        },
+    });
+    assert.equal(presentation.capitalAuthorityLabel, "REAL_LIVE_ACCOUNT");
+    assert.equal(presentation.availableCapital, null);
+    assert.equal(presentation.availableCapitalUnavailable, true);
+    assert.equal(presentation.riskBudget, null);
+    assert.notEqual(presentation.availableCapital, "10000.00");
+});
+
+test("calculateCurrentRiskBudget derives the current budget from the capital input", () => {
+    assert.equal(calculateCurrentRiskBudget(7.91836966, "0.50"), "0.0395918483");
+    assert.equal(calculateCurrentRiskBudget("1000", "0.50"), "5");
+    assert.equal(calculateCurrentRiskBudget(null, "0.50"), null);
+    assert.equal(calculateCurrentRiskBudget("1000", null), null);
 });

@@ -22,6 +22,7 @@ import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMa
 import BotControl from "../components/BotControl";
 import OperationAuthGate from "../components/auth/OperationAuthGate";
 import {
+    deriveLiveCapitalAuthority,
     pendingOrderAuthorityValue,
     resolveOperationDisplaySymbol,
 } from "../components/operation/operationPreparationModel";
@@ -216,6 +217,9 @@ const position = firstAvailable(
 // LIVE account context read path (read-only). SAVE SETTINGS refreshes this via
 // /bot/status; Final Preparation surfaces it when the SAVED mode is LIVE so the
 // operator can confirm LIVE capital while the runtime is still STOPPED.
+// The authority object carries the canonical source + freshness so the UI
+// never falls back to PAPER capital while LIVE is selected.
+const liveCapitalAuthority = deriveLiveCapitalAuthority(botStatus);
 const liveAccountCapital = firstAvailable(
     botStatus?.realEquity,
     botStatus?.realAvailableBalance,
@@ -310,6 +314,8 @@ useEffect(() => {
                             onSaveSettings={handleSaveSettings}
 
                             liveAccountCapital={liveAccountCapital}
+
+                            liveCapitalAuthority={liveCapitalAuthority}
 
                             executionEnabled={
                                 executionEnabled

@@ -152,9 +152,11 @@ export default function OperationPreparation({
     mmRuntime = "UNKNOWN",
     lifecycleState,
     capitalAuthorityStatus = "NOT CONNECTED",
+    capitalAuthorityLabel,
     availableCapital = undefined,
     capitalBasis = undefined,
     riskBudget = undefined,
+    liveCapitalAuthority,
     executionEntryAllowed,
     recommendedAction,
     riskState,
@@ -528,6 +530,48 @@ export default function OperationPreparation({
             : "OFF — INITIAL REFERENCE CAPITAL";
     const mmControlsDisabled = controlsDisabled || !mmAvailable || mmUpdating;
 
+    // Capital-authority presentation follows the SAVED trading mode. The
+    // authoritative values are derived upstream (BotControl) from the
+    // mode-specific source; these labels only make the concept explicit so
+    // PAPER / reference capital is never read as current LIVE capital.
+    const savedCapitalMode = savedSettings.tradingMode;
+    const isLiveCapitalMode = savedCapitalMode === "LIVE";
+    const capitalAuthorityDisplay = (
+        capitalAuthorityLabel || capitalAuthorityStatus || "UNKNOWN"
+    );
+    const referenceCapitalLabel = isLiveCapitalMode
+        ? "REFERENCE CAPITAL"
+        : "CAPITAL BASIS";
+    const riskBudgetLabel = isLiveCapitalMode
+        ? "CURRENT LIVE RISK BUDGET"
+        : "RISK BUDGET";
+    const availableCapitalSource = isLiveCapitalMode
+        ? "LIVE ACCOUNT"
+        : (availableCapital !== undefined && availableCapital !== null ? "RUNTIME" : "SETTINGS");
+    const riskBudgetSource = isLiveCapitalMode
+        ? "LIVE ACCOUNT"
+        : (riskBudget !== undefined && riskBudget !== null ? "RUNTIME" : "MAX_DRAWDOWN");
+    // LIVE CAPITAL is the read-only REAL account projection. It fails closed
+    // to UNAVAILABLE when the authoritative snapshot marks the account stale,
+    // disconnected, or unauthenticated (never a PAPER fallback).
+    const liveCapitalValue = (() => {
+        if (liveCapitalAuthority && typeof liveCapitalAuthority === "object") {
+            return liveCapitalAuthority.available === true
+                && liveCapitalAuthority.value !== null
+                && liveCapitalAuthority.value !== undefined
+                ? `${Number(liveCapitalAuthority.value)} USDT`
+                : "UNAVAILABLE";
+        }
+        return liveAccountCapital !== undefined && liveAccountCapital !== null
+            ? `${Number(liveAccountCapital)} USDT`
+            : "UNAVAILABLE";
+    })();
+    const liveCapitalSource = (
+        liveCapitalAuthority && liveCapitalAuthority.available !== true
+            ? "NOT CONNECTED"
+            : "LIVE ACCOUNT"
+    );
+
     const MM_CONNECTED_FIELDS = [
         "riskPerTradePercent",
         "totalExposurePercent",
@@ -778,14 +822,14 @@ return (
                             options={mmRiskOptions}
                             value={mmAvailable ? mmRiskValue : ""}
                         />
-                        <DerivedRow hideSource label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                        <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label="CAPITAL AUTHORITY" source={isLiveCapitalMode ? "LIVE ACCOUNT" : "MM RUNTIME"} value={capitalAuthorityDisplay} />
+                        <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapitalSource} value={availableCapital !== undefined && availableCapital !== null ? String(availableCapital) : "UNAVAILABLE"} />
                         <DerivedRow hideSource label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
                         <ToggleControl disabled={mmControlsDisabled} label="Compounding" onChange={(value) => onMmDraftChange({ compoundingEnabled: value })} value={mmCompoundingValue} />
-                        <DerivedRow hideSource label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label={referenceCapitalLabel} source={capitalBasis !== undefined && capitalBasis !== null ? (isLiveCapitalMode ? "MM CONFIG" : "MM RUNTIME") : "NOT CONNECTED"} value={capitalBasis !== undefined && capitalBasis !== null ? String(capitalBasis) : "UNAVAILABLE"} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-exposure" label="MAX Exposure（最大エクスポージャー）" onChange={(value) => onMmDraftChange({ totalExposurePercent: String(value) })} options={mmExposureOptions} value={mmAvailable ? mmExposureValue : ""} />
                         <SelectField disabled={mmControlsDisabled} format={wholePercentage} id="operation-prep-drawdown" label="MAX Drawdown（最大ドローダウン）" onChange={(value) => onMmDraftChange({ maximumDrawdownPercent: String(value) })} options={mmDrawdownOptions} value={mmAvailable ? mmDrawdownValue : ""} />
-                        <DerivedRow hideSource label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                        <DerivedRow hideSource label={riskBudgetLabel} source={riskBudgetSource} value={riskBudget !== undefined && riskBudget !== null ? String(riskBudget) : "UNAVAILABLE"} />
                         <div className="operation-prep-mm-save" data-testid="mm-save-controls">
                             <span className="operation-prep-mm-state" data-testid="mm-save-state">{mmDraftState}</span>
                             <small className="operation-prep-mm-save__hint">Changes require SAVE SETTINGS before START.（変更後は SAVE SETTINGS を押して確定してください）</small>
@@ -914,7 +958,7 @@ return (
                         <Section number="1" testId="final-prep-trading-mode" title="TRADING MODE">
                             <DerivedRow label="MODE" source="OPERATOR" value={summary.mode} valueClass="operation-prep-value--setting" />
                             {savedSettings.tradingMode === "LIVE" && (
-                                <DerivedRow label="LIVE CAPITAL" source={liveAccountCapital !== undefined ? "LIVE ACCOUNT" : "NOT CONNECTED"} value={liveAccountCapital !== undefined ? `${Number(liveAccountCapital)} USDT` : "UNAVAILABLE"} valueClass="operation-prep-value--setting" />
+                                <DerivedRow label="LIVE CAPITAL" source={liveCapitalSource} value={liveCapitalValue} valueClass="operation-prep-value--setting" />
                             )}
                             <DerivedRow label="CONTROL AUTHORITY" source="RUNTIME" status value={controlAuthority} />
                             <DerivedRow label="CONTROL REVISION" source="RUNTIME" value={String(controlRevision)} />
@@ -929,13 +973,13 @@ return (
 
                         <Section number="3" testId="final-prep-money-management" title="MONEY MANAGEMENT">
                             <DerivedRow label="RISK / Trade（1取引リスク）" source={mmRiskDivergence ? "MM DRAFT" : (mmConfiguration ? "MM CONFIG" : "NOT CONNECTED")} value={mmRiskDivergence ? `${summary.riskPerTrade} DRAFT → START ${savedRiskPercent}%` : summary.riskPerTrade} valueClass="operation-prep-value--setting" />
-                            <DerivedRow label="CAPITAL AUTHORITY" source={capitalAuthorityStatus || "NOT CONNECTED"} value={capitalAuthorityStatus || "UNKNOWN"} />
-                            <DerivedRow label="AVAILABLE CAPITAL" source={availableCapital !== undefined ? "RUNTIME" : "SETTINGS"} value={availableCapital !== undefined ? String(availableCapital) : "UNAVAILABLE"} />
+                            <DerivedRow label="CAPITAL AUTHORITY" source={isLiveCapitalMode ? "LIVE ACCOUNT" : "MM RUNTIME"} value={capitalAuthorityDisplay} />
+                            <DerivedRow label="AVAILABLE CAPITAL" source={availableCapitalSource} value={availableCapital !== undefined && availableCapital !== null ? String(availableCapital) : "UNAVAILABLE"} />
                             <DerivedRow label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />
-                            <DerivedRow label="CAPITAL BASIS" source={capitalBasis !== undefined ? "MM RUNTIME" : "NOT CONNECTED"} value={capitalBasis !== undefined ? String(capitalBasis) : "UNAVAILABLE"} />
+                            <DerivedRow label={referenceCapitalLabel} source={capitalBasis !== undefined && capitalBasis !== null ? (isLiveCapitalMode ? "MM CONFIG" : "MM RUNTIME") : "NOT CONNECTED"} value={capitalBasis !== undefined && capitalBasis !== null ? String(capitalBasis) : "UNAVAILABLE"} />
                             <DerivedRow label="MAX EXPOSURE" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} />
                             <DerivedRow label="MAX DRAWDOWN" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} />
-                            <DerivedRow label="RISK BUDGET" source={riskBudget !== undefined ? "RUNTIME" : "MAX_DRAWDOWN"} value={riskBudget !== undefined ? String(riskBudget) : "UNAVAILABLE"} />
+                            <DerivedRow label={riskBudgetLabel} source={riskBudgetSource} value={riskBudget !== undefined && riskBudget !== null ? String(riskBudget) : "UNAVAILABLE"} />
                             <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                             <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
                         </Section>

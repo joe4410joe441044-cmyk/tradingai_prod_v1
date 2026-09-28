@@ -31,6 +31,7 @@ import OperationToggle from "./common/OperationToggle";
 import OperationPreparation from "./operation/OperationPreparation";
 import {
     createOperationPreparationSettings,
+    deriveCapitalAuthorityPresentation,
     deriveOperationReadiness,
     resolveEffectiveMmConfiguration,
     selectionModeDisplayLabel,
@@ -334,6 +335,8 @@ export default function BotControl({
 
     liveAccountCapital,
 
+    liveCapitalAuthority,
+
     executionEnabled,
 
     botRunning,
@@ -467,9 +470,6 @@ export default function BotControl({
     } = useMoneyManagement();
     const lifecycleState = mmStatus?.lifecycleState;
     const capitalAuthorityStatus = mmStatus?.capitalAuthorityStatus;
-    const availableCapital = mmStatus?.capitalEligibility?.availableCapital;
-    const capitalBasis = mmStatus?.capitalEligibility?.capitalBasis;
-    const riskBudget = mmStatus?.capitalEligibility?.riskBudget;
     const executionEntryAllowed = mmStatus?.executionEntryAllowed;
     const recommendedAction = mmStatus?.recommendedAction;
     const riskState = mmStatus?.riskState;
@@ -789,6 +789,37 @@ export default function BotControl({
         mmConfiguration,
         mmStatus?.configuration,
     );
+    // Mode-specific capital-authority presentation. The SAVED mode decides
+    // which account authority the Final Preparation / Trade Settings capital
+    // rows read. While LIVE, the REAL account read path is the only source;
+    // the PAPER MM projection can never be displayed as LIVE available
+    // capital. The PAPER path is preserved verbatim. This is display only:
+    // START payload and REAL execution authority are unchanged.
+    const capitalPresentation = deriveCapitalAuthorityPresentation({
+        mode: startSettings.tradingMode,
+        paperCapitalSource: mmStatus?.capitalEligibility?.capitalSource,
+        paperAvailableCapital: mmStatus?.capitalEligibility?.availableCapital,
+        paperRiskBudget: mmStatus?.capitalEligibility?.riskBudget,
+        referenceCapital: mmStatus?.capitalEligibility?.capitalBasis,
+        riskPerTradePercent: effectiveMmConfiguration?.riskPerTradePercent,
+        liveCapitalAuthority: (
+            liveCapitalAuthority
+            ?? (
+                liveAccountCapital !== undefined && liveAccountCapital !== null
+                    ? {
+                        source: "REAL_LIVE_ACCOUNT",
+                        value: liveAccountCapital,
+                        available: true,
+                        stale: false,
+                    }
+                    : undefined
+            )
+        ),
+    });
+    const capitalAuthorityLabel = capitalPresentation.capitalAuthorityLabel;
+    const availableCapital = capitalPresentation.availableCapital;
+    const capitalBasis = capitalPresentation.referenceCapital;
+    const riskBudget = capitalPresentation.riskBudget;
     const effectiveSelectionMode = startSettings.selectionMode;
     const effectiveStartSymbol = effectiveSelectionMode === "AUTO"
         ? config?.displaySymbol
@@ -1737,8 +1768,10 @@ export default function BotControl({
                 mmRuntime={lifecycleState || "UNKNOWN"}
                 lifecycleState={lifecycleState}
                 capitalAuthorityStatus={capitalAuthorityStatus}
+                capitalAuthorityLabel={capitalAuthorityLabel}
                 availableCapital={availableCapital}
                 riskBudget={riskBudget}
+                liveCapitalAuthority={liveCapitalAuthority}
                 executionEntryAllowed={executionEntryAllowed}
                 recommendedAction={recommendedAction}
                 riskState={riskState}
