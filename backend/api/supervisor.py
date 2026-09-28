@@ -14,6 +14,8 @@ from backend.supervisor.knowledge_history_consumer import (
 from backend.supervisor.runtime_snapshot_adapter import RuntimeSnapshotAdapter
 from backend.api.supervisor_conversation import create_supervisor_conversation_router
 from backend.api.supervisor_history import create_supervisor_history_router
+from backend.api.supervisor_monitoring import create_supervisor_monitoring_router
+from backend.supervisor.monitoring_read_service import MonitoringReadService
 from backend.supervisor.audit_store import SupervisorAuditStore
 from backend.supervisor.conversation_service import SupervisorConversationService
 from backend.supervisor.ollama_provider import OllamaLocalProvider
@@ -60,6 +62,7 @@ def create_supervisor_router(
     adapter: RuntimeSnapshotAdapter | None = None,
     provider_configuration: object | None = None,
     knowledge_history_consumer: SupervisorKnowledgeHistoryConsumer | None = None,
+    monitoring_read_service: MonitoringReadService | None = None,
 ) -> APIRouter:
     """Create a router holding observation capability only, never commands."""
     snapshot_adapter = adapter or RuntimeSnapshotAdapter()
@@ -77,6 +80,9 @@ def create_supervisor_router(
             return _failure_response(exc.code)
         except Exception:
             return _failure_response(SupervisorFailureCode.FAIL_CLOSED)
+
+    # Read-only monitoring health/state routes (GET only; default unavailable).
+    router.include_router(create_supervisor_monitoring_router(monitoring_read_service))
 
     audit_store = SupervisorAuditStore()
     if provider_configuration is None:
