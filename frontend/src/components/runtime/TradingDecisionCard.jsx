@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradingCycleModel';
 
@@ -238,7 +238,7 @@ const TradingCycleFlow = ({ stages, selectedStepIndex, onSelectStep }) => {
 // Non-modal right-side overlay.  The drawer is position:fixed so opening it
 // never reflows the Trading Cycle flow or the surrounding dashboard; the
 // operator can keep the cycle in view while reading diagnostics.
-const TradingCycleDiagnosticsDrawer = ({ stage, onClose, rootBlocker, rootBlockerStep }) => {
+const TradingCycleDiagnosticsDrawer = ({ stage, onClose, overlayRef, rootBlocker, rootBlockerStep }) => {
     if (!stage) return null;
 
     const isRootBlocker = Number.isInteger(rootBlockerStep) && rootBlockerStep === stage.index;
@@ -251,7 +251,7 @@ const TradingCycleDiagnosticsDrawer = ({ stage, onClose, rootBlocker, rootBlocke
     };
 
     return (
-        <div className="trading-cycle-drawer-overlay" data-testid="trading-cycle-drawer-overlay">
+        <div className="trading-cycle-drawer-overlay" data-testid="trading-cycle-drawer-overlay" ref={overlayRef}>
             <aside
                 aria-labelledby="trading-cycle-drawer-title"
                 aria-modal="false"
@@ -406,6 +406,7 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
     const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
     const [thirdSectionOpen, setThirdSectionOpen] = useState(false);
     const [selectedStepIndex, setSelectedStepIndex] = useState(null);
+    const drawerOverlayRef = useRef(null);
 
     const selectStep = (index) => {
         setSelectedStepIndex((current) => (current === index ? null : index));
@@ -418,6 +419,38 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
         };
         window.addEventListener('keydown', handleEscape);
         return () => window.removeEventListener('keydown', handleEscape);
+    }, [selectedStepIndex]);
+
+    // Keep the fixed drawer clear of the app top chrome (AppNavigation +
+    // status header). Their heights are not fixed, so measure the stable
+    // document offset instead of hardcoding a top value.
+    useEffect(() => {
+        if (selectedStepIndex === null) return undefined;
+        const overlay = drawerOverlayRef.current;
+        if (!overlay) return undefined;
+
+        const layoutBottom = (element) => {
+            let offset = 0;
+            let node = element;
+            while (node) {
+                offset += node.offsetTop || 0;
+                node = node.offsetParent;
+            }
+            return offset + element.offsetHeight;
+        };
+
+        const measure = () => {
+            let bottom = 0;
+            ['.mi-app-navigation', '.app-header'].forEach((selector) => {
+                const element = document.querySelector(selector);
+                if (element) bottom = Math.max(bottom, layoutBottom(element));
+            });
+            if (bottom > 0) overlay.style.top = `${Math.ceil(bottom)}px`;
+        };
+
+        measure();
+        window.addEventListener('resize', measure);
+        return () => window.removeEventListener('resize', measure);
     }, [selectedStepIndex]);
 
     const rootBlocker = model.diagnostics?.rootBlocker || diagnostics?.rootBlocker || null;
@@ -445,6 +478,7 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
             <TradingCycleDiagnosticsDrawer
                 stage={selectedStage}
                 onClose={() => setSelectedStepIndex(null)}
+                overlayRef={drawerOverlayRef}
                 rootBlocker={rootBlocker}
                 rootBlockerStep={rootBlockerStep}
             />

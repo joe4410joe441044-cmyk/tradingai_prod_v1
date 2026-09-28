@@ -45,6 +45,7 @@ const createRenderer = (Component, props) => {
             }];
         },
         useEffect() {},
+        useRef(initial) { return { current: initial }; },
     };
     const render = (nextProps) => {
         if (nextProps) currentProps = { ...currentProps, ...nextProps };
