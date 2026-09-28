@@ -68,6 +68,23 @@ const diagnostics = {
     steps: Array.from({ length: 15 }, (_, index) => buildStep(index)),
 };
 
+if (new URLSearchParams(window.location.search).has('historical')) {
+    diagnostics.rootBlocker = null;
+    diagnostics.rootBlockerStep = null;
+    Object.assign(diagnostics.steps[4], {
+        status: 'WAITING', provenance: 'HISTORICAL', evaluationCycleId: 'CYCLE_A',
+        reasonCode: 'CURRENT_EVALUATION_NOT_ESTABLISHED',
+        reasonText: 'No evaluation is proven to belong to the current cycle.',
+        current: null, required: 'CURRENT_EVALUATION', comparison: 'NOT_EVALUATED',
+        retainedEvaluation: {
+            provenance: 'HISTORICAL', reasonText: 'Recorded LIQUIDITY_INSTABILITY',
+            current: { liquiditySafe: false, priceDifference: 0 },
+            required: { expected: true }, comparison: 'FAIL',
+            freshness: { state: 'STALE', ageSeconds: 32400 },
+        },
+    });
+}
+
 createRoot(document.getElementById("root")).render(
     <>
         <header className="app-header">

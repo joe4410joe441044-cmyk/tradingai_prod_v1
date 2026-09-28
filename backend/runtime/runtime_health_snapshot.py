@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 
+from backend.runtime.cycle_diagnostics import resolve_evaluation_provenance
+
 
 STAGE_DEFINITIONS = {
     "start-request": {
@@ -402,6 +404,7 @@ def build_trading_decision_snapshot(
         next_stage = None
         current_state = "POSITION CLOSED"
 
+    provenance = resolve_evaluation_provenance(result, cycle_id)
     entry_readiness = deepcopy(strategy.get("entryReadiness"))
     if not isinstance(entry_readiness, dict):
         entry_readiness = {
@@ -410,8 +413,8 @@ def build_trading_decision_snapshot(
             "conditions": [],
         }
     else:
-        entry_readiness["cycleId"] = cycle_id
-        entry_readiness["evaluatedAt"] = strategy.get("timestamp") or timestamp
+        entry_readiness["cycleId"] = provenance["evaluationCycleId"]
+        entry_readiness["evaluatedAt"] = provenance["evaluatedAt"]
 
     return {
         "schemaVersion": 1,
@@ -450,7 +453,7 @@ def build_trading_decision_snapshot(
         ),
         "stages": {
             "market": {"reached": bool(market_ready), "status": "PASS" if market_ready else "NOT READY", "reason": None if market_ready else "MARKET_DATA_MISSING_OR_STALE"},
-            "pythonStrategy": {"evaluated": strategy_reached, "reached": strategy_reached, "status": strategy_decision, "decision": strategy_decision, "confidence": strategy.get("confidence", result.get("strategyConfidence")), "executionAllowed": strategy.get("executionAllowed"), "reason": strategy_reason, "suppressionReason": strategy.get("suppressionReason"), "evaluatedAt": timestamp if strategy_reached else None},
+            "pythonStrategy": {"evaluated": strategy_reached, "reached": strategy_reached, "status": strategy_decision, "decision": strategy_decision, "confidence": strategy.get("confidence", result.get("strategyConfidence")), "executionAllowed": strategy.get("executionAllowed"), "reason": strategy_reason, "suppressionReason": strategy.get("suppressionReason"), "evaluatedAt": provenance["evaluatedAt"] if strategy_reached else None},
             "aiReview": {"available": False, "called": False, "reached": False, "required": False, "mode": "OFF", "implementationStatus": "NOT_INSTALLED", "status": "OFF", "decision": "NOT_REQUIRED", "confidence": None, "reason": "TRADING_AI_OFF", "fallbackUsed": False},
             "moneyManagement": {"evaluated": money_reached, "reached": money_reached, "status": money_status, "decision": guard.get("decision") if money_reached else None, "reason": money_reason if money_reached else "NO_TRADE_CANDIDATE", "suggestedQuantity": guard.get("suggestedQuantity"), "approvedQuantity": guard.get("approvedQuantity"), "riskAmount": guard.get("riskAmount")},
             "governance": {"evaluated": governance_reached, "reached": governance_reached, "status": governance_status, "decision": result.get("governanceDecision") if governance_reached else None, "reason": governance_reason if governance_reached else "NO_TRADE_CANDIDATE", "executionAuthority": execution_authority, "emergencyState": emergency_state},

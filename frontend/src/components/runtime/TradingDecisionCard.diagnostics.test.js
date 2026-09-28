@@ -386,3 +386,71 @@ test("card without diagnostics still renders STD sections and a safe empty drawe
     assert.equal(withinDrawer(renderer.root, stepBodyId(4)), true);
     assert.equal(normalizedText(body).includes("NOT AVAILABLE"), true);
 });
+
+for (const provenance of ['HISTORICAL', 'UNKNOWN']) {
+    test(`retained ${provenance} evidence is separate from the current explanation`, async () => {
+        const diagnostics = diagnosticsFixture();
+        diagnostics.rootBlocker = null;
+        diagnostics.rootBlockerStep = null;
+        Object.assign(diagnostics.steps[4], {
+            status: 'WAITING', provenance, evaluationCycleId: provenance === 'HISTORICAL' ? 'CYCLE_A' : null,
+            reasonText: 'No evaluation is proven to belong to the current cycle.',
+            reasonCode: 'CURRENT_EVALUATION_NOT_ESTABLISHED', current: null,
+            retainedEvaluation: {
+                provenance, reasonText: 'Recorded LIQUIDITY_INSTABILITY',
+                current: { liquiditySafe: false, priceDifference: 0, empty: '' },
+                required: { expected: true }, comparison: 'FAIL',
+                freshness: { state: 'STALE', ageSeconds: 32400 },
+            },
+        });
+        const renderer = await renderCard({ diagnostics });
+        openStep(renderer, 4);
+        const body = findBodyById(renderer.root, stepBodyId(4));
+        const bodyText = normalizedText(body);
+        assert.ok(bodyText.includes(`RETAINED EVALUATION · ${provenance}`));
+        assert.ok(bodyText.includes('STALE (32400s)'));
+        assert.ok(bodyText.includes('Recorded LIQUIDITY_INSTABILITY'));
+        assert.ok(bodyText.includes('liquiditySafe: false'));
+        assert.ok(bodyText.includes('priceDifference: 0'));
+        assert.ok(bodyText.includes('empty: ""'));
+        assert.ok(bodyText.includes('expected: true'));
+        assert.ok(!bodyText.includes('THIS STEP (ROOT BLOCKER)'));
+        const why = descendants(body).find(node => node.props?.className === 'step-diagnostics__reason');
+        assert.ok(!normalizedText(why).includes('LIQUIDITY'));
+    });
+}
+
+test('current boolean false and numeric zero render without missing-value fallback', async () => {
+    const diagnostics = diagnosticsFixture();
+    Object.assign(diagnostics.steps[4], {
+        provenance: 'CURRENT', evaluationCycleId: 'CYCLE_B',
+        current: { boolean: false, numeric: 0 }, required: true, comparison: 'FAIL',
+    });
+    const renderer = await renderCard({ diagnostics });
+    openStep(renderer, 4);
+    const bodyText = normalizedText(findBodyById(renderer.root, stepBodyId(4)));
+    assert.ok(bodyText.includes('boolean: false / numeric: 0'));
+    assert.ok(bodyText.includes('REQUIRED true'));
+    assert.ok(bodyText.includes('COMPARISON FAIL'));
+    assert.ok(bodyText.includes('THIS STEP (ROOT BLOCKER)'));
+});
+
+test('retained strategy data is labeled in decision details and current action', async () => {
+    const diagnostics = diagnosticsFixture();
+    Object.assign(diagnostics.steps[4], {
+        provenance: 'UNKNOWN', evaluationCycleId: null,
+        reasonCode: 'CURRENT_EVALUATION_NOT_ESTABLISHED',
+        retainedEvaluation: { provenance: 'UNKNOWN' },
+    });
+    const renderer = await renderCard({ diagnostics });
+    findToggle(renderer.root, 'lower-status-title-toggle').props.onClick();
+    findToggle(renderer.root, 'current-activity-title-toggle').props.onClick();
+    renderer.render();
+    const details = normalizedText(findBodyById(renderer.root, 'lower-status-title-content'));
+    const activity = normalizedText(findBodyById(renderer.root, 'current-activity-title-content'));
+    assert.ok(details.includes('STRATEGY EVALUATION: UNKNOWN'));
+    assert.ok(details.includes('RECORDED STATE'));
+    assert.ok(details.includes('RETAINED REASON'));
+    assert.ok(activity.includes('CURRENT_EVALUATION_NOT_ESTABLISHED'));
+    assert.ok(!activity.includes('EVALUATING_STRATEGY'));
+});

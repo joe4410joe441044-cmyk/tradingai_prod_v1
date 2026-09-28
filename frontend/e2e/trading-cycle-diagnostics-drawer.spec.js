@@ -248,3 +248,24 @@ test.describe("Trading Cycle left-aligned four-column layout", () => {
         }
     });
 });
+
+
+test('historical evidence is labeled and does not move the four-column cycle', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${HARNESS}?historical=1`);
+    await waitForCycle(page);
+    const flow = page.locator('.trading-cycle-flow');
+    const before = await box(flow);
+    await page.getByTestId('trading-cycle-step-4-toggle').click();
+    const drawer = page.getByTestId('trading-cycle-diagnostics-drawer');
+    await expect(drawer).toContainText('EVALUATION: HISTORICAL');
+    await expect(drawer).toContainText('CYCLE_A');
+    await expect(drawer).toContainText('STALE (32400s)');
+    const retained = page.getByTestId('retained-evaluation');
+    await expect(retained).toContainText('LIQUIDITY_INSTABILITY');
+    await expect(retained).toContainText('liquiditySafe: false / priceDifference: 0');
+    await expect(retained).toContainText('expected: true');
+    await expect(drawer.locator('.step-diagnostics__reason')).not.toContainText('LIQUIDITY');
+    await expect(drawer).not.toContainText('THIS STEP (ROOT BLOCKER)');
+    expect(await box(flow)).toEqual(before);
+});

@@ -204,11 +204,65 @@ def _strategy_state(runtime_result: Optional[Mapping[str, Any]]) -> dict:
     return _mapping(output.get("strategy"))
 
 
+def resolve_evaluation_provenance(
+    runtime_result: Optional[Mapping[str, Any]], current_cycle_id: Optional[str] = None
+) -> dict:
+    """Use raw evaluation identity, never the aggregate snapshot's cycle stamp.
+
+    Legacy producers do not emit a cycle ID. Timestamps establish freshness,
+    not cycle membership, so those evaluations deliberately remain UNKNOWN.
+    """
+    strategy = _strategy_state(runtime_result)
+    readiness = _mapping(strategy.get("entryReadiness"))
+    cycle_id = _clean_str(readiness.get("cycleId"))
+    evaluated_at = readiness.get("evaluatedAt")
+    if evaluated_at is None:
+        evaluated_at = strategy.get("timestamp")
+    state = "UNKNOWN"
+    if cycle_id is not None and current_cycle_id is not None:
+        state = "CURRENT" if cycle_id == current_cycle_id else "HISTORICAL"
+    return {
+        "currentCycleId": current_cycle_id,
+        "evaluationCycleId": cycle_id,
+        "provenance": state,
+        "evaluatedAt": evaluated_at,
+        "sourceUpdatedAt": strategy.get("timestamp"),
+    }
+
+
 def _entry_readiness(decision: Mapping[str, Any], strategy: Mapping[str, Any]) -> dict:
-    for candidate in (decision.get("entryReadiness"), strategy.get("entryReadiness")):
-        if isinstance(candidate, Mapping) and candidate.get("available") is True:
-            return dict(candidate)
-    return _mapping(decision.get("entryReadiness") or strategy.get("entryReadiness"))
+    # Raw strategy evidence has not been decorated with aggregate cycle/time.
+    if isinstance(strategy.get("entryReadiness"), Mapping):
+        return dict(strategy["entryReadiness"])
+    return _mapping(decision.get("entryReadiness"))
+
+
+def _condition_comparison(condition: Mapping[str, Any]) -> dict:
+    current = condition.get("currentValue")
+    expected = condition.get("expected")
+    threshold = condition.get("threshold")
+    operator = condition.get("operator")
+    value_type, comparison = "UNKNOWN", "NOT_AVAILABLE"
+    if isinstance(expected, bool):
+        value_type = "BOOLEAN"
+        if isinstance(current, bool):
+            comparison = "PASS" if current == expected else "FAIL"
+    elif expected is not None:
+        value_type = "ENUM"
+        if current is not None:
+            comparison = "PASS" if current == expected else "FAIL"
+    elif operator in {"<=", ">="} and _numeric(threshold) is not None:
+        value_type = "NUMERIC_THRESHOLD"
+        if _numeric(current) is not None:
+            passed = current <= threshold if operator == "<=" else current >= threshold
+            comparison = "PASS" if passed else "FAIL"
+    elif operator is not None:
+        value_type = "PREDICATE"
+        comparison = condition.get("status") or "NOT_AVAILABLE"
+    if condition.get("sourceStatus") == "MISSING":
+        comparison = "NOT_AVAILABLE"
+    return {"valueType": value_type, "comparison": comparison,
+            "required": expected if expected is not None else threshold}
 
 
 def _conditions_by_code(entry_readiness: Mapping[str, Any]) -> dict:
@@ -267,7 +321,10 @@ def _epoch(value: Any) -> Optional[float]:
                 return None
         try:
             normalized = text.replace("Z", "+00:00")
-            return datetime.fromisoformat(normalized).timestamp()
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
         except ValueError:
             return None
     return None
@@ -277,12 +334,12 @@ def _freshness(evaluated_at: Any, source_timestamp: Any) -> dict:
     evaluated = _epoch(evaluated_at)
     source = _epoch(source_timestamp)
     if evaluated is None or source is None:
-        return {"state": "UNKNOWN", "ageSeconds": None, "evaluatedAt": evaluated_at}
+        return {"state": "UNKNOWN", "ageSeconds": None, "evaluatedAt": source_timestamp}
     age = max(0.0, evaluated - source)
     return {
         "state": "FRESH" if age <= 5 else "STALE",
         "ageSeconds": round(age, 3),
-        "evaluatedAt": evaluated_at,
+        "evaluatedAt": source_timestamp,
     }
 
 
@@ -346,6 +403,7 @@ def _normalized_conditions(entry_readiness: Mapping[str, Any]) -> list:
             continue
         normalized.append(
             {
+                **_condition_comparison(condition),
                 "code": condition.get("code"),
                 "status": condition.get("status"),
                 "currentValue": condition.get("currentValue"),
@@ -715,8 +773,9 @@ def _step_details(
         )
 
     elif index == 4:
+        strategy_reason = entry_readiness.get("suppressionReason") or strategy.get("suppressionReason")
         conditions = _normalized_conditions(entry_readiness)
-        code = _blocking_condition_code(entry_readiness, decision.get("blockingReason"))
+        code = _blocking_condition_code(entry_readiness, strategy_reason)
         condition = _conditions_by_code(entry_readiness).get(code or "", {})
         allowed = entry_readiness.get("executionAllowed")
         if not conditions:
@@ -765,16 +824,16 @@ def _step_details(
                         "minimumConfidence": strategy.get("minimumConfidence"),
                         "conditionThreshold": condition.get("threshold"),
                         "conditionOperator": condition.get("operator"),
+                        "conditionExpected": condition.get("expected"),
                     },
                     "comparison": comparison,
-                    "reasonCode": decision.get("blockingReason")
-                    or entry_readiness.get("suppressionReason")
+                    "reasonCode": strategy_reason
                     or code
                     or "ENTRY_ALLOWED",
                     "reasonText": (
                         "Micro Edge Strategy allows entry."
                         if allowed is True
-                        else _reason_text(4, decision.get("blockingReason") or code, condition, entry_readiness)
+                        else _reason_text(4, strategy_reason or code, condition, entry_readiness)
                     ),
                     "blockerType": blocker_type,
                     "actionable": _actionable_for(blocker_type),
@@ -786,6 +845,10 @@ def _step_details(
                 }
             )
             details["extra"] = {"conditions": conditions}
+            predicate = _condition_comparison(condition)
+            details["valueType"] = predicate["valueType"]
+            if predicate["valueType"] == "BOOLEAN":
+                details["comparison"] = predicate["comparison"]
 
     elif index == 5:
         ai = _mapping(stages.get("aiReview"))
@@ -1233,7 +1296,9 @@ def build_trading_cycle_diagnostics(
     parameter_authority = _mapping(strategy.get("parameterAuthority"))
 
     if evaluated_at is None:
-        evaluated_at = decision.get("timestamp") or ctx.get("timestamp")
+        evaluated_at = decision.get("timestamp")
+        if evaluated_at is None:
+            evaluated_at = ctx.get("timestamp")
 
     bot = _mapping(ctx.get("bot"))
     running_flag = _as_bool_or_none(bot.get("running"))
@@ -1250,14 +1315,25 @@ def build_trading_cycle_diagnostics(
     if isinstance(current_index, bool) or not isinstance(current_index, int):
         current_index = None
 
+    runtime_state = _mapping(_mapping(ctx.get("runtime_health")).get("runtimeEngine"))
+    provenance = resolve_evaluation_provenance(runtime, decision.get("cycleId"))
+    current_evaluation = provenance["provenance"] == "CURRENT"
+    blocking_stage = _clean_str(decision.get("blockingStage"))
+    strategy_blocked = (blocking_stage or "").upper() == "PYTHON STRATEGY"
+    # Only a proven current strategy evaluation may explain a strategy root.
+    # Other blockers retain their own canonical current-state dependencies.
+    if not current_evaluation and strategy_blocked:
+        blocking_stage = None
     root = _root_blocker(
         bot_running=bot_running,
-        blocking_stage=decision.get("blockingStage"),
+        blocking_stage=blocking_stage,
         blocking_reason=decision.get("blockingReason"),
         entry_readiness=entry_readiness,
         close_state=close_state,
         evaluated_at=evaluated_at,
     )
+    if root and root.get("step") == 4:
+        root.update(provenance)
     root_step = (
         root.get("step")
         if isinstance(root, dict) and isinstance(root.get("step"), int)
@@ -1308,6 +1384,13 @@ def build_trading_cycle_diagnostics(
             dependency_state = f"WAITING_FOR_STEP_{root_step}"
             root_blocker_step = root_step
 
+        elif (bot_running and root_step is None and strategy_blocked
+              and not current_evaluation and current_index == 4 and index > 4):
+            # Preserve the existing entry dependency without promoting the
+            # retained suppression reason to a current root blocker.
+            effective = StepStatus.WAITING
+            dependency_state = "WAITING_FOR_STEP_4"
+
         if root_step is not None and index == root_step:
             effective = StepStatus.BLOCKED
 
@@ -1316,7 +1399,40 @@ def build_trading_cycle_diagnostics(
             dependency_state = None
             root_blocker_step = None
 
-        source_timestamp = decision.get("timestamp") or evaluated_at
+        retained = None
+        strategy_derived = index in {0, 3, 4}
+        if strategy_derived and not current_evaluation:
+            retained_details = details if bot_running else _step_details(
+                index, decision=decision, strategy=strategy,
+                entry_readiness=entry_readiness, close_state=close_state,
+                stages=stages, context=ctx, parameter_authority=parameter_authority,
+                bot_running=True,
+            )
+            retained = {**deepcopy(retained_details), **provenance,
+                        "freshness": _freshness(evaluated_at, provenance["evaluatedAt"])}
+            if index == 4:
+                retained["entryReadiness"] = deepcopy(entry_readiness)
+                retained["liquidityInstabilityDebug"] = deepcopy(strategy.get("liquidityInstabilityDebug"))
+            # Keep the supported feature-contract predicate (STEP 3), but label
+            # its evidence provenance. STEP 4 must represent current availability.
+            if index == 4 and bot_running:
+                effective = StepStatus.WAITING
+                details = {
+                    "current": _NOT_AVAILABLE, "required": "CURRENT_EVALUATION",
+                    "comparison": "NOT_EVALUATED",
+                    "reasonCode": "CURRENT_EVALUATION_NOT_ESTABLISHED",
+                    "reasonText": "No evaluation is proven to belong to the current cycle.",
+                    "blockerType": BlockerType.DATA, "actionable": Actionable.NO,
+                    "nextCondition": "CURRENT_EVALUATION", "nextStep": index + 1,
+                    "source": SOURCE,
+                }
+                if runtime_state.get("status") is not None:
+                    details["current"] = {
+                        "evaluation": _NOT_AVAILABLE,
+                        "strategyLoop": runtime_state["status"],
+                    }
+        source_timestamp = (provenance["evaluatedAt"] if strategy_derived
+                            else decision.get("timestamp"))
         freshness = _freshness(evaluated_at, source_timestamp)
         related = details.get("relatedParameters") or []
 
@@ -1335,11 +1451,17 @@ def build_trading_cycle_diagnostics(
             "nextCondition": details.get("nextCondition"),
             "nextStep": details.get("nextStep"),
             "source": details.get("source"),
-            "evaluatedAt": evaluated_at,
+            "evaluatedAt": source_timestamp,
+            "diagnosticsGeneratedAt": evaluated_at,
             "freshness": freshness,
             "dependencyState": dependency_state,
             "rootBlockerStep": root_blocker_step,
         }
+        if strategy_derived:
+            step.update(provenance)
+            step["valueType"] = details.get("valueType", "UNKNOWN")
+        if retained is not None:
+            step["retainedEvaluation"] = retained
         if details.get("extra"):
             step["extra"] = deepcopy(details["extra"])
         steps.append(step)
@@ -1349,6 +1471,9 @@ def build_trading_cycle_diagnostics(
         "source": SOURCE,
         "evaluatedAt": evaluated_at,
         "cycleId": decision.get("cycleId"),
+        "diagnosticsGeneratedAt": evaluated_at,
+        "evaluationProvenance": provenance,
+        "runtimeState": deepcopy(runtime_state),
         "cycleState": cycle_state,
         "rootBlocker": deepcopy(root),
         "rootBlockerStep": root_step,

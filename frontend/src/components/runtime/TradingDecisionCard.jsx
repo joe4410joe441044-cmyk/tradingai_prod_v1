@@ -5,13 +5,13 @@ import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradi
 const label = (english, japanese) => `${english}（${japanese}）`;
 
 const timestampLabel = (value) => {
-    if (!value) return 'NOT AVAILABLE';
+    if (value === null || value === undefined) return 'NOT AVAILABLE';
     const date = new Date(typeof value === 'number' ? value * 1000 : value);
     return Number.isNaN(date.getTime()) ? 'NOT AVAILABLE' : date.toLocaleString();
 };
 
 const durationLabel = (value) => {
-    if (!value) return 'NOT AVAILABLE';
+    if (value === null || value === undefined) return 'NOT AVAILABLE';
     const started = typeof value === 'number' ? value * 1000 : Date.parse(value);
     if (!Number.isFinite(started)) return 'NOT AVAILABLE';
     const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
@@ -33,14 +33,15 @@ const toneFor = (status) => {
 const EMPTY_VALUE = 'NOT AVAILABLE';
 
 const formatDiagnosticValue = (value) => {
-    if (value === null || value === undefined || value === '') return EMPTY_VALUE;
-    if (typeof value === 'boolean') return value ? 'YES' : 'NO';
+    if (value === null || value === undefined) return EMPTY_VALUE;
+    if (value === '') return '""';
+    if (typeof value === 'boolean') return String(value);
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : EMPTY_VALUE;
     if (Array.isArray(value)) {
         return value.length ? value.map(formatDiagnosticValue).join(', ') : EMPTY_VALUE;
     }
     if (typeof value === 'object') {
-        const entries = Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== '');
+        const entries = Object.entries(value).filter(([, item]) => item !== null && item !== undefined);
         if (!entries.length) return EMPTY_VALUE;
         return entries
             .map(([key, item]) => `${key}: ${formatDiagnosticValue(item)}`)
@@ -85,6 +86,12 @@ const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
             data-testid={`trading-cycle-step-${stage.index}-content`}
             id={`trading-cycle-step-${stage.index}-content`}
         >
+            {diagnostic.provenance && (
+                <p className="step-diagnostics__meta">
+                    EVALUATION: {diagnostic.provenance} · EVALUATION CYCLE: {display(diagnostic.evaluationCycleId)}
+                    {' · '}EVALUATED AT: {timestampLabel(diagnostic.evaluatedAt)}
+                </p>
+            )}
             <dl className="step-diagnostics__list">
                 <div className="step-diagnostics__row">
                     <dt>WHY</dt>
@@ -171,6 +178,27 @@ const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
                 </div>
             </dl>
 
+            {diagnostic.retainedEvaluation && (
+                <div data-testid="retained-evaluation">
+                    <p className="step-diagnostics__meta">
+                        RETAINED EVALUATION · {diagnostic.retainedEvaluation.provenance}
+                        {' · '}{formatFreshness(diagnostic.retainedEvaluation.freshness)}
+                    </p>
+                    <dl className="step-diagnostics__list">
+                        {[
+                            ['RETAINED REASON', diagnostic.retainedEvaluation.reasonText],
+                            ['RECORDED VALUE', diagnostic.retainedEvaluation.current],
+                            ['REQUIRED', diagnostic.retainedEvaluation.required],
+                            ['COMPARISON', diagnostic.retainedEvaluation.comparison],
+                        ].map(([name, value]) => (
+                            <div className="step-diagnostics__row" key={name}>
+                                <dt>{name}</dt>
+                                <dd><strong className="step-diagnostics__value">{formatDiagnosticValue(value)}</strong></dd>
+                            </div>
+                        ))}
+                    </dl>
+                </div>
+            )}
             <p className="step-diagnostics__meta">
                 SOURCE: {diagnostic.source || EMPTY_VALUE} · FRESHNESS: {formatFreshness(diagnostic.freshness)}
             </p>
@@ -334,7 +362,8 @@ const CurrentActivityPanel = ({ model, open, onToggle }) => (
             </div>
             <div>
                 <span>{label("CURRENT ACTION", "現在のアクション")}</span>
-                <strong>{model.currentActivity}</strong>
+                <strong>{model.currentStageIndex === 4 && model.diagnostics.stepFor(4)?.retainedEvaluation
+                    ? model.diagnostics.stepFor(4).reasonCode : model.currentActivity}</strong>
             </div>
             <div>
                 <span>{label("SELECTED SYMBOL", "選定された通貨ペア")}</span>
@@ -348,9 +377,10 @@ const CurrentActivityPanel = ({ model, open, onToggle }) => (
     </DetailDisclosure>
 );
 
-const LowerStatusPanel = ({ decision, open, onToggle }) => {
+const LowerStatusPanel = ({ decision, diagnostic, open, onToggle }) => {
     const snapshot = decision || {};
     const stages = snapshot.stages || {};
+    const retained = snapshot.currentStageIndex === 4 && diagnostic?.retainedEvaluation;
 
     return (
         <DetailDisclosure
@@ -360,21 +390,22 @@ const LowerStatusPanel = ({ decision, open, onToggle }) => {
             onToggle={onToggle}
             title={label("DECISION DETAILS", "判断詳細")}
         >
+            {retained && <p className="step-diagnostics__meta">STRATEGY EVALUATION: {diagnostic.provenance} · EVALUATION CYCLE: {display(diagnostic.evaluationCycleId)}</p>}
             <div className="lower-status-grid">
                 <div>
                     <span>{label("FINAL DECISION", "最終判断")}</span>
                     <strong>{display(snapshot.finalDecision, 'NOT AVAILABLE')}</strong>
                 </div>
                 <div>
-                    <span>{label("CURRENT STATE", "現在状態")}</span>
+                    <span>{label(retained ? "RECORDED STATE" : "CURRENT STATE", retained ? "記録された状態" : "現在状態")}</span>
                     <strong>{display(snapshot.currentState)}</strong>
                 </div>
                 <div>
-                    <span>{label("BLOCKED AT", "停止工程")}</span>
+                    <span>{label(retained ? "RECORDED BLOCK" : "BLOCKED AT", "停止工程")}</span>
                     <strong>{display(snapshot.blockingStage, 'NONE')}</strong>
                 </div>
                 <div>
-                    <span>{label("REASON", "理由")}</span>
+                    <span>{label(retained ? "RETAINED REASON" : "REASON", "理由")}</span>
                     <strong>{display(snapshot.blockingReason, 'NONE')}</strong>
                 </div>
                 <div>
@@ -491,6 +522,7 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
             {/* Lower Status Panel */}
             <LowerStatusPanel
                 decision={decision}
+                diagnostic={model.diagnostics.stepFor(4)}
                 open={decisionDetailsOpen}
                 onToggle={() => setDecisionDetailsOpen((value) => !value)}
             />

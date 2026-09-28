@@ -180,7 +180,7 @@ def test_entry_readiness_is_enriched_from_the_authoritative_strategy_result():
     snapshot = build(runtime_result=result, cycle_id="cycle-7", timestamp="fallback")
     assert snapshot["entryReadinessAvailable"] is True
     assert snapshot["entryReadiness"]["candidateDirection"] == "SELL"
-    assert snapshot["entryReadiness"]["cycleId"] == "cycle-7"
+    assert snapshot["entryReadiness"]["cycleId"] is None
     assert snapshot["entryReadiness"]["evaluatedAt"] == "2026-08-08T12:00:00"
 
 
