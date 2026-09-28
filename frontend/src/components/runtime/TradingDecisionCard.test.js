@@ -44,6 +44,7 @@ const createRenderer = (Component, props) => {
                 values[index] = typeof next === "function" ? next(values[index]) : next;
             }];
         },
+        useEffect() {},
     };
     const render = (nextProps) => {
         if (nextProps) currentProps = { ...currentProps, ...nextProps };

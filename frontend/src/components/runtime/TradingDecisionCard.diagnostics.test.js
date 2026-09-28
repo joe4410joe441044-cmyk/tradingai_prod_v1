@@ -44,6 +44,7 @@ const createRenderer = (Component, props) => {
                 values[index] = typeof next === "function" ? next(values[index]) : next;
             }];
         },
+        useEffect() {},
     };
     const render = (nextProps) => {
         if (nextProps) currentProps = { ...currentProps, ...nextProps };
@@ -77,6 +78,23 @@ const findToggle = (root, testId) => descendants(root).find(
 const findBodyById = (root, id) => descendants(root).find(
     (node) => node.props?.id === id,
 );
+
+const findDrawer = (root) => descendants(root).find(
+    (node) => node.props?.["data-testid"] === "trading-cycle-diagnostics-drawer",
+);
+const countDrawers = (root) => descendants(root).filter(
+    (node) => node.props?.["data-testid"] === "trading-cycle-diagnostics-drawer",
+).length;
+const findDrawerClose = (root) => descendants(root).find(
+    (node) => node.props?.["data-testid"] === "trading-cycle-drawer-close",
+);
+const findDialog = (root) => descendants(root).find(
+    (node) => node.props?.role === "dialog",
+);
+const withinDrawer = (root, id) => {
+    const drawer = findDrawer(root);
+    return Boolean(drawer) && descendants(drawer).some((node) => node.props?.id === id);
+};
 
 const stepToggleId = (index) => `trading-cycle-step-${index}-toggle`;
 const stepBodyId = (index) => `trading-cycle-step-${index}-content`;
@@ -168,7 +186,7 @@ const openStep = (renderer, index) => {
     renderer.render();
 };
 
-test("every STEP renders a details disclosure collapsed by default", async () => {
+test("every STEP renders a details control collapsed by default and no drawer", async () => {
     const renderer = await renderCard();
 
     for (let index = 0; index < 15; index += 1) {
@@ -177,6 +195,8 @@ test("every STEP renders a details disclosure collapsed by default", async () =>
         assert.equal(toggle.props["aria-expanded"], false, `step ${index} collapsed`);
         assert.equal(findBodyById(renderer.root, stepBodyId(index)), undefined);
     }
+    assert.equal(findDrawer(renderer.root), undefined, "no drawer by default");
+    assert.equal(countDrawers(renderer.root), 0);
 });
 
 test("all 15 stage cards remain rendered with diagnostics present", async () => {
@@ -188,7 +208,16 @@ test("all 15 stage cards remain rendered with diagnostics present", async () => 
     assert.equal(labels.length, 15);
 });
 
-test("clicking a STEP expands only that STEP and shows WHY/current/required", async () => {
+test("all 15 DETAILS controls remain rendered", async () => {
+    const renderer = await renderCard();
+    const controls = descendants(renderer.root).filter(
+        (node) => typeof node.props?.className === "string"
+            && node.props.className.split(/\s+/).includes("trading-cycle-step-toggle"),
+    );
+    assert.equal(controls.length, 15);
+});
+
+test("clicking STEP 4 opens the overlay drawer showing STEP 4 diagnostics", async () => {
     const renderer = await renderCard();
 
     openStep(renderer, 4);
@@ -198,7 +227,19 @@ test("clicking a STEP expands only that STEP and shows WHY/current/required", as
         true,
     );
     assert.equal(findToggle(renderer.root, stepToggleId(6)).props["aria-expanded"], false);
-    assert.equal(findBodyById(renderer.root, stepBodyId(6)), undefined);
+
+    const drawer = findDrawer(renderer.root);
+    assert.ok(drawer, "drawer rendered");
+    assert.equal(countDrawers(renderer.root), 1, "exactly one drawer");
+    assert.equal(drawer.props.role, "dialog");
+
+    const drawerText = normalizedText(drawer);
+    assert.equal(drawerText.includes("TRADING CYCLE DIAGNOSTICS"), true);
+    assert.equal(drawerText.includes("STEP 4"), true);
+    assert.equal(drawerText.includes("Micro Edge Strategy"), true);
+    assert.equal(drawerText.includes("STATUS: BLOCKED"), true);
+
+    assert.equal(withinDrawer(renderer.root, stepBodyId(4)), true);
 
     const bodyText = normalizedText(findBodyById(renderer.root, stepBodyId(4)));
     assert.equal(bodyText.includes("WHY"), true);
@@ -209,23 +250,93 @@ test("clicking a STEP expands only that STEP and shows WHY/current/required", as
     assert.equal(bodyText.includes("0.55"), true);
 });
 
-test("multiple STEP panels can be open and collapse independently", async () => {
+test("drawer surfaces comparison, root blocker, action, next condition and source", async () => {
     const renderer = await renderCard();
-
-    openStep(renderer, 3);
     openStep(renderer, 4);
 
-    assert.equal(findToggle(renderer.root, stepToggleId(3)).props["aria-expanded"], true);
-    assert.equal(findToggle(renderer.root, stepToggleId(4)).props["aria-expanded"], true);
-
-    openStep(renderer, 3);
-    assert.equal(findToggle(renderer.root, stepToggleId(3)).props["aria-expanded"], false);
-    assert.equal(findToggle(renderer.root, stepToggleId(4)).props["aria-expanded"], true);
-    assert.equal(findBodyById(renderer.root, stepBodyId(3)), undefined);
-    assert.ok(findBodyById(renderer.root, stepBodyId(4)));
+    const bodyText = normalizedText(findBodyById(renderer.root, stepBodyId(4)));
+    assert.equal(bodyText.includes("COMPARISON"), true);
+    assert.equal(bodyText.includes("ROOT BLOCKER"), true);
+    assert.equal(bodyText.includes("BLOCKER TYPE"), true);
+    assert.equal(bodyText.includes("OPERATOR ACTION"), true);
+    assert.equal(bodyText.includes("RELATED PARAMETER"), true);
+    assert.equal(bodyText.includes("NEXT CONDITION"), true);
+    assert.equal(bodyText.includes("NEXT STEP"), true);
+    assert.equal(bodyText.includes("SOURCE"), true);
+    assert.equal(bodyText.includes("FRESHNESS"), true);
 });
 
-test("root blocker is announced on the owning STEP", async () => {
+test("the old inline STEP panel no longer renders under the cycle", async () => {
+    const renderer = await renderCard();
+    openStep(renderer, 4);
+
+    const wrappers = descendants(renderer.root).filter(
+        (node) => typeof node.props?.className === "string"
+            && node.props.className.includes("trading-cycle-stage-details"),
+    );
+    assert.ok(wrappers.length >= 15);
+    wrappers.forEach((wrapper) => {
+        assert.equal(
+            descendants(wrapper).some((node) => node.props?.id === stepBodyId(4)),
+            false,
+            "diagnostics panel must not render inline under the step",
+        );
+    });
+});
+
+test("clicking another STEP switches the same single drawer without closing", async () => {
+    const renderer = await renderCard();
+
+    openStep(renderer, 4);
+    assert.equal(countDrawers(renderer.root), 1);
+
+    openStep(renderer, 9);
+
+    assert.equal(countDrawers(renderer.root), 1, "still exactly one drawer");
+    assert.equal(findToggle(renderer.root, stepToggleId(4)).props["aria-expanded"], false);
+    assert.equal(findToggle(renderer.root, stepToggleId(9)).props["aria-expanded"], true);
+    assert.equal(findBodyById(renderer.root, stepBodyId(4)), undefined);
+    assert.equal(withinDrawer(renderer.root, stepBodyId(9)), true);
+
+    const drawerText = normalizedText(findDrawer(renderer.root));
+    assert.equal(drawerText.includes("STEP 9"), true);
+});
+
+test("the drawer close button closes it and preserves the cycle", async () => {
+    const renderer = await renderCard();
+    openStep(renderer, 4);
+
+    const close = findDrawerClose(renderer.root);
+    assert.ok(close, "close button exists");
+    assert.ok(close.props["aria-label"], "close button has accessible name");
+    close.props.onClick();
+    renderer.render();
+
+    assert.equal(findDrawer(renderer.root), undefined, "drawer closed");
+    assert.equal(findToggle(renderer.root, stepToggleId(4)).props["aria-expanded"], false);
+    assert.equal(
+        descendants(renderer.root).filter(
+            (node) => typeof node.props?.className === "string"
+                && node.props.className.includes("trading-cycle-stage-label"),
+        ).length,
+        15,
+        "cycle still renders 15 STEP cards",
+    );
+});
+
+test("Escape key closes the drawer", async () => {
+    const renderer = await renderCard();
+    openStep(renderer, 4);
+
+    const dialog = findDialog(renderer.root);
+    assert.ok(dialog, "dialog present");
+    dialog.props.onKeyDown({ key: "Escape", stopPropagation() {} });
+    renderer.render();
+
+    assert.equal(findDrawer(renderer.root), undefined, "drawer closed by Escape");
+});
+
+test("root blocker is announced on the owning STEP inside the drawer", async () => {
     const renderer = await renderCard();
     openStep(renderer, 4);
 
@@ -235,7 +346,7 @@ test("root blocker is announced on the owning STEP", async () => {
     assert.equal(bodyText.includes("YES"), true);
 });
 
-test("downstream STEPs display WAITING FOR STEP n", async () => {
+test("downstream STEPs display WAITING FOR STEP n inside the drawer", async () => {
     const renderer = await renderCard();
     openStep(renderer, 6);
 
@@ -261,7 +372,7 @@ test("missing canonical values render as NOT AVAILABLE rather than guessed", asy
     assert.equal(bodyText.includes("NOT AVAILABLE"), true);
 });
 
-test("card without diagnostics still renders STD sections and no STEP bodies", async () => {
+test("card without diagnostics still renders STD sections and a safe empty drawer", async () => {
     const renderer = await renderCard({ diagnostics: null });
 
     assert.equal(findToggle(renderer.root, "current-activity-title-toggle") != null, true);
@@ -270,6 +381,7 @@ test("card without diagnostics still renders STD sections and no STEP bodies", a
 
     openStep(renderer, 4);
     const body = findBodyById(renderer.root, stepBodyId(4));
-    assert.ok(body, "empty diagnostics panel still renders");
+    assert.ok(body, "empty diagnostics panel still renders in the drawer");
+    assert.equal(withinDrawer(renderer.root, stepBodyId(4)), true);
     assert.equal(normalizedText(body).includes("NOT AVAILABLE"), true);
 });

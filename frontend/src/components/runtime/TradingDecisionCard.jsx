@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 
 import { createTradingCycleModel, STAGES, STATUS, display, yesNo } from './tradingCycleModel';
 
@@ -178,7 +178,7 @@ const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
     );
 };
 
-const TradingCycleStage = ({ stage, open, onToggle, rootBlocker, rootBlockerStep }) => (
+const TradingCycleStage = ({ stage, open, onToggle }) => (
     <div className="trading-cycle-stage-wrapper">
         <div className={`trading-cycle-stage trading-cycle-stage--${toneFor(stage.status)}`} data-status={stage.status}>
             <div className="trading-cycle-stage-index">{stage.index}</div>
@@ -189,6 +189,7 @@ const TradingCycleStage = ({ stage, open, onToggle, rootBlocker, rootBlockerStep
             <button
                 aria-controls={`trading-cycle-step-${stage.index}-content`}
                 aria-expanded={open}
+                aria-haspopup="dialog"
                 className="trading-cycle-step-toggle"
                 data-testid={`trading-cycle-step-${stage.index}-toggle`}
                 onClick={onToggle}
@@ -199,18 +200,11 @@ const TradingCycleStage = ({ stage, open, onToggle, rootBlocker, rootBlockerStep
                     {open ? '▲' : '▼'}
                 </span>
             </button>
-            {open && (
-                <StepDiagnosticsPanel
-                    stage={stage}
-                    rootBlocker={rootBlocker}
-                    rootBlockerStep={rootBlockerStep}
-                />
-            )}
         </div>
     </div>
 );
 
-const TradingCycleFlow = ({ stages, openSteps, onToggleStep, rootBlocker, rootBlockerStep }) => {
+const TradingCycleFlow = ({ stages, selectedStepIndex, onSelectStep }) => {
     // 布局分为三行：顶部行(0-4), 中间行(5-9), 底部行(10-14)
     const rows = [stages.slice(0, 5), stages.slice(5, 10), stages.slice(10, 15)];
 
@@ -226,10 +220,8 @@ const TradingCycleFlow = ({ stages, openSteps, onToggleStep, rootBlocker, rootBl
                             <Fragment key={stage.key}>
                                 <TradingCycleStage
                                     stage={stage}
-                                    open={openSteps.has(stage.index)}
-                                    onToggle={() => onToggleStep(stage.index)}
-                                    rootBlocker={rootBlocker}
-                                    rootBlockerStep={rootBlockerStep}
+                                    open={selectedStepIndex === stage.index}
+                                    onToggle={() => onSelectStep(stage.index)}
                                 />
                                 {index < row.length - 1 && (
                                     <div className="trading-cycle-connector" aria-hidden="true">→</div>
@@ -240,6 +232,66 @@ const TradingCycleFlow = ({ stages, openSteps, onToggleStep, rootBlocker, rootBl
                 </Fragment>
             ))}
         </section>
+    );
+};
+
+// Non-modal right-side overlay.  The drawer is position:fixed so opening it
+// never reflows the Trading Cycle flow or the surrounding dashboard; the
+// operator can keep the cycle in view while reading diagnostics.
+const TradingCycleDiagnosticsDrawer = ({ stage, onClose, rootBlocker, rootBlockerStep }) => {
+    if (!stage) return null;
+
+    const isRootBlocker = Number.isInteger(rootBlockerStep) && rootBlockerStep === stage.index;
+
+    const handleKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            onClose();
+        }
+    };
+
+    return (
+        <div className="trading-cycle-drawer-overlay" data-testid="trading-cycle-drawer-overlay">
+            <aside
+                aria-labelledby="trading-cycle-drawer-title"
+                aria-modal="false"
+                className="trading-cycle-drawer"
+                data-testid="trading-cycle-diagnostics-drawer"
+                onKeyDown={handleKeyDown}
+                role="dialog"
+            >
+                <header className="trading-cycle-drawer__header">
+                    <div className="trading-cycle-drawer__heading">
+                        <span className="trading-cycle-drawer__kicker">TRADING CYCLE DIAGNOSTICS</span>
+                        <h3 className="trading-cycle-drawer__title" id="trading-cycle-drawer-title">
+                            STEP {stage.index}
+                            <span className="trading-cycle-drawer__name">{stage.label}</span>
+                        </h3>
+                        <span className={`trading-cycle-drawer__status trading-cycle-drawer__status--${toneFor(stage.status)}`}>
+                            STATUS: {stage.status}
+                            {isRootBlocker ? ' · ROOT BLOCKER' : ''}
+                        </span>
+                    </div>
+                    <button
+                        aria-label="Close trading cycle diagnostics"
+                        autoFocus
+                        className="trading-cycle-drawer__close"
+                        data-testid="trading-cycle-drawer-close"
+                        onClick={onClose}
+                        type="button"
+                    >
+                        × CLOSE
+                    </button>
+                </header>
+                <div className="trading-cycle-drawer__body">
+                    <StepDiagnosticsPanel
+                        stage={stage}
+                        rootBlocker={rootBlocker}
+                        rootBlockerStep={rootBlockerStep}
+                    />
+                </div>
+            </aside>
+        </div>
     );
 };
 
@@ -353,19 +405,26 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
     const [currentActivityOpen, setCurrentActivityOpen] = useState(false);
     const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
     const [thirdSectionOpen, setThirdSectionOpen] = useState(false);
-    const [openSteps, setOpenSteps] = useState(new Set());
+    const [selectedStepIndex, setSelectedStepIndex] = useState(null);
 
-    const toggleStep = (index) => {
-        setOpenSteps((previous) => {
-            const next = new Set(previous);
-            if (next.has(index)) {
-                next.delete(index);
-            } else {
-                next.add(index);
-            }
-            return next;
-        });
+    const selectStep = (index) => {
+        setSelectedStepIndex((current) => (current === index ? null : index));
     };
+
+    useEffect(() => {
+        if (selectedStepIndex === null) return undefined;
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') setSelectedStepIndex(null);
+        };
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [selectedStepIndex]);
+
+    const rootBlocker = model.diagnostics?.rootBlocker || diagnostics?.rootBlocker || null;
+    const rootBlockerStep = model.diagnostics?.rootBlockerStep ?? null;
+    const selectedStage = selectedStepIndex === null
+        ? null
+        : model.stages.find((stage) => stage.index === selectedStepIndex) || null;
 
     return (
         <section className="trading-decision-card" aria-labelledby="trading-decision-title">
@@ -378,10 +437,16 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
             {/* Main Trading Cycle Flow */}
             <TradingCycleFlow
                 stages={model.stages}
-                openSteps={openSteps}
-                onToggleStep={toggleStep}
-                rootBlocker={model.diagnostics?.rootBlocker || diagnostics?.rootBlocker || null}
-                rootBlockerStep={model.diagnostics?.rootBlockerStep ?? null}
+                selectedStepIndex={selectedStepIndex}
+                onSelectStep={selectStep}
+            />
+
+            {/* Right-side overlay diagnostics drawer (single instance) */}
+            <TradingCycleDiagnosticsDrawer
+                stage={selectedStage}
+                onClose={() => setSelectedStepIndex(null)}
+                rootBlocker={rootBlocker}
+                rootBlockerStep={rootBlockerStep}
             />
 
             {/* Current Activity Panel */}

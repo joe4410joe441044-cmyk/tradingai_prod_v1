@@ -6011,6 +6011,131 @@ is not rendered until opened so the cycle stays compact.
 }
 
 /* =========================================================
+TRADING CYCLE DIAGNOSTICS OVERLAY DRAWER
+Opening a STEP DETAILS control shows this right-side overlay.
+It is position: fixed and removed from document flow, so the
+Trading Cycle width/position, STEP card x/y and the surrounding
+dashboard layout never move or shrink while it is open.
+z-index sits above dashboard content (and the trade-history
+drawer at 40) but below the existing critical modals (1000),
+app header (9999) and help/market-intelligence overlays (10000+).
+========================================================= */
+.trading-cycle-drawer-overlay {
+    position: fixed;
+    /* 12px :root padding (see ROOT section) + 42px .status-strip + 1px border */
+    top: 55px;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    display: flex;
+    justify-content: flex-end;
+    background: rgba(4, 8, 16, 0.28);
+    pointer-events: none; /* non-modal: Trading Cycle stays interactive */
+}
+
+.trading-cycle-drawer {
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    width: min(460px, calc(100vw - 24px));
+    max-width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    border-left: 1px solid var(--decision-border, #243149);
+    background: #0d1320;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+}
+
+.trading-cycle-drawer__header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--decision-border, #243149);
+    background: #111a29;
+}
+
+.trading-cycle-drawer__heading {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.trading-cycle-drawer__kicker {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #8d96a5;
+}
+
+.trading-cycle-drawer__title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #eef4fc;
+}
+
+.trading-cycle-drawer__name {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    color: #9badc6;
+}
+
+.trading-cycle-drawer__status {
+    font: 700 10px "Consolas", monospace;
+    letter-spacing: 0.6px;
+    color: #d7dde5;
+}
+
+.trading-cycle-drawer__status--blocked { color: #f0a35e; }
+.trading-cycle-drawer__status--pass { color: #59c37a; }
+.trading-cycle-drawer__status--active { color: #57b8ff; }
+.trading-cycle-drawer__status--bypassed { color: #9badc6; }
+
+.trading-cycle-drawer__close {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    border: 1px solid #2a3139;
+    border-radius: 5px;
+    background: #10151c;
+    color: #cbd5e1;
+    font: 700 10px "Consolas", monospace;
+    letter-spacing: 0.6px;
+    cursor: pointer;
+}
+
+.trading-cycle-drawer__close:hover,
+.trading-cycle-drawer__close:focus-visible {
+    border-color: #57b8ff;
+    color: #ffffff;
+}
+
+.trading-cycle-drawer__body {
+    padding: 14px;
+}
+
+/* The diagnostics panel fills the drawer instead of the old
+   240px inline card. */
+.trading-cycle-drawer .step-diagnostics,
+.trading-cycle-drawer .step-diagnostics--empty {
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+/* =========================================================
 RESPONSIVE DESIGN
 ========================================================= */
 @media (max-width: 768px) {
@@ -6043,6 +6168,13 @@ RESPONSIVE DESIGN
 
     .trading-cycle-stage-label {
         font-size: 10px;
+    }
+
+    /* Very narrow viewports: allow the drawer to use the full width
+       without introducing horizontal scroll. */
+    .trading-cycle-drawer {
+        width: 100vw;
+        border-left: 0;
     }
 }
 
