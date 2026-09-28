@@ -2937,6 +2937,40 @@ class BotManager:
             finally:
                 self._end_execution_admission(reservation)
 
+    def _observe_runtime_decision(self, microstructure_state, **context):
+        """Evaluate the canonical strategy pipeline without granting execution.
+
+        Market observation and natural BUY/SELL/HOLD generation remain active
+        while the operator execution loop is stopped. Order authority is not
+        decided here: MM, Governance, live readiness, the loop gate, and the
+        final engine guard remain the fail-closed execution boundaries.
+        """
+
+        if (
+            runtime_registry.trading_runtime is None
+            or self._symbol_switch_entry_paused
+        ):
+            return None
+
+        result = self._process_runtime_with_bot_admission(
+            microstructure_state,
+            **context,
+        )
+        self.latest_runtime_result = result
+
+        if isinstance(result, dict):
+            result["runtimeSnapshotAuthority"] = {
+                "sessionId": self.session_id,
+                "runtimeInstanceId": self.runtime_instance_id,
+                "runtimeId": context.get("runtime_id"),
+                "capturedAt": time.time(),
+                "signalGenerationAuthority": "MARKET_OBSERVATION",
+                "executionPermissionAuthority": "CANONICAL_DOWNSTREAM_GATES",
+            }
+
+        self.attach_orderbook_runtime_debug(result)
+        return result
+
     # ============================================
     # MANUAL PAPER TRADING
     # ============================================
@@ -6205,37 +6239,19 @@ class BotManager:
 
                         self.latest_microstructure_state = micro_state
 
-                        if (self.loop_state == "RUNNING"
-                                and runtime_registry.trading_runtime
-                                and not self._symbol_switch_entry_paused):
-
-                            self.latest_runtime_result = (
-                                self._process_runtime_with_bot_admission(
-                                    micro_state,
-                                    active_symbol=self.activeSymbol,
-                                    runtime_id=runtime_id,
-                                    exchange=self.exchange_name,
-                                    market_type=data.get("market_type") or self.market_type,
-                                    exchange_symbol=(
-                                        data.get("exchange_symbol")
-                                        or self.orderbook_symbol
-                                    ),
-                                )
-                            )
-
-                            if isinstance(self.latest_runtime_result, dict):
-                                self.latest_runtime_result[
-                                    "runtimeSnapshotAuthority"
-                                ] = {
-                                    "sessionId": current_session,
-                                    "runtimeInstanceId": self.runtime_instance_id,
-                                    "runtimeId": runtime_id,
-                                    "capturedAt": time.time(),
-                                }
-
-                            self.attach_orderbook_runtime_debug(
-                                self.latest_runtime_result
-                            )
+                        self._observe_runtime_decision(
+                            micro_state,
+                            active_symbol=self.activeSymbol,
+                            runtime_id=runtime_id,
+                            exchange=self.exchange_name,
+                            market_type=(
+                                data.get("market_type") or self.market_type
+                            ),
+                            exchange_symbol=(
+                                data.get("exchange_symbol")
+                                or self.orderbook_symbol
+                            ),
+                        )
 
                     except Exception as runtime_error:
 

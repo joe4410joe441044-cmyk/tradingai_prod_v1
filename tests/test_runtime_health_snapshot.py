@@ -212,6 +212,18 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
         self.assertNotEqual(snapshot["health"], "CRITICAL")
         self.assertEqual(snapshot["pipelineStatus"], "IDLE")
 
+    def test_stopped_loop_projects_fresh_strategy_observation(self):
+        snapshot = self._active_snapshot(
+            loop_state="STOPPED",
+            governance_state={"execution_enabled": False},
+        )
+
+        self.assertEqual(snapshot["runtimeLoop"]["status"], "STOPPED")
+        self.assertTrue(snapshot["strategy"]["reached"])
+        self.assertEqual(snapshot["strategy"]["status"], "IDLE")
+        self.assertEqual(snapshot["loops"]["strategy-loop"], "REACHED")
+        self.assertFalse(snapshot["executionAllowed"])
+
     def test_running_loop_with_valid_current_snapshot_is_healthy(self):
         snapshot = self._active_snapshot()
 

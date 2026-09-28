@@ -583,14 +583,15 @@ def build_runtime_health_snapshot(
         else None
     )
     snapshot_current = bool(
-        completed_result
+        active
+        and completed_result
         and snapshot_authority
         and snapshot_authority.get("sessionId") == session_id
         and snapshot_authority.get("runtimeInstanceId") == runtime_instance_id
         and snapshot_authority.get("runtimeId") == active_runtime_id
         and snapshot_age is not None
         and 0 <= snapshot_age <= 5
-    ) if loop_running else False
+    )
     execution_available = active and bool(engine_available)
     # A completed cycle remains useful as history, but it must not be exposed
     # as the current decision after the bot lifecycle has stopped.
@@ -606,17 +607,17 @@ def build_runtime_health_snapshot(
     )
     adapter_reached = False
     runtime_state_reached = False
-    strategy_reached = loop_running and result.get("strategyRuntimeReached", True)
+    strategy_reached = bool(result) and result.get("strategyRuntimeReached", True)
     ai_reached = False
-    money_reached = loop_running and bool(result.get("moneyManagementReached"))
-    governance_reached = loop_running and bool(result.get("governanceRuntimeReached"))
-    execution_reached = loop_running and bool(result.get("executionRuntimeReached"))
-    execution_governance_reached = loop_running and bool(
+    money_reached = bool(result.get("moneyManagementReached"))
+    governance_reached = bool(result.get("governanceRuntimeReached"))
+    execution_reached = bool(result.get("executionRuntimeReached"))
+    execution_governance_reached = bool(
         result.get("executionGovernanceReached")
     )
-    signal_adapter_reached = loop_running and bool(result.get("signalAdapterReached"))
-    handoff_attempted = loop_running and bool(result.get("handoffAttempted"))
-    handoff_executed = loop_running and bool(result.get("handoffExecuted"))
+    signal_adapter_reached = bool(result.get("signalAdapterReached"))
+    handoff_attempted = bool(result.get("handoffAttempted"))
+    handoff_executed = bool(result.get("handoffExecuted"))
 
     execution_runtime = result.get("runtime")
     execution_runtime = (
