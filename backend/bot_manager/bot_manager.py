@@ -1203,6 +1203,12 @@ class BotManager:
             "dailyPnlDayStart": (
                 daily_pnl.get("dayStart") if daily_pnl is not None else None
             ),
+            "positionObservation": (
+                deepcopy(client.account_position_observation)
+                if position_ok and isinstance(getattr(client, "account_position_observation", None), dict)
+                else {"positions": None, "sourceUpdatedAt": None}
+                if not position_ok else None
+            ),
             "positions": positions_value,
             "positionSummary": self._position_summary(
                 positions_value
@@ -1420,7 +1426,7 @@ class BotManager:
             self._get_real_account_snapshot()
         )
 
-        return {
+        runtime = {
             "paperAccount": self._build_paper_account_runtime(
                 account_snapshot
             ),
@@ -1466,6 +1472,33 @@ class BotManager:
                 "generation": real_account.get("generation"),
             },
         }
+
+        from backend.runtime.current_position_view import current_position, last_position_event
+        from backend.runtime.trade_history_read import TradeHistoryService
+
+        now = time.time()
+        mode = str(selected_mode).upper()
+        engine = self.engine
+        engine_matches = engine is not None and str(getattr(engine, "mode", "")).upper() == mode
+        # PAPER must not read a LIVE engine's compatibility account snapshot.
+        paper = runtime["paperAccount"] if engine_matches or engine is None else {}
+        if engine_matches and account_snapshot.get("available") is not True:
+            paper = {}
+        real = self.real_account_snapshot if isinstance(self.real_account_snapshot, dict) else {}
+        observation = real.get("positionObservation")
+        live = real if isinstance(observation, dict) else real_account
+        position_symbol = getattr(engine, "symbol", None) if engine_matches else self.symbol
+        if mode == "LIVE" and position_symbol:
+            from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+            position_symbol = to_kucoin_futures_symbol(position_symbol)
+        runtime["currentPosition"] = current_position(
+            paper if mode == "PAPER" else live, mode, now=now,
+            symbol=position_symbol,
+            current_price=getattr(engine, "latest_price", None) if engine_matches else None,
+            observation=observation, maximum_age=self.account_stale_after,
+        )
+        runtime["lastPositionEvent"] = last_position_event(TradeHistoryService(), mode)
+        return runtime
 
     def _flatten_account_runtime_fields(
         self,

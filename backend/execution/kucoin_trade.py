@@ -715,6 +715,15 @@ class KucoinTradeClient(BaseClient):
 
         positions = data["data"]
 
+        # Display-only copy of this existing response, before legacy selection.
+        # The execution return contract below remains unchanged.
+        try:
+            from backend.runtime.current_position_view import kucoin_position_observation
+            self.account_position_observation = kucoin_position_observation(positions, time.time())
+        except Exception:
+            # Display metadata must never block the existing execution reader.
+            self.account_position_observation = {"positions": None, "sourceUpdatedAt": None}
+
         active = []
 
         for p in positions:
