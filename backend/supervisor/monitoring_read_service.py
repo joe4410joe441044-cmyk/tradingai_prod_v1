@@ -33,6 +33,7 @@ from .monitoring_scheduler_models import (
 from .monitoring_scheduler_state import SchedulerStateModel
 from .monitoring_state_models import RecoveryResult
 from .monitoring_state_store import MonitoringStateStore
+from .supervisor_control_plane import ControlPlaneStatus
 
 HEALTH_READ_SCHEMA_VERSION = "supervisor-monitoring-read-v1"
 
@@ -52,6 +53,7 @@ JOURNAL_CORRUPT = "JOURNAL_CORRUPT"
 JOURNAL_READ_FAILED = "JOURNAL_READ_FAILED"
 HEALTH_REDUCTION_FAILED = "HEALTH_REDUCTION_FAILED"
 LAST_RUN_UNAVAILABLE = "LAST_RUN_UNAVAILABLE"
+CONTROL_PLANE_UNAVAILABLE = "CONTROL_PLANE_UNAVAILABLE"
 
 _MAX_CODES = 64
 
@@ -158,6 +160,7 @@ class MonitoringReadResponse(Contract):
     availability: ReadStatus = "NOT_CONFIGURED"
     warnings: tuple[Token, ...] = Field(default=(), max_length=_MAX_CODES)
     health: MonitoringHealth | None = None
+    controlPlane: ControlPlaneStatus | None = None
     crossProcessSafety: Token = CROSS_PROCESS_SAFETY
     productionActivationAllowed: bool = False
 
@@ -192,6 +195,7 @@ class MonitoringReadService:
         provenance: tuple[Token, ...] = (),
         warnings: tuple[Token, ...] = (),
         clock: Callable[[], datetime] | None = None,
+        control_plane=None,
     ) -> None:
         if store is not None and not isinstance(store, MonitoringStateStore):
             raise TypeError("store must be a MonitoringStateStore or None")
@@ -210,6 +214,7 @@ class MonitoringReadService:
         self._provenance = tuple(provenance)
         self._warnings = tuple(warnings)
         self._clock = clock if clock is not None else _now
+        self._control_plane = control_plane
 
     def read(self) -> MonitoringReadResponse:
         """Build the bounded read model.  Never executes a monitoring run."""
@@ -288,6 +293,14 @@ class MonitoringReadService:
         else:
             provenance = ()
 
+        control_plane_status = None
+        if self._control_plane is not None:
+            try:
+                control_plane_status = self._control_plane.status()
+            except Exception:  # noqa: BLE001 - control-plane status is best effort
+                warnings.add(CONTROL_PLANE_UNAVAILABLE)
+                control_plane_status = None
+
         return MonitoringReadResponse(
             generatedAt=generated_at,
             observedAt=generated_at if states else None,
@@ -316,6 +329,7 @@ class MonitoringReadService:
             availability=journal_availability,
             warnings=tuple(warnings),
             health=health,
+            controlPlane=control_plane_status,
             crossProcessSafety=CROSS_PROCESS_SAFETY,
             productionActivationAllowed=False,
             **last_run_fields,

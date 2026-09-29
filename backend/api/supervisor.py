@@ -15,7 +15,11 @@ from backend.supervisor.runtime_snapshot_adapter import RuntimeSnapshotAdapter
 from backend.api.supervisor_conversation import create_supervisor_conversation_router
 from backend.api.supervisor_history import create_supervisor_history_router
 from backend.api.supervisor_monitoring import create_supervisor_monitoring_router
+from backend.api.supervisor_monitoring_control import (
+    create_supervisor_monitoring_control_router,
+)
 from backend.supervisor.monitoring_read_service import MonitoringReadService
+from backend.supervisor.supervisor_control_plane import get_control_plane
 from backend.supervisor.audit_store import SupervisorAuditStore
 from backend.supervisor.conversation_service import SupervisorConversationService
 from backend.supervisor.ollama_provider import OllamaLocalProvider
@@ -63,9 +67,12 @@ def create_supervisor_router(
     provider_configuration: object | None = None,
     knowledge_history_consumer: SupervisorKnowledgeHistoryConsumer | None = None,
     monitoring_read_service: MonitoringReadService | None = None,
+    control_plane=None,
 ) -> APIRouter:
     """Create a router holding observation capability only, never commands."""
     snapshot_adapter = adapter or RuntimeSnapshotAdapter()
+    if control_plane is None:
+        control_plane = get_control_plane()
     router = APIRouter(prefix="/api/supervisor", tags=["supervisor"])
 
     @router.get("/snapshot", response_class=Response)
@@ -82,7 +89,13 @@ def create_supervisor_router(
             return _failure_response(SupervisorFailureCode.FAIL_CLOSED)
 
     # Read-only monitoring health/state routes (GET only; default unavailable).
+    if monitoring_read_service is None:
+        monitoring_read_service = MonitoringReadService(control_plane=control_plane)
     router.include_router(create_supervisor_monitoring_router(monitoring_read_service))
+    # Default-OFF control plane: trigger POST + bounded alert/control reads.
+    router.include_router(
+        create_supervisor_monitoring_control_router(control_plane=control_plane)
+    )
 
     audit_store = SupervisorAuditStore()
     if provider_configuration is None:

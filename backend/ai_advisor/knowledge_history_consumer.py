@@ -30,7 +30,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 from backend.runtime.cycle_evidence import (
     EvidenceType,
@@ -47,6 +47,14 @@ from backend.runtime.knowledge_history_query import (
 from backend.runtime.knowledge_history_sanitizer import sanitize_summary
 
 ADVISOR_KNOWLEDGE_HISTORY_ENABLED_ENV = "AI_ADVISOR_KNOWLEDGE_HISTORY_ENABLED"
+ADVISOR_SUPERVISOR_ALERT_EXPLANATION_ENABLED_ENV = (
+    "AI_ADVISOR_SUPERVISOR_ALERT_EXPLANATION_ENABLED"
+)
+
+# Deterministic Supervisor alert ids are "A" + 31 lowercase hex characters.
+_ALERT_ID_PATTERN = re.compile(r"\bA[0-9a-f]{31}\b")
+_ALERT_EXPLANATION_MAX_REASON_CODES = 32
+_ALERT_EXPLANATION_MAX_PROVENANCE = 32
 
 # Small request-time budget: history evidence must never flood the Advisor
 # response.  The hard maximum is still enforced by the shared query contract.
@@ -146,6 +154,102 @@ def advisor_knowledge_history_enabled(
     env = os.environ if environ is None else environ
     raw = str(env.get(ADVISOR_KNOWLEDGE_HISTORY_ENABLED_ENV, "")).strip().lower()
     return raw in _TRUTHY
+
+
+def advisor_supervisor_alert_explanation_enabled(
+    environ: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """Return whether read-only Supervisor alert explanation is enabled (default OFF)."""
+
+    env = os.environ if environ is None else environ
+    raw = str(env.get(ADVISOR_SUPERVISOR_ALERT_EXPLANATION_ENABLED_ENV, "")).strip().lower()
+    return raw in _TRUTHY
+
+
+def extract_supervisor_alert_id(message: Any) -> Optional[str]:
+    """Extract a bounded deterministic Supervisor alert id from free text."""
+
+    if not isinstance(message, str):
+        return None
+    match = _ALERT_ID_PATTERN.search(message)
+    if match is None:
+        return None
+    return match.group(0)
+
+
+def _bounded_alert_explanation(record: Any, alert_id: str) -> dict:
+    """Build a bounded, sanitized, read-only alert explanation projection."""
+
+    def _text(name: str, default=None):
+        value = getattr(record, name, None)
+        if value is None:
+            return default
+        return str(value)[:256]
+
+    def _codes(name: str) -> list:
+        values = getattr(record, name, None) or ()
+        return [str(value)[:128] for value in tuple(values)[:_ALERT_EXPLANATION_MAX_REASON_CODES]]
+
+    return {
+        "alert_id": alert_id,
+        "found": True,
+        "read_only": True,
+        "status": _text("status", "OPEN"),
+        "delivery_status": _text("delivery_status", "NOT_CONFIGURED"),
+        "severity": _text("current_severity", "UNKNOWN"),
+        "highest_severity": _text("highest_severity", "UNKNOWN"),
+        "category": _text("category", "UNKNOWN"),
+        "metric": _text("metric", "UNKNOWN"),
+        "metric_version": _text("metric_version", "1"),
+        "policy_version": _text("policy_version", "UNKNOWN"),
+        "scope": _text("scope", "DEFAULT"),
+        "mode": _text("mode", "UNKNOWN"),
+        "symbol": _text("symbol"),
+        "occurrence_count": getattr(record, "occurrence_count", 0),
+        "first_seen_at": _iso_or_none(getattr(record, "first_seen_at", None)),
+        "last_seen_at": _iso_or_none(getattr(record, "last_seen_at", None)),
+        "reason_codes": _codes("reason_codes"),
+        # Observed evidence / baseline / drift / Supervisor interpretation are
+        # kept explicitly separate so the Advisor cannot present one as another.
+        "observed_evidence": {
+            "observation_id": _text("observation_id"),
+            "source_revision": _text("source_revision"),
+        },
+        "baseline": {
+            "policy_version": _text("policy_version", "UNKNOWN"),
+            "category": _text("category", "UNKNOWN"),
+        },
+        "drift_result": {
+            "metric": _text("metric", "UNKNOWN"),
+            "metric_version": _text("metric_version", "1"),
+            "reason_codes": _codes("reason_codes"),
+        },
+        "supervisor_interpretation": _text("status", "OPEN"),
+        "provenance": _codes("provenance"),
+        "freshness": _text("freshness", "UNKNOWN"),
+        "availability": _text("availability", "NOT_CAPTURED"),
+        "partial_result": bool(getattr(record, "partial_result", False)),
+        "uncertainty": "MEDIUM" if getattr(record, "partial_result", False) else "LOW",
+    }
+
+
+def _iso_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        return value.isoformat()
+    except AttributeError:
+        return str(value)[:64]
+
+
+def _alert_explanation_unavailable(alert_id: str, reason: str) -> dict:
+    return {
+        "alert_id": alert_id,
+        "found": False,
+        "read_only": True,
+        "reason": reason,
+        "uncertainty": "HIGH",
+    }
 
 
 @dataclass(frozen=True)
@@ -493,39 +597,86 @@ class AdvisorKnowledgeHistoryConsumer:
         facade: Optional[KnowledgeHistoryQueryFacade] = None,
         *,
         environ: Optional[Mapping[str, str]] = None,
+        alert_lookup: Optional[Callable[[str], Any]] = None,
     ):
         self._facade = facade
         self._environ = environ
+        self._alert_lookup = alert_lookup
 
     @property
     def enabled(self) -> bool:
         return advisor_knowledge_history_enabled(self._environ)
+
+    @property
+    def alert_explanation_enabled(self) -> bool:
+        return advisor_supervisor_alert_explanation_enabled(self._environ)
 
     def _resolve_facade(self) -> KnowledgeHistoryQueryFacade:
         if self._facade is None:
             self._facade = shared_knowledge_history_facade()
         return self._facade
 
-    def metadata_for_message(self, message: Any) -> Optional[dict]:
-        """Return Advisor response metadata, or ``None`` when the flag is OFF.
+    def supervisor_alert_explanation_for_message(self, message: Any) -> Optional[dict]:
+        """Read-only explanation of a Supervisor alert, or ``None`` when disabled/absent.
 
-        A ``None`` return means the existing Advisor path is untouched (the
-        response gains no knowledge-history field at all).
+        Uses only an injected read-only alert lookup (the alert outbox service).
+        It never acknowledges, resolves, mutates settings or acquires any trading
+        authority, and it creates no second knowledge/history authority.
         """
 
-        if not self.enabled:
+        if not self.alert_explanation_enabled:
             return None
+        alert_id = extract_supervisor_alert_id(message)
+        if alert_id is None:
+            return None
+        if self._alert_lookup is None:
+            return _alert_explanation_unavailable(alert_id, "ALERT_LOOKUP_UNAVAILABLE")
+        try:
+            record = self._alert_lookup(alert_id)
+        except Exception:  # noqa: BLE001 - lookup failure is reported, never raised
+            return _alert_explanation_unavailable(alert_id, "ALERT_LOOKUP_FAILED")
+        if record is None:
+            return _alert_explanation_unavailable(alert_id, "ALERT_NOT_FOUND")
+        try:
+            return _bounded_alert_explanation(record, alert_id)
+        except Exception:  # noqa: BLE001
+            return _alert_explanation_unavailable(alert_id, "ALERT_PROJECTION_FAILED")
+
+    def metadata_for_message(self, message: Any) -> Optional[dict]:
+        """Return Advisor response metadata, or ``None`` when all flags are OFF.
+
+        A ``None`` return means the existing Advisor path is untouched (the
+        response gains no new field at all).
+        """
+
+        alert_explanation = self.supervisor_alert_explanation_for_message(message)
+        if not self.enabled:
+            if alert_explanation is None:
+                return None
+            return {
+                "knowledge_history_used": False,
+                "supervisorAlert": alert_explanation,
+                "partial_result": False,
+                "uncertainty": "UNKNOWN",
+                "fallback": False,
+            }
         try:
             plan = classify_advisor_question(message)
         except Exception:  # noqa: BLE001 - planning must never break the answer
             return _fallback_metadata("PLANNING_FAILED")
         if not plan.relevant or plan.query is None:
-            return _not_used_metadata(plan.reason, plan.notes)
+            metadata = _not_used_metadata(plan.reason, plan.notes)
+            if alert_explanation is not None:
+                metadata["supervisorAlert"] = alert_explanation
+            return metadata
         try:
             result = self._resolve_facade().query(plan.query)
         except Exception as exc:  # noqa: BLE001 - one failed query must not break the answer
             return _fallback_metadata("QUERY_FAILED", (type(exc).__name__,))
         try:
-            return assemble_knowledge_history_context(result, plan)
+            context = assemble_knowledge_history_context(result, plan)
         except Exception:  # noqa: BLE001 - assembly must never break the answer
             return _fallback_metadata("CONTEXT_ASSEMBLY_FAILED")
+        if alert_explanation is not None:
+            context["supervisorAlert"] = alert_explanation
+        return context
