@@ -13,6 +13,8 @@ export const deriveOperationBlockGuidance = ({
     startMmReadiness,
     executionReadiness,
     leverageReadiness,
+    liveAuthorityReadiness,
+    liveAutomationReadiness,
     emergencyState,
     position,
     pendingOrder,
@@ -171,6 +173,42 @@ export const deriveOperationBlockGuidance = ({
             fix: limitAvailable
                 ? "④ TRADE / EXECUTION で Requested Leverage を MM上限以下に変更 / Set Requested Leverage to MM limit or less"
                 : "MM Leverage Limit を取得できるまで待つ / Await a valid MM leverage limit",
+        });
+    }
+    // REAL-004: every guard that contributes to the START BLOCKED count must be
+    // visible to the operator. LIVE AUTHORITY and LIVE AUTOMATION are part of
+    // the LIVE START gate in the readiness model; surface them here so no
+    // blocker can contribute to the summary without an explanation.
+    if (
+        liveAuthorityReadiness !== undefined
+        && !notBlocking(liveAuthorityReadiness)
+    ) {
+        push({
+            id: "liveAuthority",
+            label: "LIVE Authority（LIVE権限）",
+            status: liveAuthorityReadiness,
+            current: `ALLOW_LIVE=${config?.allowLive === true ? "true" : "false"} TRADE_MODE=${current(config?.tradeMode, "unknown")}`,
+            required: "ALLOW_LIVE=true + TRADE_MODE=live",
+            section: "FINAL PREPARATION",
+            en: "LIVE START requires the global ALLOW_LIVE permission and TRADE_MODE=live.",
+            ja: "LIVE開始にはグローバルなALLOW_LIVE許可とTRADE_MODE=liveが必要です。",
+            fix: "Enable LIVE authority on the backend before a LIVE START / LIVE開始前にバックエンドのLIVE権限を有効化",
+        });
+    }
+    if (
+        liveAutomationReadiness !== undefined
+        && !notBlocking(liveAutomationReadiness)
+    ) {
+        push({
+            id: "liveAutomation",
+            label: "LIVE Automation（LIVE自動化）",
+            status: liveAutomationReadiness,
+            current: `loopOnStart=${settings?.loopOnStart ? "ON" : "OFF"} autoTradeOnStart=${settings?.autoTradeOnStart ? "ON" : "OFF"}`,
+            required: "Loop and Auto Trade OFF at LIVE start",
+            section: "FINAL PREPARATION",
+            en: "A disarmed LIVE START requires Loop and Auto Trade OFF.",
+            ja: "DISARMEDでのLIVE開始にはLoopとAuto TradeをOFFにする必要があります。",
+            fix: "Turn Loop on start and Auto Trade on start OFF / Loop on start と Auto Trade on start をOFFにしてください",
         });
     }
 

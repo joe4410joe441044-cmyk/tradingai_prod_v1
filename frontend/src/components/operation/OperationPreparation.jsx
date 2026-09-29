@@ -342,6 +342,8 @@ export default function OperationPreparation({
         startMmReadiness,
         mmReadinessSource,
         leverageReadiness,
+        liveAuthorityReadiness,
+        liveAutomationReadiness,
     } = deriveOperationReadiness({
         botRunning,
         tradingMode: settings.tradingMode,
@@ -659,6 +661,8 @@ export default function OperationPreparation({
             governanceReadiness,
             executionReadiness,
             leverageReadiness,
+            liveAuthorityReadiness,
+            liveAutomationReadiness,
             emergencyState,
             position,
             pendingOrder,
@@ -734,6 +738,10 @@ export default function OperationPreparation({
         { label: "Governance（ガバナンス）", source: "RUNTIME", value: governanceReadiness },
         { label: "Execution（執行）", source: "RUNTIME", value: runningExecutionReadiness },
         { label: "Leverage Authority（レバレッジ権限）", source: "MM CONFIG", value: leverageReadiness },
+        // REAL-004: LIVE START gate guards. Kept visible so any guard that
+        // contributes to the BLOCKED summary also has a detail row.
+        { label: "LIVE Authority（LIVE権限）", source: "RUNTIME", value: liveAuthorityReadiness },
+        { label: "LIVE Automation（LIVE自動化）", source: "OPERATOR", value: liveAutomationReadiness },
     ];
 
 return (

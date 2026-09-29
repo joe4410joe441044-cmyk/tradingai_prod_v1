@@ -10798,6 +10798,61 @@ class BotManager:
             "open_order_count": 0,
         }
 
+    def _stopped_read_only_account_pending_authority(
+        self, stopped_state, manager_pending_order,
+    ):
+        """CASE D evidence selection for a STOPPED runtime.
+
+        The stopped-PAPER durability snapshot is a process-local, lower-quality
+        evidence source. When it is stale or unavailable it can no longer prove
+        the pending-order state. The canonical GET-only real-account authority
+        is then the higher-priority read-only source and may establish START
+        safety.
+
+        This never upgrades ``pending_order = false`` to SAFE on its own: only
+        the full REAL_LIVE_ACCOUNT contract (source authority, freshness, flat
+        position, zero exposure, NONE pending order) can return a known-safe
+        payload. Anything that cannot be proven returns ``None`` so the caller
+        preserves its original fail-closed result (UNKNOWN stays UNKNOWN).
+        """
+
+        if not isinstance(stopped_state, dict):
+            return None
+
+        # Without the configured canonical read-only account authority chain
+        # there is no valid higher-priority evidence to consult.
+        if not callable(
+            getattr(self, "production_ams_mm_config_provider", None)
+        ):
+            return None
+
+        timestamp_state = stopped_state.get("snapshot_timestamp_state")
+        timestamp_reason = (
+            timestamp_state.get("reason")
+            if isinstance(timestamp_state, dict)
+            else None
+        )
+        stale_reasons = self._stopped_paper_stale_pending_reasons()
+        if (
+            stopped_state.get("reason") not in stale_reasons
+            and timestamp_reason not in stale_reasons
+        ):
+            return None
+
+        try:
+            live_authority = self._stopped_live_pending_order_authority(
+                manager_pending_order
+            )
+        except Exception:
+            return None
+
+        if (
+            isinstance(live_authority, dict)
+            and live_authority.get("known") is True
+        ):
+            return live_authority
+        return None
+
     def get_authoritative_pending_order_state(
         self, *, requested_mode=None, requested_dry_run=None,
         requested_exchange=None,
@@ -10942,6 +10997,19 @@ class BotManager:
                     manager_pending_order=manager_pending_order,
                     engine_available=False,
                 )
+
+            # CASE D: a stale/unavailable stopped-PAPER snapshot must not force
+            # UNKNOWN when a fresh canonical read-only real-account authority is
+            # valid and proves the pending-order state. A lower-quality stale
+            # snapshot never overrides the fresher authoritative evidence.
+            recovered_authority = (
+                self._stopped_read_only_account_pending_authority(
+                    stopped_state,
+                    manager_pending_order,
+                )
+            )
+            if recovered_authority is not None:
+                return recovered_authority
 
             if (
                 isinstance(timestamp_state, dict)
