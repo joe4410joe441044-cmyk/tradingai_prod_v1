@@ -10846,10 +10846,9 @@ class BotManager:
         except Exception:
             return None
 
-        if (
-            isinstance(live_authority, dict)
-            and live_authority.get("known") is True
-        ):
+        # Preserve the higher-priority authority's fail-closed result too;
+        # otherwise a stale PAPER reason hides the source actually consulted.
+        if isinstance(live_authority, dict):
             return live_authority
         return None
 
@@ -11201,23 +11200,31 @@ class BotManager:
             current.get("liveAccountAuthority")
             if isinstance(current, dict) else None
         )
-        fresh = False
-        if isinstance(account, dict) and account.get("authorityFresh") is True:
-            evaluated_at = account.get("authorityEvaluatedAt") or account.get(
-                "evaluatedAt"
+        def timestamp_is_fresh(candidate):
+            if not isinstance(candidate, dict):
+                return False
+            evaluated_at = (
+                candidate.get("authorityEvaluatedAt")
+                or candidate.get("evaluatedAt")
             )
             try:
                 observed = datetime.fromisoformat(
                     str(evaluated_at).replace("Z", "+00:00")
                 )
-                fresh = bool(
+                return bool(
                     observed.tzinfo is not None
                     and 0 <= (
                         datetime.now(timezone.utc) - observed.astimezone(timezone.utc)
                     ).total_seconds() <= self.production_ams_observation_ttl
                 )
             except (TypeError, ValueError):
-                fresh = False
+                return False
+
+        fresh = bool(
+            isinstance(account, dict)
+            and account.get("authorityFresh") is True
+            and timestamp_is_fresh(account)
+        )
 
         # START supplies an expected exchange identity. At that boundary a
         # cached READY/status projection is evidence only, never authority.
@@ -11234,6 +11241,8 @@ class BotManager:
 
         if not isinstance(account, dict):
             return unknown("LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE")
+        if not timestamp_is_fresh(account):
+            return unknown("LIVE_PENDING_ORDER_AUTHORITY_STALE")
         expected_exchange = str(requested_exchange or "").strip().lower()
         observed_exchange = str(
             getattr(self, "account_read_client_exchange", "") or ""

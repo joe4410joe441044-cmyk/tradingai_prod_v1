@@ -1,5 +1,6 @@
 """Fresh-restart START authority routing and final-boundary regressions."""
 
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from backend.bot_manager.bot_manager import BotManager
 
 
 def _formal_live_account(**changes):
+    evaluated_at = datetime.now(timezone.utc).isoformat()
     account = {
         "sourceAuthority": "REAL_LIVE_ACCOUNT",
         "capitalAuthority": "REAL_LIVE_ACCOUNT",
@@ -21,6 +23,7 @@ def _formal_live_account(**changes):
         "pendingOrderState": "NONE",
         "currentExposure": "0",
         "reasonCodes": [],
+        "authorityEvaluatedAt": evaluated_at,
     }
     account.update(changes)
     return account

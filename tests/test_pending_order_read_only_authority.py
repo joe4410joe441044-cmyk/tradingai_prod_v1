@@ -114,8 +114,8 @@ def test_case_c_no_trustworthy_authority_stays_unknown():
     assert result["known"] is False
     assert result["pending"] is None
     assert result["safe"] is False
-    assert result["reason"] == "SNAPSHOT_STALE"
-    assert result["source"] == "stopped_paper_authoritative"
+    assert result["reason"] == "LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE"
+    assert result["source"] == "live_account_read_only"
 
 
 def test_safety_invariant_pending_false_alone_never_becomes_safe():
@@ -136,7 +136,37 @@ def test_safety_invariant_stale_live_account_never_becomes_safe():
     result = _read_with_stale_snapshot(manager)
     assert result["safe"] is False
     assert result["known"] is False
-    assert result["reason"] == "SNAPSHOT_STALE"
+    assert result["reason"] == "LIVE_PENDING_ORDER_AUTHORITY_STALE"
+    assert result["source"] == "live_account_read_only"
+
+
+def test_malformed_live_authority_fails_closed_with_truthful_provenance():
+    manager = _stopped_manager(observation={
+        "liveAccountAuthority": {"authorityFresh": True},
+    })
+    manager.refresh_production_ams_read_model = Mock(return_value={
+        "liveAccountAuthority": {"authorityFresh": True},
+    })
+    result = _read_with_stale_snapshot(manager)
+    assert result["known"] is False
+    assert result["safe"] is False
+    assert result["reason"] == "LIVE_PENDING_ORDER_AUTHORITY_STALE"
+    assert result["source"] == "live_account_read_only"
+
+
+def test_future_live_authority_timestamp_fails_closed():
+    future = _fresh_live_account(
+        authorityEvaluatedAt="2099-01-01T00:00:00+00:00",
+    )
+    manager = _stopped_manager(observation={"liveAccountAuthority": future})
+    manager.refresh_production_ams_read_model = Mock(return_value={
+        "liveAccountAuthority": future,
+    })
+    result = _read_with_stale_snapshot(manager)
+    assert result["known"] is False
+    assert result["safe"] is False
+    assert result["reason"] == "LIVE_PENDING_ORDER_AUTHORITY_STALE"
+    assert result["source"] == "live_account_read_only"
 
 
 def test_safety_invariant_open_real_position_never_becomes_safe():
