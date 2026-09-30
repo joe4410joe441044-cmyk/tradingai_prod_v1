@@ -568,6 +568,18 @@ class AutoMarketSelectionRuntime:
         publisher = getattr(self.manager, "set_auto_market_selection_observation", None)
         if callable(publisher):
             publisher(observation)
+
+        # WORK I Phase A (observational): record the finalized AMS cycle result.
+        # Never re-selects a market, never raises and never alters the result.
+        try:
+            from backend.runtime.cycle_evidence_phase_a import (
+                observe_market_selection,
+            )
+
+            observe_market_selection(result)
+        except Exception:
+            pass
+
         return result
 
     def _result(self, cycle_id, started, status, reasons, *, active,

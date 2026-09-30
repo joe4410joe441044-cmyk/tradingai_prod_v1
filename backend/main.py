@@ -311,6 +311,21 @@ class TradingRuntime:
             microstructure_state["runtimeId"] = symbol_context.runtime_id
             microstructure_state["runtimeSymbolContext"] = symbol_context_payload
 
+        # WORK I Phase A (observational): observe the confirmed market-data
+        # context (Stage 2) and feature/detector output (Stage 3) at the common
+        # runtime boundary shared by the WS and PAPER production ingest paths.
+        # Disabled by default, never raises and never alters the state.
+        try:
+            from backend.runtime.cycle_evidence_phase_a import (
+                observe_feature_evidence,
+                observe_market_context,
+            )
+
+            observe_market_context(microstructure_state, runtime=self)
+            observe_feature_evidence(microstructure_state, runtime=self)
+        except Exception:
+            pass
+
         debug_result = build_runtime_debug_result()
         debug_result["runtimeSymbolContext"] = symbol_context_payload
         _record_runtime_stage(
@@ -550,10 +565,20 @@ async def startup_event():
         app,
         get_bot_manager,
     )
+    try:
+        from backend.supervisor.supervisor_control_plane import get_control_plane
+        get_control_plane().start()
+    except Exception as exc:
+        logger.error("SUPERVISOR_MONITORING_START_FAILED: %s", exc)
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    try:
+        from backend.supervisor.supervisor_control_plane import get_control_plane
+        get_control_plane().stop()
+    except Exception as exc:
+        logger.error("SUPERVISOR_MONITORING_STOP_FAILED: %s", exc)
     unregister_money_management_execution_entry_gate(app)
     unregister_money_management_http_boundary(app)
     unregister_money_management_runtime_hook(app, logger=logger)
@@ -660,6 +685,8 @@ if _auth_configured:
     )
 
     _csrf_protected = frozenset({
+        # Supervisor monitoring manual trigger (default OFF; CSRF required).
+        "/api/supervisor/monitoring/run-once",
         "/api/auth/logout",
         "/api/ai-advisor/conversation",
         "/api/bot/start",
