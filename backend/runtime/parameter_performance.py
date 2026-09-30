@@ -357,6 +357,7 @@ class ParameterPerformanceStore:
     def __init__(self, path):
         self.path = Path(path)
         self.persist_errors = 0
+        self.read_failed = False
 
     def append(self, record: Mapping[str, Any]) -> bool:
         if not isinstance(record, Mapping):
@@ -385,8 +386,7 @@ class ParameterPerformanceStore:
             return False
 
     def load(self) -> list:
-        if not self.path.exists():
-            return []
+        self.read_failed = False
         rows = []
         try:
             with self.path.open("r", encoding="utf-8") as stream:
@@ -397,6 +397,7 @@ class ParameterPerformanceStore:
                     try:
                         record = json.loads(line)
                     except (ValueError, TypeError):
+                        self.read_failed = True
                         continue
                     if (
                         isinstance(record, dict)
@@ -404,7 +405,10 @@ class ParameterPerformanceStore:
                         == STAGE13_SCHEMA_VERSION
                     ):
                         rows.append(record)
-        except OSError:
+        except FileNotFoundError:
+            return []
+        except (OSError, UnicodeError):
+            self.read_failed = True
             return []
         return rows
 

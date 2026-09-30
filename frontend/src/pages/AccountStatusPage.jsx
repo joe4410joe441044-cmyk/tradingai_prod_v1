@@ -1,3 +1,5 @@
+import CurrentPositionCard from "../components/runtime/CurrentPositionCard.jsx";
+import LastPositionEventCard from "../components/runtime/LastPositionEventCard.jsx";
 import { useState } from "react";
 import usePolling from "../hooks/usePolling";
 import PaperCapitalControl from "../components/runtime/PaperCapitalControl";
@@ -5,6 +7,7 @@ import StatusMetric from "../components/runtime/StatusMetric";
 import {
     buildAccountRuntimeProps,
     deriveAccountRuntime,
+    derivePositionCards,
     deriveFinancialMetrics,
     deriveLiveContext,
     displayRuntimeValue,
@@ -22,6 +25,8 @@ import {
 
    Live-first asymmetric account hierarchy:
      REAL / LIVE ACCOUNT   -> primary, full width
+     CURRENT POSITION      -> canonical active position
+     LAST POSITION EVENT   -> canonical completed position
      ACCOUNT RUNTIME       -> runtime card
      LIVE CONTEXT          -> context card
      PAPER / SIMULATION    -> compact secondary
@@ -198,6 +203,7 @@ export function AccountStatusView({
     const derived = deriveAccountRuntime(props);
     const liveContext = deriveLiveContext(props, derived);
     const financialMetrics = deriveFinancialMetrics(derived);
+    const { currentPosition, lastPositionEvent } = derivePositionCards(props.accountRuntime);
 
     const {
         realPositionValue,
@@ -391,9 +397,11 @@ export function AccountStatusView({
                 </section>
             </article>
 
-            {/* =================================================
-               LEVEL 3: ACCOUNT RUNTIME + LIVE CONTEXT
-            ================================================= */}
+            <CurrentPositionCard position={currentPosition} />
+            <LastPositionEventCard position={lastPositionEvent} />
+
+            {/* ACCOUNT RUNTIME + LIVE CONTEXT */}
+
             <div className="as-secondary-grid">
                 <article className="semantic-card as-card clear" data-testid="account-runtime-section">
                     <header className="semantic-card-header">

@@ -138,7 +138,7 @@ def test_latest_history_mode_separation_643ms_and_authority(tmp_path):
     assert last_position_event(service, "LIVE")["realizedPnl"] is None
     assert project(dict(available=True, positions=[], positionState="FLAT", lastUpdate=NOW))["status"] == "FLAT"
     assert project(paper())["status"] == "OPEN"  # history never overrides current
-    assert last_position_event(TradeHistoryService(base_directory=tmp_path/'empty'), "LIVE")["event"] == "UNKNOWN"
+    assert last_position_event(TradeHistoryService(base_directory=tmp_path/'empty'), "LIVE")["event"] == "NONE"
     broken = Mock(); broken.history.side_effect = OSError("unavailable")
     assert last_position_event(broken, "PAPER")["realizedPnl"] is None
 
@@ -171,7 +171,7 @@ def test_account_runtime_additive_and_status_schema(tmp_path):
     assert {"realAccount", "paperAccount", "execution", "connection"} <= runtime.keys()
     assert runtime["realAccount"] == real
     assert runtime["currentPosition"]["status"] == "OPEN"
-    assert runtime["lastPositionEvent"]["event"] == "UNKNOWN"
+    assert runtime["lastPositionEvent"]["event"] == "NONE"
     assert StatusResponse(accountRuntime=runtime, status="STOPPED", timestamp=NOW,
         last_update=NOW, price=0, marketReady=False, marketStale=True,
         execution_mode="SIMULATION", real_order_allowed=False, ws_connected=False,
@@ -200,7 +200,7 @@ def test_runtime_mode_switch_failure_and_643ms_are_independent(tmp_path):
         assert runtime["lastPositionEvent"]["side"] == "SHORT"
         assert runtime["lastPositionEvent"]["holdingMs"] == 643
         live = bot._build_account_runtime(paper_snapshot, {"realAccount": real}, "LIVE", True, "LIVE", False)
-        assert live["lastPositionEvent"]["event"] == "UNKNOWN"
+        assert live["lastPositionEvent"]["event"] == "NONE"
         # A failed latest position GET wins over a superficially flat readiness view.
         bot.real_account_snapshot = {**real, "positionObservation": {"positions": None, "sourceUpdatedAt": None}}
         live = bot._build_account_runtime(paper_snapshot, {"realAccount": real}, "LIVE", True, "LIVE", False)
@@ -232,3 +232,20 @@ def test_observation_failure_does_not_change_execution_reader():
     with patch('backend.runtime.current_position_view.kucoin_position_observation', side_effect=ValueError("observation failed")):
         assert client.get_positions() == dict(symbol="XRPUSDTM", qty=2., side="SELL", entry_price=2.)
     assert client.account_position_observation["positions"] is None
+
+
+def test_last_event_empty_vs_unavailable(tmp_path):
+    service = TradeHistoryService(base_directory=tmp_path)
+    assert last_position_event(service, "PAPER")["event"] == "NONE"
+    service.store.path.parent.mkdir(parents=True, exist_ok=True)
+    service.store.path.write_text("broken json\n")
+    assert last_position_event(service, "PAPER")["event"] == "UNKNOWN"
+    service.store.path.unlink()
+    service.store.path.mkdir()
+    assert last_position_event(service, "PAPER")["event"] == "UNKNOWN"
+    broken = Mock()
+    broken.history.side_effect = OSError("unavailable")
+    assert last_position_event(broken, "PAPER")["event"] == "UNKNOWN"
+    broken.history.side_effect = None
+    broken.history.return_value = {}
+    assert last_position_event(broken, "PAPER")["event"] == "UNKNOWN"

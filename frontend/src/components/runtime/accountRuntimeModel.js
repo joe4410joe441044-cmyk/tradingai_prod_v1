@@ -791,3 +791,32 @@ export const buildAccountRuntimeProps = (botStatus, extra = {}) => {
         lastUpdate,
     };
 };
+
+// Position cards consume only C-P2 canonical projections; no legacy fallbacks.
+export const derivePositionCards = (accountRuntime) => ({
+    currentPosition: accountRuntime?.currentPosition ?? {},
+    lastPositionEvent: accountRuntime?.lastPositionEvent ?? {},
+});
+export const positionNumber = (value, pnl = false) => isFiniteNumber(value)
+    ? value.toLocaleString("en-US", { minimumFractionDigits: pnl ? 2 : 0, maximumFractionDigits: pnl ? 2 : 10 })
+    : "—";
+export const positionQuantity = (position) => `${positionNumber(position.quantity)} ${
+    position.quantityUnit === "coin" ? "coin" : position.quantityUnit === "contract" ? "contracts" : "UNIT UNKNOWN"
+}`;
+export const positionTime = (value) => {
+    if (!isFiniteNumber(value)) return "—";
+    const date = new Date(value * 1000); // Canonical timestamps are Unix seconds.
+    return Number.isFinite(date.getTime()) ? `${date.toISOString().replace("T", " ").slice(0, 19)} UTC` : "—";
+};
+export const positionHolding = (value) => {
+    if (!isFiniteNumber(value) || value < 0) return "—";
+    if (value < 1000) return `${Math.round(value)} ms`;
+    if (value < 60000) return `${(value / 1000).toFixed(1)} sec`;
+    if (value < 3600000) return `${Math.floor(value / 60000)}m ${Math.floor(value / 1000) % 60}s`;
+    return `${Math.floor(value / 3600000)}h ${String(Math.floor(value / 60000) % 60).padStart(2, "0")}m`;
+};
+export const positionState = (position) => {
+    if (position.freshness === "STALE" || position.status === "STALE") return "UNKNOWN / STALE";
+    if (position.reason === "MULTIPLE_POSITIONS") return "MULTIPLE POSITIONS";
+    return ["OPEN", "FLAT"].includes(position.status) ? position.status : "UNKNOWN";
+};

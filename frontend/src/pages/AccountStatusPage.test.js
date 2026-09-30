@@ -1,3 +1,4 @@
+import { compilePositionModules } from "../../test-support/positionModules.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -24,7 +25,10 @@ const loadModule = async () => {
         "export default()=>({data:{data:null},loading:false,error:false});",
     );
     try {
+        await compilePositionModules(temporary);
         await writeFile(output, transformed.code
+            .replace('"../components/runtime/CurrentPositionCard.jsx"', '"./CurrentPositionCard.mjs"')
+            .replace('"../components/runtime/LastPositionEventCard.jsx"', '"./LastPositionEventCard.mjs"')
             .replace('from "../hooks/usePolling";', `from "${usePollingStub}";`)
             .replace('from "../components/runtime/PaperCapitalControl";', `from "${paperCapitalStub}";`)
             .replace('from "../components/runtime/StatusMetric";', `from "${statusMetricStub}";`)
@@ -773,4 +777,28 @@ test("H. existing PAPER fields remain present alongside the split PnL", async ()
     assert.ok(findByTestId(nodes, "paper-realized-pnl"), "paper realized present");
     assert.equal(findByTestId(nodes, "paper-pnl"), undefined, "generic paper PnL replaced");
     assert.ok(findByTestId(nodes, "set-paper-capital"), "Set Paper Capital present");
+});
+
+
+test("canonical position cards follow financial status and remain independent", async () => {
+    const { AccountStatusView } = await loadModule();
+    for (const status of ["OPEN", "FLAT", "UNKNOWN"]) {
+        for (const event of ["CLOSED", "NONE"]) {
+            const nodes = walk(AccountStatusView({ botStatus: { selectedMode: "LIVE", control: "BOT",
+                accountRuntime: { currentPosition: { status, mode: "PAPER", control: "MANUAL", side: "LONG", symbol: "CURRENT" },
+                    lastPositionEvent: { event, mode: "LIVE", side: "SHORT", symbol: "PREVIOUS", holdingMs: 643 } } } }));
+            const ids = nodes.filter(n => typeof n === "object").map(n => n.props?.["data-testid"]);
+            const order = ["account-financial-status", "current-position-card", "last-position-event-card", "account-runtime-section"];
+            for (let i = 1; i < order.length; i++) assert.ok(ids.indexOf(order[i-1]) < ids.indexOf(order[i]));
+            const current = texts(walk(findByTestId(nodes, "current-position-card"))).join(" ");
+            assert.ok(current.includes(status));
+            assert.ok(current.includes("PAPER"));
+            assert.ok(current.includes("MANUAL"));
+            assert.ok(!current.includes("PREVIOUS"));
+            if (status === "UNKNOWN") assert.ok(!current.includes("NO OPEN POSITION"));
+            const last = texts(walk(findByTestId(nodes, "last-position-event-card"))).join(" ");
+            assert.ok(last.includes("LIVE"));
+            assert.ok(last.includes(event === "CLOSED" ? "643 ms" : "NO RECENT POSITION EVENT"));
+        }
+    }
 });

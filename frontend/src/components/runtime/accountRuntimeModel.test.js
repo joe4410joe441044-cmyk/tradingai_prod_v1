@@ -521,3 +521,21 @@ test("financial PnL tone follows the sign and treats zero as neutral", async () 
     })).derived);
     assert.equal(zero.find((m) => m.key === "unrealizedPnl").tone, "neutral");
 });
+
+test("position projections preserve null, zero, units and canonical authority", async () => {
+    const m = await loadModule();
+    assert.equal(m.positionNumber(null), "—");
+    for (const v of [undefined, NaN, Infinity, true, "0"]) assert.equal(m.positionNumber(v), "—");
+    assert.equal(m.positionNumber(0, true), "0.00");
+    assert.equal(m.positionNumber(-1.5, true), "-1.50");
+    assert.equal(m.positionQuantity({quantity:12,quantityUnit:"contract"}), "12 contracts");
+    assert.equal(m.positionQuantity({quantity:6174,quantityUnit:"coin"}), "6,174 coin");
+    assert.equal(m.positionQuantity({quantity:12}), "12 UNIT UNKNOWN");
+    for (const [ms, expected] of [[643,"643 ms"],[12400,"12.4 sec"],[133000,"2m 13s"],[3840000,"1h 04m"],[null,"—"],[0,"0 ms"]]) assert.equal(m.positionHolding(ms), expected);
+    assert.equal(m.positionTime(0), "1970-01-01 00:00:00 UTC");
+    assert.equal(m.positionTime(null), "—");
+    const currentPosition = {status:"UNKNOWN",quantity:null};
+    const lastPositionEvent = {event:"CLOSED",realizedPnl:0};
+    assert.deepEqual(m.derivePositionCards({currentPosition,lastPositionEvent,paperAccount:{position:{side:"BUY"}}}), {currentPosition,lastPositionEvent});
+    assert.deepEqual(m.derivePositionCards(), {currentPosition:{},lastPositionEvent:{}});
+});

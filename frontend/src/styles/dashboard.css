@@ -6771,3 +6771,33 @@ Intelligence are unaffected.
     white-space: normal;
     overflow-wrap: anywhere;
 }
+
+/* Canonical position cards share Account Status typography and surfaces. */
+.account-status-page .as-position-card { min-width: 0; overflow-wrap: anywhere; }
+.account-status-page .as-position-body { padding: 14px; }
+.account-status-page .as-position-card--open { border-color: #38bdf8; }
+.account-status-page .as-position-card--stale { border-color: #d6a347; }
+.account-status-page .as-position-card--secondary { background: rgba(15, 23, 42, .55); }
+.account-status-page .as-position-card h2 { font-size: 15px; line-height: 1.5; }
+.account-status-page .as-position-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.account-status-page .as-position-badges > strong { color: #e2e8f0; }
+.account-status-page .as-position-card--open .as-position-badges > strong { color: #67e8f9; }
+.account-status-page .as-position-card--stale .as-position-badges > strong { color: #fcd34d; }
+.account-status-page .as-position-identity { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 18px; font-size: 22px; }
+.account-status-page .as-position-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.account-status-page .as-position-metric { min-width: 0; }
+.account-status-page .as-position-metric dt { color: #94a3b8; font-size: 11px; letter-spacing: .06em; }
+.account-status-page .as-position-metric dd { margin: 6px 0 0; color: #e2e8f0; font-variant-numeric: tabular-nums; font-size: 15px; }
+.account-status-page .as-position-primary dd { font-size: 21px; font-weight: 700; }
+.account-status-page .as-position-metric--positive dd { color: #4ade80; }
+.account-status-page .as-position-metric--negative dd { color: #fb7185; }
+.account-status-page .as-position-details { border-top: 1px solid #334155; padding-top: 12px; color: #94a3b8; font-size: 12px; }
+.account-status-page .as-position-details summary { cursor: pointer; }
+.account-status-page .as-position-details ul { padding-left: 20px; }
+.account-status-page .as-position-message { color: #cbd5e1; margin: 20px 0; }
+@media (max-width: 900px) {
+    .account-status-page .as-position-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+    .account-status-page .as-position-grid { grid-template-columns: minmax(0, 1fr); }
+}

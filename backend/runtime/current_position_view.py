@@ -186,8 +186,13 @@ def last_position_event(service, mode):
     try:
         result = service.history(mode=mode.lower(), scope=mode, period="all",
                                  sort="exitTimestamp", direction="desc", page_size=1)
-        records = result.get("records", [])
+        records = result.get("records")
+        if getattr(getattr(service, "store", None), "read_failed", False) is True:
+            return view
+        if not isinstance(records, list):
+            return view
         if not records:
+            view["event"] = "NONE"
             return view
         row = records[0]
         if row.get("mode") != mode.lower() or timestamp(row.get("exitTimestamp")) is None:
