@@ -61,7 +61,7 @@ def _live_config(**overrides):
         "exchange": "kucoin",
         "mode": "live",
         "dry_run": False,
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 5,
         "sl_percent": 0.5,

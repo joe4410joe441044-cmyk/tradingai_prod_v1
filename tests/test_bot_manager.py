@@ -329,7 +329,7 @@ def test_engine_propagation_contract():
         "exchange": "kucoin",
         "mode": "paper",
         "dry_run": True,
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 7,
         "sl_percent": 0.5,
@@ -381,7 +381,7 @@ def test_engine_propagation_uses_canonical_not_raw_payload():
         "exchange": "kucoin",
         "mode": "paper",
         "dry_run": True,
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 7,
         "sl_percent": 0.5,
@@ -435,7 +435,7 @@ def test_engine_propagation_matches_mm_saved_config():
         "exchange": "kucoin",
         "mode": "paper",
         "dry_run": True,
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 8.5,
         "sl_percent": 0.5,
@@ -487,7 +487,7 @@ def test_engine_propagation_unknown_not_coerced_to_zero():
         "exchange": "kucoin",
         "mode": "paper",
         "dry_run": True,
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 7,
         "sl_percent": 0.5,
@@ -623,6 +623,15 @@ def test_start_synchronous_first_callback_hands_baseline_off_after_running():
         else None
     )
     manager = BotManager()
+    # Isolate the PAPER accounting baseline from the Production
+    # paper_account_state.json so the startup authority handoff is deterministic
+    # (canonical default PAPER capital = 1000.00; no disk write).
+    manager.paper_account_state = manager.paper_account_store.default_state()
+    manager.paper_account_runtime_snapshot = (
+        manager.paper_account_store.as_runtime_snapshot(
+            manager.paper_account_state
+        )
+    )
     manager.money_management_runtime_metrics.restore(
         persisted(),
         StateSource.INITIAL_STATE,
@@ -669,7 +678,7 @@ def test_start_synchronous_first_callback_hands_baseline_off_after_running():
 
     config = {
         "symbol": "XRPUSDT", "exchange": "kucoin",
-        "mode": "paper", "dry_run": True, "risk_percent": 1,
+        "mode": "paper", "dry_run": True, "risk_percent": 0.5,
         "position_size": 100, "max_drawdown_pct": 7,
         "sl_percent": 0.5, "tp_percent": 1, "timeframe": "5m",
         "trailing_stop": True, "leverage": 4.0,

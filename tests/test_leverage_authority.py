@@ -336,7 +336,7 @@ def test_start_transports_effective_leverage_to_execution_engine():
         "symbol": "XRPUSDT",
         "exchange": "kucoin",
         "mode": "paper",
-        "risk_percent": 1,
+        "risk_percent": 0.5,
         "position_size": 100,
         "max_drawdown_pct": 5,
         "sl_percent": 0.5,

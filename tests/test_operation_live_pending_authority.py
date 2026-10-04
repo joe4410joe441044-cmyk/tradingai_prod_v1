@@ -152,6 +152,7 @@ def test_start_rechecks_inventory_before_first_side_effect():
         allowed=True, effective_leverage=1, maximum_leverage=1,
     ))
     manager._resolve_max_drawdown_authority = Mock(return_value=5.0)
+    manager._resolve_risk_percent_authority = Mock(return_value=0.5)
     safe = {"known": True, "pending": False, "safe": True}
     changed = {
         "known": True, "pending": True, "safe": False,
