@@ -1310,6 +1310,71 @@ class BotManager:
             "reason": snapshot.get("reason"),
         }
 
+    def _build_durable_paper_account_runtime(self):
+        """Read-only projection of the durable PAPER simulation account.
+
+        Used whenever the active engine is not proven to be the PAPER engine
+        (an active LIVE engine, or no active engine). The active LIVE engine
+        state must never be projected as the PAPER account. This is a view
+        over the existing persisted PAPER account store and never mutates
+        state, resets capital, or creates a second account authority.
+        """
+
+        state = (
+            self.paper_account_state
+            if isinstance(self.paper_account_state, dict)
+            else {}
+        )
+
+        def numeric(key, default=None):
+            value = state.get(key)
+            if value is None or isinstance(value, bool):
+                return default
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return default
+            return number if math.isfinite(number) else default
+
+        reason = state.get("restoreReason")
+        if reason:
+            return {
+                "balance": None,
+                "equity": None,
+                "availableBalance": None,
+                "position": None,
+                "positions": [],
+                "realizedPnl": None,
+                "unrealizedPnl": None,
+                "totalPnl": None,
+                "source": state.get(
+                    "source",
+                    "PAPER_ACCOUNT_DURABLE_STATE",
+                ),
+                "capital": numeric("capital"),
+                "positionState": "UNKNOWN",
+                "lastUpdate": state.get("updatedAt"),
+                "available": False,
+                "reason": reason,
+            }
+
+        return {
+            "balance": numeric("balance"),
+            "equity": numeric("equity"),
+            "availableBalance": numeric("availableBalance"),
+            "position": None,
+            "positions": [],
+            "realizedPnl": numeric("realizedPnl"),
+            "unrealizedPnl": numeric("unrealizedPnl"),
+            "totalPnl": numeric("totalPnl"),
+            "source": state.get("source", "PAPER_SIMULATION"),
+            "capital": numeric("capital"),
+            "positionState": state.get("positionState", "FLAT"),
+            "lastUpdate": state.get("updatedAt"),
+            "available": state.get("balance") is not None,
+            "reason": None,
+        }
+
     def reset_paper_capital(self, capital, source="DASHBOARD_MANUAL"):
         amount = normalize_capital(capital)
         if source not in {"DASHBOARD_MANUAL", "REAL_AVAILABLE_PRESET"}:
@@ -1421,15 +1486,35 @@ class BotManager:
         real_order_allowed,
     ):
 
+        mode = str(selected_mode).upper()
+        engine = self.engine
+        engine_mode = str(
+            getattr(engine, "mode", "") or ""
+        ).strip().lower()
+        engine_proves_paper = engine is not None and engine_mode == "paper"
+        engine_proves_live = engine is not None and engine_mode == "live"
+        # A present engine that does not claim LIVE owns the active account
+        # snapshot while the runtime is PAPER. A proven LIVE engine, or no
+        # active engine, must never source the PAPER account.
+        engine_sources_paper = engine_proves_paper or (
+            engine is not None
+            and not engine_proves_live
+            and mode == "PAPER"
+        )
+
         real_account = dict(
             live_readiness.get("realAccount") or
             self._get_real_account_snapshot()
         )
 
+        paper_account = (
+            self._build_paper_account_runtime(account_snapshot)
+            if engine_sources_paper
+            else self._build_durable_paper_account_runtime()
+        )
+
         runtime = {
-            "paperAccount": self._build_paper_account_runtime(
-                account_snapshot
-            ),
+            "paperAccount": paper_account,
             "realAccount": real_account,
             "execution": {
                 "selectedMode": selected_mode,
@@ -1475,29 +1560,64 @@ class BotManager:
 
         from backend.runtime.current_position_view import current_position, last_position_event
         from backend.runtime.trade_history_read import TradeHistoryService
+        from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
 
         now = time.time()
-        mode = str(selected_mode).upper()
-        engine = self.engine
-        engine_matches = engine is not None and str(getattr(engine, "mode", "")).upper() == mode
-        # PAPER must not read a LIVE engine's compatibility account snapshot.
-        paper = runtime["paperAccount"] if engine_matches or engine is None else {}
-        if engine_matches and account_snapshot.get("available") is not True:
+
+        # PAPER position source: never a LIVE engine's compatibility snapshot.
+        paper = paper_account if paper_account.get("available") is True else {}
+        if engine_proves_paper and account_snapshot.get("available") is not True:
             paper = {}
+
         real = self.real_account_snapshot if isinstance(self.real_account_snapshot, dict) else {}
         observation = real.get("positionObservation")
         live = real if isinstance(observation, dict) else real_account
-        position_symbol = getattr(engine, "symbol", None) if engine_matches else self.symbol
-        if mode == "LIVE" and position_symbol:
-            from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
-            position_symbol = to_kucoin_futures_symbol(position_symbol)
-        runtime["currentPosition"] = current_position(
-            paper if mode == "PAPER" else live, mode, now=now,
-            symbol=position_symbol,
-            current_price=getattr(engine, "latest_price", None) if engine_matches else None,
-            observation=observation, maximum_age=self.account_stale_after,
-        )
-        runtime["lastPositionEvent"] = last_position_event(TradeHistoryService(), mode)
+
+        paper_symbol = getattr(engine, "symbol", None) if engine_proves_paper else self.symbol
+        paper_price = getattr(engine, "latest_price", None) if engine_proves_paper else None
+
+        live_symbol = getattr(engine, "symbol", None) if engine_proves_live else self.symbol
+        if live_symbol:
+            live_symbol = to_kucoin_futures_symbol(live_symbol)
+
+        positions_by_mode = {
+            "PAPER": current_position(
+                paper, "PAPER", now=now,
+                symbol=paper_symbol,
+                current_price=paper_price,
+                maximum_age=self.account_stale_after,
+            ),
+            "LIVE": current_position(
+                live, "LIVE", now=now,
+                symbol=live_symbol,
+                observation=observation, maximum_age=self.account_stale_after,
+            ),
+        }
+
+        history_service = TradeHistoryService()
+        last_events_by_mode = {
+            "PAPER": last_position_event(history_service, "PAPER"),
+            "LIVE": last_position_event(history_service, "LIVE"),
+        }
+
+        runtime["positionsByMode"] = positions_by_mode
+        runtime["lastPositionEventsByMode"] = last_events_by_mode
+
+        # Legacy keys preserve selectedMode semantics without recomputation.
+        legacy_current = positions_by_mode.get(mode)
+        if legacy_current is None:
+            legacy_current = current_position(
+                paper if mode == "PAPER" else live, mode, now=now,
+                symbol=paper_symbol if mode == "PAPER" else live_symbol,
+                current_price=paper_price if mode == "PAPER" else None,
+                observation=observation, maximum_age=self.account_stale_after,
+            )
+        runtime["currentPosition"] = legacy_current
+
+        legacy_event = last_events_by_mode.get(mode)
+        if legacy_event is None:
+            legacy_event = last_position_event(history_service, mode)
+        runtime["lastPositionEvent"] = legacy_event
         return runtime
 
     def _flatten_account_runtime_fields(
