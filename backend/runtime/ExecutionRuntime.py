@@ -917,6 +917,27 @@ class ExecutionRuntime:
             },
         )
 
+        # WORK I Phase A (observational): record the finalized strategy signal
+        # (Stage 4) and the constant TradingAI OFF decision (Stage 5).  Disabled
+        # by default, never raises and never alters the signal/decision.
+        try:
+            from backend.runtime.cycle_evidence_phase_a import (
+                observe_ai_decision,
+                observe_strategy_signal,
+            )
+
+            observe_strategy_signal(
+                strategy_state,
+                trace_id=trace_id,
+                mode=mode,
+                symbol=symbol,
+                status=strategy_status,
+                reason=strategy_state.get("suppressionReason"),
+            )
+            observe_ai_decision(trace_id=trace_id, mode=mode, symbol=symbol)
+        except Exception:
+            pass
+
         self.signal_adapter_reached = False
         self.last_adapter_output = None
         self.handoff_attempted = False

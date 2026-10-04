@@ -315,10 +315,16 @@ def create_advice_router(composition: AdvisorAPIComposition) -> APIRouter:
             response = AdvisorHTTPResponse(
                 status=result.status,
                 advisorResponse=result.response,
+                knowledgeHistory=getattr(result, "knowledgeHistory", None),
             )
+            content = response.model_dump(mode="json")
+            if response.knowledgeHistory is None:
+                # Preserve the exact pre-existing response shape when the
+                # knowledge/history consumer is disabled (default OFF).
+                content.pop("knowledgeHistory", None)
             return JSONResponse(
                 status_code=200,
-                content=response.model_dump(mode="json"),
+                content=content,
             )
         response = AdvisorHTTPResponse(
             status=result.status,

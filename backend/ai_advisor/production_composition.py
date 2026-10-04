@@ -16,6 +16,9 @@ from backend.ai_advisor.api_security import (
     RejectingAdvisorAuthenticator,
 )
 from backend.ai_advisor.credential_loader import CredentialLoader
+from backend.ai_advisor.knowledge_history_consumer import (
+    AdvisorKnowledgeHistoryConsumer,
+)
 from backend.ai_advisor.openai_provider import OpenAIProviderAdapter
 from backend.ai_advisor.live_connectivity import (
     OPENAI_OFFICIAL_ENDPOINT,
@@ -275,6 +278,7 @@ def _provider_service(
         failureObservationSink=failure_observation_sink,
         semanticValidationObservationSink=semantic_validation_observation_sink,
         responseSafetyObservationSink=response_safety_observation_sink,
+        knowledgeHistoryConsumer=AdvisorKnowledgeHistoryConsumer(),
     )
 
 

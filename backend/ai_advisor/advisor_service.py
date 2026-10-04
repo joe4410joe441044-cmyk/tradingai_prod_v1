@@ -1,12 +1,16 @@
 """Pure application-layer orchestration for the AI Advisor pipeline."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 from backend.ai_advisor.context_builder import build_advisor_context
 from backend.ai_advisor.conversation_models import AdvisorRequest
 from backend.ai_advisor.conversation_validation import (
     validate_request_time,
     validate_trusted_request,
+)
+from backend.ai_advisor.knowledge_history_consumer import (
+    AdvisorKnowledgeHistoryConsumer,
 )
 from backend.ai_advisor.prompt_builder import build_advisor_prompt
 from backend.ai_advisor.prompt_models import AdvisorPromptPolicy
@@ -93,6 +97,7 @@ class AdvisorService:
     responseSafetyObservationSink: ResponseSafetyRejectionObservationSink = (
         NoOpResponseSafetyRejectionObservationSink()
     )
+    knowledgeHistoryConsumer: Optional[AdvisorKnowledgeHistoryConsumer] = None
 
     def _observe_parse_failure(
         self,
@@ -256,8 +261,17 @@ class AdvisorService:
                 )
             except Exception:
                 pass
+        knowledge_history = None
+        if self.knowledgeHistoryConsumer is not None:
+            try:
+                knowledge_history = self.knowledgeHistoryConsumer.metadata_for_message(
+                    request.message
+                )
+            except Exception:
+                knowledge_history = None
         return AdvisorServiceResult(
             status=AdvisorServiceStatus.SUCCEEDED,
             response=response,
             failure=None,
+            knowledgeHistory=knowledge_history,
         )
