@@ -25,6 +25,10 @@ import {
     isAuthErrorStatus,
 } from "../features/auth/operatorAuth";
 import {
+    recordStartChainDiagnostic,
+    START_CHAIN_EVENTS,
+} from "../features/diagnostics/startChainDiagnostics";
+import {
     useMoneyManagement,
 } from "../features/money-management/hooks/useMoneyManagement";
 import OperationToggle from "./common/OperationToggle";
@@ -370,6 +374,8 @@ export default function BotControl({
     setExecutionEnabledState,
 
     onLegacyConfigChange,
+
+    startDiagnosticRecorder = recordStartChainDiagnostic,
 
 }){
 
@@ -891,6 +897,15 @@ export default function BotControl({
         && !emergencyBlocksOperations
         && emergencyStateCode === "READY"
     );
+    const emitStartDiagnostic = (eventName, metadata) => {
+        try {
+            if (typeof startDiagnosticRecorder === "function") {
+                startDiagnosticRecorder(eventName, metadata);
+            }
+        } catch {
+            // Diagnostics are best-effort and must never affect START authority.
+        }
+    };
     const liveReadinessDetails = [
         ["EMERGENCY", startReadiness.emergencyReadiness],
         ["POSITION", startReadiness.positionState],
@@ -934,6 +949,13 @@ export default function BotControl({
     };
 
     const handleBotLifecycle = async () => {
+        emitStartDiagnostic(START_CHAIN_EVENTS.START_CLICK, {
+            botPending: botPendingRef.current,
+            botRunning: Boolean(botRunning),
+            isLiveMode,
+            outcome: "RECEIVED",
+            startTriggerAllowed: isLiveMode ? liveStartTriggerAllowed : paperStartAllowed,
+        });
         if (botPendingRef.current) return;
         if (botRunning) {
             await executeBotStop();
@@ -988,6 +1010,11 @@ export default function BotControl({
     };
 
     const executeBotStart = async () => {
+        emitStartDiagnostic(START_CHAIN_EVENTS.EXECUTE_BOT_START_ENTER, {
+            isLiveMode,
+            outcome: "ENTERED",
+            startConfirmAllowed,
+        });
         botPendingRef.current = true;
         setBotPending(true);
         setBotError(null);
@@ -996,6 +1023,8 @@ export default function BotControl({
 
         let riskPercentValue = startRiskPercent;
         let maxDrawdownValue = startMaxDrawdownPercent;
+        let apiStartCallAttempted = false;
+        let apiStartResponseObserved = false;
         try {
             // Problem 1/9: flush any pending VALID MM draft so the START
             // payload uses the authoritative saved configuration the user
@@ -1032,6 +1061,12 @@ export default function BotControl({
                 }
             }
 
+            emitStartDiagnostic(START_CHAIN_EVENTS.API_START_CALL, {
+                isLiveMode,
+                outcome: "CALLED",
+                startConfirmAllowed,
+            });
+            apiStartCallAttempted = true;
             const response = await authenticatedControlRequest(API.botStart(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1054,6 +1089,13 @@ export default function BotControl({
                     loop_on_start: (isLiveMode || manualControlActive) ? false : startSettings.loopOnStart,
                     auto_trade_on_start: (isLiveMode || manualControlActive) ? false : startSettings.autoTradeOnStart,
                 }),
+            });
+            apiStartResponseObserved = true;
+            emitStartDiagnostic(START_CHAIN_EVENTS.API_START_RESPONSE, {
+                httpStatus: response.status,
+                isLiveMode,
+                ok: response.ok,
+                outcome: response.ok ? "RECEIVED_OK" : "RECEIVED_ERROR",
             });
             const result = await response.json().catch(() => null);
 
@@ -1088,6 +1130,13 @@ export default function BotControl({
 
             await refreshStatusSafely();
         } catch (error) {
+            if (apiStartCallAttempted && !apiStartResponseObserved) {
+                emitStartDiagnostic(START_CHAIN_EVENTS.API_START_RESPONSE, {
+                    isLiveMode,
+                    ok: false,
+                    outcome: "REQUEST_ERROR",
+                });
+            }
             setBotError(`START failed: ${error?.message || "UNKNOWN ERROR"}`);
         } finally {
             botPendingRef.current = false;
@@ -1576,6 +1625,17 @@ export default function BotControl({
         }
 
         setStartConfirmOpen(true);
+        if (isLiveMode) {
+            emitStartDiagnostic(START_CHAIN_EVENTS.LIVE_MODAL_OPEN, {
+                outcome: "OPENED",
+                startConfirmAllowed,
+            });
+            emitStartDiagnostic(START_CHAIN_EVENTS.LIVE_CONFIRM_GATE, {
+                allowed: startConfirmAllowed,
+                liveConfirmEnabled: startConfirmAllowed,
+                outcome: startConfirmAllowed ? "ALLOWED" : "BLOCKED",
+            });
+        }
     };
 
     const cancelStartConfirm = () => {
@@ -1587,6 +1647,17 @@ export default function BotControl({
     };
 
     const confirmStart = async () => {
+        if (isLiveMode) {
+            emitStartDiagnostic(START_CHAIN_EVENTS.LIVE_CONFIRM_CLICK, {
+                liveConfirmEnabled: startConfirmAllowed,
+                outcome: "RECEIVED",
+            });
+        }
+        emitStartDiagnostic(START_CHAIN_EVENTS.CONFIRM_HANDLER_ENTER, {
+            isLiveMode,
+            outcome: "ENTERED",
+            startConfirmAllowed,
+        });
         if (botPendingRef.current) {
             return;
         }

@@ -44,6 +44,9 @@ const operationPreparationModelUrl = pathToFileURL(
 const operatorAuthUrl = pathToFileURL(
     join(sourceDir, "../features/auth/operatorAuth.js")
 ).href;
+const startChainDiagnosticsUrl = pathToFileURL(
+    join(sourceDir, "../features/diagnostics/startChainDiagnostics.js")
+).href;
 
 const transformJsxFile = async (
     inputUrl
@@ -188,6 +191,10 @@ const loadBotControl = async () => {
             .replace(
                 'from "../features/auth/operatorAuth";',
                 `from "${operatorAuthUrl}";`,
+            )
+            .replace(
+                'from "../features/diagnostics/startChainDiagnostics";',
+                `from "${startChainDiagnosticsUrl}";`,
             )
             .replace(
                 'from "./common/OperationToggle";',
@@ -2156,6 +2163,7 @@ test("BotControl reuses shared readiness without re-implementing MM readiness", 
 
 test("LIVE authority denied keeps trigger enabled and disables modal confirm", async () => {
     setMmConfiguration();
+    const diagnostics = [];
     try {
         const renderer = await renderBotControl(readyStartProps({
             config: {
@@ -2163,6 +2171,9 @@ test("LIVE authority denied keeps trigger enabled and disables modal confirm", a
                 dryRun: false,
                 allowLive: false,
                 tradeMode: "paper",
+            },
+            startDiagnosticRecorder: (event, metadata) => {
+                diagnostics.push({ event, ...metadata });
             },
         }));
         const start = findButton(renderer.root, "START BOT");
@@ -2172,6 +2183,19 @@ test("LIVE authority denied keeps trigger enabled and disables modal confirm", a
         assert.equal(textIncludes(renderer.root, "START READINESS: BLOCKED"), true);
         assert.equal(textIncludes(renderer.root, "LIVE AUTHORITY: BLOCKED"), true);
         assert.equal(findButton(renderer.root, "LIVEを開始").props.disabled, true);
+        assert.deepEqual(diagnostics.slice(-2), [
+            {
+                event: "LIVE_MODAL_OPEN",
+                outcome: "OPENED",
+                startConfirmAllowed: false,
+            },
+            {
+                allowed: false,
+                event: "LIVE_CONFIRM_GATE",
+                liveConfirmEnabled: false,
+                outcome: "BLOCKED",
+            },
+        ]);
     } finally {
         clearMmConfiguration();
     }
@@ -2330,6 +2354,81 @@ test("LIVE confirm performs exactly one START and preserves the DISARMED boundar
         await clickAndRender(renderer, confirm);
         assert.deepEqual(mock.requests.map(({ url }) => url), ["/api/bot/start"]);
         assert.equal(refreshCount, 1);
+        const payload = JSON.parse(mock.requests[0].options.body);
+        assert.equal(payload.mode, "live");
+        assert.equal(payload.dry_run, false);
+        assert.equal(payload.loop_on_start, false);
+        assert.equal(payload.auto_trade_on_start, false);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("LIVE START emits each canonical diagnostic stage once in order", async () => {
+    setMmStatus({ executionEntryAllowed: false });
+    setMmConfiguration();
+    const diagnostics = [];
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: {
+            status: "started", loopState: "STOPPED", autoTradeEnabled: false,
+        } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+            startDiagnosticRecorder: (event, metadata) => {
+                diagnostics.push({ event, ...metadata });
+            },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        await clickAndRender(renderer, findButton(renderer.root, "LIVEを開始"));
+
+        assert.deepEqual(diagnostics.map(({ event }) => event), [
+            "START_CLICK",
+            "LIVE_MODAL_OPEN",
+            "LIVE_CONFIRM_GATE",
+            "LIVE_CONFIRM_CLICK",
+            "CONFIRM_HANDLER_ENTER",
+            "EXECUTE_BOT_START_ENTER",
+            "API_START_CALL",
+            "API_START_RESPONSE",
+        ]);
+        assert.equal(diagnostics[2].allowed, true);
+        assert.equal(diagnostics[2].liveConfirmEnabled, true);
+        assert.equal(diagnostics[7].httpStatus, 200);
+        assert.equal(mock.requests.length, 1);
+    } finally {
+        clearMmStatus();
+        clearMmConfiguration();
+        mock.restore();
+    }
+});
+
+test("diagnostic failure cannot change LIVE START authority, payload, or request count", async () => {
+    setMmStatus({ executionEntryAllowed: false });
+    setMmConfiguration();
+    const mock = installFetchMock((url) => {
+        assert.equal(url, "/api/bot/start");
+        return jsonResponse({ body: {
+            status: "started", loopState: "STOPPED", autoTradeEnabled: false,
+        } });
+    });
+    try {
+        const renderer = await renderBotControl(readyStartProps({
+            config: { mode: "live", allowLive: true, tradeMode: "live" },
+            startDiagnosticRecorder: () => {
+                throw new Error("diagnostic unavailable");
+            },
+        }));
+        await clickAndRender(renderer, findButton(renderer.root, "START BOT"));
+        const confirm = findButton(renderer.root, "LIVEを開始");
+        assert.equal(confirm.props.disabled, false);
+        await clickAndRender(renderer, confirm);
+
+        assert.equal(mock.requests.length, 1);
         const payload = JSON.parse(mock.requests[0].options.body);
         assert.equal(payload.mode, "live");
         assert.equal(payload.dry_run, false);
