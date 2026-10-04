@@ -519,6 +519,22 @@ export const ACCOUNT_FINANCIAL_METRICS = [
     { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", percent: true },
 ];
 
+/* PAPER view keeps the same 3x3 grid slots (so switching never reflows the
+   layout) but relabels/remaps the cells that have a canonical paper meaning.
+   MARGIN cells have no authoritative paper equivalent and remain UNAVAILABLE
+   (rendered as "—"), never a fabricated zero. */
+export const PAPER_FINANCIAL_METRICS = [
+    { key: "equity", label: "EQUITY", jpLabel: "純資産", icon: "equity", category: "asset" },
+    { key: "availableBalance", label: "AVAILABLE BALANCE", jpLabel: "利用可能額", icon: "availableBalance", category: "asset" },
+    { key: "walletBalance", label: "BALANCE", jpLabel: "残高", icon: "walletBalance", category: "asset" },
+    { key: "unrealizedPnl", label: "UNREALIZED PNL", jpLabel: "含み損益", icon: "unrealizedPnl", category: "pnl" },
+    { key: "realizedPnlToday", label: "REALIZED PNL", jpLabel: "確定損益", icon: "realizedPnlToday", category: "pnl" },
+    { key: "totalPnlToday", label: "TOTAL PNL", jpLabel: "総損益", icon: "totalPnlToday", category: "pnl" },
+    { key: "marginUsed", label: "MARGIN USED", jpLabel: "使用証拠金", icon: "marginUsed", category: "margin" },
+    { key: "marginAvailable", label: "MARGIN AVAILABLE", jpLabel: "利用可能証拠金", icon: "marginAvailable", category: "margin" },
+    { key: "marginRatio", label: "MARGIN RATIO", jpLabel: "証拠金率", icon: "marginRatio", category: "margin", percent: true },
+];
+
 const isFiniteNumber = (value) => (
     typeof value === "number" && Number.isFinite(value)
 );
@@ -531,12 +547,66 @@ const pnlTone = (value) => {
     return numericValue > 0 ? "positive" : "negative";
 };
 
-export const deriveFinancialMetrics = (derived = {}) => {
+/* PAPER financial projection. Reads canonical paperAccount fields only; it
+   never borrows a REAL field and never invents a paper margin/leverage figure. */
+const derivePaperFinancialMetrics = (derived = {}) => {
+    const { paperAccount, paperAvailable } = derived;
+    const account = paperAccount && typeof paperAccount === "object"
+        ? paperAccount
+        : {};
+    const available = paperAvailable !== false;
+
+    const rawByKey = {
+        equity: account.equity,
+        availableBalance: account.availableBalance,
+        walletBalance: account.balance,
+        unrealizedPnl: account.unrealizedPnl,
+        realizedPnlToday: account.realizedPnl,
+        totalPnlToday: account.totalPnl,
+        marginUsed: null,
+        marginAvailable: null,
+        marginRatio: null,
+    };
+
+    return PAPER_FINANCIAL_METRICS.map((def) => {
+        let value = null;
+        let unit = null;
+        let state = null;
+
+        if (!available || def.category === "margin") {
+            state = "UNAVAILABLE";
+        } else if (isFiniteNumber(rawByKey[def.key])) {
+            value = def.category === "pnl"
+                ? formatPnl(rawByKey[def.key])
+                : formatAmount(rawByKey[def.key]);
+            unit = def.percent ? "%" : ACCOUNT_FINANCIAL_UNIT;
+        } else {
+            state = "UNAVAILABLE";
+        }
+
+        const tone = def.category === "pnl"
+            ? pnlTone(rawByKey[def.key])
+            : "neutral";
+
+        return {
+            ...def,
+            value,
+            unit,
+            state,
+            tone,
+        };
+    });
+};
+
+export const deriveFinancialMetrics = (derived = {}, accountView = "LIVE") => {
+    if (String(accountView).toUpperCase() === "PAPER") {
+        return derivePaperFinancialMetrics(derived);
+    }
+
     const {
         realLoading,
         realStale,
         realConnected,
-        realBalanceRaw,
         realEquityRaw,
         realAvailableRaw,
         realWalletBalanceRaw,
@@ -792,11 +862,73 @@ export const buildAccountRuntimeProps = (botStatus, extra = {}) => {
     };
 };
 
-// Position cards consume only C-P2 canonical projections; no legacy fallbacks.
-export const derivePositionCards = (accountRuntime) => ({
-    currentPosition: accountRuntime?.currentPosition ?? {},
-    lastPositionEvent: accountRuntime?.lastPositionEvent ?? {},
-});
+/* =================================================
+   Account View (display-only) helpers.
+
+   accountView is a pure presentation selector:
+     "PAPER" -> paper account view (UI label PAPER)
+     "LIVE"  -> real/live account view (UI label REAL)
+
+   The initial view follows selectedMode where valid. A manual
+   selection is preserved across polling refreshes because the
+   caller keeps the manual value and it always wins.
+================================================= */
+export const initialAccountView = (selectedMode) => (
+    String(selectedMode ?? "").trim().toUpperCase() === "LIVE" ? "LIVE" : "PAPER"
+);
+
+export const resolveAccountView = (selectedMode, manualView) => (
+    manualView === "PAPER" || manualView === "LIVE"
+        ? manualView
+        : initialAccountView(selectedMode)
+);
+
+/* Position cards consume the C-P6 dual mode projections.
+   - When dual projections exist, the requested view is selected and there is
+     NEVER a cross-mode fallback: an absent key yields an unavailable ({}) card.
+   - Legacy fallback (single currentPosition / lastPositionEvent) is allowed
+     only when the legacy projection already belongs to the requested view, so
+     PAPER data can never leak into REAL and vice versa.
+   - Called without a view, the legacy projection is returned unchanged for
+     backward compatibility with existing consumers. */
+export const derivePositionCards = (accountRuntime, accountView) => {
+    const runtime = accountRuntime && typeof accountRuntime === "object"
+        ? accountRuntime
+        : {};
+    const view = accountView === "PAPER" || accountView === "LIVE"
+        ? accountView
+        : undefined;
+
+    if (!view) {
+        return {
+            currentPosition: runtime.currentPosition ?? {},
+            lastPositionEvent: runtime.lastPositionEvent ?? {},
+        };
+    }
+
+    const byMode = runtime.positionsByMode;
+    const eventsByMode = runtime.lastPositionEventsByMode;
+    const hasDualProjection = (byMode && typeof byMode === "object")
+        || (eventsByMode && typeof eventsByMode === "object");
+
+    if (hasDualProjection) {
+        const position = byMode && typeof byMode === "object" ? byMode[view] : undefined;
+        const event = eventsByMode && typeof eventsByMode === "object"
+            ? eventsByMode[view]
+            : undefined;
+        return {
+            currentPosition: position && typeof position === "object" ? position : {},
+            lastPositionEvent: event && typeof event === "object" ? event : {},
+        };
+    }
+
+    const legacyPosition = runtime.currentPosition;
+    const legacyEvent = runtime.lastPositionEvent;
+    return {
+        currentPosition: legacyPosition && legacyPosition.mode === view ? legacyPosition : {},
+        lastPositionEvent: legacyEvent && legacyEvent.mode === view ? legacyEvent : {},
+    };
+};
 export const positionNumber = (value, pnl = false) => isFiniteNumber(value)
     ? value.toLocaleString("en-US", { minimumFractionDigits: pnl ? 2 : 0, maximumFractionDigits: pnl ? 2 : 10 })
     : "—";

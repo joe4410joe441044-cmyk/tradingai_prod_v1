@@ -103,12 +103,25 @@ let buildAccountRuntimeProps;
 let deriveAccountRuntime;
 let deriveLiveContext;
 let deriveFinancialMetrics;
+let derivePositionCards;
+let initialAccountView;
+let resolveAccountView;
 let displayRuntimeValue;
 let isAvailable;
 
 test.before(async () => {
     const module = await loadModule();
-    ({ buildAccountRuntimeProps, deriveAccountRuntime, deriveLiveContext, deriveFinancialMetrics, displayRuntimeValue, isAvailable } = module);
+    ({
+        buildAccountRuntimeProps,
+        deriveAccountRuntime,
+        deriveLiveContext,
+        deriveFinancialMetrics,
+        derivePositionCards,
+        initialAccountView,
+        resolveAccountView,
+        displayRuntimeValue,
+        isAvailable,
+    } = module);
 });
 
 test("nested realAccount is authoritative over flattened compatibility fields", async () => {
@@ -538,4 +551,176 @@ test("position projections preserve null, zero, units and canonical authority", 
     const lastPositionEvent = {event:"CLOSED",realizedPnl:0};
     assert.deepEqual(m.derivePositionCards({currentPosition,lastPositionEvent,paperAccount:{position:{side:"BUY"}}}), {currentPosition,lastPositionEvent});
     assert.deepEqual(m.derivePositionCards(), {currentPosition:{},lastPositionEvent:{}});
+});
+
+/* =================================================
+   C-P6-3 ACCOUNT VIEW — display-only selection
+================================================= */
+
+test("initialAccountView follows selectedMode and safely defaults to PAPER", async () => {
+    assert.equal(initialAccountView("LIVE"), "LIVE");
+    assert.equal(initialAccountView("live"), "LIVE");
+    assert.equal(initialAccountView("PAPER"), "PAPER");
+    assert.equal(initialAccountView(undefined), "PAPER");
+    assert.equal(initialAccountView(null), "PAPER");
+    assert.equal(initialAccountView(""), "PAPER");
+    assert.equal(initialAccountView("BOGUS"), "PAPER");
+});
+
+test("resolveAccountView preserves a manual selection over later selectedMode changes", async () => {
+    // A manual choice always wins, so polling cannot force the view back.
+    assert.equal(resolveAccountView("LIVE", "PAPER"), "PAPER");
+    assert.equal(resolveAccountView("PAPER", "LIVE"), "LIVE");
+    assert.equal(resolveAccountView("LIVE", null), "LIVE");
+    assert.equal(resolveAccountView("PAPER", undefined), "PAPER");
+    assert.equal(resolveAccountView("PAPER", "BOGUS"), "PAPER");
+});
+
+test("derivePositionCards selects the requested view from dual projections", async () => {
+    const paper = { status: "OPEN", mode: "PAPER", symbol: "PAPERONLY" };
+    const live = { status: "OPEN", mode: "LIVE", symbol: "REALONLY" };
+    const paperEvent = { event: "CLOSED", mode: "PAPER", symbol: "PAPEREVENT" };
+    const liveEvent = { event: "CLOSED", mode: "LIVE", symbol: "REALEVENT" };
+    const runtime = {
+        positionsByMode: { PAPER: paper, LIVE: live },
+        lastPositionEventsByMode: { PAPER: paperEvent, LIVE: liveEvent },
+        // legacy values must be ignored once dual projections exist
+        currentPosition: { mode: "PAPER", symbol: "LEGACY" },
+        lastPositionEvent: { mode: "LIVE", symbol: "LEGACY_EVENT" },
+    };
+    assert.deepEqual(derivePositionCards(runtime, "PAPER"), {
+        currentPosition: paper,
+        lastPositionEvent: paperEvent,
+    });
+    assert.deepEqual(derivePositionCards(runtime, "LIVE"), {
+        currentPosition: live,
+        lastPositionEvent: liveEvent,
+    });
+});
+
+test("derivePositionCards never cross-falls back when the requested view key is absent", async () => {
+    const runtime = {
+        positionsByMode: { PAPER: { status: "FLAT", mode: "PAPER" } },
+        lastPositionEventsByMode: { PAPER: { event: "NONE", mode: "PAPER" } },
+        currentPosition: { status: "OPEN", mode: "LIVE", symbol: "LEGACY_LIVE" },
+        lastPositionEvent: { event: "CLOSED", mode: "LIVE", symbol: "LEGACY_LIVE_EVENT" },
+    };
+    const live = derivePositionCards(runtime, "LIVE");
+    assert.deepEqual(live, { currentPosition: {}, lastPositionEvent: {} });
+});
+
+test("derivePositionCards legacy fallback is mode-scoped and view-less calls stay compatible", async () => {
+    const runtime = {
+        currentPosition: { mode: "PAPER", symbol: "PAPER_LEGACY" },
+        lastPositionEvent: { mode: "LIVE", symbol: "LIVE_LEGACY" },
+    };
+    // With no dual projections, a matching legacy mode is allowed.
+    assert.deepEqual(derivePositionCards(runtime, "PAPER").currentPosition, runtime.currentPosition);
+    assert.deepEqual(derivePositionCards(runtime, "LIVE").lastPositionEvent, runtime.lastPositionEvent);
+    // Mismatched legacy data never crosses the requested view boundary.
+    assert.deepEqual(derivePositionCards(runtime, "LIVE").currentPosition, {});
+    assert.deepEqual(derivePositionCards(runtime, "PAPER").lastPositionEvent, {});
+    // No view keeps the historical behavior untouched.
+    assert.deepEqual(derivePositionCards(runtime), {
+        currentPosition: runtime.currentPosition,
+        lastPositionEvent: runtime.lastPositionEvent,
+    });
+});
+
+test("deriveFinancialMetrics dispatches PAPER vs LIVE with no cross-account values", async () => {
+    const connected = makeStatus({
+        realAccountConnected: true,
+        accountRuntime: {
+            ...makeStatus().accountRuntime,
+            realAccount: {
+                ...REAL_NOT_CONNECTED,
+                connected: true,
+                authenticated: true,
+                permission: "READ_ONLY",
+                equity: 7.92,
+                availableBalance: 5.42,
+                balance: 7.92,
+                walletBalance: 7.92,
+                unrealizedPnl: 1.23,
+                realizedPnlToday: 0.5,
+                totalPnlToday: 1.73,
+                marginUsed: 0,
+                marginAvailable: 7.92,
+                marginRatio: 5,
+                lastSync: Date.now() / 1000,
+            },
+            paperAccount: {
+                balance: 10000,
+                equity: 10000,
+                availableBalance: 9800,
+                positions: [],
+                totalPnl: 42,
+                realizedPnl: 42,
+                unrealizedPnl: 0,
+                available: true,
+                source: "PAPER_SIMULATION",
+            },
+        },
+    });
+    const { derived } = derive(connected);
+
+    const paper = Object.fromEntries(
+        deriveFinancialMetrics(derived, "PAPER").map((m) => [m.key, m]),
+    );
+    const live = Object.fromEntries(
+        deriveFinancialMetrics(derived, "LIVE").map((m) => [m.key, m]),
+    );
+
+    assert.equal(paper.equity.value, "10,000.00");
+    assert.equal(paper.availableBalance.value, "9,800.00");
+    assert.equal(paper.walletBalance.value, "10,000.00");
+    assert.equal(paper.walletBalance.label, "BALANCE");
+    assert.equal(paper.unrealizedPnl.value, "0.00");
+    assert.equal(paper.realizedPnlToday.value, "+42.00");
+    assert.equal(paper.totalPnlToday.value, "+42.00");
+    ["marginUsed", "marginAvailable", "marginRatio"].forEach((key) => {
+        assert.equal(paper[key].state, "UNAVAILABLE", `paper ${key}`);
+        assert.equal(paper[key].value, null, `paper ${key} must not be fabricated`);
+    });
+
+    assert.equal(live.equity.value, "7.92");
+    assert.equal(live.availableBalance.value, "5.42");
+    assert.equal(live.walletBalance.value, "7.92");
+    assert.equal(live.marginRatio.value, "5.00");
+
+    // No PAPER value leaks into REAL and vice versa.
+    assert.notEqual(live.equity.value, paper.equity.value);
+    // The default dispatch remains the REAL projection for existing consumers.
+    assert.deepEqual(
+        deriveFinancialMetrics(derived).map((m) => m.value),
+        deriveFinancialMetrics(derived, "LIVE").map((m) => m.value),
+    );
+});
+
+test("deriveFinancialMetrics PAPER never fabricates zeros for missing fields", async () => {
+    const { derived } = derive(makeStatus({
+        accountRuntime: {
+            ...makeStatus().accountRuntime,
+            paperAccount: {
+                balance: 1000,
+                equity: 1000,
+                availableBalance: 980,
+                positions: [],
+                totalPnl: 0,
+                available: true,
+                source: "PAPER_SIMULATION",
+                // realizedPnl / unrealizedPnl intentionally missing
+            },
+        },
+    }));
+    const paper = Object.fromEntries(
+        deriveFinancialMetrics(derived, "PAPER").map((m) => [m.key, m]),
+    );
+    ["unrealizedPnl", "realizedPnlToday"].forEach((key) => {
+        assert.equal(paper[key].state, "UNAVAILABLE", `paper ${key}`);
+        assert.equal(paper[key].value, null, `paper ${key} must not be zero`);
+    });
+    // Authoritative zero (totalPnl) is still a valid value.
+    assert.equal(paper.totalPnlToday.value, "0.00");
+    assert.equal(paper.totalPnlToday.tone, "neutral");
 });

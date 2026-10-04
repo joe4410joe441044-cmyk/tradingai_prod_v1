@@ -6251,6 +6251,86 @@ Intelligence are unaffected.
     white-space: nowrap;
 }
 
+/* =================================================
+   ACCOUNT VIEW — compact display-only segmented selector.
+   It selects which authoritative account projection is
+   rendered; it never implies execution authority.
+================================================= */
+.account-status-page .as-account-view {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 8px 12px;
+    border: 1px solid var(--semantic-card-border);
+    border-radius: 8px;
+    background: var(--semantic-card-bg);
+}
+
+.account-status-page .as-account-view-label {
+    color: #93a2b8;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.account-status-page .as-account-view-options {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid #2d405e;
+    border-radius: 8px;
+    background: #0b101a;
+}
+
+.account-status-page .as-account-view-option {
+    min-width: 84px;
+    padding: 6px 16px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #8ea0b8;
+    font: 700 12px "Consolas", monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.account-status-page .as-account-view-option:hover {
+    color: #e7edf7;
+}
+
+.account-status-page .as-account-view-option:focus-visible {
+    outline: 2px solid #57b8ff;
+    outline-offset: 2px;
+}
+
+.account-status-page .as-account-view-option--selected {
+    border-color: rgba(87, 184, 255, 0.55);
+    background: rgba(87, 184, 255, 0.14);
+    color: #eaf3ff;
+    box-shadow: inset 0 0 0 1px rgba(87, 184, 255, 0.18);
+}
+
+@media (max-width: 560px) {
+    .account-status-page .as-account-view {
+        justify-content: space-between;
+    }
+
+    .account-status-page .as-account-view-options {
+        flex: 1 1 auto;
+    }
+
+    .account-status-page .as-account-view-option {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 6px 10px;
+    }
+}
+
 /* Real / Live Account is primary: full width, dominant */
 .account-status-page .as-primary-card {
     width: 100%;

@@ -16,4 +16,18 @@ const scenarios = {
     stale:{...open,status:"UNKNOWN",freshness:"STALE"},
     multiple:{status:"UNKNOWN",mode:"LIVE",reason:"MULTIPLE_POSITIONS",positions:[{symbol:"XRPUSDTM",side:"LONG"},{symbol:"ETHUSDTM",side:"SHORT"}]},
 };
-createRoot(document.getElementById("root")).render(<div className="dashboard"><AccountStatusView botStatus={{selectedMode:scenarios[scenario].mode,accountRuntime:{currentPosition:scenarios[scenario],lastPositionEvent:last}}} /></div>);
+
+const selected = scenarios[scenario];
+const otherMode = selected.mode === "PAPER" ? "LIVE" : "PAPER";
+const emptyFlat = { status: "FLAT", mode: otherMode, control: "UNKNOWN", freshness: "FRESH", positions: [] };
+const selectedEvent = { ...last, mode: selected.mode };
+const otherEvent = { event: "NONE", mode: otherMode, control: "UNKNOWN" };
+
+const accountRuntime = {
+    positionsByMode: { [selected.mode]: selected, [otherMode]: emptyFlat },
+    lastPositionEventsByMode: { [selected.mode]: selectedEvent, [otherMode]: otherEvent },
+    currentPosition: selected,
+    lastPositionEvent: selectedEvent,
+};
+
+createRoot(document.getElementById("root")).render(<div className="dashboard"><AccountStatusView botStatus={{selectedMode:selected.mode,accountRuntime}} /></div>);

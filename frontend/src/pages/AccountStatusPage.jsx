@@ -13,27 +13,32 @@ import {
     displayRuntimeValue,
     displayValue,
     fetchBotStatus,
-    formatAmount,
     formatLastUpdate,
-    formatPnl,
     formatPositionValue,
     isAvailable,
+    resolveAccountView,
 } from "../components/runtime/accountRuntimeModel";
 
 /* =================================================
    ACCOUNT STATUS (independent page)
 
-   Live-first asymmetric account hierarchy:
-     REAL / LIVE ACCOUNT   -> primary, full width
-     CURRENT POSITION      -> canonical active position
-     LAST POSITION EVENT   -> canonical completed position
-     ACCOUNT RUNTIME       -> runtime card
-     LIVE CONTEXT          -> context card
-     PAPER / SIMULATION    -> compact secondary
+   Read-only account hierarchy driven by a display-only
+   ACCOUNT VIEW switch:
 
-   Read-only. No operation controls. Canonical source
-   is GET /api/bot/status.
-================================================= */
+     ACCOUNT VIEW [ PAPER ] [ REAL ]   -> display only
+     <selected account header>         -> PAPER or REAL
+     ACCOUNT FINANCIAL STATUS          -> one common 3x3 card
+     CURRENT POSITION                  -> selected view source
+     LAST POSITION EVENT               -> selected view source
+     ACCOUNT RUNTIME                   -> global runtime
+     LIVE CONTEXT                      -> global context
+     SET PAPER CAPITAL                 -> explicit paper control
+
+   The switch only changes which already-authoritative
+   projection is rendered. It never mutates runtime mode,
+   authority or orders, and it never calls a write endpoint.
+   Canonical source is GET /api/bot/status.
+================================================ */
 
 const displaySyncState = (value) => {
     if (value === true) return "PENDING";
@@ -63,7 +68,7 @@ const displayCurrentContext = (value) => (
    external asset, no emoji, no new dependency. The
    visual language mirrors the dashboard cyan icon
    containers. PnL icons inherit the status color.
-================================================= */
+================================================ */
 const FINANCIAL_GLYPHS = {
     equity: (
         <>
@@ -193,17 +198,61 @@ function FinancialMetricCard({ metric }) {
     );
 }
 
+/* Compact segmented selector — display only. */
+function AccountViewSwitch({ accountView, onAccountViewChange }) {
+    const options = [
+        { value: "PAPER", label: "PAPER" },
+        { value: "LIVE", label: "REAL" },
+    ];
+    return (
+        <div
+            className="as-account-view"
+            data-testid="account-view-switch"
+            role="group"
+            aria-label="Account view（表示口座）"
+        >
+            <span className="as-account-view-label">ACCOUNT VIEW（表示口座）</span>
+            <div className="as-account-view-options">
+                {options.map((option) => {
+                    const selected = accountView === option.value;
+                    return (
+                        <button
+                            key={option.value}
+                            type="button"
+                            className={`as-account-view-option${
+                                selected ? " as-account-view-option--selected" : ""
+                            }`}
+                            aria-pressed={selected}
+                            data-testid={`account-view-option-${option.value.toLowerCase()}`}
+                            onClick={() => onAccountViewChange?.(option.value)}
+                        >
+                            {option.label}
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 export function AccountStatusView({
     botStatus = {},
     onPaperCapitalApplied,
     detailsExpanded = false,
     onDetailsToggle = () => {},
+    accountView,
+    onAccountViewChange,
 }) {
     const props = buildAccountRuntimeProps(botStatus);
     const derived = deriveAccountRuntime(props);
     const liveContext = deriveLiveContext(props, derived);
-    const financialMetrics = deriveFinancialMetrics(derived);
-    const { currentPosition, lastPositionEvent } = derivePositionCards(props.accountRuntime);
+    const resolvedView = resolveAccountView(derived.normalizedSelectedMode, accountView);
+    const isPaperView = resolvedView === "PAPER";
+    const financialMetrics = deriveFinancialMetrics(derived, resolvedView);
+    const { currentPosition, lastPositionEvent } = derivePositionCards(
+        props.accountRuntime,
+        resolvedView,
+    );
 
     const {
         realPositionValue,
@@ -218,19 +267,32 @@ export function AccountStatusView({
         resolvedAccountType,
         authVerified,
         accountLastSync,
-        paperMode,
-        normalizedSelectedMode,
         paperBalance,
-        paperEquity,
-        paperAvailableBalance,
-        paperPosition,
-        paperUnrealizedPnl,
-        paperRealizedPnl,
-        paperAccount,
+        normalizedSelectedMode,
         realAvailableRaw,
         realPositionSummary,
         selectedExchange,
     } = derived;
+
+    const accountIdentity = isPaperView
+        ? {
+            kicker: "Simulation Account（シミュレーション口座）",
+            title: "PAPER ACCOUNT / ペーパー口座",
+        }
+        : {
+            kicker: "Production Account（本番口座）",
+            title: "REAL / LIVE ACCOUNT / 実口座",
+        };
+
+    const selectedPositionValue = isPaperView
+        ? formatPositionValue(
+            derived.paperPosition,
+            derived.paperAvailable ? "NO_OPEN_POSITION" : undefined,
+        )
+        : realPositionValue;
+    const selectedAuthority = isPaperView
+        ? "READ ONLY"
+        : displayValue(resolvedPermission);
 
     const runtimeState = {
         runtimeMode: normalizedSelectedMode,
@@ -269,62 +331,75 @@ export function AccountStatusView({
         >
             <header className="as-page-header">
                 <div>
-                    <span className="as-page-kicker">Live-first account hierarchy</span>
+                    <span className="as-page-kicker">Read-only account hierarchy（参照専用）</span>
                     <h1>Account Status（アカウント状況）</h1>
                 </div>
                 <span className="as-page-badge">READ ONLY</span>
             </header>
 
             {/* =================================================
-               LEVEL 1: REAL / LIVE ACCOUNT (PRIMARY)
+               ACCOUNT VIEW — display-only selector
             ================================================= */}
-            <article className="semantic-card as-primary-card clear" data-testid="real-account-section">
+            <AccountViewSwitch
+                accountView={resolvedView}
+                onAccountViewChange={onAccountViewChange}
+            />
+
+            {/* =================================================
+               SELECTED ACCOUNT — header + common financial card
+            ================================================= */}
+            <article className="semantic-card as-primary-card clear" data-testid="account-view-section">
                 <header
                     className="as-account-summary"
-                    data-testid="real-account-canonical"
+                    data-testid="account-view-header"
+                    data-view={resolvedView}
                 >
                     <div className="as-account-summary-identity">
-                        <span className="semantic-card-kicker">Production Account（本番口座）</span>
-                        <h2>Real / Live Account（実口座）</h2>
+                        <span className="semantic-card-kicker">{accountIdentity.kicker}</span>
+                        <h2>{accountIdentity.title}</h2>
                     </div>
                     <p
                         className="as-account-summary-context"
-                        data-testid="real-account-paper-context"
+                        data-testid="account-view-context"
                     >
                         {displayCurrentContext(liveContext.currentContext)}
                     </p>
                     <div className="as-account-summary-position">
                         <span>POSITION（ポジション）</span>
-                        <strong data-testid="real-position">{realPositionValue}</strong>
+                        <strong data-testid="selected-account-position">{selectedPositionValue}</strong>
                     </div>
-                    <span className="as-account-summary-authority" data-testid="real-read-only-authority">
-                        {displayValue(resolvedPermission)}
+                    <span className="as-account-summary-authority" data-testid="selected-account-authority">
+                        {selectedAuthority}
                     </span>
                 </header>
 
                 {/*
                    ACCOUNT FINANCIAL STATUS — 5px SILVER raised metallic frame.
-                   Authoritative backend/exchange fields only. Missing or
-                   ambiguous metrics surface as UNAVAILABLE (never a fake zero).
+                   ONE common card driven by accountView. Authoritative fields
+                   only. Missing or ambiguous metrics surface as UNAVAILABLE
+                   (never a fake zero).
                 */}
                 <section
                     className="as-financial-frame"
                     data-testid="account-financial-status"
+                    data-view={resolvedView}
                 >
                     <header className="as-financial-frame-header">
                         <div className="as-financial-frame-title">
                             <span className="as-financial-kicker">Account Financial Status</span>
                         </div>
-                        <button
-                            type="button"
-                            className="as-details-toggle"
-                            data-testid="account-details-toggle"
-                            aria-expanded={detailsExpanded}
-                            aria-controls="account-financial-details"
-                            onClick={onDetailsToggle}
-                        >
-                            DETAILS {detailsExpanded ? "▲" : "▼"}
-                        </button>
+                        {!isPaperView && (
+                            <button
+                                type="button"
+                                className="as-details-toggle"
+                                data-testid="account-details-toggle"
+                                aria-expanded={detailsExpanded}
+                                aria-controls="account-financial-details"
+                                onClick={onDetailsToggle}
+                            >
+                                DETAILS {detailsExpanded ? "▲" : "▼"}
+                            </button>
+                        )}
                     </header>
 
                     <div className="as-financial-grid" data-testid="financial-metric-grid">
@@ -333,74 +408,76 @@ export function AccountStatusView({
                         ))}
                     </div>
 
-                    <div
-                        id="account-financial-details"
-                        className={`as-financial-details${
-                            detailsExpanded ? " as-financial-details--open" : ""
-                        }`}
-                        data-testid="account-financial-details"
-                    >
-                        <div className="as-primary-details" data-testid="real-account-details">
-                            <StatusMetric
-                                label="Exchange（取引所）"
-                                value={displayValue(realExchange)}
-                                testId="real-exchange"
-                                tone="connection"
-                            />
-                            <StatusMetric
-                                label="Connection（接続）"
-                                value={displayValue(resolvedExchangeConnection)}
-                                testId="real-connection"
-                                tone={realConnected ? "safe" : "connection"}
-                            />
-                            <StatusMetric
-                                label="Authentication（取引所認証）"
-                                value={displayValue(resolvedExchangeAuth)}
-                                testId="real-auth"
-                                tone={authVerified ? "safe" : "connection"}
-                            />
-                            <StatusMetric
-                                label="API Key（APIキー）"
-                                value={displayValue(resolvedApiKeyStatus)}
-                                testId="real-api-key"
-                                tone={authVerified ? "safe" : "connection"}
-                            />
-                            <StatusMetric
-                                label="Permission（権限）"
-                                value={displayValue(resolvedPermission)}
-                                testId="real-permission"
-                                tone={realConnected ? "safe" : "connection"}
-                            />
-                            <StatusMetric
-                                label="Account Type（口座種別）"
-                                value={displayValue(resolvedAccountType)}
-                                testId="real-account-type"
-                                tone="connection"
-                            />
-                            <StatusMetric
-                                label="Sync Status（同期状態）"
-                                value={realSyncStatus}
-                                testId="real-sync-status"
-                                tone={realConnected ? "safe" : "warning"}
-                            />
-                            <StatusMetric
-                                label="Last Sync（最終同期）"
-                                value={realConnected
-                                    ? displayValue(accountLastSync, formatLastUpdate)
-                                    : "--"
-                                }
-                                testId="real-last-sync"
-                                tone="connection"
-                            />
+                    {!isPaperView && (
+                        <div
+                            id="account-financial-details"
+                            className={`as-financial-details${
+                                detailsExpanded ? " as-financial-details--open" : ""
+                            }`}
+                            data-testid="account-financial-details"
+                        >
+                            <div className="as-primary-details" data-testid="real-account-details">
+                                <StatusMetric
+                                    label="Exchange（取引所）"
+                                    value={displayValue(realExchange)}
+                                    testId="real-exchange"
+                                    tone="connection"
+                                />
+                                <StatusMetric
+                                    label="Connection（接続）"
+                                    value={displayValue(resolvedExchangeConnection)}
+                                    testId="real-connection"
+                                    tone={realConnected ? "safe" : "connection"}
+                                />
+                                <StatusMetric
+                                    label="Authentication（取引所認証）"
+                                    value={displayValue(resolvedExchangeAuth)}
+                                    testId="real-auth"
+                                    tone={authVerified ? "safe" : "connection"}
+                                />
+                                <StatusMetric
+                                    label="API Key（APIキー）"
+                                    value={displayValue(resolvedApiKeyStatus)}
+                                    testId="real-api-key"
+                                    tone={authVerified ? "safe" : "connection"}
+                                />
+                                <StatusMetric
+                                    label="Permission（権限）"
+                                    value={displayValue(resolvedPermission)}
+                                    testId="real-permission"
+                                    tone={realConnected ? "safe" : "connection"}
+                                />
+                                <StatusMetric
+                                    label="Account Type（口座種別）"
+                                    value={displayValue(resolvedAccountType)}
+                                    testId="real-account-type"
+                                    tone="connection"
+                                />
+                                <StatusMetric
+                                    label="Sync Status（同期状態）"
+                                    value={realSyncStatus}
+                                    testId="real-sync-status"
+                                    tone={realConnected ? "safe" : "warning"}
+                                />
+                                <StatusMetric
+                                    label="Last Sync（最終同期）"
+                                    value={realConnected
+                                        ? displayValue(accountLastSync, formatLastUpdate)
+                                        : "--"
+                                    }
+                                    testId="real-last-sync"
+                                    tone="connection"
+                                />
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </section>
             </article>
 
             <CurrentPositionCard position={currentPosition} />
             <LastPositionEventCard position={lastPositionEvent} />
 
-            {/* ACCOUNT RUNTIME + LIVE CONTEXT */}
+            {/* ACCOUNT RUNTIME + LIVE CONTEXT — global, never switch with view */}
 
             <div className="as-secondary-grid">
                 <article className="semantic-card as-card clear" data-testid="account-runtime-section">
@@ -534,74 +611,17 @@ export function AccountStatusView({
             </div>
 
             {/* =================================================
-               LEVEL 4: PAPER / SIMULATION (SECONDARY)
+               PAPER CAPITAL SETTINGS — explicit paper control,
+               available regardless of ACCOUNT VIEW.
             ================================================= */}
-            <article className="semantic-card as-paper-card" data-testid="paper-account-section">
+            <article className="semantic-card as-card clear" data-testid="paper-capital-section">
                 <header className="semantic-card-header">
                     <div>
-                        <span className="semantic-card-kicker">Simulation Account（シミュレーション口座）</span>
-                        <h2>Paper / Simulation（ペーパー・シミュレーション）</h2>
+                        <span className="semantic-card-kicker">Paper configuration（ペーパー設定）</span>
+                        <h2>SET PAPER CAPITAL / ペーパー資金設定</h2>
                     </div>
-                    <span className="semantic-badge">PAPER_SIMULATION</span>
+                    <span className="semantic-badge">PAPER_CAPITAL</span>
                 </header>
-
-                <div className="as-paper-metrics" data-testid="paper-account-metrics">
-                    <StatusMetric
-                        label="Balance（模擬残高）"
-                        value={displayRuntimeValue(paperBalance, {
-                            formatter: formatAmount,
-                        })}
-                        testId="paper-balance"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Equity（模擬純資産）"
-                        value={displayRuntimeValue(paperEquity, {
-                            formatter: formatAmount,
-                        })}
-                        testId="paper-equity"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Available（模擬利用可能額）"
-                        value={displayRuntimeValue(paperAvailableBalance, {
-                            formatter: formatAmount,
-                        })}
-                        testId="paper-available"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Position（模擬ポジション）"
-                        value={formatPositionValue(
-                            paperPosition,
-                            derived.paperAvailable ? "NO_OPEN_POSITION" : undefined,
-                        )}
-                        testId="paper-position"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Unrealized PnL（含み損益）"
-                        value={displayRuntimeValue(paperUnrealizedPnl, {
-                            formatter: formatPnl,
-                        })}
-                        testId="paper-unrealized-pnl"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Realized PnL（確定損益）"
-                        value={displayRuntimeValue(paperRealizedPnl, {
-                            formatter: formatPnl,
-                        })}
-                        testId="paper-realized-pnl"
-                        tone="paper"
-                    />
-                    <StatusMetric
-                        label="Source（データソース）"
-                        value={paperAccount.source || "PAPER_SIMULATION"}
-                        testId="paper-source"
-                        tone="paper"
-                    />
-                </div>
 
                 <PaperCapitalControl
                     paperBalance={paperBalance}
@@ -613,8 +633,9 @@ export function AccountStatusView({
                 />
 
                 <p className="semantic-card-note">
-                    Simulation-only account. No real funds are used.
-                    {" "}（シミュレーション専用口座です。実資金は使用されません。）
+                    Separate PAPER configuration control. It resets simulation capital only and never
+                    affects the Real Account.
+                    {" "}（ペーパー専用の設定です。模擬資金のみをリセットし、実口座には影響しません。）
                 </p>
             </article>
         </section>
@@ -625,6 +646,7 @@ export default function AccountStatusPage() {
     const { data } = usePolling(fetchBotStatus, 5000);
     const botStatus = data?.data;
     const [detailsExpanded, setDetailsExpanded] = useState(false);
+    const [manualAccountView, setManualAccountView] = useState(null);
 
     const refreshBotStatus = async () => {
         const snapshot = await fetchBotStatus();
@@ -637,6 +659,8 @@ export default function AccountStatusPage() {
             onPaperCapitalApplied={refreshBotStatus}
             detailsExpanded={detailsExpanded}
             onDetailsToggle={() => setDetailsExpanded((expanded) => !expanded)}
+            accountView={manualAccountView}
+            onAccountViewChange={setManualAccountView}
         />
     );
 }
