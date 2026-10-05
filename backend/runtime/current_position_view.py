@@ -85,7 +85,7 @@ def current_position(account, mode, *, now, symbol=None, current_price=None,
     if account.get("stale") is True or (updated is not None and now - updated > maximum_age):
         view.update(freshness="STALE", reason="STALE_SOURCE")
         return view
-    if updated is None or updated > now or account.get("loading") is True:
+    if updated is None or updated > now:
         view["reason"] = "SOURCE_NOT_CURRENT"
         return view
     if (paper and account.get("available") is not True) or (

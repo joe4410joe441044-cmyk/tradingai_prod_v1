@@ -374,3 +374,84 @@ def test_no_history_vs_read_failure(tmp_path):
     broken_runtime = build(bot, broken, "PAPER")
     assert broken_runtime["lastPositionEventsByMode"]["PAPER"]["event"] == "UNKNOWN"
     assert broken_runtime["lastPositionEventsByMode"]["LIVE"]["event"] == "UNKNOWN"
+
+
+# L. REAL-004 loading snapshot retains the last completed observation -------
+
+def retained_observation(rows, updated):
+    return {"positions": rows, "sourceUpdatedAt": updated}
+
+
+def loading_live_snapshot(observation, *, stale=False):
+    return {
+        "authenticated": True,
+        "lastSync": NOW,
+        "loading": True,
+        "stale": stale,
+        "positionObservation": observation,
+    }
+
+
+def test_real004_loading_snapshot_retains_fresh_flat_live_observation(tmp_path):
+    bot = BotManager()
+    bot.engine = LiveEngine(symbol="XRPUSDT")
+    bot.symbol = "XRPUSDT"
+    bot.real_account_snapshot = loading_live_snapshot(
+        retained_observation([], NOW - 29.718657),
+    )
+    runtime = build(bot, empty_service(tmp_path), "LIVE",
+                    live={"authenticated": True, "lastSync": NOW, "positions": []})
+
+    live_view = runtime["positionsByMode"]["LIVE"]
+    assert live_view["status"] == "FLAT"
+    assert live_view["freshness"] == "FRESH"
+    assert live_view["reason"] is None
+    assert runtime["currentPosition"] == live_view
+
+
+def test_real004_loading_snapshot_retains_open_position(tmp_path):
+    bot = BotManager()
+    bot.engine = LiveEngine(symbol="XBTUSDTM")
+    bot.symbol = "XBTUSDTM"
+    bot.real_account_snapshot = loading_live_snapshot(retained_observation([
+        {"id": "one", "symbol": "XBTUSDTM", "currentQty": 1, "avgEntryPrice": 120000,
+         "markPrice": 120009.57, "markValue": 120.00957, "unrealisedPnl": .00957,
+         "realLeverage": 6, "posMargin": 20, "liquidationPrice": 100000,
+         "openingTimestamp": (NOW - 60) * 1000},
+    ], NOW))
+    runtime = build(bot, empty_service(tmp_path), "LIVE",
+                    live={"authenticated": True, "lastSync": NOW, "positions": []})
+
+    live_view = runtime["positionsByMode"]["LIVE"]
+    assert live_view["status"] == "OPEN"
+    assert live_view["quantity"] == 1
+
+
+def test_real004_failed_refresh_never_creates_false_flat(tmp_path):
+    bot = BotManager()
+    bot.engine = LiveEngine(symbol="XRPUSDT")
+    bot.symbol = "XRPUSDT"
+    bot.real_account_snapshot = loading_live_snapshot(
+        {"positions": None, "sourceUpdatedAt": None}, stale=True,
+    )
+    runtime = build(bot, empty_service(tmp_path), "LIVE",
+                    live={"authenticated": True, "lastSync": NOW, "positions": []})
+
+    live_view = runtime["positionsByMode"]["LIVE"]
+    assert live_view["status"] == "UNKNOWN"
+    assert live_view["status"] != "FLAT"
+
+
+def test_real004_stale_loading_snapshot_not_flat(tmp_path):
+    bot = BotManager()
+    bot.engine = LiveEngine(symbol="XRPUSDT")
+    bot.symbol = "XRPUSDT"
+    bot.real_account_snapshot = loading_live_snapshot(
+        retained_observation([], NOW - 91),
+    )
+    runtime = build(bot, empty_service(tmp_path), "LIVE",
+                    live={"authenticated": True, "lastSync": NOW, "positions": []})
+
+    live_view = runtime["positionsByMode"]["LIVE"]
+    assert live_view["status"] == "UNKNOWN"
+    assert live_view["reason"] == "STALE_SOURCE"

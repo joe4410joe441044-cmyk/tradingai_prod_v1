@@ -249,3 +249,172 @@ def test_last_event_empty_vs_unavailable(tmp_path):
     broken.history.side_effect = None
     broken.history.return_value = {}
     assert last_position_event(broken, "PAPER")["event"] == "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# REAL-004 position authority minimal repair.
+#
+# A refresh sets ``loading=True`` while retaining the last completed
+# position observation.  The retained observation remains authoritative for
+# display while its source timestamp is current; ``loading`` alone must not
+# discard it.  All assertions below are pure projection checks and never
+# touch execution authority, orders, or the exchange.
+# ---------------------------------------------------------------------------
+
+MAX_AGE = 90
+
+
+def retained_observation(rows, updated):
+    return {"positions": rows, "sourceUpdatedAt": updated}
+
+
+def live_account(**extra):
+    account = dict(authenticated=True, lastSync=NOW, loading=True)
+    account.update(extra)
+    return account
+
+
+def test_real004_loading_false_fresh_empty_observation_is_flat():
+    view = current_position(live_account(loading=False), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW),
+                            maximum_age=MAX_AGE)
+    assert (view["status"], view["freshness"], view["reason"]) == ("FLAT", "FRESH", None)
+
+
+def test_real004_loading_true_fresh_retained_empty_observation_is_flat():
+    view = current_position(live_account(), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW),
+                            maximum_age=MAX_AGE)
+    assert (view["status"], view["freshness"], view["reason"]) == ("FLAT", "FRESH", None)
+
+
+def test_real004_loading_true_fresh_retained_open_observation_preserved():
+    observation = kucoin_position_observation([
+        {"id": "one", "symbol": "XBTUSDTM", "currentQty": 1, "avgEntryPrice": 120000,
+         "markPrice": 120009.57, "markValue": 120.00957, "unrealisedPnl": .00957,
+         "realLeverage": 6, "posMargin": 20, "liquidationPrice": 100000,
+         "openingTimestamp": (NOW - 60) * 1000}], NOW)
+    view = current_position(live_account(), "LIVE", now=NOW, symbol="XBTUSDTM",
+                            observation=observation, maximum_age=MAX_AGE)
+    assert view["status"] == "OPEN" and view["freshness"] == "FRESH"
+    assert view["side"] == "LONG" and view["quantity"] == 1
+
+
+def test_real004_loading_true_missing_source_timestamp_not_current():
+    view = current_position(live_account(), "LIVE", now=NOW,
+                            observation=retained_observation([], None),
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["reason"] == "SOURCE_NOT_CURRENT"
+
+
+def test_real004_loading_true_future_source_timestamp_not_current():
+    view = current_position(live_account(), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW + 1),
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["reason"] == "SOURCE_NOT_CURRENT"
+
+
+def test_real004_loading_true_stale_source_is_stale():
+    view = current_position(live_account(), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW - MAX_AGE - 1),
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["freshness"] == "STALE"
+    assert view["reason"] == "STALE_SOURCE"
+
+
+def test_real004_loading_false_stale_source_is_stale():
+    view = current_position(live_account(loading=False), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW - MAX_AGE - 1),
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["freshness"] == "STALE"
+    assert view["reason"] == "STALE_SOURCE"
+
+
+def test_real004_refresh_failure_invalidated_observation_fails_closed():
+    view = current_position(live_account(loading=False), "LIVE", now=NOW,
+                            observation={"positions": None, "sourceUpdatedAt": None},
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["status"] != "FLAT"
+    assert view["reason"] == "SOURCE_NOT_CURRENT"
+
+
+def test_real004_retained_source_eventually_expires_to_stale():
+    observation = retained_observation([], NOW)
+    fresh = current_position(live_account(), "LIVE", now=NOW,
+                             observation=observation, maximum_age=MAX_AGE)
+    expired = current_position(live_account(), "LIVE", now=NOW + MAX_AGE + 1,
+                               observation=observation, maximum_age=MAX_AGE)
+    assert fresh["status"] == "FLAT"
+    assert expired["status"] == "UNKNOWN" and expired["reason"] == "STALE_SOURCE"
+
+
+def test_real004_malformed_and_unauthenticated_observation_unknown():
+    unavailable = current_position(live_account(), "LIVE", now=NOW,
+                                   observation=retained_observation(None, NOW),
+                                   maximum_age=MAX_AGE)
+    assert unavailable["status"] == "UNKNOWN"
+    assert unavailable["reason"] == "POSITION_SOURCE_UNAVAILABLE"
+    unauthenticated = current_position(live_account(authenticated=False), "LIVE",
+                                       now=NOW, observation=retained_observation([], NOW),
+                                       maximum_age=MAX_AGE)
+    assert unauthenticated["status"] == "UNKNOWN"
+
+
+def test_real004_multiple_source_is_ambiguous_not_flat():
+    observation = kucoin_position_observation([
+        {"id": "one", "symbol": "XBTUSDTM", "currentQty": 1, "avgEntryPrice": 120000},
+        {"id": "two", "symbol": "XRPUSDTM", "currentQty": -2, "avgEntryPrice": 2},
+    ], NOW)
+    view = current_position(live_account(), "LIVE", now=NOW,
+                            observation=observation, maximum_age=MAX_AGE)
+    assert view["status"] == "UNKNOWN" and view["reason"] == "MULTIPLE_POSITIONS"
+
+
+def test_real004_paper_projection_source_unaffected():
+    account = paper()
+    before = deepcopy(account)
+    view = project(account, symbol="GRIFFAINUSDT", current_price=.016195)
+    assert account == before
+    assert view["status"] == "OPEN" and view["mode"] == "PAPER"
+    flat = dict(available=True, positions=[], positionState="FLAT", lastUpdate=NOW)
+    assert project(flat)["status"] == "FLAT"
+
+
+def test_real004_live_source_selection_unchanged():
+    account = dict(authenticated=True, lastSync=NOW, positions=[dict(
+        symbol="XRPUSDTM", qty=1, side="BUY", entry_price=2, entry_time=NOW,
+        entry_authority="MANUAL")])
+    legacy = current_position(account, "LIVE", now=NOW, maximum_age=MAX_AGE)
+    assert legacy["status"] == "OPEN"
+    observed = current_position(account, "LIVE", now=NOW,
+                                observation=retained_observation([], NOW),
+                                maximum_age=MAX_AGE)
+    assert observed["status"] == "FLAT"
+
+
+def test_real004_projection_exposes_no_execution_authority():
+    view = current_position(live_account(loading=False), "LIVE", now=NOW,
+                            observation=retained_observation([], NOW),
+                            maximum_age=MAX_AGE)
+    for key in ("realOrderAllowed", "liveOrderEntryAllowed", "executionEntryAllowed",
+                "executionEnabled", "armed", "orderSideAuthority"):
+        assert key not in view
+
+
+def test_real004_historical_loading_true_age_29_718657_is_flat():
+    age = 29.718657
+    account = live_account()
+    view = current_position(account, "LIVE", now=NOW,
+                            observation=retained_observation([], NOW - age),
+                            maximum_age=MAX_AGE)
+    assert view["status"] == "FLAT"
+    assert view["freshness"] == "FRESH"
+    assert view["reason"] is None
+    stale = current_position(account, "LIVE", now=NOW,
+                             observation=retained_observation([], NOW - MAX_AGE - age),
+                             maximum_age=MAX_AGE)
+    assert stale["status"] == "UNKNOWN" and stale["reason"] == "STALE_SOURCE"
+    missing = current_position(account, "LIVE", now=NOW,
+                               observation=retained_observation([], None),
+                               maximum_age=MAX_AGE)
+    assert missing["status"] == "UNKNOWN" and missing["reason"] == "SOURCE_NOT_CURRENT"
