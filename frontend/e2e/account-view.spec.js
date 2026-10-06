@@ -63,3 +63,37 @@ for (const width of widths) {
         await page.screenshot({ path: `/tmp/cp63-account-view-${width}.png`, fullPage: true });
     });
 }
+
+for (const width of widths) {
+    for (const scenario of ["stale", "flat", "unknown", "open"]) {
+        test(`position header truth ${scenario} ${width}`, async ({ page }) => {
+            const mutations = [];
+            const errors = [];
+            page.on("pageerror", error => errors.push(String(error)));
+            page.on("request", request => {
+                if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) mutations.push(request.url());
+            });
+            await page.route(url => url.pathname.startsWith("/api/"), route => route.abort());
+            await page.setViewportSize({ width, height: 1400 });
+            await page.goto(`/e2e/support/account-view-harness.html?position=${scenario}`);
+            for (const mode of ["paper", "live", "paper"]) {
+                await page.getByTestId(`account-view-option-${mode}`).click();
+                const expected = scenario === "stale" ? "UNKNOWN / STALE" : scenario === "flat" ? "FLAT" : scenario === "unknown" ? "UNKNOWN" : mode === "paper" ? "LONG / OPEN" : "SHORT / OPEN";
+                await expect(page.getByTestId("selected-account-position")).toHaveText(expected);
+                await expect(page.getByTestId("current-position-card")).toContainText(scenario === "open" ? "OPEN" : expected);
+                expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+                const clipped = await page.locator('[data-testid="account-status-page"]').evaluate(root => [...root.querySelectorAll("*")].filter(e => {
+                    const style = getComputedStyle(e);
+                    return e.clientWidth > 0 && (e.scrollWidth > e.clientWidth + 2 && ["hidden", "clip"].includes(style.overflowX) || e.scrollHeight > e.clientHeight + 2 && ["hidden", "clip"].includes(style.overflowY));
+                }).map(e => e.dataset.testid || e.className));
+                expect(clipped).toEqual([]);
+                const header = await page.getByTestId("selected-account-position").boundingBox();
+                const selector = await page.getByTestId("account-view-switch").boundingBox();
+                expect(header.y).toBeGreaterThanOrEqual(selector.y + selector.height);
+                await page.screenshot({ path: `/tmp/cp65f-${scenario}-${mode}-${width}.png`, fullPage: true });
+            }
+            expect(mutations).toEqual([]);
+            expect(errors).toEqual([]);
+        });
+    }
+}

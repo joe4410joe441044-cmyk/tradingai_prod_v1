@@ -777,3 +777,34 @@ const loadPrefixedModule = async () => {
     }
     return prefixedModulePromise;
 };
+
+// The legacy account snapshots deliberately claim FLAT in this matrix.
+for (const mode of ["PAPER", "LIVE"]) {
+    for (const [name, position, expected] of [
+        ["OPEN LONG", { status: "OPEN", side: "LONG", symbol: "CANONICAL", quantity: 2, freshness: "FRESH" }, "LONG / OPEN"],
+        ["OPEN SHORT", { status: "OPEN", side: "SHORT", symbol: "CANONICAL", quantity: 3, freshness: "FRESH" }, "SHORT / OPEN"],
+        ["FLAT FRESH", { status: "FLAT", freshness: "FRESH" }, "FLAT"],
+        ["UNKNOWN", { status: "UNKNOWN", freshness: "FRESH" }, "UNKNOWN"],
+        ["STALE production repro", { status: "UNKNOWN", freshness: "STALE", quantity: null, reason: "STALE_SOURCE" }, "UNKNOWN / STALE"],
+        ["stale FLAT", { status: "FLAT", freshness: "STALE" }, "UNKNOWN / STALE"],
+        ["missing", undefined, "UNKNOWN"],
+        ["null", null, "UNKNOWN"],
+        ["multiple", { status: "UNKNOWN", reason: "MULTIPLE_POSITIONS", positions: [] }, "MULTIPLE POSITIONS"],
+    ]) {
+        test(`selected-account-position ${mode} ${name}`, () => {
+            const status = baseStatus();
+            status.accountRuntime.positionsByMode[mode] = position;
+            const nodes = view(status, mode);
+            assert.equal(readTestIdValue(nodes, "selected-account-position"), expected);
+            if (expected !== "FLAT") assert.notEqual(readTestIdValue(nodes, "selected-account-position"), "FLAT");
+        });
+    }
+}
+
+test("selected-account-position PAPER -> REAL -> PAPER restores canonical truth", () => {
+    const status = baseStatus();
+    status.accountRuntime.positionsByMode.PAPER = { status: "UNKNOWN", freshness: "STALE" };
+    for (const [mode, expected] of [["PAPER", "UNKNOWN / STALE"], ["LIVE", "FLAT"], ["PAPER", "UNKNOWN / STALE"]]) {
+        assert.equal(readTestIdValue(view(status, mode), "selected-account-position"), expected);
+    }
+});

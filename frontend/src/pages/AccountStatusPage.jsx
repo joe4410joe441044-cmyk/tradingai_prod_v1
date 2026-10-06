@@ -14,8 +14,8 @@ import {
     displayValue,
     fetchBotStatus,
     formatLastUpdate,
-    formatPositionValue,
     isAvailable,
+    positionState,
     resolveAccountView,
 } from "../components/runtime/accountRuntimeModel";
 
@@ -255,7 +255,6 @@ export function AccountStatusView({
     );
 
     const {
-        realPositionValue,
         realConnected,
         realLoading,
         realStale,
@@ -284,12 +283,10 @@ export function AccountStatusView({
             title: "REAL / LIVE ACCOUNT / 実口座",
         };
 
-    const selectedPositionValue = isPaperView
-        ? formatPositionValue(
-            derived.paperPosition,
-            derived.paperAvailable ? "NO_OPEN_POSITION" : undefined,
-        )
-        : realPositionValue;
+    const selectedPositionState = positionState(currentPosition);
+    const selectedPositionValue = selectedPositionState === "OPEN"
+        ? (["LONG", "SHORT"].includes(currentPosition.side) ? `${currentPosition.side} / OPEN` : "OPEN")
+        : selectedPositionState;
     const selectedAuthority = isPaperView
         ? "READ ONLY"
         : displayValue(resolvedPermission);

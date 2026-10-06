@@ -69,6 +69,19 @@ const botStatus = {
     },
 };
 
+// Isolated header fixtures retain the contradictory legacy FLAT account snapshot.
+const scenario = new URLSearchParams(location.search).get("position");
+if (["stale", "flat", "unknown"].includes(scenario)) {
+    for (const mode of ["PAPER", "LIVE"]) {
+        botStatus.accountRuntime.positionsByMode[mode] = {
+            mode, status: scenario === "flat" ? "FLAT" : "UNKNOWN",
+            freshness: scenario === "stale" ? "STALE" : "FRESH",
+            reason: scenario === "stale" ? "STALE_SOURCE" : undefined,
+            quantity: null, positions: [],
+        };
+    }
+}
+
 const root = createRoot(document.getElementById("root"));
 const render = (accountView) => root.render(
     <div className="dashboard">
