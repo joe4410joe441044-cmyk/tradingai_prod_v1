@@ -94,6 +94,7 @@ class RuntimeHealthSnapshotTest(unittest.TestCase):
                 "emergency_stop": False,
             },
             "snapshot_timestamp": 1_700_000_001.0,
+            "projection_timestamp": 1_700_000_001.0,
             "loop_state": "RUNNING",
             "session_id": 7,
             "runtime_instance_id": "instance-1",

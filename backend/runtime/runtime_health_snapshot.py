@@ -8,8 +8,20 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
+import time
 
 from backend.runtime.cycle_diagnostics import resolve_evaluation_provenance
+
+
+# Freshness window for a completed runtime result, in seconds. Uses the same
+# value the projection gate previously enforced (upper bound).
+RUNTIME_SNAPSHOT_FRESHNESS_WINDOW_SECONDS = 5.0
+
+# Small tolerance for a completed result whose capture clock is marginally
+# ahead of the projection clock (e.g. same-process ordering / NTP adjustment).
+# A larger future skew is treated as a clock anomaly and fails closed.
+RUNTIME_SNAPSHOT_CLOCK_SKEW_TOLERANCE_SECONDS = 1.0
 
 
 STAGE_DEFINITIONS = {
@@ -550,6 +562,7 @@ def build_runtime_health_snapshot(
     runtime_metrics,
     governance_state,
     snapshot_timestamp,
+    projection_timestamp=None,
     lifecycle_revision=0,
     lifecycle_state=None,
     cycle_id=None,
@@ -574,14 +587,30 @@ def build_runtime_health_snapshot(
         snapshot_authority if isinstance(snapshot_authority, dict) else {}
     )
     captured_at = snapshot_authority.get("capturedAt")
-    snapshot_age = (
-        float(snapshot_timestamp) - float(captured_at)
-        if isinstance(snapshot_timestamp, (int, float))
-        and not isinstance(snapshot_timestamp, bool)
-        and isinstance(captured_at, (int, float))
+    # Freshness must be evaluated against one coherent reference clock. The
+    # completed result carries its own capture time inside the same authority
+    # object, so age is measured against the single projection-time clock
+    # rather than mixing it with the independently sampled loop metric
+    # (snapshot_timestamp / last_bot_update). Previously a request could read a
+    # fresh result whose capturedAt was newer than the loop metric still left
+    # from the previous writer cycle, producing a small negative age that the
+    # strict `0 <= age <= 5` bound rejected as stale. A genuinely stale result
+    # (old capturedAt) still exceeds the upper bound and fails closed, and a
+    # future-dated capturedAt beyond the skew tolerance still fails closed.
+    reference_timestamp = projection_timestamp
+    if (
+        not isinstance(reference_timestamp, (int, float))
+        or isinstance(reference_timestamp, bool)
+    ):
+        reference_timestamp = time.time()
+    snapshot_age = None
+    if (
+        isinstance(captured_at, (int, float))
         and not isinstance(captured_at, bool)
-        else None
-    )
+    ):
+        snapshot_age = float(reference_timestamp) - float(captured_at)
+        if not math.isfinite(snapshot_age):
+            snapshot_age = None
     snapshot_current = bool(
         active
         and completed_result
@@ -590,7 +619,11 @@ def build_runtime_health_snapshot(
         and snapshot_authority.get("runtimeInstanceId") == runtime_instance_id
         and snapshot_authority.get("runtimeId") == active_runtime_id
         and snapshot_age is not None
-        and 0 <= snapshot_age <= 5
+        and (
+            -RUNTIME_SNAPSHOT_CLOCK_SKEW_TOLERANCE_SECONDS
+            <= snapshot_age
+            <= RUNTIME_SNAPSHOT_FRESHNESS_WINDOW_SECONDS
+        )
     )
     execution_available = active and bool(engine_available)
     # A completed cycle remains useful as history, but it must not be exposed
