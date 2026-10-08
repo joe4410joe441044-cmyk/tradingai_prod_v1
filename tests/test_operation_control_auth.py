@@ -51,6 +51,7 @@ SUPPORTED_PROTECTED_PATHS = frozenset({
     "/api/bot/live-order-entry/disarm",
     "/api/bot/control",
     "/api/bot/manual-trade",
+    "/api/bot/saved-mode",
     "/api/bot/paper-account/capital",
     "/api/governance/mode",
     "/api/governance/execution",

@@ -63,6 +63,13 @@ class ExecutionControlRequest(BaseModel):
     expectedRevision: Optional[int] = Field(None, ge=0)
 
 
+class SavedModeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Mode
+    expectedRevision: Optional[int] = Field(None, ge=0)
+
+
 class ManualTradeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -154,11 +161,21 @@ class StatusResponse(BaseModel):
 
     selectedMode: str = "PAPER"
 
+    savedMode: str = "PAPER"
+
+    savedModeRevision: int = 0
+
+    savedModeUpdatedAt: Optional[float] = None
+
+    runtimeMode: str = "NONE"
+
     safetyReason: str = "DRY_RUN_ACTIVE"
 
     allowLive: bool = False
 
     tradeMode: str = "paper"
+
+    tradeModeCapability: str = "paper"
 
     paperBootstrapEligible: Optional[bool] = None
 
@@ -454,6 +471,26 @@ def stop_bot(_operator: str = Depends(require_operator_session)):
 
     result = bot_manager.stop()
 
+    return result
+
+
+# =========================
+# SAVED / SELECTED DESTINATION
+# =========================
+# Commit the canonical destination for the NEXT START. This is a pure
+# configuration write: it never starts the runtime, arms LIVE, constructs an
+# execution engine, changes real-order authority, or places an order.
+@router.post("/saved-mode")
+def save_selected_mode(
+    request: SavedModeRequest,
+    _operator: str = Depends(require_operator_session),
+):
+    result = get_bot_manager().set_saved_mode(
+        request.mode.value,
+        expected_revision=request.expectedRevision,
+    )
+    if result.get("success") is not True:
+        raise HTTPException(status_code=409, detail=result)
     return result
 
 

@@ -9,6 +9,9 @@ export default function StatusStrip({ runtimeHealth }) {
     const strategyLoopStatus = runtimeHealth.runtimeEngine.status;
     const latency = formatLatency(runtimeHealth.latencyMs);
     const mode = runtimeHealth.mode;
+    // Process-wide TRADE_MODE environment capability, exposed separately and
+    // truthfully so it is never confused with the selected destination.
+    const modeCapability = runtimeHealth.modeCapability || "PAPER";
 
 
     /* =====================================================
@@ -141,6 +144,34 @@ export default function StatusStrip({ runtimeHealth }) {
 
                     {
                         mode
+                    }
+
+                </span>
+
+            </div>
+
+            {/* ============================================= */}
+            {/* CAPABILITY (process TRADE_MODE) */}
+            {/* ============================================= */}
+
+            <div className="status-item">
+
+                <span className="status-label">
+                    CAPABILITY
+                </span>
+
+                <span
+                    className={
+                        `status-value ${
+                            modeCapability === "LIVE"
+                                ? "live"
+                                : "paper"
+                        }`
+                    }
+                >
+
+                    {
+                        modeCapability
                     }
 
                 </span>

@@ -35,9 +35,21 @@ _TEST_STORE_PATH = _TEST_STORE_DIR / "parameter_performance.jsonl"
 os.environ["PARAMETER_PERFORMANCE_PATH"] = str(_TEST_STORE_PATH)
 os.environ["PARAMETER_PERFORMANCE_ORIGIN"] = "NON_PRODUCTION"
 
+# D-LIVE-2: isolate the canonical saved-mode authority so no test can read or
+# write the Production destination file.
+_TEST_SAVED_MODE_DIR = Path(tempfile.gettempdir()) / "tradingai-saved-mode-test"
+_TEST_SAVED_MODE_DIR.mkdir(parents=True, exist_ok=True)
+_TEST_SAVED_MODE_PATH = _TEST_SAVED_MODE_DIR / "saved_mode_authority.json"
+
+os.environ["TRADINGAI_SAVED_MODE_PATH"] = str(_TEST_SAVED_MODE_PATH)
+
 
 def _test_store_path() -> Path:
     return Path(os.environ["PARAMETER_PERFORMANCE_PATH"])
+
+
+def _test_saved_mode_path() -> Path:
+    return Path(os.environ["TRADINGAI_SAVED_MODE_PATH"])
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +57,22 @@ def _isolated_parameter_performance_store():
     """Start every test with an empty isolated store."""
 
     path = _test_store_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    yield path
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolated_saved_mode_authority():
+    """Start every test with no committed saved-mode destination."""
+
+    path = _test_saved_mode_path()
     try:
         path.unlink()
     except FileNotFoundError:

@@ -118,26 +118,48 @@ test("missing snapshot is explicit critical telemetry, not a WAIT placeholder", 
     assert.equal(result.timeline.length, 0);
 });
 
-test("MODE follows the authoritative tradeMode source to PAPER", () => {
+test("MODE follows the canonical savedMode source to PAPER", () => {
     const result = deriveRuntimeHealth({
-        botStatus: { runtime_health: backendHealth, tradeMode: "paper" },
+        botStatus: { runtime_health: backendHealth, savedMode: "PAPER" },
     });
 
     assert.equal(result.mode, "PAPER");
 });
 
-test("MODE follows the authoritative tradeMode source to LIVE", () => {
+test("MODE follows the canonical savedMode source to LIVE", () => {
     const result = deriveRuntimeHealth({
-        botStatus: { runtime_health: backendHealth, tradeMode: "live" },
+        botStatus: { runtime_health: backendHealth, savedMode: "LIVE" },
     });
 
     assert.equal(result.mode, "LIVE");
+});
+
+test("MODE falls back to selectedMode when savedMode is absent", () => {
+    const result = deriveRuntimeHealth({
+        botStatus: { runtime_health: backendHealth, selectedMode: "LIVE" },
+    });
+
+    assert.equal(result.mode, "LIVE");
+});
+
+test("MODE no longer derives from the process tradeMode capability", () => {
+    const result = deriveRuntimeHealth({
+        botStatus: {
+            runtime_health: backendHealth,
+            savedMode: "PAPER",
+            tradeMode: "live",
+        },
+    });
+
+    assert.equal(result.mode, "PAPER", "selected destination wins");
+    assert.equal(result.modeCapability, "LIVE", "capability is exposed separately");
 });
 
 test("MODE fails closed to PAPER when the authoritative source is absent", () => {
     const result = deriveRuntimeHealth({ botStatus: {} });
 
     assert.equal(result.mode, "PAPER");
+    assert.equal(result.modeCapability, "PAPER");
 });
 
 test("stopped snapshot keeps the previous hold out of current UI state", () => {

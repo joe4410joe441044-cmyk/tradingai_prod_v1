@@ -1999,6 +1999,69 @@ test("Work D: MANUAL panel fails closed when no canonical symbol is available", 
     assert.equal(panel.includes("ACTIVE SYMBOL NOT AVAILABLE"), true);
 });
 
+test("D-LIVE-2: STOPPED manual destination follows the canonical savedMode", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        botRunning: false,
+        config: {
+            mode: "PAPER",
+            savedMode: "LIVE",
+            runtimeMode: "NONE",
+            selectedMode: "PAPER",
+            dryRun: true,
+            selectionMode: "MANUAL",
+            symbol: "XRPUSDTM",
+        },
+    }));
+    const panel = normalizedText(descendants(findTestId(renderer.root, "manual-trading-panel")));
+    assert.equal(panel.includes("DESTINATION LIVE"), true);
+});
+
+test("D-LIVE-2: RUNNING manual destination follows runtimeMode while savedMode differs", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        botRunning: true,
+        config: {
+            mode: "PAPER",
+            savedMode: "LIVE",
+            runtimeMode: "PAPER",
+            selectedMode: "PAPER",
+            dryRun: true,
+            selectionMode: "MANUAL",
+            symbol: "XRPUSDTM",
+        },
+    }));
+    const panel = normalizedText(descendants(findTestId(renderer.root, "manual-trading-panel")));
+    assert.equal(panel.includes("DESTINATION PAPER"), true);
+});
+
+test("D-LIVE-2: STOPPED saved LIVE does not claim REAL EXECUTION while simulation", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "MANUAL",
+        position: "FLAT",
+        activeSymbol: "XRPUSDTM",
+        realOrderAllowed: false,
+        config: {
+            mode: "PAPER",
+            savedMode: "LIVE",
+            runtimeMode: "NONE",
+            selectedMode: "PAPER",
+            dryRun: true,
+            executionMode: "SIMULATION",
+            selectionMode: "MANUAL",
+            symbol: "XRPUSDTM",
+        },
+        handleManualTrade: () => {},
+    }));
+    manualTradeButtons(renderer.root)[0].props.onClick();
+    renderer.render();
+    assert.equal(normalizedText(findTestId(renderer.root, "manual-confirm-mode")), "LIVE");
+    assert.equal(findTestId(renderer.root, "manual-confirm-real-execution"), undefined);
+});
+
 test("Work D: MANUAL BUY and SELL invoke the existing manual trade handler", async () => {
     const Component = await loadComponent();
     const calls = [];

@@ -27,6 +27,7 @@ import {
     resolveOperationDisplaySymbol,
 } from "../components/operation/operationPreparationModel";
 import { performSaveSettings } from "../features/trade-settings/saveSettings";
+import { authenticatedControlRequest } from "../features/auth/operatorAuth";
 
 
 const fetchBotStatus = async () => {
@@ -96,7 +97,11 @@ const buildBotConfig = (base, botStatus, running) => ({
         || typeof botStatus?.real_order_allowed === "boolean",
     allowLive: botStatus?.allowLive,
     tradeMode: botStatus?.tradeMode,
+    tradeModeCapability: botStatus?.tradeModeCapability,
     selectedMode: botStatus?.selectedMode,
+    savedMode: botStatus?.savedMode,
+    savedModeRevision: botStatus?.savedModeRevision,
+    runtimeMode: botStatus?.runtimeMode,
     dryRun: typeof botStatus?.dryRun === "boolean" ? botStatus.dryRun : undefined,
     leverageAuthority: botStatus?.leverageAuthority ?? null,
     paperBootstrapEligible: botStatus?.paperBootstrapEligible,
@@ -140,41 +145,6 @@ const refreshBotStatus = useCallback(async () => {
 
     return snapshot.data;
 }, []);
-
-// SAVE SETTINGS = the configuration authority boundary. It reads the current
-// draft, validates it, and (for LIVE) refreshes the authoritative LIVE account
-// context via the existing read-only status path. Only after a successful
-// read/validation does it commit a new saved revision. It NEVER starts the
-// runtime, arms execution, or creates an order. A failed LIVE context refresh
-// leaves the previous saved revision untouched.
-const handleSaveSettings = useCallback(async () => {
-    if (savingSettings) {
-        return { ok: false, inProgress: true };
-    }
-    setSavingSettings(true);
-    setSettingsSaveError(null);
-    setSettingsSaveNotice(null);
-    try {
-        const result = await performSaveSettings({
-            draft: tradeSettings,
-            refreshLiveContext: refreshBotStatus,
-        });
-        if (!result.ok) {
-            const message = {
-                INVALID_MODE: "Mode must be PAPER or LIVE.（モードはPAPERまたはLIVEにしてください）",
-                INVALID_SYMBOL: "Symbol is required.（シンボルを指定してください）",
-                LIVE_ACCOUNT_CONTEXT_UNAVAILABLE: "LIVE account context could not be refreshed. Saved settings were not changed.（LIVEアカウント情報を取得できませんでした。保存済み設定は変更されていません）",
-            }[result.code] || "SAVE FAILED（保存に失敗しました）";
-            setSettingsSaveError({ code: result.code, message });
-            return { ok: false, code: result.code };
-        }
-        commitSavedSettings(tradeSettings);
-        setSettingsSaveNotice("SETTINGS SAVED");
-        return { ok: true };
-    } finally {
-        setSavingSettings(false);
-    }
-}, [commitSavedSettings, refreshBotStatus, savingSettings, tradeSettings]);
 
 const runtime = telemetryState.runtime;
 const marketData = telemetryState.market;
@@ -225,6 +195,104 @@ const liveAccountCapital = firstAvailable(
     botStatus?.realAvailableBalance,
     botStatus?.realBalance,
 );
+
+// Canonical selected/saved destination authority. The backend savedMode is
+// the source of truth for the next START destination; localStorage is only a
+// fallback while the backend value has not yet been observed.
+const canonicalSavedMode = (() => {
+    const candidate = String(botStatus?.savedMode ?? "").trim().toUpperCase();
+    return candidate === "LIVE" || candidate === "PAPER" ? candidate : null;
+})();
+
+// Persist the mode to the backend canonical saved-mode authority. This is a
+// pure configuration write: it never starts the runtime, arms LIVE, constructs
+// an execution engine, changes real-order authority, or places an order.
+const persistSavedMode = useCallback(async (mode) => {
+    const normalized = String(mode ?? "").trim().toUpperCase();
+    if (normalized !== "PAPER" && normalized !== "LIVE") {
+        return { ok: false, code: "INVALID_MODE" };
+    }
+    const expectedRevision = Number.isFinite(Number(botStatus?.savedModeRevision))
+        ? Number(botStatus.savedModeRevision)
+        : undefined;
+    try {
+        const response = await authenticatedControlRequest(API.botSavedMode(), {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            body: JSON.stringify({
+                mode: normalized.toLowerCase(),
+                ...(expectedRevision === undefined ? {} : { expectedRevision }),
+            }),
+        });
+        if (!response.ok) {
+            return {
+                ok: false,
+                code: "SAVED_MODE_REJECTED",
+                status: response.status,
+            };
+        }
+        const body = await response.json().catch(() => ({}));
+        if (body?.success !== true) {
+            return { ok: false, code: body?.reason || "SAVED_MODE_REJECTED" };
+        }
+        return {
+            ok: true,
+            savedMode: body.savedMode,
+            revision: body.savedModeRevision,
+        };
+    } catch {
+        return { ok: false, code: "SAVED_MODE_UNAVAILABLE" };
+    }
+}, [botStatus?.savedModeRevision]);
+
+// SAVE SETTINGS = the configuration authority boundary. It reads the current
+// draft, validates it, and (for LIVE) refreshes the authoritative LIVE account
+// context via the existing read-only status path. Only after a successful
+// read/validation does it commit the mode to the backend canonical saved-mode
+// authority and a new local saved revision. It NEVER starts the runtime, arms
+// execution, or creates an order. A failed step leaves the previous saved
+// mode/revision untouched.
+const handleSaveSettings = useCallback(async () => {
+    if (savingSettings) {
+        return { ok: false, inProgress: true };
+    }
+    setSavingSettings(true);
+    setSettingsSaveError(null);
+    setSettingsSaveNotice(null);
+    try {
+        const result = await performSaveSettings({
+            draft: tradeSettings,
+            refreshLiveContext: refreshBotStatus,
+        });
+        if (!result.ok) {
+            const message = {
+                INVALID_MODE: "Mode must be PAPER or LIVE.（モードはPAPERまたはLIVEにしてください）",
+                INVALID_SYMBOL: "Symbol is required.（シンボルを指定してください）",
+                LIVE_ACCOUNT_CONTEXT_UNAVAILABLE: "LIVE account context could not be refreshed. Saved settings were not changed.（LIVEアカウント情報を取得できませんでした。保存済み設定は変更されていません）",
+            }[result.code] || "SAVE FAILED（保存に失敗しました）";
+            setSettingsSaveError({ code: result.code, message });
+            return { ok: false, code: result.code };
+        }
+        const persisted = await persistSavedMode(tradeSettings.mode);
+        if (!persisted.ok) {
+            const message = {
+                STALE_SAVED_MODE_REVISION: "Saved mode changed in another session. Reload and save again.（別の画面で保存モードが更新されました。再読み込みして保存し直してください）",
+                SAVED_MODE_UNAVAILABLE: "Saved mode could not be committed to the backend. Saved settings were not changed.（保存モードをサーバーに確定できませんでした。保存済み設定は変更されていません）",
+            }[persisted.code] || "SAVE FAILED（保存に失敗しました）";
+            setSettingsSaveError({ code: persisted.code, message });
+            return { ok: false, code: persisted.code };
+        }
+        commitSavedSettings(tradeSettings);
+        setSettingsSaveNotice("SETTINGS SAVED");
+        await refreshBotStatus();
+        return { ok: true };
+    } finally {
+        setSavingSettings(false);
+    }
+}, [commitSavedSettings, persistSavedMode, refreshBotStatus, savingSettings, tradeSettings]);
 
 const runtimeHealth = useMemo(() => deriveRuntimeHealth({
     botStatus,
@@ -299,7 +367,13 @@ useEffect(() => {
 
                             config={buildBotConfig(tradeSettings, botStatus, runtimeHealth.running)}
 
-                            savedConfig={buildBotConfig(savedSettings, botStatus, runtimeHealth.running)}
+                            savedConfig={buildBotConfig(
+                                canonicalSavedMode
+                                    ? { ...savedSettings, mode: canonicalSavedMode }
+                                    : savedSettings,
+                                botStatus,
+                                runtimeHealth.running,
+                            )}
 
                             settingsDirty={settingsDirty}
 

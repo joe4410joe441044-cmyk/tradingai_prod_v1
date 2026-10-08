@@ -39,7 +39,7 @@ const displayDuration = (value) => (
         : "--"
 );
 
-const missingSnapshot = (mode = "PAPER") => ({
+const missingSnapshot = (mode = "PAPER", modeCapability = "PAPER") => ({
     snapshotPresent: false,
     snapshotId: null,
     lifecycleRevision: null,
@@ -48,6 +48,7 @@ const missingSnapshot = (mode = "PAPER") => ({
     statusFingerprint: null,
     running: false,
     mode,
+    modeCapability,
     executionAuthority: {
         status: "DISABLED_BY_OPERATOR",
         enabled: false,
@@ -145,14 +146,34 @@ const normalizeTimelineEvent = (event = {}) => {
     };
 };
 
-export function deriveRuntimeHealth({ botStatus } = {}) {
-    const mode = String(botStatus?.tradeMode ?? "").trim().toUpperCase() === "LIVE"
+// The header MODE is the operator's SELECTED / SAVED trading destination, not
+// the process-wide environment capability. Prefer the canonical backend
+// savedMode, fall back to the legacy runtime selectedMode, then PAPER.
+const resolveSelectedMode = (botStatus = {}) => {
+    for (const candidate of [botStatus?.savedMode, botStatus?.selectedMode]) {
+        const normalized = String(candidate ?? "").trim().toUpperCase();
+        if (normalized === "LIVE" || normalized === "PAPER") return normalized;
+    }
+    return "PAPER";
+};
+
+// Process-wide TRADE_MODE capability, exposed truthfully and separately so it
+// is never silently displayed as the selected trading destination.
+const resolveModeCapability = (botStatus = {}) => (
+    String(botStatus?.tradeModeCapability ?? botStatus?.tradeMode ?? "")
+        .trim()
+        .toUpperCase() === "LIVE"
         ? "LIVE"
-        : "PAPER";
+        : "PAPER"
+);
+
+export function deriveRuntimeHealth({ botStatus } = {}) {
+    const mode = resolveSelectedMode(botStatus);
+    const modeCapability = resolveModeCapability(botStatus);
     const health = botStatus?.runtime_health;
 
     if (!health || typeof health !== "object" || !health.stages) {
-        return missingSnapshot(mode);
+        return missingSnapshot(mode, modeCapability);
     }
 
     const stages = Object.entries(health.stages).map(normalizeStage);
@@ -174,6 +195,7 @@ export function deriveRuntimeHealth({ botStatus } = {}) {
         statusFingerprint: health.statusFingerprint,
         running: health.bot?.running === true,
         mode,
+        modeCapability,
         executionAuthority: health.executionAuthority || {
             status: health.executionEngine?.enabled === true
                 ? "ENABLED"

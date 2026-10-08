@@ -160,12 +160,34 @@ MANUAL_ENTRY_AUTHORITY = "MANUAL"
 MANUAL_TRADE_REQUEST_LIMIT = 256
 
 # =========================
+# SAVED / SELECTED DESTINATION AUTHORITY
+# =========================
+#
+# ``savedMode`` is the operator-committed trading destination for the NEXT
+# START. It is deliberately distinct from:
+#   * the process-wide environment capability (backend.config.TRADE_MODE),
+#   * the mode of an already attached RUNNING engine (runtimeMode),
+#   * execution authority (realOrderAllowed / liveOrderEntryAllowed /
+#     executionEnabled), which stays fail-closed.
+#
+# Committing a saved mode never starts a runtime, arms LIVE, constructs an
+# execution engine, or enables real-order execution.
+SAVED_MODE_PAPER = "PAPER"
+SAVED_MODE_LIVE = "LIVE"
+SAVED_MODE_VALUES = (
+    SAVED_MODE_PAPER,
+    SAVED_MODE_LIVE,
+)
+SAVED_MODE_SCHEMA_VERSION = 1
+SAVED_MODE_PATH_ENV = "TRADINGAI_SAVED_MODE_PATH"
+
+# =========================
 # BOT MANAGER
 # =========================
 
 class BotManager:
 
-    def __init__(self):
+    def __init__(self, saved_mode_path=None):
 
         self.engine = None
 
@@ -305,6 +327,27 @@ class BotManager:
         self.exchange = None
 
         self.config = {}
+
+        # =========================
+        # SAVED / SELECTED DESTINATION
+        # =========================
+
+        # Canonical committed operator destination for the next START. This is
+        # the ONLY backend authority for the selected trading destination. It
+        # is writable without START / ARM / order / engine creation and does
+        # not itself grant any execution authority. ``_load_saved_mode_authority``
+        # reads the durable file (or returns the PAPER/0 default).
+        self.saved_mode_lock = threading.Lock()
+        self.saved_mode_path = (
+            saved_mode_path
+            if saved_mode_path
+            else self._default_saved_mode_path()
+        )
+        (
+            self.saved_mode,
+            self.saved_mode_revision,
+            self.saved_mode_updated_at,
+        ) = self._load_saved_mode_authority()
 
         # =========================
         # ORDERFLOW COMPONENTS
@@ -5554,6 +5597,53 @@ class BotManager:
         self._store_market_snapshot(snapshot)
         return True
 
+    def _resolve_start_mode(self, config):
+        """Resolve the START requested mode from the saved-mode authority.
+
+        Once the operator has committed a saved destination (revision > 0),
+        ``savedMode`` is canonical and the request body is advisory only.
+        Before any commit the legacy request-body mode is honored so existing
+        behaviour is preserved.
+        """
+
+        body_mode = str(config.get("mode", "")).strip().lower()
+        saved_mode = str(
+            getattr(self, "saved_mode", SAVED_MODE_PAPER)
+        ).strip().lower()
+        saved_revision = int(
+            getattr(self, "saved_mode_revision", 0) or 0
+        )
+        saved_mode_is_authoritative = (
+            saved_revision > 0 and saved_mode in ("paper", "live")
+        )
+
+        requested_mode = (
+            saved_mode if saved_mode_is_authoritative else body_mode
+        )
+
+        if requested_mode not in ("paper", "live"):
+            return {
+                "mode": None,
+                "dryRun": None,
+                "authoritative": saved_mode_is_authoritative,
+                "reason": "INVALID_MODE",
+            }
+
+        if saved_mode_is_authoritative:
+            return {
+                "mode": requested_mode,
+                "dryRun": requested_mode == "paper",
+                "authoritative": True,
+                "reason": None,
+            }
+
+        return {
+            "mode": requested_mode,
+            "dryRun": config.get("dry_run", True),
+            "authoritative": False,
+            "reason": None,
+        }
+
     def start(self, config):
 
         try:
@@ -5614,19 +5704,25 @@ class BotManager:
         config["max_drawdown_pct"] = max_drawdown_authority
 
         try:
-            requested_mode = str(
-                config.get("mode", "")
-            ).strip().lower()
-            requested_dry_run = config.get("dry_run", True)
+            mode_resolution = self._resolve_start_mode(config)
+            requested_mode = mode_resolution["mode"]
 
             if requested_mode not in ("paper", "live"):
                 return {
                     "status": "error",
-                    "reason": "INVALID_MODE",
+                    "reason": mode_resolution.get("reason") or "INVALID_MODE",
                     "success": False,
                     "completed": False,
                     "stateUnknown": False,
                 }
+
+            requested_dry_run = mode_resolution["dryRun"]
+
+            if mode_resolution["authoritative"]:
+                # dry_run follows the canonical destination so a LIVE saved
+                # mode cannot be started as a PAPER dry-run (or vice versa).
+                config["mode"] = requested_mode
+                config["dry_run"] = requested_dry_run
 
             if requested_mode == "paper":
                 pending_authority = (
@@ -8303,6 +8399,155 @@ class BotManager:
             "runtime",
             "stopped_paper_safety_snapshot.json",
         )
+
+    # =========================
+    # SAVED MODE AUTHORITY
+    # =========================
+
+    @classmethod
+    def _default_saved_mode_path(cls):
+
+        override = os.environ.get(SAVED_MODE_PATH_ENV)
+        if override:
+            return os.path.abspath(override)
+
+        return os.path.join(
+            cls._project_root(),
+            "logs",
+            "runtime",
+            "saved_mode_authority.json",
+        )
+
+    @staticmethod
+    def _normalize_saved_mode(value):
+
+        normalized = str(value or "").strip().upper()
+        if normalized in SAVED_MODE_VALUES:
+            return normalized
+        return None
+
+    def _empty_saved_mode_state(self):
+
+        return (SAVED_MODE_PAPER, 0, None)
+
+    def _load_saved_mode_authority(self):
+
+        path = self.saved_mode_path
+        if not path or not os.path.exists(path):
+            return self._empty_saved_mode_state()
+
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return self._empty_saved_mode_state()
+
+        if not isinstance(payload, dict):
+            return self._empty_saved_mode_state()
+
+        mode = self._normalize_saved_mode(payload.get("savedMode"))
+        revision = payload.get("revision")
+        if mode is None or type(revision) is not int or revision < 0:
+            return self._empty_saved_mode_state()
+
+        updated_at = payload.get("updatedAt")
+        if type(updated_at) not in {int, float}:
+            updated_at = None
+
+        return (mode, revision, updated_at)
+
+    def _persist_saved_mode_authority(self, mode, revision, updated_at):
+
+        payload = {
+            "schemaVersion": SAVED_MODE_SCHEMA_VERSION,
+            "savedMode": mode,
+            "revision": revision,
+            "updatedAt": updated_at,
+        }
+
+        self._write_json_atomic(self.saved_mode_path, payload)
+
+    def get_saved_mode(self):
+
+        with self.saved_mode_lock:
+            return self.saved_mode
+
+    def get_saved_mode_authority(self):
+
+        with self.saved_mode_lock:
+            return {
+                "savedMode": self.saved_mode,
+                "savedModeRevision": self.saved_mode_revision,
+                "savedModeUpdatedAt": self.saved_mode_updated_at,
+            }
+
+    def set_saved_mode(self, mode, expected_revision=None):
+        """Commit the canonical selected destination for the next START.
+
+        This is a pure configuration write. It never starts the runtime, arms
+        LIVE order entry, constructs an execution engine, changes
+        ``realOrderAllowed`` / ``liveOrderEntryAllowed`` / ``executionEnabled``,
+        or places an order.
+        """
+
+        normalized = self._normalize_saved_mode(mode)
+        if normalized is None:
+            return {
+                "success": False,
+                "reason": "INVALID_SAVED_MODE",
+                "savedMode": self.get_saved_mode(),
+                "savedModeRevision": self.saved_mode_revision,
+            }
+
+        with self.saved_mode_lock:
+            if expected_revision is not None:
+                try:
+                    expected = int(expected_revision)
+                except (TypeError, ValueError):
+                    expected = None
+                if expected is None:
+                    return {
+                        "success": False,
+                        "reason": "INVALID_SAVED_MODE_REVISION",
+                        "savedMode": self.saved_mode,
+                        "savedModeRevision": self.saved_mode_revision,
+                    }
+                if expected != self.saved_mode_revision:
+                    return {
+                        "success": False,
+                        "reason": "STALE_SAVED_MODE_REVISION",
+                        "savedMode": self.saved_mode,
+                        "savedModeRevision": self.saved_mode_revision,
+                        "expectedRevision": expected,
+                    }
+
+            updated_at = time.time()
+            next_revision = self.saved_mode_revision + 1
+
+            try:
+                self._persist_saved_mode_authority(
+                    normalized,
+                    next_revision,
+                    updated_at,
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "reason": "SAVED_MODE_PERSIST_FAILED",
+                    "savedMode": self.saved_mode,
+                    "savedModeRevision": self.saved_mode_revision,
+                }
+
+            self.saved_mode = normalized
+            self.saved_mode_revision = next_revision
+            self.saved_mode_updated_at = updated_at
+
+            return {
+                "success": True,
+                "savedMode": normalized,
+                "savedModeRevision": next_revision,
+                "savedModeUpdatedAt": updated_at,
+            }
 
     @staticmethod
     def _stopped_paper_durable_schema_version():
@@ -13114,6 +13359,18 @@ class BotManager:
             self.config.get("mode", "paper")
         ).strip().upper()
 
+        # Selected/saved destination and the mode of the currently attached
+        # runtime are distinct authorities. ``savedMode`` is the committed
+        # next-START destination; ``runtimeMode`` describes an ATTACHED engine
+        # only (NONE while STOPPED). Neither grants execution authority.
+        saved_mode = self.get_saved_mode()
+
+        runtime_mode = (
+            selected_mode
+            if (self._running or self.engine is not None)
+            else "NONE"
+        )
+
         live_readiness = self._build_live_readiness_snapshot(
             selected_mode,
             dry_run,
@@ -13680,6 +13937,16 @@ class BotManager:
 
             "selectedMode": selected_mode,
 
+            # Canonical selected / saved destination for the next START.
+            "savedMode": saved_mode,
+
+            "savedModeRevision": self.saved_mode_revision,
+
+            "savedModeUpdatedAt": self.saved_mode_updated_at,
+
+            # Mode of the currently attached RUNNING engine; NONE while stopped.
+            "runtimeMode": runtime_mode,
+
             "safetyReason": safety_reason,
 
             "exchangeAuth": (
@@ -13814,7 +14081,11 @@ class BotManager:
 
             "allowLive": backend_config.ALLOW_LIVE,
 
+            # Process-wide environment capability. This is NOT the selected
+            # trading destination; ``savedMode`` owns that meaning.
             "tradeMode": backend_config.TRADE_MODE,
+
+            "tradeModeCapability": backend_config.TRADE_MODE,
 
             # Keep legacy names aligned for existing API consumers.
             "execution_mode": execution_mode,

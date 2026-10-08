@@ -75,6 +75,9 @@ export const API = {
   botStatus: () =>
     join("/bot/status"),
 
+  botSavedMode: () =>
+    join("/bot/saved-mode"),
+
   botStart: () =>
     join("/bot/start"),
 

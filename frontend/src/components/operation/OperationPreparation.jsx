@@ -470,12 +470,27 @@ export default function OperationPreparation({
             : "SELL / SHORT"
     );
     // PAPER/LIVE is the execution destination; BOT/MANUAL is the entry
-    // authority. The destination is the canonical selected mode, never the
-    // process-wide environment trade capability (which is not a destination).
+    // authority. The destination is the canonical selected/saved mode, never
+    // the process-wide environment trade capability (which is not a
+    // destination). While STOPPED the committed savedMode is shown; while
+    // RUNNING the attached runtimeMode is the current destination.
     const manualDestination = (() => {
-        const selected = String(
-            config?.selectedMode || ""
-        ).trim().toUpperCase();
+        const normalize = (value) => {
+            const text = String(value ?? "").trim().toUpperCase();
+            return text === "LIVE" || text === "PAPER" ? text : null;
+        };
+        const saved = normalize(config?.savedMode);
+        const runtime = normalize(config?.runtimeMode);
+        if (botRunning === true && runtime) {
+            return runtime;
+        }
+        if (saved) {
+            return saved;
+        }
+        if (runtime) {
+            return runtime;
+        }
+        const selected = normalize(config?.selectedMode);
         if (selected === "LIVE" && config?.dryRun === false) {
             return "LIVE";
         }
@@ -484,6 +499,17 @@ export default function OperationPreparation({
         }
         return "UNKNOWN";
     })();
+    // A LIVE DESTINATION is not itself LIVE execution authority. The REAL
+    // EXECUTION warning only appears when an actual LIVE execution path is
+    // present, so saving LIVE while STOPPED never claims execution is enabled.
+    const manualLiveExecutionActive = (
+        manualDestination === "LIVE"
+        && (
+            executionMode === "LIVE"
+            || realOrderAllowed === true
+            || config?.dryRun === false
+        )
+    );
 
     // Manual execution confirmation (presentation-only). The backend remains
     // the authority; this only decides whether the operator confirms first.
@@ -1430,7 +1456,7 @@ return (
                                     <span>ACTION:</span>
                                     <strong data-testid="manual-confirm-action">{manualConfirmOperationLabel}</strong>
                                 </div>
-                                {manualDestination === "LIVE" && (
+                                {manualLiveExecutionActive && (
                                     <div className="operation-live-confirm__detail-row">
                                         <span>EXECUTION:</span>
                                         <strong
