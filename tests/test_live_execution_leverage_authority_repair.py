@@ -275,6 +275,9 @@ def test_reduce_only_close_omits_leverage(monkeypatch):
         "quantity": 3.0,
         "signed_quantity": 3.0,
         "raw_quantity": 3.0,
+        # D-LIVE-4D: the reduceOnly close now uses the actual position margin
+        # mode (v1 ``crossMode`` / ``marginMode``) as its close authority.
+        "raw": {"symbol": "XRPUSDTM", "currentQty": 3, "crossMode": False},
         "error_code": None,
         "error": None,
     }

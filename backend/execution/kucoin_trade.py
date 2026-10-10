@@ -37,12 +37,24 @@ DAILY_PNL_PAGE_SIZE = 50
 # the fail-closed preflight cannot drift apart.  The exchange's authoritative
 # current symbol margin mode is read (GET only) from the KuCoin v2
 # ``getMarginMode`` endpoint.  The flat v1 position placeholder marginMode
-# must never be used as authority for this comparison.
+# must never be used as authority for the ENTRY comparison.
+#
+# For an existing position close the position itself is the authority: the
+# reduceOnly close must use the actual position's margin mode (v1 position
+# ``marginMode`` / ``crossMode``), falling back to the GET authority.  A close
+# is never forced to ISOLATED and never falls back to a blind mode.
 
 REQUESTED_MARGIN_MODE = "ISOLATED"
+MARGIN_MODE_UNKNOWN = "UNKNOWN"
 MARGIN_MODE_SOURCE = "KUCOIN_V2_POSITION_MARGIN_MODE"
 MARGIN_MODE_AUTHORITY_ENDPOINT = "/api/v2/position/getMarginMode"
 CANONICAL_MARGIN_MODES = ("ISOLATED", "CROSS")
+
+# Canonical comparison reasons.  These are the only values the entry
+# preflight may emit, so the operator-facing block reason is deterministic.
+MARGIN_MODE_COMPATIBLE = "MARGIN_MODE_COMPATIBLE"
+MARGIN_MODE_MISMATCH = "MARGIN_MODE_MISMATCH"
+MARGIN_MODE_AUTHORITY_UNAVAILABLE = "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
 
 
 def normalize_kucoin_risk_ratio(value):
@@ -398,6 +410,54 @@ class KucoinTradeClient(BaseClient):
         authority["available"] = True
         return authority
 
+    def margin_mode_authority(self, symbol, timeout=10):
+        """Canonical required-vs-actual margin mode comparison (GET only).
+
+        This is the single margin-mode authority for TradingAI.  It combines
+        the exchange GET read with the canonical requested mode and emits one
+        deterministic comparison contract:
+
+        * ``known``       - an authoritative exchange mode was obtained
+        * ``requiredMode``- canonical TradingAI requested mode (ISOLATED)
+        * ``actualMode``  - authoritative exchange mode, or ``UNKNOWN``
+        * ``compatible``  - required == actual
+        * ``reason``      - ``MARGIN_MODE_COMPATIBLE`` | ``MARGIN_MODE_MISMATCH``
+                            | ``MARGIN_MODE_AUTHORITY_UNAVAILABLE``
+        * ``source`` / ``updatedAt`` / ``authorityReason`` - provenance
+
+        Never guesses an unknown mode and never rewrites the requested mode.
+        """
+
+        read = self.get_margin_mode(symbol, timeout=timeout)
+        known = bool(read.get("available"))
+        actual = (
+            read.get("marginMode")
+            if known
+            else MARGIN_MODE_UNKNOWN
+        )
+
+        if not known:
+            reason = MARGIN_MODE_AUTHORITY_UNAVAILABLE
+            compatible = False
+        elif actual == REQUESTED_MARGIN_MODE:
+            reason = MARGIN_MODE_COMPATIBLE
+            compatible = True
+        else:
+            reason = MARGIN_MODE_MISMATCH
+            compatible = False
+
+        return {
+            "known": known,
+            "requiredMode": REQUESTED_MARGIN_MODE,
+            "actualMode": actual,
+            "compatible": compatible,
+            "reason": reason,
+            "source": read.get("source", MARGIN_MODE_SOURCE),
+            "updatedAt": read.get("updatedAt"),
+            "symbol": read.get("symbol"),
+            "authorityReason": read.get("reason"),
+        }
+
     def margin_mode_entry_gate(self, symbol, timeout=10):
         """Fail-closed margin mode preflight for a LIVE entry.
 
@@ -411,29 +471,85 @@ class KucoinTradeClient(BaseClient):
           missing / unknown).
         """
 
-        authority = self.get_margin_mode(symbol, timeout=timeout)
-        requested = REQUESTED_MARGIN_MODE
-        exchange_mode = authority.get("marginMode")
+        authority = self.margin_mode_authority(symbol, timeout=timeout)
+        requested = authority["requiredMode"]
+        exchange_mode = authority["actualMode"]
 
-        if not authority.get("available"):
+        if not authority["known"]:
             return {
-                "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+                "reason": MARGIN_MODE_AUTHORITY_UNAVAILABLE,
+                "known": False,
+                "compatible": False,
                 "requestedMarginMode": requested,
-                "exchangeMarginMode": exchange_mode or "UNKNOWN",
-                "marginModeSource": MARGIN_MODE_SOURCE,
-                "authorityReason": authority.get("reason"),
+                "exchangeMarginMode": MARGIN_MODE_UNKNOWN,
+                "marginModeSource": authority["source"],
+                "authorityReason": authority.get("authorityReason"),
                 "updatedAt": authority.get("updatedAt"),
             }
 
-        if exchange_mode != requested:
+        if not authority["compatible"]:
             return {
-                "reason": "MARGIN_MODE_MISMATCH",
+                "reason": MARGIN_MODE_MISMATCH,
+                "known": True,
+                "compatible": False,
                 "requestedMarginMode": requested,
                 "exchangeMarginMode": exchange_mode,
-                "marginModeSource": MARGIN_MODE_SOURCE,
+                "marginModeSource": authority["source"],
                 "authorityReason": None,
                 "updatedAt": authority.get("updatedAt"),
             }
+
+        return None
+
+    def position_margin_mode(self, position):
+        """Extract a canonical margin mode from a KuCoin v1 position object.
+
+        The v1 position carries the actual position margin mode either as an
+        explicit ``marginMode`` string or as the legacy ``crossMode`` boolean
+        (true == CROSS).  Returns ``None`` when the value is absent or not one
+        of the canonical modes.  This is the authority used for a close.
+        """
+
+        if not isinstance(position, dict):
+            return None
+
+        raw_mode = position.get("marginMode")
+
+        if isinstance(raw_mode, str):
+            candidate = raw_mode.strip().upper()
+            if candidate in CANONICAL_MARGIN_MODES:
+                return candidate
+
+        cross_mode = position.get("crossMode")
+
+        if isinstance(cross_mode, bool):
+            return "CROSS" if cross_mode else "ISOLATED"
+
+        return None
+
+    def close_margin_mode(self, symbol, position=None, timeout=10):
+        """Resolve the authoritative margin mode for a reduceOnly close.
+
+        Prefers the existing position's own exchange-reported mode (the
+        position is the authority for its own close), then falls back to the
+        GET-only symbol authority.  Returns ``None`` when the mode cannot be
+        determined so the caller can fail closed instead of guessing a mode.
+        """
+
+        raw_position = None
+        if isinstance(position, dict):
+            raw_position = position.get("raw")
+            if not isinstance(raw_position, dict):
+                raw_position = position
+
+        position_mode = self.position_margin_mode(raw_position)
+
+        if position_mode is not None:
+            return position_mode
+
+        read = self.get_margin_mode(symbol, timeout=timeout)
+        if read.get("available"):
+            return read.get("marginMode")
 
         return None
 
@@ -1405,6 +1521,34 @@ class KucoinTradeClient(BaseClient):
 
         size = int(size_value)
         endpoint = "/api/v1/orders"
+
+        # =====================================
+        # CLOSE MARGIN MODE AUTHORITY (exit safety)
+        # =====================================
+        # ENTRY safety and EXIT safety are not identical.  A new entry is
+        # blocked on a margin-mode mismatch, but an existing real position must
+        # still be closable.  The reduceOnly close therefore uses the actual
+        # position's own margin mode (or the GET-only symbol authority) instead
+        # of blindly forcing ISOLATED.  If the mode cannot be deterministically
+        # resolved, fail closed and submit no order rather than risk an
+        # incompatible close.
+        close_margin_mode = self.close_margin_mode(
+            normalized_symbol,
+            initial,
+            timeout=timeout,
+        )
+
+        if close_margin_mode is None:
+            return response(
+                False,
+                error_code=MARGIN_MODE_AUTHORITY_UNAVAILABLE,
+                error="close margin mode authority unavailable",
+                normalized_symbol=normalized_symbol,
+                side=close_side,
+                size=size,
+                initial_position=initial,
+            )
+
         # ReduceOnly close intentionally carries no order-level leverage.
         # KuCoin Futures Add Order contract: `leverage` is "Optional for type
         # is 'isolated margin' order ... If you are to close the position, or
@@ -1421,7 +1565,7 @@ class KucoinTradeClient(BaseClient):
             "type": "market",
             "size": str(size),
             "reduceOnly": True,
-            "marginMode": "ISOLATED",
+            "marginMode": close_margin_mode,
         }
         body = json.dumps(body_dict)
 
@@ -2425,7 +2569,7 @@ class KucoinTradeClient(BaseClient):
                 "type": "market",
                 "size": str(qty),
                 "leverage": order_leverage,
-                "marginMode": "ISOLATED"
+                "marginMode": REQUESTED_MARGIN_MODE
             }
 
             body = json.dumps(body_dict)

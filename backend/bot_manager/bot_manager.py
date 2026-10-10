@@ -92,6 +92,7 @@ from backend.execution.kucoin_trade import (
     KucoinTradeClient,
     account_status_total_pnl_today,
     MARGIN_MODE_SOURCE,
+    REQUESTED_MARGIN_MODE as MARGIN_MODE_REQUIRED,
 )
 
 from backend.money_management.risk_percent_authority import (
@@ -758,6 +759,11 @@ class BotManager:
             "marginMode": None,
             "marginModeSource": MARGIN_MODE_SOURCE,
             "marginModeUpdatedAt": None,
+            "requiredMarginMode": MARGIN_MODE_REQUIRED,
+            "actualMarginMode": "UNKNOWN",
+            "marginModeKnown": False,
+            "marginModeCompatible": False,
+            "marginModeReason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
             "dailyPnlSource": None,
             "dailyPnlObservedAt": None,
             "dailyPnlDayStart": None,
@@ -1117,24 +1123,58 @@ class BotManager:
 
         # Observability-only authoritative exchange margin mode.  This read
         # never gates execution here; the fail-closed entry gate lives on the
-        # LIVE order boundary.  An unavailable read degrades to UNKNOWN.
+        # LIVE order boundary.  An unavailable read degrades to UNKNOWN and
+        # must never be coerced to a compatible value.
         margin_mode_authority = {
-            "marginMode": None,
-            "available": False,
-            "source": MARGIN_MODE_SOURCE,
+            "known": False,
+            "requiredMode": MARGIN_MODE_REQUIRED,
+            "actualMode": "UNKNOWN",
+            "compatible": False,
             "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+            "source": MARGIN_MODE_SOURCE,
             "updatedAt": None,
         }
 
         try:
+            symbol = self.orderbook_symbol or self.symbol
+            authority_reader = getattr(client, "margin_mode_authority", None)
             margin_reader = getattr(client, "get_margin_mode", None)
-            if callable(margin_reader):
-                candidate = margin_reader(
-                    self.orderbook_symbol
-                    or self.symbol
-                )
+
+            authority_candidate = None
+
+            if callable(authority_reader):
+                candidate = authority_reader(symbol)
                 if isinstance(candidate, dict):
-                    margin_mode_authority = candidate
+                    authority_candidate = candidate
+
+            if authority_candidate is not None:
+                margin_mode_authority = authority_candidate
+            elif callable(margin_reader):
+                candidate = margin_reader(symbol)
+                if isinstance(candidate, dict):
+                    known = bool(candidate.get("available"))
+                    actual = (
+                        candidate.get("marginMode")
+                        if known
+                        else "UNKNOWN"
+                    )
+                    margin_mode_authority = {
+                        "known": known,
+                        "requiredMode": MARGIN_MODE_REQUIRED,
+                        "actualMode": actual,
+                        "compatible": bool(
+                            known and actual == MARGIN_MODE_REQUIRED
+                        ),
+                        "reason": (
+                            "MARGIN_MODE_COMPATIBLE"
+                            if known and actual == MARGIN_MODE_REQUIRED
+                            else "MARGIN_MODE_MISMATCH"
+                            if known
+                            else "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
+                        ),
+                        "source": candidate.get("source", MARGIN_MODE_SOURCE),
+                        "updatedAt": candidate.get("updatedAt"),
+                    }
         except Exception:
             pass
 
@@ -1265,8 +1305,8 @@ class BotManager:
             "marginAvailable": margin_available,
             "marginRatio": margin_ratio,
             "marginMode": (
-                margin_mode_authority.get("marginMode")
-                if margin_mode_authority.get("available")
+                margin_mode_authority.get("actualMode")
+                if margin_mode_authority.get("known")
                 else "UNKNOWN"
             ),
             "marginModeSource": margin_mode_authority.get(
@@ -1274,6 +1314,24 @@ class BotManager:
                 MARGIN_MODE_SOURCE,
             ),
             "marginModeUpdatedAt": margin_mode_authority.get("updatedAt"),
+            "requiredMarginMode": margin_mode_authority.get(
+                "requiredMode",
+                MARGIN_MODE_REQUIRED,
+            ),
+            "actualMarginMode": margin_mode_authority.get(
+                "actualMode",
+                "UNKNOWN",
+            ),
+            "marginModeKnown": bool(
+                margin_mode_authority.get("known")
+            ),
+            "marginModeCompatible": bool(
+                margin_mode_authority.get("compatible")
+            ),
+            "marginModeReason": (
+                margin_mode_authority.get("reason")
+                or "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
+            ),
             "dailyPnlSource": (
                 daily_pnl.get("source") if daily_pnl is not None else None
             ),
@@ -1786,6 +1844,24 @@ class BotManager:
             "realMarginModeSource": real_account.get("marginModeSource"),
             "realMarginModeUpdatedAt": real_account.get(
                 "marginModeUpdatedAt"
+            ),
+            "realRequiredMarginMode": real_account.get(
+                "requiredMarginMode",
+                MARGIN_MODE_REQUIRED,
+            ),
+            "realActualMarginMode": real_account.get(
+                "actualMarginMode",
+                "UNKNOWN",
+            ),
+            "realMarginModeKnown": bool(
+                real_account.get("marginModeKnown")
+            ),
+            "realMarginModeCompatible": bool(
+                real_account.get("marginModeCompatible")
+            ),
+            "realMarginModeReason": (
+                real_account.get("marginModeReason")
+                or "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
             ),
             "realPosition": self._legacy_real_position_value(
                 real_account.get("positions")
@@ -4116,6 +4192,47 @@ class BotManager:
         }
         return result
 
+    def _manual_preparation_margin_mode_authority(self, symbol):
+        """Best-effort GET-only margin mode authority for manual preparation.
+
+        Read only.  Uses the canonical account read client, then the running
+        engine's exchange, and degrades to an unavailable authority rather than
+        fabricating a value.  Never mutates the exchange account.
+        """
+
+        client = self.account_read_client
+        if client is None:
+            engine = self.engine
+            client = (
+                getattr(engine, "exchange", None)
+                if engine is not None
+                else None
+            )
+
+        reader = (
+            getattr(client, "margin_mode_authority", None)
+            if client is not None
+            else None
+        )
+
+        if callable(reader):
+            try:
+                authority = reader(symbol)
+                if isinstance(authority, dict):
+                    return authority
+            except Exception:
+                pass
+
+        return {
+            "known": False,
+            "requiredMode": MARGIN_MODE_REQUIRED,
+            "actualMode": "UNKNOWN",
+            "compatible": False,
+            "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+            "source": MARGIN_MODE_SOURCE,
+            "updatedAt": None,
+        }
+
     def get_manual_trade_preparation(self):
         """Read-only context-bound manual candidate. No MM preflight."""
 
@@ -4138,8 +4255,37 @@ class BotManager:
                 "reason": None,
             }
 
+            margin_authority = self._manual_preparation_margin_mode_authority(
+                active_symbol
+            )
+            margin_reason = (
+                margin_authority.get("reason")
+                or "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
+            )
+            result.update({
+                "requiredMarginMode": margin_authority.get(
+                    "requiredMode",
+                    MARGIN_MODE_REQUIRED,
+                ),
+                "actualMarginMode": margin_authority.get(
+                    "actualMode",
+                    "UNKNOWN",
+                ),
+                "marginModeKnown": bool(margin_authority.get("known")),
+                "marginModeCompatible": bool(
+                    margin_authority.get("compatible")
+                ),
+                "marginModeReason": margin_reason,
+                "marginModeSource": margin_authority.get(
+                    "source",
+                    MARGIN_MODE_SOURCE,
+                ),
+                "marginModeUpdatedAt": margin_authority.get("updatedAt"),
+            })
+
             if engine is None:
                 result["reason"] = "ENGINE_UNAVAILABLE"
+                result["firstBlocker"] = "ENGINE_UNAVAILABLE"
                 return result
 
             try:
@@ -4164,6 +4310,21 @@ class BotManager:
                 result["reason"] = (
                     preview.get("reason") or "ENTRY_PREVIEW_INVALID"
                 )
+
+            # A LIVE entry that is otherwise preparable is still blocked by an
+            # incompatible or unavailable exchange margin mode authority.  The
+            # blocker is exposed without requiring START / ARM or a real order.
+            if (
+                mode == "live"
+                and result["valid"] is True
+                and margin_authority.get("compatible") is not True
+            ):
+                result["valid"] = False
+                result["reason"] = margin_reason
+                if isinstance(result.get("candidate"), dict):
+                    result["candidate"]["valid"] = False
+
+            result["firstBlocker"] = result.get("reason")
 
             return result
 

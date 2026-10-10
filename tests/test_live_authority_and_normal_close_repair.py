@@ -423,6 +423,15 @@ PARTIAL = {
 
 
 def _close_engine(flatten_result):
+    # D-LIVE-4D: the module-level flatten fixtures are built at import time, but
+    # the engine treats exchange close evidence older than
+    # LIVE_CLOSE_EVIDENCE_MAX_AGE_SECONDS as UNKNOWN.  Refresh the position
+    # evidence timestamp per construction so these tests are deterministic and
+    # independent of collection/run ordering.
+    if isinstance(flatten_result, dict):
+        final_position = flatten_result.get("final_position")
+        if isinstance(final_position, dict) and "timestamp" in final_position:
+            final_position["timestamp"] = time.time()
     engine = _ready_engine(exchange=_exchange(flatten_result))
     engine.LIVE_CLOSE_RECONCILIATION_INTERVAL_SECONDS = 0
     engine.actual_position = _position("long")
