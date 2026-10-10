@@ -91,6 +91,7 @@ from backend.core.logger import (
 from backend.execution.kucoin_trade import (
     KucoinTradeClient,
     account_status_total_pnl_today,
+    MARGIN_MODE_SOURCE,
 )
 
 from backend.money_management.risk_percent_authority import (
@@ -754,6 +755,9 @@ class BotManager:
             "marginUsed": None,
             "marginAvailable": None,
             "marginRatio": None,
+            "marginMode": None,
+            "marginModeSource": MARGIN_MODE_SOURCE,
+            "marginModeUpdatedAt": None,
             "dailyPnlSource": None,
             "dailyPnlObservedAt": None,
             "dailyPnlDayStart": None,
@@ -1111,6 +1115,29 @@ class BotManager:
                 "POSITION_FETCH_FAILED",
             )
 
+        # Observability-only authoritative exchange margin mode.  This read
+        # never gates execution here; the fail-closed entry gate lives on the
+        # LIVE order boundary.  An unavailable read degrades to UNKNOWN.
+        margin_mode_authority = {
+            "marginMode": None,
+            "available": False,
+            "source": MARGIN_MODE_SOURCE,
+            "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+            "updatedAt": None,
+        }
+
+        try:
+            margin_reader = getattr(client, "get_margin_mode", None)
+            if callable(margin_reader):
+                candidate = margin_reader(
+                    self.orderbook_symbol
+                    or self.symbol
+                )
+                if isinstance(candidate, dict):
+                    margin_mode_authority = candidate
+        except Exception:
+            pass
+
         authenticated = balance_ok or position_ok
         successful_sync = authenticated
         last_sync = (
@@ -1237,6 +1264,16 @@ class BotManager:
             "marginUsed": margin_used,
             "marginAvailable": margin_available,
             "marginRatio": margin_ratio,
+            "marginMode": (
+                margin_mode_authority.get("marginMode")
+                if margin_mode_authority.get("available")
+                else "UNKNOWN"
+            ),
+            "marginModeSource": margin_mode_authority.get(
+                "source",
+                MARGIN_MODE_SOURCE,
+            ),
+            "marginModeUpdatedAt": margin_mode_authority.get("updatedAt"),
             "dailyPnlSource": (
                 daily_pnl.get("source") if daily_pnl is not None else None
             ),
@@ -1745,6 +1782,11 @@ class BotManager:
             "realRealizedPnlToday": real_account.get("realizedPnlToday"),
             "realTotalPnlToday": real_account.get("totalPnlToday"),
             "realMarginRatio": real_account.get("marginRatio"),
+            "realMarginMode": real_account.get("marginMode"),
+            "realMarginModeSource": real_account.get("marginModeSource"),
+            "realMarginModeUpdatedAt": real_account.get(
+                "marginModeUpdatedAt"
+            ),
             "realPosition": self._legacy_real_position_value(
                 real_account.get("positions")
             ),
