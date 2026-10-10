@@ -29,6 +29,22 @@ DAILY_PNL_MAX_PAGES = 100
 DAILY_PNL_PAGE_SIZE = 50
 
 
+# =====================================
+# MARGIN MODE AUTHORITY
+# =====================================
+# The canonical TradingAI LIVE order contract requests ISOLATED margin.  The
+# requested mode is an explicit single authority so the payload contract and
+# the fail-closed preflight cannot drift apart.  The exchange's authoritative
+# current symbol margin mode is read (GET only) from the KuCoin v2
+# ``getMarginMode`` endpoint.  The flat v1 position placeholder marginMode
+# must never be used as authority for this comparison.
+
+REQUESTED_MARGIN_MODE = "ISOLATED"
+MARGIN_MODE_SOURCE = "KUCOIN_V2_POSITION_MARGIN_MODE"
+MARGIN_MODE_AUTHORITY_ENDPOINT = "/api/v2/position/getMarginMode"
+CANONICAL_MARGIN_MODES = ("ISOLATED", "CROSS")
+
+
 def normalize_kucoin_risk_ratio(value):
     """Convert KuCoin Classic Futures' account risk ratio to display percent.
 
@@ -284,6 +300,142 @@ class KucoinTradeClient(BaseClient):
         if not isinstance(payload, dict) or payload.get("code") != "200000":
             raise RuntimeError("KUCOIN_PRIVATE_GET_FAILED")
         return payload.get("data")
+
+    def get_margin_mode(self, symbol, timeout=10):
+        """Read the authoritative KuCoin symbol margin mode (GET only).
+
+        Uses the existing authenticated signer to call the v2
+        ``getMarginMode`` endpoint.  The response is normalized to the
+        canonical vocabulary ``ISOLATED`` / ``CROSS``.  Any transport,
+        authorization, HTTP, malformed, missing, or unknown value is reported
+        as unavailable rather than guessed, so the caller can fail closed.
+        """
+
+        normalized_symbol = self.normalize_symbol(symbol)
+        endpoint = (
+            MARGIN_MODE_AUTHORITY_ENDPOINT
+            + "?"
+            + urlencode({"symbol": normalized_symbol})
+        )
+
+        authority = {
+            "symbol": normalized_symbol,
+            "marginMode": None,
+            "available": False,
+            "source": MARGIN_MODE_SOURCE,
+            "reason": None,
+            "updatedAt": time.time(),
+        }
+
+        try:
+            headers = self._headers("GET", endpoint, "")
+            res = self.session.get(
+                self.base_url + endpoint,
+                headers=headers,
+                timeout=timeout,
+            )
+        except Exception as e:
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_REQUEST_FAILED"
+            runtime_debug(
+                "KuCoin getMarginMode request failed symbol=%s error=%s",
+                normalized_symbol,
+                e,
+            )
+            return authority
+
+        status_code = getattr(res, "status_code", None)
+
+        try:
+            status_code = (
+                int(status_code)
+                if status_code is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            status_code = None
+
+        if status_code is not None and status_code >= 400:
+            authority["reason"] = (
+                "MARGIN_MODE_AUTHORITY_HTTP_%s"
+                % status_code
+            )
+            return authority
+
+        try:
+            payload = res.json()
+        except Exception as e:
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_RESPONSE_FAILED"
+            runtime_debug(
+                "KuCoin getMarginMode malformed response symbol=%s error=%s",
+                normalized_symbol,
+                e,
+            )
+            return authority
+
+        if not isinstance(payload, dict) or payload.get("code") != "200000":
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_RESPONSE_FAILED"
+            return authority
+
+        data = payload.get("data")
+
+        if not isinstance(data, dict):
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_RESPONSE_FAILED"
+            return authority
+
+        raw_mode = data.get("marginMode")
+
+        if not isinstance(raw_mode, str) or not raw_mode.strip():
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_MISSING"
+            return authority
+
+        mode = raw_mode.strip().upper()
+
+        if mode not in CANONICAL_MARGIN_MODES:
+            authority["reason"] = "MARGIN_MODE_AUTHORITY_UNKNOWN"
+            return authority
+
+        authority["marginMode"] = mode
+        authority["available"] = True
+        return authority
+
+    def margin_mode_entry_gate(self, symbol, timeout=10):
+        """Fail-closed margin mode preflight for a LIVE entry.
+
+        Returns ``None`` when the authoritative exchange margin mode equals the
+        requested canonical mode.  Otherwise returns a sanitized block
+        descriptor with a canonical reason and diagnostic fields:
+
+        * ``MARGIN_MODE_MISMATCH`` when exchange differs from requested
+        * ``MARGIN_MODE_AUTHORITY_UNAVAILABLE`` when the exchange mode cannot
+          be authoritatively determined (transport / auth / malformed /
+          missing / unknown).
+        """
+
+        authority = self.get_margin_mode(symbol, timeout=timeout)
+        requested = REQUESTED_MARGIN_MODE
+        exchange_mode = authority.get("marginMode")
+
+        if not authority.get("available"):
+            return {
+                "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+                "requestedMarginMode": requested,
+                "exchangeMarginMode": exchange_mode or "UNKNOWN",
+                "marginModeSource": MARGIN_MODE_SOURCE,
+                "authorityReason": authority.get("reason"),
+                "updatedAt": authority.get("updatedAt"),
+            }
+
+        if exchange_mode != requested:
+            return {
+                "reason": "MARGIN_MODE_MISMATCH",
+                "requestedMarginMode": requested,
+                "exchangeMarginMode": exchange_mode,
+                "marginModeSource": MARGIN_MODE_SOURCE,
+                "authorityReason": None,
+                "updatedAt": authority.get("updatedAt"),
+            }
+
+        return None
 
     def get_deposit_history(self, *, start_at, end_at, current_page=1,
                             page_size=50, currency="USDT", timeout=10):
@@ -2356,6 +2508,40 @@ class KucoinTradeClient(BaseClient):
         leverage=None,
         sizing_validator=None
     ):
+        # =====================================
+        # MARGIN MODE AUTHORITY (fail-closed)
+        # =====================================
+        # Every LIVE entry (BOT and MANUAL) funnels through this shared method
+        # before any order is constructed.  The requested canonical mode
+        # (ISOLATED) must match the authoritative exchange symbol margin mode.
+        # A mismatch or an unavailable authority blocks before
+        # POST /api/v1/orders.  The disarmed gate is resolved by create_order
+        # so LIVE_NOT_READY keeps precedence when live orders are not allowed.
+        if self.live_order_allowed:
+            block = self.margin_mode_entry_gate(symbol)
+
+            if block is not None:
+                result = {
+                    "success": False,
+                    "exchange": "kucoin",
+                    "symbol": self.normalize_symbol(symbol),
+                    "side": side,
+                    "qty": qty,
+                    "blockedReason": block["reason"],
+                    "error": block["reason"],
+                    "requestedMarginMode": block["requestedMarginMode"],
+                    "exchangeMarginMode": block["exchangeMarginMode"],
+                    "marginModeSource": block["marginModeSource"],
+                    "marginModeAuthorityReason": block.get("authorityReason"),
+                    "timestamp": time.time(),
+                }
+
+                runtime_debug(
+                    "KuCoin margin mode gate blocked result=%s",
+                    result,
+                )
+
+                return result
 
         return self.create_order(
             symbol,

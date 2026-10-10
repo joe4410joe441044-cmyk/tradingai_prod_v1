@@ -441,6 +441,17 @@ def _engine_with_real_kucoin(
         "side": "BUY",
         "qty": 1,
     }
+    # D-LIVE-4C-M1: the LIVE entry boundary now requires an authoritative
+    # margin mode (ISOLATED) before submit; this fixture isolates leverage
+    # propagation, so it supplies a matching authority.
+    client.get_margin_mode = lambda symbol, timeout=10: {
+        "symbol": "XRPUSDTM",
+        "marginMode": "ISOLATED",
+        "available": True,
+        "source": "KUCOIN_V2_POSITION_MARGIN_MODE",
+        "reason": None,
+        "updatedAt": time.time(),
+    }
     captured = {"bodies": [], "posts": 0}
 
     def fake_post(url, headers=None, data=None, **kwargs):
