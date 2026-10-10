@@ -275,6 +275,9 @@ def test_reduce_only_close_omits_leverage(monkeypatch):
         "quantity": 3.0,
         "signed_quantity": 3.0,
         "raw_quantity": 3.0,
+        # D-LIVE-4D: the reduceOnly close now uses the actual position margin
+        # mode (v1 ``crossMode`` / ``marginMode``) as its close authority.
+        "raw": {"symbol": "XRPUSDTM", "currentQty": 3, "crossMode": False},
         "error_code": None,
         "error": None,
     }
@@ -440,6 +443,17 @@ def _engine_with_real_kucoin(
         "state": "OPEN",
         "side": "BUY",
         "qty": 1,
+    }
+    # D-LIVE-4C-M1: the LIVE entry boundary now requires an authoritative
+    # margin mode (ISOLATED) before submit; this fixture isolates leverage
+    # propagation, so it supplies a matching authority.
+    client.get_margin_mode = lambda symbol, timeout=10: {
+        "symbol": "XRPUSDTM",
+        "marginMode": "ISOLATED",
+        "available": True,
+        "source": "KUCOIN_V2_POSITION_MARGIN_MODE",
+        "reason": None,
+        "updatedAt": time.time(),
     }
     captured = {"bodies": [], "posts": 0}
 

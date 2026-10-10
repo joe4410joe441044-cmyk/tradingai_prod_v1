@@ -205,6 +205,22 @@ class StatusResponse(BaseModel):
 
     realMarginRatio: Optional[float] = None
 
+    realMarginMode: Optional[str] = None
+
+    realMarginModeSource: Optional[str] = None
+
+    realMarginModeUpdatedAt: Optional[float] = None
+
+    realRequiredMarginMode: Optional[str] = None
+
+    realActualMarginMode: Optional[str] = None
+
+    realMarginModeKnown: Optional[bool] = None
+
+    realMarginModeCompatible: Optional[bool] = None
+
+    realMarginModeReason: Optional[str] = None
+
     realPosition: Optional[Any] = None
 
     realPositionState: Optional[str] = None

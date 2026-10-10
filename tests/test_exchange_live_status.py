@@ -9855,6 +9855,13 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     "quantity": quantity,
                     "signed_quantity": signed_quantity,
                     "raw_quantity": signed_quantity,
+                    # D-LIVE-4D: reduceOnly close uses the actual position
+                    # margin mode (v1 ``crossMode``) as its close authority.
+                    "raw": {
+                        "symbol": "XRPUSDTM",
+                        "currentQty": signed_quantity,
+                        "crossMode": False,
+                    },
                     "error_code": None,
                     "error": None,
                 }
@@ -9990,6 +9997,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "side": "long",
             "quantity": 2.0,
             "signed_quantity": 2.0,
+            # D-LIVE-4D: close margin mode authority (v1 ``crossMode``).
+            "raw": {
+                "symbol": "XRPUSDTM",
+                "currentQty": 2.0,
+                "crossMode": False,
+            },
             "error_code": None,
             "error": None,
         }
@@ -10085,6 +10098,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "side": "long",
             "quantity": 2.0,
             "signed_quantity": 2.0,
+            # D-LIVE-4D: close margin mode authority (v1 ``crossMode``).
+            "raw": {
+                "symbol": "XRPUSDTM",
+                "currentQty": 2.0,
+                "crossMode": False,
+            },
             "error_code": None,
             "error": None,
         }
@@ -10135,6 +10154,12 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "side": "short",
             "quantity": 2.0,
             "signed_quantity": -2.0,
+            # D-LIVE-4D: close margin mode authority (v1 ``crossMode``).
+            "raw": {
+                "symbol": "XRPUSDTM",
+                "currentQty": -2.0,
+                "crossMode": False,
+            },
             "error_code": None,
             "error": None,
         }

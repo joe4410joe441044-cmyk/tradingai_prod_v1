@@ -183,6 +183,8 @@ def test_actual_manual_engine_to_adapter_revalidates_wire_quantity(monkeypatch):
     client.get_price=lambda symbol:100
     client.get_balance=lambda:1000
     client.get_positions=lambda symbol:dict(symbol='XRPUSDTM',qty=1000,side='BUY',entry_price=100)
+    client.get_margin_mode=lambda symbol,timeout=10:dict(symbol='XRPUSDTM',marginMode='ISOLATED',available=True,
+        source='KUCOIN_V2_POSITION_MARGIN_MODE',reason=None,updatedAt=0.0)
     captured=[]
     def post(url,**kwargs):
         import json
