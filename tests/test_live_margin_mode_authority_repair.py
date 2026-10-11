@@ -461,6 +461,8 @@ def test_account_status_projection_exposes_authoritative_margin_mode(monkeypatch
     bot = BotManager()
     bot.account_read_client = client
     bot.account_read_client_exchange = "kucoin"
+    # D-LIVE-4F: install the runtime symbol so the authority read is exercised.
+    bot._active_symbol = SYMBOL
 
     snapshot = bot._refresh_real_account_snapshot("kucoin")
 
@@ -504,6 +506,9 @@ def test_account_status_projection_unknown_when_authority_unavailable(monkeypatc
     bot = BotManager()
     bot.account_read_client = client
     bot.account_read_client_exchange = "kucoin"
+    # D-LIVE-4F: install the runtime symbol so the unavailable authority read
+    # is the reason for UNKNOWN, not an absent symbol.
+    bot._active_symbol = SYMBOL
 
     snapshot = bot._refresh_real_account_snapshot("kucoin")
 
@@ -786,6 +791,10 @@ def _status_bot(monkeypatch, margin_authority):
     bot = BotManager()
     bot.account_read_client = client
     bot.account_read_client_exchange = "kucoin"
+    # D-LIVE-4F: the projection reads the single symbol authority and never
+    # issues an exchange request for an absent placeholder.  Install the
+    # running runtime symbol so the authority read is exercised.
+    bot._active_symbol = SYMBOL
     return bot, client
 
 

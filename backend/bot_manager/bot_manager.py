@@ -84,6 +84,10 @@ from backend.market.exchange_factory import (
     ExchangeFactory
 )
 
+from backend.market.kucoin_futures_public import (
+    to_kucoin_futures_symbol
+)
+
 from backend.core.logger import (
     logger
 )
@@ -93,6 +97,7 @@ from backend.execution.kucoin_trade import (
     account_status_total_pnl_today,
     MARGIN_MODE_SOURCE,
     REQUESTED_MARGIN_MODE as MARGIN_MODE_REQUIRED,
+    ABSENT_SYMBOL_VALUES,
 )
 
 from backend.money_management.risk_percent_authority import (
@@ -182,6 +187,20 @@ SAVED_MODE_VALUES = (
 )
 SAVED_MODE_SCHEMA_VERSION = 1
 SAVED_MODE_PATH_ENV = "TRADINGAI_SAVED_MODE_PATH"
+
+# =========================
+# READ-ONLY SYMBOL AUTHORITY
+# =========================
+#
+# The read-only margin-mode projection needs one truthfully-known symbol.  A
+# structurally absent symbol (``None`` / blank / the literal placeholders
+# ``NONE`` / ``NULL`` / ``UNKNOWN``) is NOT a symbol and must never be
+# forwarded to an exchange authority read.  There is deliberately no durable
+# backend configured-symbol authority in this phase, so the resolver only
+# reads authority that the running runtime already installed; when none is
+# present the projection degrades to UNKNOWN and fails closed.
+SYMBOL_AUTHORITY_RESOLVED = "SYMBOL_AUTHORITY_RESOLVED"
+SYMBOL_AUTHORITY_UNAVAILABLE = "SYMBOL_AUTHORITY_UNAVAILABLE"
 
 # =========================
 # BOT MANAGER
@@ -1135,48 +1154,61 @@ class BotManager:
             "updatedAt": None,
         }
 
-        try:
-            symbol = self.orderbook_symbol or self.symbol
-            authority_reader = getattr(client, "margin_mode_authority", None)
-            margin_reader = getattr(client, "get_margin_mode", None)
+        # The symbol is resolved from a single read-only authority.  When no
+        # truthful symbol is available (e.g. a STOPPED process after restart
+        # with no durable configured symbol), NO exchange request is made and
+        # the authority stays UNKNOWN / fail-closed.
+        resolved_symbol = self.resolve_read_only_symbol()
+        margin_mode_authority["resolvedSymbol"] = resolved_symbol.get(
+            "symbol"
+        )
+        margin_mode_authority["symbolAuthoritySource"] = resolved_symbol.get(
+            "source"
+        )
 
-            authority_candidate = None
+        if resolved_symbol.get("known"):
+            try:
+                symbol = resolved_symbol["symbol"]
+                authority_reader = getattr(client, "margin_mode_authority", None)
+                margin_reader = getattr(client, "get_margin_mode", None)
 
-            if callable(authority_reader):
-                candidate = authority_reader(symbol)
-                if isinstance(candidate, dict):
-                    authority_candidate = candidate
+                authority_candidate = None
 
-            if authority_candidate is not None:
-                margin_mode_authority = authority_candidate
-            elif callable(margin_reader):
-                candidate = margin_reader(symbol)
-                if isinstance(candidate, dict):
-                    known = bool(candidate.get("available"))
-                    actual = (
-                        candidate.get("marginMode")
-                        if known
-                        else "UNKNOWN"
-                    )
-                    margin_mode_authority = {
-                        "known": known,
-                        "requiredMode": MARGIN_MODE_REQUIRED,
-                        "actualMode": actual,
-                        "compatible": bool(
-                            known and actual == MARGIN_MODE_REQUIRED
-                        ),
-                        "reason": (
-                            "MARGIN_MODE_COMPATIBLE"
-                            if known and actual == MARGIN_MODE_REQUIRED
-                            else "MARGIN_MODE_MISMATCH"
+                if callable(authority_reader):
+                    candidate = authority_reader(symbol)
+                    if isinstance(candidate, dict):
+                        authority_candidate = candidate
+
+                if authority_candidate is not None:
+                    margin_mode_authority = authority_candidate
+                elif callable(margin_reader):
+                    candidate = margin_reader(symbol)
+                    if isinstance(candidate, dict):
+                        known = bool(candidate.get("available"))
+                        actual = (
+                            candidate.get("marginMode")
                             if known
-                            else "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
-                        ),
-                        "source": candidate.get("source", MARGIN_MODE_SOURCE),
-                        "updatedAt": candidate.get("updatedAt"),
-                    }
-        except Exception:
-            pass
+                            else "UNKNOWN"
+                        )
+                        margin_mode_authority = {
+                            "known": known,
+                            "requiredMode": MARGIN_MODE_REQUIRED,
+                            "actualMode": actual,
+                            "compatible": bool(
+                                known and actual == MARGIN_MODE_REQUIRED
+                            ),
+                            "reason": (
+                                "MARGIN_MODE_COMPATIBLE"
+                                if known and actual == MARGIN_MODE_REQUIRED
+                                else "MARGIN_MODE_MISMATCH"
+                                if known
+                                else "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
+                            ),
+                            "source": candidate.get("source", MARGIN_MODE_SOURCE),
+                            "updatedAt": candidate.get("updatedAt"),
+                        }
+            except Exception:
+                pass
 
         authenticated = balance_ok or position_ok
         successful_sync = authenticated
@@ -4192,13 +4224,34 @@ class BotManager:
         }
         return result
 
-    def _manual_preparation_margin_mode_authority(self, symbol):
+    def _manual_preparation_margin_mode_authority(self, symbol=None):
         """Best-effort GET-only margin mode authority for manual preparation.
 
-        Read only.  Uses the canonical account read client, then the running
-        engine's exchange, and degrades to an unavailable authority rather than
-        fabricating a value.  Never mutates the exchange account.
+        Read only.  The symbol is resolved from the single read-only symbol
+        authority when the caller does not already hold one, so a STOPPED bot
+        never forwards ``None`` / ``NONE`` / an empty symbol to KuCoin.  Uses
+        the canonical account read client, then the running engine's exchange,
+        and degrades to an unavailable authority rather than fabricating a
+        value.  Never mutates the exchange account.
         """
+
+        resolved_symbol = self._normalize_symbol_candidate(symbol)
+        if resolved_symbol is None:
+            resolved_symbol = self.resolve_read_only_symbol().get("symbol")
+
+        unavailable = {
+            "known": False,
+            "requiredMode": MARGIN_MODE_REQUIRED,
+            "actualMode": "UNKNOWN",
+            "compatible": False,
+            "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
+            "source": MARGIN_MODE_SOURCE,
+            "updatedAt": None,
+            "resolvedSymbol": resolved_symbol,
+        }
+
+        if resolved_symbol is None:
+            return unavailable
 
         client = self.account_read_client
         if client is None:
@@ -4217,21 +4270,13 @@ class BotManager:
 
         if callable(reader):
             try:
-                authority = reader(symbol)
+                authority = reader(resolved_symbol)
                 if isinstance(authority, dict):
                     return authority
             except Exception:
                 pass
 
-        return {
-            "known": False,
-            "requiredMode": MARGIN_MODE_REQUIRED,
-            "actualMode": "UNKNOWN",
-            "compatible": False,
-            "reason": "MARGIN_MODE_AUTHORITY_UNAVAILABLE",
-            "source": MARGIN_MODE_SOURCE,
-            "updatedAt": None,
-        }
+        return unavailable
 
     def get_manual_trade_preparation(self):
         """Read-only context-bound manual candidate. No MM preflight."""
@@ -4575,6 +4620,69 @@ class BotManager:
         return {
             "activeSymbol": self._active_symbol,
             "selectionMode": self.selection_mode,
+        }
+
+    @staticmethod
+    def _normalize_symbol_candidate(value):
+        """Return a canonical symbol token, or ``None`` when structurally absent.
+
+        ``None``, blank strings, and the literal placeholders ``NONE`` /
+        ``NULL`` / ``UNKNOWN`` are absent and are never treated as an exchange
+        symbol.
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        upper = text.upper()
+        if upper in ABSENT_SYMBOL_VALUES:
+            return None
+        return upper
+
+    def resolve_read_only_symbol(self):
+        """Resolve the single truthfully-known symbol for read-only diagnostics.
+
+        Truthful precedence (first present authority wins):
+
+        1. authoritative active runtime symbol (START-installed)
+        2. authoritative runtime orderbook symbol
+        3. last committed START config symbol, if actually present
+        4. (no other durable backend symbol authority has been proven to exist)
+        5. unavailable
+
+        The resolver is observational only.  It never mutates runtime, config,
+        or selection state, never fabricates a symbol, and never substitutes a
+        frontend default or an AUTO Market Selection candidate.  When no
+        authority is present it returns ``known=False`` / ``symbol=None`` with
+        reason ``SYMBOL_AUTHORITY_UNAVAILABLE`` so callers fail closed instead
+        of issuing an exchange request for a placeholder.
+        """
+        config = self.config if isinstance(self.config, dict) else {}
+        candidates = (
+            ("ACTIVE_RUNTIME_SYMBOL", getattr(self, "_active_symbol", None)),
+            ("RUNTIME_ORDERBOOK_SYMBOL", getattr(self, "orderbook_symbol", None)),
+            ("START_CONFIG_SYMBOL", config.get("symbol")),
+        )
+
+        for source, raw in candidates:
+            canonical = self._normalize_symbol_candidate(raw)
+            if canonical is None:
+                continue
+            return {
+                "known": True,
+                "symbol": to_kucoin_futures_symbol(canonical),
+                "canonicalSymbol": canonical,
+                "source": source,
+                "reason": SYMBOL_AUTHORITY_RESOLVED,
+            }
+
+        return {
+            "known": False,
+            "symbol": None,
+            "canonicalSymbol": None,
+            "source": None,
+            "reason": SYMBOL_AUTHORITY_UNAVAILABLE,
         }
 
     def set_auto_market_selection_observation(self, observation):

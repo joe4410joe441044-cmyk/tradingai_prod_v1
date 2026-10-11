@@ -56,6 +56,12 @@ MARGIN_MODE_COMPATIBLE = "MARGIN_MODE_COMPATIBLE"
 MARGIN_MODE_MISMATCH = "MARGIN_MODE_MISMATCH"
 MARGIN_MODE_AUTHORITY_UNAVAILABLE = "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
 
+# Structurally absent symbol values.  ``None`` normalizes to the literal
+# ``"NONE"`` through the legacy compatibility mapper, so the guard must reject
+# the placeholder tokens as well as empty strings.  None of these is a symbol
+# and none may be forwarded to an exchange authority read.
+ABSENT_SYMBOL_VALUES = frozenset({"", "NONE", "NULL", "UNKNOWN"})
+
 
 def normalize_kucoin_risk_ratio(value):
     """Convert KuCoin Classic Futures' account risk ratio to display percent.
@@ -324,6 +330,20 @@ class KucoinTradeClient(BaseClient):
         """
 
         normalized_symbol = self.normalize_symbol(symbol)
+
+        # Fail closed WITHOUT any exchange request when the symbol is
+        # structurally absent.  The legacy mapper turns ``None`` into the
+        # literal ``"NONE"``; that placeholder must never reach KuCoin.
+        if str(normalized_symbol or "").strip().upper() in ABSENT_SYMBOL_VALUES:
+            return {
+                "symbol": None,
+                "marginMode": None,
+                "available": False,
+                "source": MARGIN_MODE_SOURCE,
+                "reason": MARGIN_MODE_AUTHORITY_UNAVAILABLE,
+                "updatedAt": time.time(),
+            }
+
         endpoint = (
             MARGIN_MODE_AUTHORITY_ENDPOINT
             + "?"
