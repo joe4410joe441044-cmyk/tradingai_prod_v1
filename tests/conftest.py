@@ -43,6 +43,20 @@ _TEST_SAVED_MODE_PATH = _TEST_SAVED_MODE_DIR / "saved_mode_authority.json"
 
 os.environ["TRADINGAI_SAVED_MODE_PATH"] = str(_TEST_SAVED_MODE_PATH)
 
+# D-LIVE-4F-1: isolate the durable configured-symbol authority so no test can
+# read or write the Production destination file.
+_TEST_CONFIGURED_SYMBOL_DIR = (
+    Path(tempfile.gettempdir()) / "tradingai-configured-symbol-test"
+)
+_TEST_CONFIGURED_SYMBOL_DIR.mkdir(parents=True, exist_ok=True)
+_TEST_CONFIGURED_SYMBOL_PATH = (
+    _TEST_CONFIGURED_SYMBOL_DIR / "configured_symbol_authority.json"
+)
+
+os.environ["TRADINGAI_CONFIGURED_SYMBOL_PATH"] = str(
+    _TEST_CONFIGURED_SYMBOL_PATH
+)
+
 
 def _test_store_path() -> Path:
     return Path(os.environ["PARAMETER_PERFORMANCE_PATH"])
@@ -50,6 +64,10 @@ def _test_store_path() -> Path:
 
 def _test_saved_mode_path() -> Path:
     return Path(os.environ["TRADINGAI_SAVED_MODE_PATH"])
+
+
+def _test_configured_symbol_path() -> Path:
+    return Path(os.environ["TRADINGAI_CONFIGURED_SYMBOL_PATH"])
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +91,22 @@ def _isolated_saved_mode_authority():
     """Start every test with no committed saved-mode destination."""
 
     path = _test_saved_mode_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    yield path
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolated_configured_symbol_authority():
+    """Start every test with no committed configured MANUAL symbol."""
+
+    path = _test_configured_symbol_path()
     try:
         path.unlink()
     except FileNotFoundError:
