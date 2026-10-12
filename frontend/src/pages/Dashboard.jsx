@@ -25,6 +25,7 @@ import {
     deriveLiveCapitalAuthority,
     pendingOrderAuthorityValue,
     resolveOperationDisplaySymbol,
+    startPositionAuthorityValue,
 } from "../components/operation/operationPreparationModel";
 import { performSaveSettings } from "../features/trade-settings/saveSettings";
 import { authenticatedControlRequest } from "../features/auth/operatorAuth";
@@ -178,7 +179,7 @@ const wsMarketData = marketData?.lastUpdate
     ? marketData
     : undefined;
 
-const position = firstAvailable(
+const legacyPosition = firstAvailable(
     getPositionSide(botStatus?.actual_position),
     getPositionSide(botStatus?.position),
     getPositionSide(wsMarketData?.position),
@@ -203,6 +204,11 @@ const canonicalSavedMode = (() => {
     const candidate = String(botStatus?.savedMode ?? "").trim().toUpperCase();
     return candidate === "LIVE" || candidate === "PAPER" ? candidate : null;
 })();
+const position = startPositionAuthorityValue(
+    botStatus,
+    canonicalSavedMode || tradeSettings?.mode,
+    legacyPosition,
+);
 
 // Persist the mode to the backend canonical saved-mode authority. This is a
 // pure configuration write: it never starts the runtime, arms LIVE, constructs

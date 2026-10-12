@@ -166,6 +166,179 @@ export const pendingOrderAuthorityValue = (status) => {
         : null;
 };
 
+const LIVE_POSITION_SOURCE = "KUCOIN_FUTURES";
+const LIVE_ACCOUNT_TYPE = "KUCOIN_FUTURES";
+const LIVE_EXCHANGE = "KUCOIN";
+const LIVE_POSITION_MAX_AGE_SECONDS = 90;
+
+const liveObservationTimestamp = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed >= 1e12 ? parsed / 1000 : parsed;
+};
+
+const livePositionDirection = (side, quantity) => {
+    const normalized = String(side ?? "").trim().toUpperCase();
+    if (["LONG", "BUY"].includes(normalized)) return "LONG";
+    if (["SHORT", "SELL"].includes(normalized)) return "SHORT";
+    const parsed = Number(quantity);
+    if (!Number.isFinite(parsed) || parsed === 0) return null;
+    return parsed > 0 ? "LONG" : "SHORT";
+};
+
+const validObservedLivePosition = (value) => (
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && String(value.symbol ?? "").trim() !== ""
+    && typeof value.currentQty !== "boolean"
+    && Number.isFinite(Number(value.currentQty))
+    && Number(value.currentQty) !== 0
+    && livePositionDirection(value.positionSide, value.currentQty) !== null
+);
+
+const validProjectedLivePosition = (value, sourceUpdatedAt) => (
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && value.status === "OPEN"
+    && value.mode === "LIVE"
+    && value.source === LIVE_POSITION_SOURCE
+    && value.freshness === "FRESH"
+    && String(value.symbol ?? "").trim() !== ""
+    && typeof value.contractQuantity !== "boolean"
+    && Number.isFinite(Number(value.contractQuantity))
+    && Number(value.contractQuantity) > 0
+    && livePositionDirection(value.side, null) !== null
+    && liveObservationTimestamp(value.sourceUpdatedAt) === sourceUpdatedAt
+);
+
+const validAccountLivePosition = (value) => (
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && String(value.symbol ?? "").trim() !== ""
+    && typeof value.qty === "number"
+    && Number.isFinite(value.qty)
+    && value.qty > 0
+    && livePositionDirection(value.side, null) !== null
+);
+
+const positionKey = (symbol, direction, quantity) => (
+    String(symbol).trim().toUpperCase()
+    + ":" + direction
+    + ":" + Math.abs(Number(quantity))
+);
+
+// START position authority. PAPER deliberately keeps the existing runtime
+// projection. LIVE consumes the completed account-wide position observation
+// and its canonical LIVE projection. Missing or contradictory evidence fails
+// closed to UNKNOWN; verified positions block across every symbol.
+export const startPositionAuthorityValue = (
+    status,
+    tradingMode,
+    paperPosition,
+    nowSeconds = Date.now() / 1000,
+) => {
+    if (String(tradingMode ?? "").trim().toUpperCase() !== "LIVE") {
+        return paperPosition;
+    }
+
+    const runtime = status?.accountRuntime;
+    const account = runtime?.realAccount;
+    const position = runtime?.positionsByMode?.LIVE;
+    if (!account || !position) return "UNKNOWN";
+
+    const observation = account.positionObservation;
+    if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+        return "UNKNOWN";
+    }
+    const observedPositions = observation.positions;
+    const projectedPositions = position.positions;
+    const accountPositions = account.positions;
+    if (
+        !Array.isArray(observedPositions)
+        || !Array.isArray(projectedPositions)
+        || !Array.isArray(accountPositions)
+        || observedPositions.some((item) => !validObservedLivePosition(item))
+    ) {
+        return "UNKNOWN";
+    }
+
+    const sourceUpdatedAt = liveObservationTimestamp(position.sourceUpdatedAt);
+    const observationUpdatedAt = liveObservationTimestamp(observation.sourceUpdatedAt);
+    const age = Number(nowSeconds) - sourceUpdatedAt;
+    const identityVerified = (
+        String(account.exchange ?? "").trim().toUpperCase() === LIVE_EXCHANGE
+        && String(account.accountType ?? "").trim().toUpperCase() === LIVE_ACCOUNT_TYPE
+        && account.accountSource === REAL_LIVE_ACCOUNT_SOURCE
+        && account.positionSource === REAL_LIVE_ACCOUNT_SOURCE
+    );
+    const observationVerified = (
+        position.mode === "LIVE"
+        && position.source === LIVE_POSITION_SOURCE
+        && position.freshness === "FRESH"
+        && account.connected === true
+        && account.authenticated === true
+        && account.stale !== true
+        && sourceUpdatedAt !== null
+        && observationUpdatedAt === sourceUpdatedAt
+        && Number.isFinite(age)
+        && age >= 0
+        && age <= LIVE_POSITION_MAX_AGE_SECONDS
+    );
+    if (!identityVerified || !observationVerified) return "UNKNOWN";
+
+    const expectedSummary = accountPositions.length > 0 ? "OPEN" : "FLAT";
+    if (account.positionSummary !== expectedSummary) return "UNKNOWN";
+
+    const observedKeys = observedPositions.map((item) => (
+        positionKey(
+            item.symbol,
+            livePositionDirection(item.positionSide, item.currentQty),
+            item.currentQty,
+        )
+    )).sort();
+    const projectedKeys = projectedPositions.map((item) => (
+        positionKey(
+            item.symbol,
+            livePositionDirection(item.side, null),
+            item.contractQuantity,
+        )
+    )).sort();
+    if (
+        projectedPositions.some((item) => (
+            !validProjectedLivePosition(item, sourceUpdatedAt)
+        ))
+        || observedKeys.length !== projectedKeys.length
+        || observedKeys.some((key, index) => key !== projectedKeys[index])
+    ) {
+        return "UNKNOWN";
+    }
+
+    const accountKeys = accountPositions.map((item) => (
+        validAccountLivePosition(item)
+            ? positionKey(
+                item.symbol,
+                livePositionDirection(item.side, null),
+                item.qty,
+            )
+            : null
+    ));
+    if (
+        accountKeys.some((key) => key === null || key.includes(":NaN"))
+        || accountKeys.some((key) => !observedKeys.includes(key))
+    ) {
+        return "UNKNOWN";
+    }
+
+    if (observedPositions.length > 0) {
+        return ["OPEN", "UNKNOWN"].includes(position.status) ? "OPEN" : "UNKNOWN";
+    }
+    if (position.status === "FLAT") return "FLAT";
+    return "UNKNOWN";
+};
+
 const ABSENT_SYMBOL_VALUES = new Set([
     "",
     "UNKNOWN",

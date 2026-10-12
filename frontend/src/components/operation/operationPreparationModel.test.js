@@ -13,6 +13,7 @@ import {
     resolveOperationDisplaySymbol,
     selectionModeDisplayLabel,
     snapshotTradeSettings,
+    startPositionAuthorityValue,
     tradeSettingsDiffer,
 } from "./operationPreparationModel.js";
 
@@ -731,4 +732,202 @@ test("calculateCurrentRiskBudget derives the current budget from the capital inp
     assert.equal(calculateCurrentRiskBudget("1000", "0.50"), "5");
     assert.equal(calculateCurrentRiskBudget(null, "0.50"), null);
     assert.equal(calculateCurrentRiskBudget("1000", null), null);
+});
+
+const LIVE_POSITION_NOW = 2000000000;
+const LIVE_POSITION_UPDATED_AT = LIVE_POSITION_NOW - 1;
+
+const rawLivePosition = (symbol = "XRPUSDTM", currentQty = 1) => ({
+    id: symbol + ":" + currentQty,
+    symbol,
+    currentQty,
+});
+
+const projectedLivePosition = (raw, sourceUpdatedAt) => ({
+    status: "OPEN",
+    mode: "LIVE",
+    source: "KUCOIN_FUTURES",
+    freshness: "FRESH",
+    sourceUpdatedAt,
+    symbol: raw.symbol,
+    contractQuantity: Math.abs(Number(raw.currentQty)),
+    side: Number(raw.currentQty) > 0 ? "LONG" : "SHORT",
+});
+
+const livePositionStatus = (options = {}) => {
+    const hasObservation = Object.prototype.hasOwnProperty.call(options, "observation");
+    const observation = hasObservation
+        ? options.observation
+        : { positions: [], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT };
+    const observationRows = Array.isArray(observation?.positions)
+        ? observation.positions
+        : [];
+    const projectionUpdatedAt = Object.prototype.hasOwnProperty.call(
+        options.position || {}, "sourceUpdatedAt",
+    )
+        ? options.position.sourceUpdatedAt
+        : observation?.sourceUpdatedAt;
+    const projectedPositions = Object.prototype.hasOwnProperty.call(
+        options.position || {}, "positions",
+    )
+        ? options.position.positions
+        : observationRows
+            .filter((item) => item && typeof item === "object")
+            .map((item) => projectedLivePosition(item, projectionUpdatedAt));
+
+    return {
+        accountRuntime: {
+            realAccount: {
+                exchange: "kucoin",
+                accountType: "KUCOIN_FUTURES",
+                accountSource: "KUCOIN_FUTURES_READ_ONLY",
+                positionSource: "KUCOIN_FUTURES_READ_ONLY",
+                connected: true,
+                authenticated: true,
+                stale: false,
+                positionObservation: observation,
+                positions: [],
+                positionSummary: "FLAT",
+                ...(options.account || {}),
+            },
+            positionsByMode: {
+                LIVE: {
+                    mode: "LIVE",
+                    source: "KUCOIN_FUTURES",
+                    status: "FLAT",
+                    freshness: "FRESH",
+                    sourceUpdatedAt: projectionUpdatedAt,
+                    positions: projectedPositions,
+                    ...(options.position || {}),
+                },
+            },
+        },
+    };
+};
+
+test("LIVE START accepts verified fresh account-wide FLAT", () => {
+    assert.equal(startPositionAuthorityValue(
+        livePositionStatus(), "LIVE", "OPEN", LIVE_POSITION_NOW,
+    ), "FLAT");
+});
+
+for (const [name, options] of [
+    ["missing observation", { observation: undefined }],
+    ["null observation", { observation: null }],
+    ["malformed observation object", { observation: [] }],
+    ["missing observation positions", {
+        observation: { sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+    }],
+    ["observation positions not an array", {
+        observation: { positions: {}, sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+    }],
+    ["malformed observation row", {
+        observation: { positions: [{}], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+    }],
+    ["missing real-account positions", { account: { positions: undefined } }],
+    ["malformed real-account position", {
+        account: { positions: [{}], positionSummary: "OPEN" },
+    }],
+    ["missing observation timestamp", { observation: { positions: [] } }],
+]) {
+    test("LIVE START fails closed for " + name, () => {
+        assert.equal(startPositionAuthorityValue(
+            livePositionStatus(options), "LIVE", "FLAT", LIVE_POSITION_NOW,
+        ), "UNKNOWN");
+    });
+}
+
+test("LIVE START rejects FLAT projection contradicted by observation OPEN", () => {
+    const open = rawLivePosition("XBTUSDTM", 1);
+    const status = livePositionStatus({
+        observation: { positions: [open], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "FLAT", positions: [] },
+    });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "UNKNOWN");
+});
+
+test("LIVE START rejects FLAT projection contradicted by realAccount positions OPEN", () => {
+    const status = livePositionStatus({
+        account: {
+            positions: [{ symbol: "XRPUSDTM", qty: 1, side: "BUY" }],
+            positionSummary: "OPEN",
+        },
+    });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "UNKNOWN");
+});
+
+test("LIVE START rejects FLAT projection contradicted by positionSummary OPEN", () => {
+    const status = livePositionStatus({ account: { positionSummary: "OPEN" } });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "UNKNOWN");
+});
+
+for (const [name, options] of [
+    ["projection and observation timestamp mismatch", {
+        position: { sourceUpdatedAt: LIVE_POSITION_UPDATED_AT - 1 },
+    }],
+    ["wrong account source", { account: { accountSource: "OTHER" } }],
+    ["wrong position source", { account: { positionSource: "OTHER" } }],
+    ["wrong projection source", { position: { source: "OTHER" } }],
+    ["wrong exchange", { account: { exchange: "other" } }],
+    ["wrong account type", { account: { accountType: "SPOT" } }],
+    ["disconnected exchange", { account: { connected: false } }],
+    ["unauthenticated exchange", { account: { authenticated: false } }],
+    ["stale account", { account: { stale: true } }],
+    ["expired observation", {
+        observation: { positions: [], sourceUpdatedAt: LIVE_POSITION_NOW - 91 },
+    }],
+    ["future observation", {
+        observation: { positions: [], sourceUpdatedAt: LIVE_POSITION_NOW + 1 },
+    }],
+    ["UNKNOWN projection", { position: { status: "UNKNOWN" } }],
+    ["STALE projection", { position: { freshness: "STALE" } }],
+]) {
+    test("LIVE START fails closed for " + name, () => {
+        assert.equal(startPositionAuthorityValue(
+            livePositionStatus(options), "LIVE", "FLAT", LIVE_POSITION_NOW,
+        ), "UNKNOWN");
+    });
+}
+
+test("LIVE START blocks a verified open position", () => {
+    const open = rawLivePosition("XRPUSDTM", 1);
+    const status = livePositionStatus({
+        observation: { positions: [open], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "OPEN" },
+        account: {
+            positions: [{ symbol: "XRPUSDTM", qty: 1, side: "BUY" }],
+            positionSummary: "OPEN",
+        },
+    });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "OPEN");
+});
+
+test("LIVE START blocks an open position on another symbol", () => {
+    const open = rawLivePosition("XBTUSDTM", -2);
+    const status = livePositionStatus({
+        observation: { positions: [open], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "UNKNOWN" },
+    });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "OPEN");
+});
+
+test("LIVE START blocks multiple verified open positions", () => {
+    const positions = [
+        rawLivePosition("XRPUSDTM", 1),
+        rawLivePosition("XBTUSDTM", -2),
+    ];
+    const status = livePositionStatus({
+        observation: { positions, sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "UNKNOWN" },
+        account: {
+            positions: [{ symbol: "XRPUSDTM", qty: 1, side: "BUY" }],
+            positionSummary: "OPEN",
+        },
+    });
+    assert.equal(startPositionAuthorityValue(status, "LIVE", "FLAT", LIVE_POSITION_NOW), "OPEN");
+});
+
+test("PAPER position behavior is unchanged", () => {
+    const legacy = { side: "LONG" };
+    assert.equal(startPositionAuthorityValue({}, "PAPER", legacy, LIVE_POSITION_NOW), legacy);
 });
