@@ -6,8 +6,9 @@ Pins the D-LIVE-4F contract:
   margin-mode projection;
 * precedence is runtime symbol -> orderbook symbol -> last START config
   symbol -> unavailable;
-* an absent symbol (None / blank / literal NONE / NULL / UNKNOWN) is never
-  forwarded to an exchange request, so ``symbol=NONE`` can never reach KuCoin;
+* an absent symbol (None / blank / literal NONE / NULL / UNKNOWN /
+  ``NOT AVAILABLE``) is never forwarded to an exchange request, so
+  ``symbol=NONE`` can never reach KuCoin;
 * no frontend default and no AUTO Market Selection candidate is used as a
   substitute for a missing MANUAL symbol authority;
 * an unavailable symbol projects UNKNOWN / fail-closed and is never coerced to
@@ -119,7 +120,10 @@ def test_no_symbol_authority_returns_unavailable():
 
 
 def test_blank_and_placeholder_config_values_are_absent():
-    for value in (None, "", "   ", "NONE", "null", "unknown"):
+    for value in (
+        None, "", "   ", "NONE", "null", "unknown",
+        "NOT AVAILABLE", "not available",
+    ):
         bot = _bot(_active_symbol=None, orderbook_symbol=None, config={"symbol": value})
         resolved = bot.resolve_read_only_symbol()
         assert resolved["known"] is False, value
@@ -170,7 +174,10 @@ def _guarded_client():
     return client, calls
 
 
-@pytest.mark.parametrize("value", [None, "", "   ", "NONE", "NULL", "UNKNOWN"])
+@pytest.mark.parametrize(
+    "value",
+    [None, "", "   ", "NONE", "NULL", "UNKNOWN", "NOT AVAILABLE", "not available"],
+)
 def test_absent_symbol_never_triggers_exchange_request(value):
     client, calls = _guarded_client()
 
@@ -183,7 +190,16 @@ def test_absent_symbol_never_triggers_exchange_request(value):
 
 
 def test_absent_snapshot_guard_set_matches_contract():
-    assert ABSENT_SYMBOL_VALUES == {"", "NONE", "NULL", "UNKNOWN"}
+    # Must mirror the canonical Operation absent-symbol vocabulary
+    # (``operationPreparationModel.js``): blank / NONE / NULL / UNKNOWN /
+    # NOT AVAILABLE.
+    assert ABSENT_SYMBOL_VALUES == {
+        "",
+        "NONE",
+        "NULL",
+        "UNKNOWN",
+        "NOT AVAILABLE",
+    }
 
 
 # =========================
@@ -374,3 +390,71 @@ def test_manual_preparation_symbol_unavailable_does_not_query():
     assert authority["known"] is False
     assert authority["reason"] == MARGIN_MODE_AUTHORITY_UNAVAILABLE
     client.margin_mode_authority.assert_not_called()
+
+
+# =========================
+# A: STOPPED manual + valid saved symbol
+# =========================
+
+def test_manual_preparation_valid_saved_symbol_uses_canonical_contract():
+    # STOPPED process: no running runtime symbol, but the saved/committed
+    # START config still carries XRPUSDT.  Manual preparation must resolve the
+    # canonical contract symbol (XRPUSDT -> XRPUSDTM) without a running runtime
+    # and must never query with the raw canonical token.
+    manager = _bot(_active_symbol=None, orderbook_symbol=None, config={"symbol": "XRPUSDT"})
+    client = Mock()
+    client.margin_mode_authority.return_value = {
+        "known": True,
+        "requiredMode": REQUESTED_MARGIN_MODE,
+        "actualMode": "ISOLATED",
+        "compatible": True,
+        "reason": MARGIN_MODE_COMPATIBLE,
+        "source": MARGIN_MODE_SOURCE,
+        "updatedAt": 1.0,
+    }
+    manager.account_read_client = client
+
+    authority = manager._manual_preparation_margin_mode_authority(None)
+
+    assert authority["known"] is True
+    assert authority["compatible"] is True
+    client.margin_mode_authority.assert_called_once_with("XRPUSDTM")
+
+
+def test_manual_preparation_placeholder_saved_symbol_fails_closed():
+    manager = _bot(
+        _active_symbol=None,
+        orderbook_symbol=None,
+        config={"symbol": "NOT AVAILABLE"},
+    )
+    client = Mock()
+    manager.account_read_client = client
+
+    authority = manager._manual_preparation_margin_mode_authority(None)
+
+    assert authority["known"] is False
+    assert authority["reason"] == MARGIN_MODE_AUTHORITY_UNAVAILABLE
+    client.margin_mode_authority.assert_not_called()
+
+
+# =========================
+# N: absent-symbol path never raises NameError
+# =========================
+
+def test_absent_symbol_path_never_raises_nameerror():
+    # Regression: the previously broken absent-symbol path referenced an
+    # unbound ``ABSENT_SYMBOL_VALUES`` and could raise NameError.  The constant
+    # must be bound and every absent path must resolve without raising.
+    assert isinstance(ABSENT_SYMBOL_VALUES, (set, frozenset))
+
+    bot = _bot(_active_symbol=None, orderbook_symbol=None, config={})
+    for value in (None, "", "   ", "NONE", "NULL", "UNKNOWN", "NOT AVAILABLE"):
+        assert bot._normalize_symbol_candidate(value) is None
+        resolved = bot.resolve_read_only_symbol()
+        assert resolved["known"] is False
+        assert bot._manual_preparation_margin_mode_authority(value)["known"] is False
+
+    client, calls = _guarded_client()
+    for value in (None, "", "NOT AVAILABLE"):
+        client.get_margin_mode(value)
+    assert calls["gets"] == 0

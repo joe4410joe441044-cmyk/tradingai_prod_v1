@@ -58,9 +58,14 @@ MARGIN_MODE_AUTHORITY_UNAVAILABLE = "MARGIN_MODE_AUTHORITY_UNAVAILABLE"
 
 # Structurally absent symbol values.  ``None`` normalizes to the literal
 # ``"NONE"`` through the legacy compatibility mapper, so the guard must reject
-# the placeholder tokens as well as empty strings.  None of these is a symbol
-# and none may be forwarded to an exchange authority read.
-ABSENT_SYMBOL_VALUES = frozenset({"", "NONE", "NULL", "UNKNOWN"})
+# the placeholder tokens as well as empty strings.  ``NOT AVAILABLE`` is the
+# canonical Operation absent-symbol sentinel already used by the frontend
+# (``operationPreparationModel.js``) and must be rejected by the backend too so
+# a display placeholder can never be forwarded to an exchange authority read.
+# None of these is a symbol.
+ABSENT_SYMBOL_VALUES = frozenset(
+    {"", "NONE", "NULL", "UNKNOWN", "NOT AVAILABLE"}
+)
 
 
 def normalize_kucoin_risk_ratio(value):
