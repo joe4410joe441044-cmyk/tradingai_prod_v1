@@ -67,6 +67,7 @@ class SavedModeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Mode
+    symbol: Optional[str] = Field(None, min_length=1, max_length=32)
     expectedRevision: Optional[int] = Field(None, ge=0)
 
 
@@ -402,6 +403,10 @@ class StatusResponse(BaseModel):
 
     activeSymbol: Optional[str] = None
 
+    configuredSymbol: Optional[str] = None
+
+    configuredSymbolRevision: int = 0
+
     selectionMode: str = "MANUAL"
 
     autoMarketSelection: dict = Field(default_factory=dict)
@@ -496,17 +501,42 @@ def stop_bot(_operator: str = Depends(require_operator_session)):
 # Commit the canonical destination for the NEXT START. This is a pure
 # configuration write: it never starts the runtime, arms LIVE, constructs an
 # execution engine, changes real-order authority, or places an order.
+#
+# The ``symbol`` field reuses this single authenticated SAVE SETTINGS mutation
+# boundary to commit the durable configured MANUAL symbol. It is optional so the
+# existing mode-only callers keep working unchanged. The symbol is validated
+# before either authority is mutated; the mode is committed first (preserving
+# the exact prior contract), then the symbol.
 @router.post("/saved-mode")
 def save_selected_mode(
     request: SavedModeRequest,
     _operator: str = Depends(require_operator_session),
 ):
-    result = get_bot_manager().set_saved_mode(
+    manager = get_bot_manager()
+
+    if request.symbol is not None:
+        if manager._normalize_configured_symbol(request.symbol) is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "reason": "INVALID_CONFIGURED_SYMBOL",
+                    "configuredSymbol": manager.get_configured_symbol(),
+                },
+            )
+
+    result = manager.set_saved_mode(
         request.mode.value,
         expected_revision=request.expectedRevision,
     )
     if result.get("success") is not True:
         raise HTTPException(status_code=409, detail=result)
+
+    if request.symbol is not None:
+        symbol_result = manager.set_configured_symbol(request.symbol)
+        if symbol_result.get("success") is not True:
+            raise HTTPException(status_code=409, detail=symbol_result)
+        result = {**result, **symbol_result}
+
     return result
 
 

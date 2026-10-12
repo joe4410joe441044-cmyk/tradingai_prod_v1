@@ -189,6 +189,26 @@ SAVED_MODE_SCHEMA_VERSION = 1
 SAVED_MODE_PATH_ENV = "TRADINGAI_SAVED_MODE_PATH"
 
 # =========================
+# CONFIGURED SYMBOL AUTHORITY
+# =========================
+#
+# ``configuredSymbol`` is the durable, operator-committed MANUAL trading
+# destination for the NEXT START. It is the ONE canonical backend authority for
+# the manually configured symbol and is deliberately distinct from:
+#   * the runtime active symbol (only meaningful while a runtime is attached),
+#   * the runtime orderbook symbol,
+#   * the last in-memory START config (lost on a clean process restart),
+#   * the frontend Trade Settings draft (browser-local only),
+#   * the AUTO Market Selection candidate (a separate selection mechanism).
+#
+# It survives a clean backend restart and is available while STOPPED without any
+# START / ARM / engine / order. It is NOT the mode authority: the trading mode
+# stays owned by ``saved_mode_authority.json`` (mode-only). Committing it never
+# starts a runtime, arms LIVE, constructs an engine, or places an order.
+CONFIGURED_SYMBOL_SCHEMA_VERSION = 1
+CONFIGURED_SYMBOL_PATH_ENV = "TRADINGAI_CONFIGURED_SYMBOL_PATH"
+
+# =========================
 # READ-ONLY SYMBOL AUTHORITY
 # =========================
 #
@@ -208,7 +228,7 @@ SYMBOL_AUTHORITY_UNAVAILABLE = "SYMBOL_AUTHORITY_UNAVAILABLE"
 
 class BotManager:
 
-    def __init__(self, saved_mode_path=None):
+    def __init__(self, saved_mode_path=None, configured_symbol_path=None):
 
         self.engine = None
 
@@ -369,6 +389,27 @@ class BotManager:
             self.saved_mode_revision,
             self.saved_mode_updated_at,
         ) = self._load_saved_mode_authority()
+
+        # =========================
+        # CONFIGURED SYMBOL AUTHORITY
+        # =========================
+        #
+        # Durable operator-committed MANUAL destination for the next START.
+        # Loaded at construction so the read-only STOPPED projection can resolve
+        # a truthful symbol after a clean restart with no runtime and no START
+        # config. Writing it never starts a runtime, arms LIVE, creates an
+        # engine, or places an order.
+        self.configured_symbol_lock = threading.Lock()
+        self.configured_symbol_path = (
+            configured_symbol_path
+            if configured_symbol_path
+            else self._default_configured_symbol_path()
+        )
+        (
+            self.configured_symbol,
+            self.configured_symbol_revision,
+            self.configured_symbol_updated_at,
+        ) = self._load_configured_symbol_authority()
 
         # =========================
         # ORDERFLOW COMPONENTS
@@ -4645,25 +4686,44 @@ class BotManager:
 
         Truthful precedence (first present authority wins):
 
-        1. authoritative active runtime symbol (START-installed)
-        2. authoritative runtime orderbook symbol
-        3. last committed START config symbol, if actually present
-        4. (no other durable backend symbol authority has been proven to exist)
-        5. unavailable
+        * while a runtime is attached (RUNNING):
+            1. authoritative active runtime symbol (START-installed)
+            2. authoritative runtime orderbook symbol
+            3. durable configured MANUAL symbol
+            4. last committed START config symbol, if actually present
+        * while STOPPED:
+            1. durable configured MANUAL symbol (survives clean restart)
+            2. any leftover in-memory active runtime symbol
+            3. any leftover in-memory runtime orderbook symbol
+            4. last in-memory START config symbol
+        * unavailable when no authority is present.
 
-        The resolver is observational only.  It never mutates runtime, config,
-        or selection state, never fabricates a symbol, and never substitutes a
-        frontend default or an AUTO Market Selection candidate.  When no
-        authority is present it returns ``known=False`` / ``symbol=None`` with
-        reason ``SYMBOL_AUTHORITY_UNAVAILABLE`` so callers fail closed instead
-        of issuing an exchange request for a placeholder.
+        The durable configured symbol is the MANUAL destination committed by SAVE
+        SETTINGS / the authorized MANUAL START boundary. It never overrides a
+        live runtime symbol, never feeds AUTO Market Selection, and is never
+        fabricated from a frontend default. The resolver is observational only:
+        it never mutates runtime, config, or selection state, never substitutes a
+        frontend default or an AUTO Market Selection candidate, and returns
+        ``known=False`` / ``symbol=None`` with reason
+        ``SYMBOL_AUTHORITY_UNAVAILABLE`` when no authority is present so callers
+        fail closed instead of issuing an exchange request for a placeholder.
         """
         config = self.config if isinstance(self.config, dict) else {}
-        candidates = (
-            ("ACTIVE_RUNTIME_SYMBOL", getattr(self, "_active_symbol", None)),
-            ("RUNTIME_ORDERBOOK_SYMBOL", getattr(self, "orderbook_symbol", None)),
-            ("START_CONFIG_SYMBOL", config.get("symbol")),
-        )
+        running = bool(getattr(self, "_running", False))
+        if running:
+            candidates = (
+                ("ACTIVE_RUNTIME_SYMBOL", getattr(self, "_active_symbol", None)),
+                ("RUNTIME_ORDERBOOK_SYMBOL", getattr(self, "orderbook_symbol", None)),
+                ("CONFIGURED_SYMBOL", getattr(self, "configured_symbol", None)),
+                ("START_CONFIG_SYMBOL", config.get("symbol")),
+            )
+        else:
+            candidates = (
+                ("CONFIGURED_SYMBOL", getattr(self, "configured_symbol", None)),
+                ("ACTIVE_RUNTIME_SYMBOL", getattr(self, "_active_symbol", None)),
+                ("RUNTIME_ORDERBOOK_SYMBOL", getattr(self, "orderbook_symbol", None)),
+                ("START_CONFIG_SYMBOL", config.get("symbol")),
+            )
 
         for source, raw in candidates:
             canonical = self._normalize_symbol_candidate(raw)
@@ -6301,6 +6361,16 @@ class BotManager:
             self.balance_check_ok = False
 
             self.position_check_ok = False
+
+            # The authorized MANUAL START boundary atomically (re)establishes
+            # the durable configured-symbol authority for the runtime that is
+            # about to activate, so the STOPPED read-only projection resolves a
+            # truthful symbol after a clean restart. AUTO selection owns its own
+            # separate authority and never writes the MANUAL destination. A
+            # structurally absent request symbol fails closed at
+            # ``_set_active_symbol_for_start`` below; a persistence failure here
+            # is non-fatal and never starts/arms/orders anything.
+            self._establish_configured_symbol_on_start(config)
 
             active_symbol = self._set_active_symbol_for_start(
                 config["symbol"]
@@ -8859,6 +8929,189 @@ class BotManager:
                 "savedModeRevision": next_revision,
                 "savedModeUpdatedAt": updated_at,
             }
+
+    # =========================
+    # CONFIGURED SYMBOL AUTHORITY
+    # =========================
+
+    @classmethod
+    def _default_configured_symbol_path(cls):
+
+        override = os.environ.get(CONFIGURED_SYMBOL_PATH_ENV)
+        if override:
+            return os.path.abspath(override)
+
+        return os.path.join(
+            cls._project_root(),
+            "logs",
+            "runtime",
+            "configured_symbol_authority.json",
+        )
+
+    @classmethod
+    def _normalize_configured_symbol(cls, value):
+        """Return the canonical exchange symbol, or ``None`` when absent.
+
+        A structurally absent value (``None`` / blank / the literal placeholders
+        ``NONE`` / ``NULL`` / ``UNKNOWN`` / ``NOT AVAILABLE``) is never a symbol.
+        ``XRPUSDT`` and ``XRPUSDTM`` both normalize to ``XRPUSDTM``.
+        """
+
+        canonical = cls._normalize_symbol_candidate(value)
+        if canonical is None:
+            return None
+        return to_kucoin_futures_symbol(canonical)
+
+    def _empty_configured_symbol_state(self):
+
+        return (None, 0, None)
+
+    def _load_configured_symbol_authority(self):
+
+        path = self.configured_symbol_path
+        if not path or not os.path.exists(path):
+            return self._empty_configured_symbol_state()
+
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return self._empty_configured_symbol_state()
+
+        if not isinstance(payload, dict):
+            return self._empty_configured_symbol_state()
+
+        symbol = self._normalize_configured_symbol(payload.get("symbol"))
+        revision = payload.get("revision")
+        if symbol is None or type(revision) is not int or revision < 0:
+            return self._empty_configured_symbol_state()
+
+        updated_at = payload.get("updatedAt")
+        if type(updated_at) not in {int, float}:
+            updated_at = None
+
+        return (symbol, revision, updated_at)
+
+    def _persist_configured_symbol_authority(self, symbol, revision, updated_at):
+
+        payload = {
+            "schemaVersion": CONFIGURED_SYMBOL_SCHEMA_VERSION,
+            "symbol": symbol,
+            "revision": revision,
+            "updatedAt": updated_at,
+        }
+
+        self._write_json_atomic(self.configured_symbol_path, payload)
+
+    def get_configured_symbol(self):
+
+        with self.configured_symbol_lock:
+            return self.configured_symbol
+
+    def get_configured_symbol_authority(self):
+
+        with self.configured_symbol_lock:
+            return {
+                "configuredSymbol": self.configured_symbol,
+                "configuredSymbolRevision": self.configured_symbol_revision,
+                "configuredSymbolUpdatedAt": self.configured_symbol_updated_at,
+            }
+
+    def set_configured_symbol(self, symbol, expected_revision=None):
+        """Commit the canonical configured MANUAL symbol for the next START.
+
+        Pure configuration write. It never starts the runtime, arms LIVE order
+        entry, constructs an execution engine, changes ``realOrderAllowed`` /
+        ``liveOrderEntryAllowed`` / ``executionEnabled``, changes the margin
+        mode or leverage, or places an order. A structurally absent or
+        placeholder symbol fails closed without mutating the authority.
+        """
+
+        normalized = self._normalize_configured_symbol(symbol)
+        if normalized is None:
+            return {
+                "success": False,
+                "reason": "INVALID_CONFIGURED_SYMBOL",
+                "configuredSymbol": self.get_configured_symbol(),
+                "configuredSymbolRevision": self.configured_symbol_revision,
+            }
+
+        with self.configured_symbol_lock:
+            if expected_revision is not None:
+                try:
+                    expected = int(expected_revision)
+                except (TypeError, ValueError):
+                    expected = None
+                if expected is None:
+                    return {
+                        "success": False,
+                        "reason": "INVALID_CONFIGURED_SYMBOL_REVISION",
+                        "configuredSymbol": self.configured_symbol,
+                        "configuredSymbolRevision": self.configured_symbol_revision,
+                    }
+                if expected != self.configured_symbol_revision:
+                    return {
+                        "success": False,
+                        "reason": "STALE_CONFIGURED_SYMBOL_REVISION",
+                        "configuredSymbol": self.configured_symbol,
+                        "configuredSymbolRevision": self.configured_symbol_revision,
+                        "expectedRevision": expected,
+                    }
+
+            updated_at = time.time()
+            next_revision = self.configured_symbol_revision + 1
+
+            try:
+                self._persist_configured_symbol_authority(
+                    normalized,
+                    next_revision,
+                    updated_at,
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "reason": "CONFIGURED_SYMBOL_PERSIST_FAILED",
+                    "configuredSymbol": self.configured_symbol,
+                    "configuredSymbolRevision": self.configured_symbol_revision,
+                }
+
+            self.configured_symbol = normalized
+            self.configured_symbol_revision = next_revision
+            self.configured_symbol_updated_at = updated_at
+
+            return {
+                "success": True,
+                "configuredSymbol": normalized,
+                "configuredSymbolRevision": next_revision,
+                "configuredSymbolUpdatedAt": updated_at,
+            }
+
+    def _establish_configured_symbol_on_start(self, config):
+        """Atomically commit the MANUAL START destination to the durable authority.
+
+        The authorized MANUAL START boundary is the mechanism that establishes
+        the configured symbol for the runtime that is about to activate. AUTO
+        selection keeps its own separate authority: an AUTO start never writes
+        the MANUAL configured destination (no manual/AUTO conflation). A
+        structurally absent request symbol establishes nothing.
+        """
+
+        selection_mode = str(
+            (config or {}).get("selection_mode")
+            or getattr(self, "selection_mode", "MANUAL")
+            or "MANUAL"
+        ).strip().upper()
+        requested_symbol = self._normalize_symbol_candidate(
+            (config or {}).get("symbol")
+        )
+        if selection_mode != "MANUAL" or requested_symbol is None:
+            return {
+                "success": False,
+                "reason": "CONFIGURED_SYMBOL_NOT_APPLICABLE",
+                "configuredSymbol": self.get_configured_symbol(),
+                "configuredSymbolRevision": self.configured_symbol_revision,
+            }
+        return self.set_configured_symbol(requested_symbol)
 
     @staticmethod
     def _stopped_paper_durable_schema_version():
@@ -14254,6 +14507,15 @@ class BotManager:
             "savedModeRevision": self.saved_mode_revision,
 
             "savedModeUpdatedAt": self.saved_mode_updated_at,
+
+            # Durable operator-committed MANUAL configured symbol for the next
+            # START. Distinct from the runtime active / orderbook symbols, which
+            # are null while STOPPED. Never fabricated from a frontend default.
+            "configuredSymbol": self.configured_symbol,
+
+            "configuredSymbolRevision": self.configured_symbol_revision,
+
+            "configuredSymbolUpdatedAt": self.configured_symbol_updated_at,
 
             # Mode of the currently attached RUNNING engine; NONE while stopped.
             "runtimeMode": runtime_mode,
