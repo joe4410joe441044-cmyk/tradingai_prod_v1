@@ -236,6 +236,14 @@ class MoneyManagementConfigurationResponse:
     revision: int
     source: str
     updated_at: datetime
+    small_account_minimum_contract_mode: bool = False
+    small_account_allowed_symbol: str = "XRPUSDTM"
+    small_account_max_contracts: Optional[Decimal] = None
+    small_account_max_risk_percent: Optional[Decimal] = None
+    small_account_max_absolute_risk_usdt: Optional[Decimal] = None
+    small_account_max_leverage: Optional[Decimal] = None
+    small_account_require_isolated: bool = True
+    small_account_require_manual_selection: bool = True
 
     def to_dict(self):
         return {
@@ -264,6 +272,14 @@ class MoneyManagementConfigurationResponse:
             ),
             "maximumLeverage": _serialize(self.maximum_leverage),
             "compoundingEnabled": self.compounding_enabled,
+            "smallAccountMinimumContractMode": self.small_account_minimum_contract_mode,
+            "smallAccountAllowedSymbol": self.small_account_allowed_symbol,
+            "smallAccountMaxContracts": _serialize(self.small_account_max_contracts),
+            "smallAccountMaxRiskPercent": _serialize(self.small_account_max_risk_percent),
+            "smallAccountMaxAbsoluteRiskUsdt": _serialize(self.small_account_max_absolute_risk_usdt),
+            "smallAccountMaxLeverage": _serialize(self.small_account_max_leverage),
+            "smallAccountRequireIsolated": self.small_account_require_isolated,
+            "smallAccountRequireManualSelection": self.small_account_require_manual_selection,
             "revision": self.revision,
             "source": self.source,
             "updatedAt": _serialize(self.updated_at),
@@ -639,6 +655,14 @@ class MoneyManagementHttpBoundary:
             revision,
             source,
             updated_at,
+            small_account_minimum_contract_mode=base_config.small_account_minimum_contract_mode if base_config is not None else False,
+            small_account_allowed_symbol=base_config.small_account_allowed_symbol if base_config is not None else "XRPUSDTM",
+            small_account_max_contracts=base_config.small_account_max_contracts if base_config is not None else None,
+            small_account_max_risk_percent=base_config.small_account_max_risk_percent if base_config is not None else None,
+            small_account_max_absolute_risk_usdt=base_config.small_account_max_absolute_risk_usdt if base_config is not None else None,
+            small_account_max_leverage=base_config.small_account_max_leverage if base_config is not None else None,
+            small_account_require_isolated=base_config.small_account_require_isolated if base_config is not None else True,
+            small_account_require_manual_selection=base_config.small_account_require_manual_selection if base_config is not None else True,
         )
 
     def get_configuration(self):
