@@ -10,7 +10,7 @@ from backend.money_management.order_sizing import OrderSizingAuthority, SizingRe
 from tests.test_money_management_api import ready_boundary
 
 
-@pytest.mark.parametrize('risk,exposure', [('0.5', '20'), ('1', '100'), ('2.1', '180'), ('5', '500')])
+@pytest.mark.parametrize('risk,exposure', [('0.5', '10'), ('1', '100'), ('1.01', '180'), ('2', '180'), ('2.1', '180'), ('5', '500')])
 def test_explicit_policy_round_trip(risk, exposure):
     boundary, *_ = ready_boundary()
     boundary.update_configuration({'riskPerTradePercent': risk, 'totalExposurePercent': exposure,
@@ -34,8 +34,8 @@ def test_invalid_ranges_are_atomic(field, value):
 
 
 @pytest.mark.parametrize('patch', [
-    {'riskPerTradePercent': '5.0001'}, {'totalExposurePercent': '500.0001'},
-    {'singleSymbolExposurePercent': '500.0001'},
+    {'riskPerTradePercent': '5.01'}, {'totalExposurePercent': '500.01'},
+    {'singleSymbolExposurePercent': '500.01'},
     {'singleSymbolExposurePercent': '181', 'totalExposurePercent': '180'},
     {'maximumDrawdownPercent': '101'},
 ])

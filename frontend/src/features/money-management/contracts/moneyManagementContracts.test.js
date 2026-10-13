@@ -308,3 +308,14 @@ test("futures absolute caps and exposure ordering reject invalid drafts", () => 
       ["riskPerTradePercent", "singleSymbolExposurePercent", "totalExposurePercent"].map(key => ({[key]: value}))),
   ]) assert.equal(validateMoneyManagementConfigurationDraft({...draft, ...patch}, 7).valid, false);
 });
+
+test("validation and draft creation do not elevate canonical defaults", () => {
+  const config = normalizeMoneyManagementConfiguration(validConfiguration());
+  const draft = configurationDraftFromAuthoritative(config);
+  const before = JSON.stringify(draft);
+  assert.equal(validateMoneyManagementConfigurationDraft(draft, 7).valid, true);
+  assert.deepEqual([draft.riskPerTradePercent, draft.singleSymbolExposurePercent, draft.totalExposurePercent],
+                   ["0.50", "10.00", "20.00"]);
+  assert.equal(JSON.stringify(draft), before);
+  assert.equal(config.riskPerTradePercent, "0.50");
+});

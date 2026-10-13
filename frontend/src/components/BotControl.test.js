@@ -3174,3 +3174,20 @@ test("CAPITAL AUTHORITY: LIVE START payload is unchanged (no capital presentatio
         mock.restore();
     }
 });
+
+test("mounting elevated policy never automatically saves, starts, arms or trades", async () => {
+    setMmConfiguration({ riskPerTradePercent: "2.1", totalExposurePercent: "180", singleSymbolExposurePercent: "180" });
+    clearMmSaveCalls();
+    const mock = installFetchMock(() => { throw new Error("No automatic mutation expected"); });
+    try {
+        const renderer = await renderBotControl(readyStartProps({config: {risk_percent: 2.1}}));
+        renderer.render();
+        assert.equal(mock.requests.length, 0);
+        assert.equal(globalThis.__MM_SAVE_CALLS__ ?? 0, 0);
+        assert.equal(globalThis.__MM_CONFIGURATION__.riskPerTradePercent, "2.1");
+    } finally {
+        mock.restore();
+        clearMmConfiguration();
+        clearMmSaveCalls();
+    }
+});

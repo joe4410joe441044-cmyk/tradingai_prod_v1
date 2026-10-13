@@ -216,3 +216,22 @@ This approved amendment supersedes conflicting range restrictions in the baselin
 - Non-finite, zero, negative, risk above 5%, and exposure above 500% are invalid. Loss/drawdown percentage ranges and their ordering remain unchanged.
 - Existing sizing mathematics, cost assumptions, downward quantity rounding and minimum contract checks remain unchanged. No minimum-quantity override is permitted.
 - Draft validation and configuration acceptance do not authorize execution. Existing confirmation, revision, Governance and live-order gates remain authoritative; this task authorizes no production configuration change or real order.
+
+### Preserved risk and execution authorities
+
+`0 < risk <= 1%` is Standard policy; `1% < risk <= 5%` is explicit elevated
+leveraged-futures policy; risk above 5% is invalid. MM remains authoritative.
+The execution sizing risk is `min(Trade Settings risk_percent, MM risk_per_trade_pct)`:
+Trade Settings cannot override a lower MM ceiling. A higher MM ceiling cannot
+raise a lower Trade Settings risk. Leverage does not reduce price risk and does
+not multiply the configured exposure capacity. Exposure of 500% is gross
+notional relative to equity, not 500% risk; Risk and Exposure remain separate
+authorities.
+
+The operator must explicitly configure and save elevated policy through the
+existing configuration authority. Defaults and existing saved values must not
+be elevated by migration, rendering, validation, or selection-option changes.
+Minimum contract quantity cannot override MM or Risk, force upward rounding,
+or make an invalid quantity valid; invalid quantity remains fail-closed.
+LIVE execution still requires every existing execution, Governance, account,
+exchange, confirmation and order-authorization gate.

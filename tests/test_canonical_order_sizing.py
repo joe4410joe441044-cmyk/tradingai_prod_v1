@@ -216,8 +216,31 @@ def test_current_capital_elevated_execution_preview_with_costs():
     assert sizing.size()['contracts'] == '1'
     assert sizing.size()['position_size'] == 13.9938
     assert sizing.risk_budget == D('0.16628576286')
+    notional = D('13.9938')
+    assert notional * sizing.risk_fraction <= sizing.risk_budget
+    assert notional <= min(sizing.position_cap, sizing.symbol_capacity, sizing.total_capacity)
+    assert notional / sizing.leverage <= sizing.available * D('0.8')
+    assert sizing.minimum <= D(sizing.size()['contracts']) <= sizing.maximum
+    assert D(sizing.size()['contracts']) % sizing.step == 0
     engine.sizing_policy_provider = lambda: default
     engine.config['risk_percent'] = 0.5
     with pytest.raises(SizingRejected, match='NO_VALID_QUANTITY_FOR_RISK_POLICY'):
         engine._order_sizing_authority(price=D('1.39938'), rules=rules).size()
+    engine.exchange.create_order.assert_not_called()
+
+
+@pytest.mark.parametrize('trade_risk,mm_risk,effective', [
+    ('2.1', '2.1', '2.1'), ('3', '2', '2'), ('1', '3', '1'),
+])
+def test_explicit_trade_risk_and_mm_keep_smaller_authority(trade_risk, mm_risk, effective):
+    engine = engine_for('live', 7.91836966)
+    policy = replace(build_default_money_management_config(), risk_per_trade_pct=D(mm_risk),
+                     single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'))
+    engine.sizing_policy_provider = lambda: policy
+    engine.config['risk_percent'] = trade_risk
+    sizing = engine._order_sizing_authority(price=D('1.39938'))
+    assert sizing.risk_percent == D(effective)
+    assert sizing.symbol_capacity == D('7.91836966') * D('1.8')
+    assert sizing.total_capacity == sizing.symbol_capacity
+    assert sizing.risk_fraction == D('0.01')
     engine.exchange.create_order.assert_not_called()

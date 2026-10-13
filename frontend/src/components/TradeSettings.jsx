@@ -151,7 +151,7 @@ export default function TradeSettings({
                         min="0.1"
                         max="5"
                         value={
-                            values.risk_percent ?? 0.5
+                            values.risk_percent ?? 1
                         }
                         onChange={(e) =>
                             handle(

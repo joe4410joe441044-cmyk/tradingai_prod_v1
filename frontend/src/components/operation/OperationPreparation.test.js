@@ -2790,7 +2790,7 @@ test("CAPITAL AUTHORITY (PAPER): PAPER account authority remains separate from r
     assert.equal(scopedRowValue(mm, "CURRENT LIVE RISK BUDGET"), null);
 });
 
-test("Final Preparation preserves saved elevated and arbitrary higher values", async () => {
+test("Final Preparation preserves saved elevated and arbitrary higher values without automatic actions", async () => {
     const Component = await loadComponent();
     for (const [risk, exposure] of [["2.1", "180"], ["2.37", "183"], ["5", "500"]]) {
         const changes = [];
@@ -2799,6 +2799,11 @@ test("Final Preparation preserves saved elevated and arbitrary higher values", a
             mmDraft: mmDraft({riskPerTradePercent: risk, totalExposurePercent: exposure}),
             mmConfiguration: mmConfig({riskPerTradePercent: risk, totalExposurePercent: exposure}),
             onMmDraftChange: patch => changes.push(patch),
+            onSaveSettings: () => changes.push("SAVE"),
+            handleLiveOrderEntryChange: () => changes.push("ARM"),
+            handleManualTrade: side => changes.push(side),
+            handleLoopChange: () => changes.push("LOOP"),
+            handleAutoTradeChange: () => changes.push("AUTO TRADE"),
         });
         assert.equal(findSelect(renderer.root, "operation-prep-risk").props.value, Number(risk));
         assert.equal(findSelect(renderer.root, "operation-prep-exposure").props.value, Number(exposure));
