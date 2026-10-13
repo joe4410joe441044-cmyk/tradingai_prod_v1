@@ -76,9 +76,10 @@ export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
 
 const VALIDATION_MESSAGES = Object.freeze({
   INVALID_BOOLEAN: "A boolean value is required.",
-  INVALID_PERCENTAGE: "Enter a decimal greater than 0 and at most 100.",
+  INVALID_PERCENTAGE: "Enter a decimal greater than 0 within the field limit (risk 5%, exposure 500%, loss/drawdown 100%).",
   INVALID_POSITIVE_DECIMAL: "Enter a decimal greater than 0.",
-  RISK_PERCENT_EXCEEDS_MAXIMUM: "Risk per trade must not exceed 1%.",
+  SYMBOL_EXPOSURE_EXCEEDS_TOTAL: "Single-symbol exposure must not exceed total exposure.",
+  RISK_PERCENT_EXCEEDS_MAXIMUM: "Risk per trade must not exceed 5%. Above 1% is elevated leveraged-futures configuration.",
   WARNING_MUST_BE_BELOW_BLOCK:
     "Warning must be below the corresponding block value.",
   DAILY_BLOCK_MUST_BE_BELOW_WEEKLY:

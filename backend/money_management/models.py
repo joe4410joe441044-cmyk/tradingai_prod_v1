@@ -12,9 +12,9 @@ def _dec(name, value, positive=False, nonnegative=False):
     if positive and value <= 0: raise ValueError(f"{name} must be > 0")
     if nonnegative and value < 0: raise ValueError(f"{name} must be >= 0")
     return value
-def _pct(name,value,positive=False):
+def _pct(name,value,positive=False,maximum=Decimal("100")):
     value=_dec(name,value,positive=positive)
-    if value>Decimal("100"): raise ValueError(f"{name} must be <= 100")
+    if value>maximum: raise ValueError(f"{name} must be <= {maximum}")
     return value
 def _dt(name,value):
     if not isinstance(value,datetime) or value.tzinfo is None or value.utcoffset() is None: raise TypeError(f"{name} must be timezone-aware datetime")
@@ -54,7 +54,10 @@ class MoneyManagementConfig:
         if type(self.multi_bot_enabled) is not bool: raise TypeError("multi_bot_enabled must be bool")
         if type(self.compounding_enabled) is not bool: raise TypeError("compounding_enabled must be bool")
         for n in ("initial_reference_equity","maximum_position_notional"): _dec(n,getattr(self,n),positive=True)
-        for n in ("risk_per_trade_pct","maximum_drawdown_pct","total_exposure_pct","single_symbol_exposure_pct","daily_loss_warning_pct","daily_loss_block_pct","weekly_loss_warning_pct","weekly_loss_block_pct","monthly_loss_warning_pct","monthly_loss_block_pct","profit_lock_start_pct"): _pct(n,getattr(self,n),positive=True)
+        for n in ("maximum_drawdown_pct","daily_loss_warning_pct","daily_loss_block_pct","weekly_loss_warning_pct","weekly_loss_block_pct","monthly_loss_warning_pct","monthly_loss_block_pct","profit_lock_start_pct"): _pct(n,getattr(self,n),positive=True)
+        _pct("risk_per_trade_pct", self.risk_per_trade_pct, positive=True, maximum=Decimal("5"))
+        for n in ("total_exposure_pct", "single_symbol_exposure_pct"):
+            _pct(n, getattr(self, n), positive=True, maximum=Decimal("500"))
         _dec("maximum_leverage",self.maximum_leverage,positive=True)
         if self.maximum_leverage>Decimal("5"): raise ValueError("maximum_leverage must be <= 5")
         if self.single_symbol_exposure_pct>self.total_exposure_pct: raise ValueError("single-symbol exposure exceeds total")

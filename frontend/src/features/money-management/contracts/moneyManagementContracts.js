@@ -1,6 +1,5 @@
 import {
   compareDecimalStrings,
-  isBackendPercentage,
   isStrictDecimalString,
 } from "../utils/moneyManagementDecimal.js";
 import { isValidUtcIsoTimestamp } from "../utils/moneyManagementTime.js";
@@ -627,13 +626,16 @@ export function validateMoneyManagementConfigurationDraft(
     errors.compoundingEnabled = "INVALID_BOOLEAN";
   }
   for (const field of PERCENTAGE_FIELDS) {
-    if (!isBackendPercentage(draft[field])) {
+    const maximum = ["totalExposurePercent", "singleSymbolExposurePercent"].includes(field) ? "500" : "100";
+    if (!isStrictDecimalString(draft[field]) ||
+        compareDecimalStrings(draft[field], "0") <= 0 ||
+        compareDecimalStrings(draft[field], maximum) > 0) {
       errors[field] = "INVALID_PERCENTAGE";
     }
   }
   if (
     !errors.riskPerTradePercent &&
-    compareDecimalStrings(draft.riskPerTradePercent, "1") > 0
+    compareDecimalStrings(draft.riskPerTradePercent, "5") > 0
   ) {
     errors.riskPerTradePercent = "RISK_PERCENT_EXCEEDS_MAXIMUM";
   }
@@ -685,6 +687,10 @@ export function validateMoneyManagementConfigurationDraft(
     ) >= 0
   ) {
     errors.monthlyBlockPercent = "MONTHLY_BLOCK_MUST_BE_BELOW_DRAWDOWN";
+  }
+  if (!errors.singleSymbolExposurePercent && !errors.totalExposurePercent &&
+      compareDecimalStrings(draft.singleSymbolExposurePercent, draft.totalExposurePercent) > 0) {
+    errors.singleSymbolExposurePercent = "SYMBOL_EXPOSURE_EXCEEDS_TOTAL";
   }
   if (!Number.isInteger(expectedRevision) || expectedRevision < 1) {
     errors.expectedRevision = "MISSING";

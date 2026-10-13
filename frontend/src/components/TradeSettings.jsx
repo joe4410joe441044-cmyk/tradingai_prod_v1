@@ -149,8 +149,9 @@ export default function TradeSettings({
                         type="number"
                         step="0.1"
                         min="0.1"
+                        max="5"
                         value={
-                            values.risk_percent ?? 1
+                            values.risk_percent ?? 0.5
                         }
                         onChange={(e) =>
                             handle(

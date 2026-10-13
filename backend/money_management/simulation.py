@@ -62,13 +62,13 @@ class MoneyManagementSimulationInput:
         for name in ("win_rate_percent", "average_win_percent"):
             _decimal(name, getattr(self, name), nonnegative=True, maximum=Decimal("100"))
         _decimal("average_loss_percent", self.average_loss_percent, positive=True, maximum=Decimal("100"))
-        _decimal("risk_per_trade_percent", self.risk_per_trade_percent, positive=True, maximum=Decimal("1"))
+        _decimal("risk_per_trade_percent", self.risk_per_trade_percent, positive=True, maximum=Decimal("5"))
         _decimal("maximum_drawdown_percent", self.maximum_drawdown_percent, positive=True, maximum=Decimal("100"))
         for name in ("fees_percent", "slippage_percent"):
             _decimal(name, getattr(self, name), nonnegative=True, maximum=Decimal("100"))
         _decimal("maximum_position_notional", self.maximum_position_notional, positive=True)
         for name in ("total_exposure_percent", "single_symbol_exposure_percent"):
-            _decimal(name, getattr(self, name), positive=True, maximum=Decimal("100"))
+            _decimal(name, getattr(self, name), positive=True, maximum=Decimal("500"))
         if self.single_symbol_exposure_percent > self.total_exposure_percent:
             raise ValueError("single symbol exposure exceeds total")
         if type(self.compounding_enabled) is not bool:

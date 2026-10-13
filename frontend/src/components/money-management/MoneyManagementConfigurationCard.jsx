@@ -110,6 +110,7 @@ export default function MoneyManagementConfigurationCard({
             className="mm-card--configuration"
             title="Configuration"
         >
+            <p>Standard risk ≤1%; above 1% up to 5% is elevated leveraged-futures configuration. Exposure above 100% up to 500% is gross notional / equity and requires explicit operator configuration.</p>
             <dl className="mm-configuration-meta">
                 <div>
                     <dt>Backend Revision</dt>

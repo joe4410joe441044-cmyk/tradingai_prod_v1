@@ -142,7 +142,7 @@ class MoneyManagementSimulationTests(unittest.TestCase):
             {"number_of_trades": MAX_SIMULATION_TRADES + 1},
             {"win_rate_percent": D("101")},
             {"average_loss_percent": D("0")},
-            {"risk_per_trade_percent": D("1.01")},
+            {"risk_per_trade_percent": D("5.01")},
             {"fees_percent": D("NaN")},
             {"scenario": "UNSUPPORTED"},
         )

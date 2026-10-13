@@ -408,7 +408,7 @@ _REQUEST_FIELDS = frozenset((
 ))
 
 
-def _strict_decimal(name, value):
+def _strict_decimal(name, value, maximum=Decimal("100")):
     if isinstance(value, bool) or not isinstance(value, (str, Decimal)):
         raise ValueError(f"{name} must be a decimal string")
     if isinstance(value, str) and not value.strip():
@@ -417,7 +417,7 @@ def _strict_decimal(name, value):
         result = value if isinstance(value, Decimal) else Decimal(value.strip())
     except (InvalidOperation, ValueError):
         raise ValueError(f"{name} must be a valid decimal") from None
-    if not result.is_finite() or result <= 0 or result > Decimal("100"):
+    if not result.is_finite() or result <= 0 or result > maximum:
         raise ValueError(f"{name} is outside the supported percentage range")
     return result
 
@@ -1583,20 +1583,21 @@ class MoneyManagementHttpBoundary:
                         if external == "maximumPositionNotional"
                         else _strict_decimal
                     )
-                    base_update[internal] = parser(
-                        external, payload[external]
-                    )
+                    if external in ("totalExposurePercent", "singleSymbolExposurePercent"):
+                        base_update[internal] = _strict_decimal(external, payload[external], Decimal("500"))
+                    else:
+                        base_update[internal] = parser(external, payload[external])
         except ValueError:
             self._error(
                 422,
                 "CONFIGURATION_INVALID",
                 "Base configuration value is invalid.",
             )
-        if base_update.get("risk_per_trade_pct", Decimal("0")) > Decimal("1"):
+        if base_update.get("risk_per_trade_pct", Decimal("0")) > Decimal("5"):
             self._error(
                 422,
                 "CONFIGURATION_INVALID",
-                "Risk per trade must not exceed 1 percent.",
+                "Risk per trade must not exceed 5 percent; above 1 percent is elevated leveraged-futures configuration.",
             )
         return (
             expected,

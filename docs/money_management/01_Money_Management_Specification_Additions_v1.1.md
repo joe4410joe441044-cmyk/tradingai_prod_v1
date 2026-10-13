@@ -171,7 +171,7 @@ This section is normative. It supersedes any conflicting proposed, legacy, or de
 
 | ID | Approved decision |
 | --- | --- |
-| D01 | Risk per trade is 0.50% of current eligible equity. Hard maximum is 1.00%. `riskAmount = eligibleEquity * 0.005`. Leverage never increases riskAmount. |
+| D01 | Risk per trade is 0.50% of current eligible equity. Standard safety/reference threshold is 1.00%; the absolute configurable maximum is 5.00%, with values above 1% permitted only as explicit operator-configured leveraged-futures elevated configuration. Default `riskAmount = eligibleEquity * 0.005`. Leverage never increases riskAmount. |
 | D02 | Maximum position is 100 USDT notional for one logical position. |
 | D03 | Maximum account drawdown is 5.00% from Account High-Water Mark Equity. Scope is account. Breach is `LOCKED`; no new trade and approvedSize is 0. |
 | D04 | Maximum total exposure is 20% of eligible equity (200 USDT at reference equity). |
@@ -454,6 +454,21 @@ Persist Active/Draft configuration and history; equity/HWM; period starts/counte
 
 ## Validation and MM-1A Input Package
 
-Validate daily warning < daily block; weekly warning < weekly block; monthly warning < monthly block; daily block < weekly block <= monthly block < maximum DD; maximum position <= symbol exposure <= total exposure; 0 < risk per trade <= 1%; 0 < leverage <= 5x Standard; profit thresholds strictly rise; giveback and multiplier ceilings decrease by tier; 0.25 < 0.50 < 1.00; approved amounts are non-negative and no greater than requested; MM never changes direction; leverage never raises risk amount; Governance is final.
+Validate daily warning < daily block; weekly warning < weekly block; monthly warning < monthly block; daily block < weekly block <= monthly block < maximum DD; maximum position <= symbol exposure <= total exposure; 0 < risk per trade <= 5% (Standard safety/reference threshold 1%; above 1% requires explicit operator configuration for leveraged futures); 0 < single-symbol exposure <= total exposure <= 500%; 0 < leverage <= 5x Standard; profit thresholds strictly rise; giveback and multiplier ceilings decrease by tier; 0.25 < 0.50 < 1.00; approved amounts are non-negative and no greater than requested; MM never changes direction; leverage never raises risk amount; Governance is final.
 
 MM-1A input package: typed models, enums, calculation inputs/outputs, units, precision, rounding, validation errors, block reasons, states, configuration fields, and persistence fields.
+
+
+## Approved leveraged-futures configuration amendment
+
+Task: `TRADINGAI-WORK-D-MM-FUTURES-POLICY-AMENDMENT-RANGE-REPAIR-2`.
+This approved amendment supersedes conflicting range restrictions in the baseline.
+
+- `ADD_CAPITAL=NO`. Default risk remains 0.5%; 1% remains the Standard safety/reference threshold.
+- Risk above 1% through 5% is an elevated leveraged-futures configuration, allowed only when explicitly configured by the operator. It is not a new default or an automatic recommendation.
+- Single-symbol and total exposure may each be explicitly configured above 100% through 500% for leveraged futures. Single-symbol exposure must not exceed total exposure.
+- Exposure remains `GROSS_NOTIONAL_DIVIDED_BY_EQUITY`: gross notional / current equity * 100, not margin utilization. Leverage never multiplies the risk budget.
+- Defaults remain risk 0.5%, single-symbol exposure 10%, total exposure 20%, maximum position notional 100 USDT, maximum leverage 5x. The position cap and leverage limit remain unchanged.
+- Non-finite, zero, negative, risk above 5%, and exposure above 500% are invalid. Loss/drawdown percentage ranges and their ordering remain unchanged.
+- Existing sizing mathematics, cost assumptions, downward quantity rounding and minimum contract checks remain unchanged. No minimum-quantity override is permitted.
+- Draft validation and configuration acceptance do not authorize execution. Existing confirmation, revision, Governance and live-order gates remain authoritative; this task authorizes no production configuration change or real order.

@@ -856,6 +856,7 @@ return (
                             options={mmRiskOptions}
                             value={mmAvailable ? mmRiskValue : ""}
                         />
+                        <small>Standard risk ≤1%; above 1% up to 5% and exposure above 100% up to 500% require explicit leveraged-futures configuration.</small>
                         <DerivedRow hideSource label="CAPITAL AUTHORITY" source={isLiveCapitalMode ? "LIVE ACCOUNT" : "MM RUNTIME"} value={capitalAuthorityDisplay} />
                         <DerivedRow hideSource label="AVAILABLE CAPITAL" source={availableCapitalSource} value={availableCapital !== undefined && availableCapital !== null ? String(availableCapital) : "UNAVAILABLE"} />
                         <DerivedRow hideSource label="COMPOUNDING POLICY" source={savedCompounding === null ? "NOT CONNECTED" : "MM CONFIG"} value={compoundingPolicy} />

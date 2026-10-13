@@ -1020,7 +1020,7 @@ class MoneyManagementConfigurationApiTests(unittest.TestCase):
             {"totalExposurePercent": "Infinity"},
             {"totalExposurePercent": "0"},
             {"totalExposurePercent": "5"},
-            {"totalExposurePercent": "101"},
+            {"totalExposurePercent": "500.01"},
             {
                 "dailyWarningPercent": "4",
                 "dailyBlockPercent": "3",

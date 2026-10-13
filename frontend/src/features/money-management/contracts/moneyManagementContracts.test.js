@@ -284,3 +284,27 @@ for (const mode of ["PAPER", "LIVE", undefined, null, "invalid", "paper", " LIVE
     assert.ok(safe.blockReasons.includes("TRADING_RUNTIME_METRICS_UNAVAILABLE"));
   });
 }
+
+test("explicit futures elevated values round trip without clamping", () => {
+  for (const [risk, exposure] of [["1", "100"], ["2.1", "180"], ["5", "500"]]) {
+    const draft = configurationDraftFromAuthoritative(normalizeMoneyManagementConfiguration(
+      validConfiguration({riskPerTradePercent: risk, totalExposurePercent: exposure, singleSymbolExposurePercent: exposure}),
+    ));
+    assert.equal(validateMoneyManagementConfigurationDraft(draft, 7).valid, true);
+    const payload = buildMoneyManagementConfigurationPayload(draft, 7);
+    assert.equal(payload.riskPerTradePercent, risk);
+    assert.equal(payload.totalExposurePercent, exposure);
+    assert.equal(payload.singleSymbolExposurePercent, exposure);
+  }
+});
+
+test("futures absolute caps and exposure ordering reject invalid drafts", () => {
+  const draft = configurationDraftFromAuthoritative(normalizeMoneyManagementConfiguration(validConfiguration()));
+  for (const patch of [
+    {riskPerTradePercent: "5.0001"}, {totalExposurePercent: "500.0001"},
+    {singleSymbolExposurePercent: "500.0001"},
+    {singleSymbolExposurePercent: "181", totalExposurePercent: "180"},
+    ...["0", "-1", "NaN", "Infinity", "", true, 2.1].flatMap(value =>
+      ["riskPerTradePercent", "singleSymbolExposurePercent", "totalExposurePercent"].map(key => ({[key]: value}))),
+  ]) assert.equal(validateMoneyManagementConfigurationDraft({...draft, ...patch}, 7).valid, false);
+});

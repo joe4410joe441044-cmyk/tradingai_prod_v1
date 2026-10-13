@@ -201,3 +201,18 @@ drawdown use this adjusted series. Deposits therefore cannot create trading
 profit, withdrawals cannot create trading loss or drawdown, and mixed cash-flow
 and trading results retain only the trading component. Unknown or unresolved
 cash flow fails closed under the existing cash-flow state contract.
+
+
+## Approved leveraged-futures configuration amendment
+
+Task: `TRADINGAI-WORK-D-MM-FUTURES-POLICY-AMENDMENT-RANGE-REPAIR-2`.
+This approved amendment supersedes conflicting range restrictions in the baseline.
+
+- `ADD_CAPITAL=NO`. Default risk remains 0.5%; 1% remains the Standard safety/reference threshold.
+- Risk above 1% through 5% is an elevated leveraged-futures configuration, allowed only when explicitly configured by the operator. It is not a new default or an automatic recommendation.
+- Single-symbol and total exposure may each be explicitly configured above 100% through 500% for leveraged futures. Single-symbol exposure must not exceed total exposure.
+- Exposure remains `GROSS_NOTIONAL_DIVIDED_BY_EQUITY`: gross notional / current equity * 100, not margin utilization. Leverage never multiplies the risk budget.
+- Defaults remain risk 0.5%, single-symbol exposure 10%, total exposure 20%, maximum position notional 100 USDT, maximum leverage 5x. The position cap and leverage limit remain unchanged.
+- Non-finite, zero, negative, risk above 5%, and exposure above 500% are invalid. Loss/drawdown percentage ranges and their ordering remain unchanged.
+- Existing sizing mathematics, cost assumptions, downward quantity rounding and minimum contract checks remain unchanged. No minimum-quantity override is permitted.
+- Draft validation and configuration acceptance do not authorize execution. Existing confirmation, revision, Governance and live-order gates remain authoritative; this task authorizes no production configuration change or real order.

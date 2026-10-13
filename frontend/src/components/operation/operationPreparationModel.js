@@ -6,8 +6,8 @@ export const OPERATION_PREPARATION_OPTIONS = Object.freeze({
     // Selection (which market / symbol) is never confused with Execution
     // Control authority, which legitimately keeps the label "MANUAL".
     symbols: ["XRPUSDTM", "BTCUSDTM", "ETHUSDTM"],
-    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1],
-    maxExposure: [10, 20, 30, 40, 50],
+    riskPerTrade: [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.1, 2.5, 3, 4, 5],
+    maxExposure: [10, 20, 30, 40, 50, 100, 150, 180, 200, 300, 400, 500],
     maxDrawdown: [5, 7, 10],
     requestedLeverage: [1, 2, 3, 4, 5, 7, 10],
     positionSize: [0, 25, 50, 75, 100],

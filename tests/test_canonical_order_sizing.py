@@ -201,3 +201,23 @@ def test_actual_manual_engine_to_adapter_revalidates_wire_quantity(monkeypatch):
         assert captured[0]['size']=='1000'
         assert len(recorder.intents)==2  # admission and final normalized quantity
         assert all(intent.requested_quantity==D('1') for intent in recorder.intents)
+
+
+def test_current_capital_elevated_execution_preview_with_costs():
+    engine = engine_for('live', 7.91836966)
+    default = build_default_money_management_config()
+    elevated = replace(default, risk_per_trade_pct=D('2.1'),
+                       single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'))
+    engine.sizing_policy_provider = lambda: elevated
+    engine.config['risk_percent'] = 2.1
+    rules = {**contract_rules('XRPUSDTM', 10), 'taker_fee_rate': '0.0006'}
+    sizing = engine._order_sizing_authority(price=D('1.39938'), rules=rules)
+    assert sizing.cost_percent == D('0.12')
+    assert sizing.size()['contracts'] == '1'
+    assert sizing.size()['position_size'] == 13.9938
+    assert sizing.risk_budget == D('0.16628576286')
+    engine.sizing_policy_provider = lambda: default
+    engine.config['risk_percent'] = 0.5
+    with pytest.raises(SizingRejected, match='NO_VALID_QUANTITY_FOR_RISK_POLICY'):
+        engine._order_sizing_authority(price=D('1.39938'), rules=rules).size()
+    engine.exchange.create_order.assert_not_called()
