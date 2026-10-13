@@ -53,7 +53,7 @@ class MoneyManagementConfig:
     small_account_allowed_symbol: str="XRPUSDTM"
     small_account_max_contracts: Decimal=Decimal("1")
     small_account_max_risk_percent: Decimal=Decimal("2.0")
-    small_account_max_absolute_risk_usdt: Decimal=Decimal("0.158")
+    small_account_max_absolute_risk_usdt: Optional[Decimal]=None
     small_account_max_leverage: Decimal=Decimal("3")
     small_account_require_isolated: bool=True
     small_account_require_flat_before_entry: bool=True
@@ -75,7 +75,11 @@ class MoneyManagementConfig:
         _dec("maximum_leverage",self.maximum_leverage,positive=True)
         _dec("small_account_max_contracts",self.small_account_max_contracts,positive=True)
         _pct("small_account_max_risk_percent",self.small_account_max_risk_percent,positive=True)
-        _dec("small_account_max_absolute_risk_usdt",self.small_account_max_absolute_risk_usdt,positive=True)
+        if self.small_account_max_absolute_risk_usdt is None:
+            if self.small_account_minimum_contract_mode:
+                raise ValueError("small_account_max_absolute_risk_usdt required when mode enabled")
+        else:
+            _dec("small_account_max_absolute_risk_usdt",self.small_account_max_absolute_risk_usdt,positive=True)
         _dec("small_account_max_leverage",self.small_account_max_leverage,positive=True)
         if self.small_account_max_contracts>Decimal("1"): raise ValueError("small_account_max_contracts must be <= 1")
         if self.small_account_max_leverage>self.maximum_leverage: raise ValueError("small-account leverage exceeds normal maximum")

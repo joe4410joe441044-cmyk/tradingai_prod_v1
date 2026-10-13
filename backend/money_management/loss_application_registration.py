@@ -70,6 +70,7 @@ def build_default_money_management_config():
         single_symbol_exposure_pct=Decimal("10"),
         maximum_leverage=Decimal("5"),
         multi_bot_enabled=False,
+        small_account_max_absolute_risk_usdt=Decimal("0.158"),
     )
 
 

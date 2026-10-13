@@ -7,6 +7,7 @@ import time
 import pytest
 from backend.money_management.order_sizing import OrderSizingAuthority, SizingRejected, floor_contracts
 from backend.money_management.loss_application_registration import build_default_money_management_config
+from backend.money_management.models import MoneyManagementConfig
 from backend.money_management.live_capital_authority import build_live_capital_eligibility
 from backend.portfolio.portfolio_manager import PortfolioManager
 from backend.execution.kucoin_trade import KucoinTradeClient
@@ -308,3 +309,14 @@ def test_small_account_provenance_never_authorizes_two_contracts(equity, sl, lev
         assert result["contracts"] == "1"
     with pytest.raises(SizingRejected):
         a.validate(2, sizing_policy_mode="SMALL_ACCOUNT_MINIMUM_CONTRACT")
+def test_small_account_absolute_cap_is_profile_explicit_not_generic_default():
+    generic = MoneyManagementConfig(
+        profile="CAPITAL_PROTECTION_STANDARD", mode="PAPER",
+        initial_reference_equity=D("1000"), risk_per_trade_pct=D("0.5"),
+        maximum_position_notional=D("100"), maximum_drawdown_pct=D("5"),
+        total_exposure_pct=D("20"), single_symbol_exposure_pct=D("10"),
+        maximum_leverage=D("5"), multi_bot_enabled=False)
+    assert generic.small_account_max_absolute_risk_usdt is None
+    assert build_default_money_management_config().small_account_max_absolute_risk_usdt == D("0.158")
+    with pytest.raises(ValueError, match="absolute_risk_usdt required"):
+        replace(generic, small_account_minimum_contract_mode=True)

@@ -243,6 +243,8 @@ class MoneyManagementConfigurationResponse:
     small_account_max_absolute_risk_usdt: Optional[Decimal] = None
     small_account_max_leverage: Optional[Decimal] = None
     small_account_require_isolated: bool = True
+    small_account_require_flat_before_entry: bool = True
+    small_account_require_no_pending: bool = True
     small_account_require_manual_selection: bool = True
 
     def to_dict(self):
@@ -279,6 +281,8 @@ class MoneyManagementConfigurationResponse:
             "smallAccountMaxAbsoluteRiskUsdt": _serialize(self.small_account_max_absolute_risk_usdt),
             "smallAccountMaxLeverage": _serialize(self.small_account_max_leverage),
             "smallAccountRequireIsolated": self.small_account_require_isolated,
+            "smallAccountRequireFlatBeforeEntry": self.small_account_require_flat_before_entry,
+            "smallAccountRequireNoPending": self.small_account_require_no_pending,
             "smallAccountRequireManualSelection": self.small_account_require_manual_selection,
             "revision": self.revision,
             "source": self.source,
@@ -662,6 +666,8 @@ class MoneyManagementHttpBoundary:
             small_account_max_absolute_risk_usdt=base_config.small_account_max_absolute_risk_usdt if base_config is not None else None,
             small_account_max_leverage=base_config.small_account_max_leverage if base_config is not None else None,
             small_account_require_isolated=base_config.small_account_require_isolated if base_config is not None else True,
+            small_account_require_flat_before_entry=base_config.small_account_require_flat_before_entry if base_config is not None else True,
+            small_account_require_no_pending=base_config.small_account_require_no_pending if base_config is not None else True,
             small_account_require_manual_selection=base_config.small_account_require_manual_selection if base_config is not None else True,
         )
 

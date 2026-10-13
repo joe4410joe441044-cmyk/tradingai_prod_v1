@@ -3781,7 +3781,7 @@ class ExecutionEngine:
             small_account_allowed_symbol=policy.small_account_allowed_symbol,
             small_account_max_contracts=policy.small_account_max_contracts,
             small_account_max_risk_percent=policy.small_account_max_risk_percent,
-            small_account_max_absolute_risk_usdt=policy.small_account_max_absolute_risk_usdt,
+            small_account_max_absolute_risk_usdt=policy.small_account_max_absolute_risk_usdt or Decimal("0"),
             small_account_max_leverage=policy.small_account_max_leverage,
             live=live, entry_authority=str(context.get("entryAuthority") or "").upper(),
             configured_symbol=str(context.get("configuredSymbol") or ""),
