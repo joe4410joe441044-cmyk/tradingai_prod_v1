@@ -46,14 +46,31 @@ class OrderSizingAuthority:
     step: Decimal
     maximum: Decimal
     cost_percent: Decimal = Decimal("0")
+    small_account_mode: bool = False
+    small_account_allowed_symbol: str = ""
+    small_account_max_contracts: Decimal = Decimal("1")
+    small_account_max_risk_percent: Decimal = Decimal("2")
+    small_account_max_absolute_risk_usdt: Decimal = Decimal("0")
+    small_account_max_leverage: Decimal = Decimal("3")
+    live: bool = False
+    entry_authority: str = ""
+    configured_symbol: str = ""
+    loop_enabled: bool = False
+    position_flat: bool = False
+    pending_known: bool = False
+    pending: bool = True
+    margin_mode_known: bool = False
+    margin_mode: str = "UNKNOWN"
+    margin_mode_compatible: bool = False
+    leverage_explicit: bool = False
 
     def __post_init__(self):
         if not isinstance(self.symbol, str) or not self.symbol:
             raise SizingRejected("SIZING_SYMBOL_UNAVAILABLE")
         for name in self.__dataclass_fields__:
-            if name != "symbol":
+            if name in {"price","equity","available","risk_percent","sl_percent","leverage","fixed_notional","position_cap","symbol_capacity","total_capacity","multiplier","minimum","step","maximum","cost_percent","small_account_max_contracts","small_account_max_risk_percent","small_account_max_absolute_risk_usdt","small_account_max_leverage"}:
                 object.__setattr__(self, name, number(getattr(self, name), zero=name in {
-                    "available", "fixed_notional", "symbol_capacity", "total_capacity", "cost_percent"
+                    "available", "fixed_notional", "symbol_capacity", "total_capacity", "cost_percent", "small_account_max_absolute_risk_usdt"
                 }))
         if self.sl_percent > 100 or self.risk_percent > 100:
             raise SizingRejected("SIZING_AUTHORITY_INVALID")
@@ -72,7 +89,7 @@ class OrderSizingAuthority:
                    self.symbol_capacity, self.total_capacity,
                    self.available * Decimal("0.8") * self.leverage)
 
-    def validate(self, contracts, *, approved_base=None):
+    def validate(self, contracts, *, approved_base=None, sizing_policy_mode="NORMAL_MM"):
         contracts = number(contracts)
         if contracts < self.minimum or contracts > self.maximum or contracts % self.step:
             raise SizingRejected("NO_VALID_QUANTITY_FOR_EXCHANGE_CONSTRAINTS")
@@ -80,6 +97,9 @@ class OrderSizingAuthority:
         if approved_base is not None and base > number(approved_base):
             raise SizingRejected("NORMALIZED_QUANTITY_EXCEEDS_APPROVAL")
         notional = base * self.price
+        if sizing_policy_mode == "SMALL_ACCOUNT_MINIMUM_CONTRACT":
+            self._validate_small_account_candidate(contracts, notional)
+            return base, notional
         if notional * self.risk_fraction > self.risk_budget:
             raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
         if notional > min(self.position_cap, self.symbol_capacity, self.total_capacity):
@@ -90,7 +110,7 @@ class OrderSizingAuthority:
             raise SizingRejected("NORMALIZED_QUANTITY_EXCEEDS_FIXED_SIZE")
         return base, notional
 
-    def size(self):
+    def _normal_size(self):
         # Fixed mode does not silently resize a request to fit risk/MM/margin.
         requested = self.fixed_notional or self.notional_limit
         if self.fixed_notional and requested / self.price / self.multiplier > self.maximum:
@@ -116,4 +136,55 @@ class OrderSizingAuthority:
                 "position_size": float(notional), "required_margin": float(notional / self.leverage),
                 "configured_position_size": float(self.fixed_notional),
                 "risk_budget": float(self.risk_budget), "sl_risk": float(notional * self.sl_percent / 100),
-                "sizing_mode": "fixed_position_size" if self.fixed_notional else "risk_percent"}
+                "sizing_mode": "fixed_position_size" if self.fixed_notional else "risk_percent",
+                "sizingPolicyMode": "NORMAL_MM", "smallAccountExceptionApplied": False,
+                "normalExposureGateResult": "PASS", "smallAccountFloorDecision": "NOT_EVALUATED"}
+
+    def _validate_small_account_candidate(self, contracts, notional):
+        checks = (
+            (self.small_account_mode, "SMALL_ACCOUNT_MODE_OFF"),
+            (self.live, "SMALL_ACCOUNT_REQUIRES_LIVE"),
+            (self.entry_authority == "MANUAL", "SMALL_ACCOUNT_REQUIRES_MANUAL"),
+            (not self.loop_enabled, "SMALL_ACCOUNT_LOOP_BLOCKED"),
+            (self.symbol == self.small_account_allowed_symbol == self.configured_symbol, "SMALL_ACCOUNT_SYMBOL_MISMATCH"),
+            (contracts == self.minimum, "SMALL_ACCOUNT_REQUIRES_EXCHANGE_MINIMUM"),
+            (contracts <= self.small_account_max_contracts, "SMALL_ACCOUNT_HARD_CAP_EXCEEDED"),
+            (self.position_flat, "SMALL_ACCOUNT_REQUIRES_FLAT"),
+            (self.pending_known and not self.pending, "SMALL_ACCOUNT_PENDING_UNSAFE"),
+            (self.margin_mode_known and self.margin_mode == "ISOLATED" and self.margin_mode_compatible, "SMALL_ACCOUNT_REQUIRES_ISOLATED"),
+            (self.leverage_explicit, "SMALL_ACCOUNT_LEVERAGE_UNKNOWN"),
+            (self.leverage <= self.small_account_max_leverage, "SMALL_ACCOUNT_LEVERAGE_EXCEEDED"),
+        )
+        for allowed, reason in checks:
+            if not allowed:
+                raise SizingRejected(reason)
+        risk = notional * self.risk_fraction
+        if risk > self.equity * self.small_account_max_risk_percent / 100:
+            raise SizingRejected("SMALL_ACCOUNT_RISK_PERCENT_EXCEEDED")
+        if self.small_account_max_absolute_risk_usdt <= 0 or risk > self.small_account_max_absolute_risk_usdt:
+            raise SizingRejected("SMALL_ACCOUNT_ABSOLUTE_RISK_EXCEEDED")
+        if notional / self.leverage > self.available * Decimal("0.8"):
+            raise SizingRejected("NO_VALID_QUANTITY_FOR_AVAILABLE_MARGIN")
+
+    def size(self):
+        try:
+            return self._normal_size()
+        except SizingRejected as normal_error:
+            normal_reason = str(normal_error)
+            if not self.small_account_mode:
+                raise
+        contracts = self.minimum
+        notional = contracts * self.multiplier * self.price
+        self._validate_small_account_candidate(contracts, notional)
+        base = contracts * self.multiplier
+        risk = notional * self.risk_fraction
+        return {"valid": True, "qty": float(base), "contracts": str(contracts),
+                "position_size": float(notional), "required_margin": float(notional / self.leverage),
+                "configured_position_size": float(self.fixed_notional), "risk_budget": float(self.risk_budget),
+                "sl_risk": float(notional * self.sl_percent / 100), "sizing_mode": "minimum_contract_floor",
+                "sizingPolicyMode": "SMALL_ACCOUNT_MINIMUM_CONTRACT", "smallAccountExceptionApplied": True,
+                "smallAccountReason": "NORMAL_MM_BELOW_EXCHANGE_MINIMUM", "normalSizingResult": normal_reason,
+                "normalExposureGateResult": normal_reason, "smallAccountFloorDecision": "ALLOW",
+                "candidateContracts": str(contracts), "candidateBaseQuantity": float(base),
+                "candidateNotionalUsdt": float(notional), "candidateRiskUsdt": float(risk),
+                "candidateRiskPercent": float(risk / self.equity * 100), "effectiveLeverage": float(self.leverage)}

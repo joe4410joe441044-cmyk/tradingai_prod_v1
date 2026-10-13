@@ -3666,9 +3666,21 @@ class BotManager:
         reservation["traceId"] = trace_id
 
         try:
-            preflight = engine.preflight_execution_entry(
-                action, trace_id
-            )
+            pending_authority = self.get_authoritative_pending_order_state()
+            margin_authority = self._manual_preparation_margin_mode_authority(active_symbol)
+            authority_context = {
+                "entryAuthority": MANUAL_ENTRY_AUTHORITY,
+                "configuredSymbol": self.get_configured_symbol(),
+                "loopEnabled": self.loop_state == "RUNNING",
+                "positionFlat": getattr(engine, "actual_position", None) is None,
+                "pendingKnown": pending_authority.get("known") is True,
+                "pending": pending_authority.get("pending"),
+                "marginModeKnown": margin_authority.get("known") is True,
+                "actualMarginMode": margin_authority.get("actualMode"),
+                "marginModeCompatible": margin_authority.get("compatible") is True,
+            }
+            engine._manual_sizing_authority_context = authority_context
+            preflight = engine.preflight_execution_entry(action, trace_id)
             if (
                 not isinstance(preflight, dict)
                 or preflight.get("allowed") is not True
@@ -3792,6 +3804,7 @@ class BotManager:
                 "authoritySnapshot": reservation.get("snapshot"),
             }
         finally:
+            engine._manual_sizing_authority_context = None
             # Clear approval on every exit, including Governance exceptions.
             engine.clear_execution_entry_preflight(trace_id)
             self._end_execution_admission(reservation)
@@ -4375,9 +4388,22 @@ class BotManager:
                 return result
 
             try:
-                preview = engine.get_result().get("preview", {})
-            except Exception:
-                preview = {}
+                preview_context = {
+                    "entryAuthority": MANUAL_ENTRY_AUTHORITY,
+                    "configuredSymbol": self.get_configured_symbol(),
+                    "loopEnabled": self.loop_state == "RUNNING",
+                    "positionFlat": position_state == "FLAT",
+                    "pendingKnown": pending.get("known") is True,
+                    "pending": pending.get("pending"),
+                    "marginModeKnown": margin_authority.get("known") is True,
+                    "actualMarginMode": margin_authority.get("actualMode"),
+                    "marginModeCompatible": margin_authority.get("compatible") is True,
+                }
+                preview = engine._order_sizing_authority(
+                    price=engine.get_price(), authority_context=preview_context
+                ).size()
+            except Exception as exc:
+                preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected) else "SIZING_AUTHORITY_UNAVAILABLE"}
 
             if preview.get("valid") is True and preview.get("qty"):
                 result["candidate"] = {
@@ -4390,7 +4416,9 @@ class BotManager:
                     "price": engine.get_price(),
                     "priceTimestamp": time.time(),
                     "valid": True,
+                    **{key: value for key, value in preview.items() if key not in {"valid", "qty", "position_size", "required_margin", "sizing_mode"}},
                 }
+                result.update({key: value for key, value in preview.items() if key.startswith("smallAccount") or key in {"sizingPolicyMode", "effectiveLeverage", "candidateContracts", "candidateBaseQuantity", "candidateNotionalUsdt", "candidateRiskUsdt", "candidateRiskPercent", "normalSizingResult"}})
                 result["valid"] = True
             else:
                 result["reason"] = (

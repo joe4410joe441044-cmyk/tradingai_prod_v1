@@ -201,3 +201,69 @@ def test_actual_manual_engine_to_adapter_revalidates_wire_quantity(monkeypatch):
         assert captured[0]['size']=='1000'
         assert len(recorder.intents)==2  # admission and final normalized quantity
         assert all(intent.requested_quantity==D('1') for intent in recorder.intents)
+
+
+def small_account_authority(**changes):
+    values = dict(equity="7.91836966", available="7.91836966", leverage="3",
+        small_account_mode=True, small_account_allowed_symbol="XRPUSDTM",
+        small_account_max_contracts="1", small_account_max_risk_percent="2",
+        small_account_max_absolute_risk_usdt="0.158", small_account_max_leverage="3",
+        live=True, entry_authority="MANUAL", configured_symbol="XRPUSDTM",
+        loop_enabled=False, position_flat=True, pending_known=True, pending=False,
+        margin_mode_known=True, margin_mode="ISOLATED", margin_mode_compatible=True,
+        leverage_explicit=True)
+    values.update(changes)
+    return authority(**values)
+
+
+def test_small_account_one_contract_success_and_provenance():
+    result = small_account_authority().size()
+    assert result["contracts"] == "1"
+    assert result["qty"] == 10
+    assert result["sizingPolicyMode"] == "SMALL_ACCOUNT_MINIMUM_CONTRACT"
+    assert result["smallAccountExceptionApplied"] is True
+    assert result["candidateRiskPercent"] <= 2
+
+
+def test_normal_mm_wins_when_sufficiently_funded_even_with_mode_on():
+    result = small_account_authority(equity="1000", available="1000").size()
+    assert result["sizingPolicyMode"] == "NORMAL_MM"
+    assert D(result["contracts"]) > 1
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"small_account_mode":False}, "NO_VALID_QUANTITY_FOR_RISK_POLICY"),
+    ({"entry_authority":"BOT"}, "REQUIRES_MANUAL"),
+    ({"loop_enabled":True}, "LOOP_BLOCKED"),
+    ({"configured_symbol":"ETHUSDTM"}, "SYMBOL_MISMATCH"),
+    ({"minimum":"2"}, "HARD_CAP_EXCEEDED"),
+    ({"position_flat":False}, "REQUIRES_FLAT"),
+    ({"pending":True}, "PENDING_UNSAFE"),
+    ({"pending_known":False}, "PENDING_UNSAFE"),
+    ({"margin_mode":"CROSS"}, "REQUIRES_ISOLATED"),
+    ({"margin_mode_known":False}, "REQUIRES_ISOLATED"),
+    ({"margin_mode_compatible":False}, "REQUIRES_ISOLATED"),
+    ({"leverage_explicit":False}, "LEVERAGE_UNKNOWN"),
+    ({"leverage":"4"}, "LEVERAGE_EXCEEDED"),
+    ({"small_account_max_risk_percent":"1"}, "RISK_PERCENT_EXCEEDED"),
+    ({"small_account_max_absolute_risk_usdt":"0.1"}, "ABSOLUTE_RISK_EXCEEDED"),
+])
+def test_small_account_floor_fails_closed(change, reason):
+    with pytest.raises(SizingRejected, match=reason):
+        small_account_authority(**change).size()
+
+
+@pytest.mark.parametrize("equity,sl,leverage", [
+    ("15.83673932", "1", "3"), ("79.1836966", "0.2", "3"),
+    ("791.836966", "0.02", "1"),
+])
+def test_small_account_provenance_never_authorizes_two_contracts(equity, sl, leverage):
+    a = small_account_authority(equity=equity, available=equity, sl_percent=sl, leverage=leverage)
+    try:
+        result = a.size()
+    except SizingRejected:
+        return
+    if result["sizingPolicyMode"] == "SMALL_ACCOUNT_MINIMUM_CONTRACT":
+        assert result["contracts"] == "1"
+    with pytest.raises(SizingRejected):
+        a.validate(2, sizing_policy_mode="SMALL_ACCOUNT_MINIMUM_CONTRACT")

@@ -198,6 +198,8 @@ export default function OperationPreparation({
     // reading the DRAFT. When no saved revision is provided the draft is the
     // fallback so legacy callers are unchanged.
     const savedSettings = createOperationPreparationSettings(savedConfig ?? config);
+    const smallAccountMode = mmConfiguration?.smallAccountMinimumContractMode === true;
+    const smallAccountPolicyStatus = smallAccountMode ? "READY CHECK REQUIRED" : "OFF";
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
     // MANUAL TRADING execution confirmation preference. Presentation-only:
@@ -1203,6 +1205,14 @@ return (
                                     <DerivedRow hideSource label="ACTIVE SYMBOL" source="RUNTIME" value={manualActiveSymbol} />
                                     <DerivedRow hideSource label="DESTINATION" source="RUNTIME" value={manualDestination} />
                                     <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
+                                </div>
+                                <div className="operation-prep-derived-list" data-testid="small-account-policy-display">
+                                    <DerivedRow hideSource label="SMALL ACCOUNT MODE" source="MM" value={smallAccountMode ? "ON" : "OFF"} />
+                                    <DerivedRow hideSource label="MAX CONTRACTS" source="MM" value={mmConfiguration?.smallAccountMaxContracts ?? "1"} />
+                                    <DerivedRow hideSource label="TARGET SYMBOL" source="MM" value={mmConfiguration?.smallAccountAllowedSymbol ?? "UNAVAILABLE"} />
+                                    <DerivedRow hideSource label="RISK CAP" source="MM" value={`${mmConfiguration?.smallAccountMaxRiskPercent ?? "2.0"}% / ${mmConfiguration?.smallAccountMaxAbsoluteRiskUsdt ?? "0.158"} USDT`} />
+                                    <DerivedRow hideSource label="LEVERAGE CAP" source="MM" value={`${mmConfiguration?.smallAccountMaxLeverage ?? "3"}x`} />
+                                    <DerivedRow hideSource label="POLICY STATUS" source="MM" value={smallAccountPolicyStatus} />
                                 </div>
                                 <div className="operation-prep-order-confirm" data-testid="manual-order-confirm">
                                     <span className="operation-prep-label">ORDER CONFIRM（注文確認）</span>

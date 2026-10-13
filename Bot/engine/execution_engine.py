@@ -1987,7 +1987,7 @@ class ExecutionEngine:
             ):
                 self.execution_entry_preapproval = None
 
-    def preflight_execution_entry(self, side, trace_id):
+    def preflight_execution_entry(self, side, trace_id, authority_context=None):
         """Evaluate the exact candidate at MM before Governance.
 
         This is fail-closed and creates no order, position, provider call, or
@@ -2016,7 +2016,14 @@ class ExecutionEngine:
             }
 
         price = self.get_price()
-        preview = self.get_result().get("preview", {})
+        if authority_context is None:
+            authority_context = getattr(self, "_manual_sizing_authority_context", None)
+        try:
+            preview = self._order_sizing_authority(
+                price=price, authority_context=authority_context
+            ).size()
+        except Exception as exc:
+            preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected) else "SIZING_AUTHORITY_UNAVAILABLE"}
         quantity = preview.get("qty")
         if (
             not price
@@ -2053,6 +2060,7 @@ class ExecutionEngine:
             }
 
         decision.update({
+            **{key: value for key, value in preview.items() if key not in {"valid", "qty"}},
             "allowed": True,
             "decision": "ALLOW",
             "suggestedQuantity": quantity,
@@ -3704,7 +3712,7 @@ class ExecutionEngine:
     # RESULT
     # =====================================
 
-    def _order_sizing_authority(self, *, price, rules=None, fresh=False):
+    def _order_sizing_authority(self, *, price, rules=None, fresh=False, authority_context=None):
         """Read current MM policy and mode-specific order capital, never reference capital."""
         policy = self.sizing_policy_provider() if callable(self.sizing_policy_provider) else None
         if not isinstance(policy, MoneyManagementConfig):
@@ -3756,6 +3764,8 @@ class ExecutionEngine:
         leverage = number(self.config.get("effective_leverage") if live else self.config.get("leverage"))
         if leverage > min(policy.maximum_leverage, number(rules.get("max_leverage"))):
             raise SizingRejected("SIZING_LEVERAGE_EXCEEDS_AUTHORITY")
+        context = authority_context if isinstance(authority_context, dict) else getattr(self, "_manual_sizing_authority_context", None)
+        context = context if isinstance(context, dict) else {}
         return OrderSizingAuthority(
             symbol=symbol, price=price, equity=equity, available=available,
             risk_percent=min(number(self.config.get("risk_percent")), policy.risk_per_trade_pct),
@@ -3767,6 +3777,21 @@ class ExecutionEngine:
             multiplier=rules.get("multiplier"), minimum=rules.get("min_size"),
             step=rules.get("qty_step"), maximum=rules.get("max_size"),
             cost_percent=number(rules.get("taker_fee_rate"), zero=True) * 200,
+            small_account_mode=policy.small_account_minimum_contract_mode,
+            small_account_allowed_symbol=policy.small_account_allowed_symbol,
+            small_account_max_contracts=policy.small_account_max_contracts,
+            small_account_max_risk_percent=policy.small_account_max_risk_percent,
+            small_account_max_absolute_risk_usdt=policy.small_account_max_absolute_risk_usdt,
+            small_account_max_leverage=policy.small_account_max_leverage,
+            live=live, entry_authority=str(context.get("entryAuthority") or "").upper(),
+            configured_symbol=str(context.get("configuredSymbol") or ""),
+            loop_enabled=context.get("loopEnabled") is True,
+            position_flat=context.get("positionFlat") is True,
+            pending_known=context.get("pendingKnown") is True, pending=context.get("pending") is True,
+            margin_mode_known=context.get("marginModeKnown") is True,
+            margin_mode=str(context.get("actualMarginMode") or "UNKNOWN").upper(),
+            margin_mode_compatible=context.get("marginModeCompatible") is True,
+            leverage_explicit=self.config.get("effective_leverage") is not None,
         )
 
     def _validate_final_entry_quantity(self, *, symbol, contracts, price, rules,
@@ -3775,7 +3800,9 @@ class ExecutionEngine:
         authority = self._order_sizing_authority(price=price, rules=rules, fresh=True)
         if symbol != authority.symbol or number(leverage) != authority.leverage:
             raise SizingRejected("FINAL_SIZING_CONTEXT_CHANGED")
-        base, _ = authority.validate(contracts, approved_base=approved_base)
+        preapproval = self.execution_entry_preapproval if isinstance(self.execution_entry_preapproval, dict) else {}
+        policy_mode = (preapproval.get("decision") or {}).get("sizingPolicyMode", "NORMAL_MM")
+        base, _ = authority.validate(contracts, approved_base=approved_base, sizing_policy_mode=policy_mode)
         allowed, _ = self._evaluate_execution_entry_guard({
             "symbol": self.symbol, "side": side, "qty": float(base),
             "price": float(price), "traceId": trace_id,

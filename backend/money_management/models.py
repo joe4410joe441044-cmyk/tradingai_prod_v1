@@ -49,13 +49,33 @@ class MoneyManagementConfig:
     recovery_25_multiplier: Decimal=Decimal("0.25")
     recovery_50_multiplier: Decimal=Decimal("0.50")
     compounding_enabled: bool=False
+    small_account_minimum_contract_mode: bool=False
+    small_account_allowed_symbol: str="XRPUSDTM"
+    small_account_max_contracts: Decimal=Decimal("1")
+    small_account_max_risk_percent: Decimal=Decimal("2.0")
+    small_account_max_absolute_risk_usdt: Decimal=Decimal("0.158")
+    small_account_max_leverage: Decimal=Decimal("3")
+    small_account_require_isolated: bool=True
+    small_account_require_flat_before_entry: bool=True
+    small_account_require_no_pending: bool=True
+    small_account_require_manual_selection: bool=True
     def __post_init__(self):
         object.__setattr__(self,"profile",_enum(MoneyManagementProfile,self.profile)); object.__setattr__(self,"mode",_enum(TradingMode,self.mode))
         if type(self.multi_bot_enabled) is not bool: raise TypeError("multi_bot_enabled must be bool")
         if type(self.compounding_enabled) is not bool: raise TypeError("compounding_enabled must be bool")
+        if type(self.small_account_minimum_contract_mode) is not bool: raise TypeError("small_account_minimum_contract_mode must be bool")
+        for n in ("small_account_require_isolated","small_account_require_flat_before_entry","small_account_require_no_pending","small_account_require_manual_selection"):
+            if type(getattr(self,n)) is not bool: raise TypeError(f"{n} must be bool")
+        if not isinstance(self.small_account_allowed_symbol,str) or not self.small_account_allowed_symbol.strip(): raise ValueError("small_account_allowed_symbol required")
         for n in ("initial_reference_equity","maximum_position_notional"): _dec(n,getattr(self,n),positive=True)
         for n in ("risk_per_trade_pct","maximum_drawdown_pct","total_exposure_pct","single_symbol_exposure_pct","daily_loss_warning_pct","daily_loss_block_pct","weekly_loss_warning_pct","weekly_loss_block_pct","monthly_loss_warning_pct","monthly_loss_block_pct","profit_lock_start_pct"): _pct(n,getattr(self,n),positive=True)
         _dec("maximum_leverage",self.maximum_leverage,positive=True)
+        _dec("small_account_max_contracts",self.small_account_max_contracts,positive=True)
+        _pct("small_account_max_risk_percent",self.small_account_max_risk_percent,positive=True)
+        _dec("small_account_max_absolute_risk_usdt",self.small_account_max_absolute_risk_usdt,positive=True)
+        _dec("small_account_max_leverage",self.small_account_max_leverage,positive=True)
+        if self.small_account_max_contracts>Decimal("1"): raise ValueError("small_account_max_contracts must be <= 1")
+        if self.small_account_max_leverage>self.maximum_leverage: raise ValueError("small-account leverage exceeds normal maximum")
         if self.maximum_leverage>Decimal("5"): raise ValueError("maximum_leverage must be <= 5")
         if self.single_symbol_exposure_pct>self.total_exposure_pct: raise ValueError("single-symbol exposure exceeds total")
         if self.maximum_position_notional>self.initial_reference_equity*self.single_symbol_exposure_pct/100: raise ValueError("position exceeds reference symbol exposure")
