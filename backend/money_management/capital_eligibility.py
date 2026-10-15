@@ -46,6 +46,8 @@ class CapitalEligibilityContract:
     capital_source: str = "UNSPECIFIED"
     input_authority: str = "UNSPECIFIED"
     capital_basis: Optional[Decimal] = None
+    single_symbol_exposure_percent: Optional[Decimal] = None
+    max_single_symbol_exposure: Optional[Decimal] = None
 
     def to_dict(self):
         return {
@@ -60,6 +62,8 @@ class CapitalEligibilityContract:
             "riskBudget": _value(self.risk_budget),
             "maxPositionNotional": _value(self.max_position_notional),
             "totalExposurePercent": _value(self.total_exposure_percent),
+            "singleSymbolExposurePercent": _value(self.single_symbol_exposure_percent),
+            "maxSingleSymbolExposure": _value(self.max_single_symbol_exposure),
             "maxTotalExposure": _value(self.max_total_exposure),
             "remainingExposure": _value(self.remaining_exposure),
             "maxTotalExposureAmount": _value(self.max_total_exposure),
@@ -82,13 +86,18 @@ def build_capital_eligibility_contract(
     mm_regime, policy_version, evaluated_at, authority_fresh=True,
     execution_entry_allowed=True, capital_source="UNSPECIFIED",
     input_authority="UNSPECIFIED", compounding_enabled=False,
-    capital_basis=None,
+    capital_basis=None, single_symbol_exposure_percent=None,
 ):
     if type(compounding_enabled) is not bool:
         raise TypeError("compounding_enabled must be bool")
     max_total = (
         equity * total_exposure_percent / Decimal("100")
         if equity is not None and total_exposure_percent is not None else None
+    )
+    max_single_symbol = (
+        equity * single_symbol_exposure_percent / Decimal("100")
+        if equity is not None and single_symbol_exposure_percent is not None
+        else None
     )
     remaining = (
         max(max_total - open_exposure, Decimal("0"))
@@ -116,6 +125,7 @@ def build_capital_eligibility_contract(
         policy_version, evaluated_at, bool(authority_fresh),
         bool(execution_entry_allowed and authority_fresh),
         capital_source, input_authority, capital_basis,
+        single_symbol_exposure_percent, max_single_symbol,
     )
 
 
@@ -151,6 +161,12 @@ class PerMarketEligibilityResult:
     mm_evaluated_at: datetime
     approved_position_notional: Optional[Decimal] = None
     effective_leverage: Optional[Decimal] = None
+    market_data_ready: bool = False
+    capital_authority_ready: bool = False
+    mm_policy_eligible: bool = False
+    execution_quantity_valid: bool = False
+    entry_authority_enabled: bool = False
+    preselection_eligible: bool = False
 
     def to_dict(self):
         return {
@@ -167,6 +183,12 @@ class PerMarketEligibilityResult:
             "mmEvaluatedAt": _value(self.mm_evaluated_at),
             "approvedPositionNotional": _value(self.approved_position_notional),
             "effectiveLeverage": _value(self.effective_leverage),
+            "marketDataReady": self.market_data_ready,
+            "capitalAuthorityReady": self.capital_authority_ready,
+            "mmPolicyEligible": self.mm_policy_eligible,
+            "executionQuantityValid": self.execution_quantity_valid,
+            "entryAuthorityEnabled": self.entry_authority_enabled,
+            "preselectionEligible": self.preselection_eligible,
             "orderCreated": False,
             "sizingStage": "PRE_SELECTION_ELIGIBILITY",
         }
@@ -188,13 +210,16 @@ def evaluate_market_capital_eligibility(
     ):
         raise TypeError("evaluated_at must be timezone-aware")
     evaluated_at = evaluated_at.astimezone(timezone.utc)
-    reasons = []
+    policy_reasons = []
+    market_reasons = []
+    capital_reasons = []
+    entry_reasons = []
     if (
         not isinstance(effective_leverage, Decimal)
         or not effective_leverage.is_finite()
         or effective_leverage <= 0
     ):
-        reasons.append("LEVERAGE_AUTHORITY_INVALID")
+        policy_reasons.append("LEVERAGE_AUTHORITY_INVALID")
     metadata_age = evaluated_at - metadata.metadata_evaluated_at
     if (
         maximum_metadata_age_seconds <= 0
@@ -202,34 +227,52 @@ def evaluate_market_capital_eligibility(
         < -METADATA_FUTURE_SKEW_TOLERANCE_SECONDS
         or metadata_age.total_seconds() > maximum_metadata_age_seconds
     ):
-        reasons.append("MARKET_METADATA_STALE")
+        market_reasons.append("MARKET_METADATA_STALE")
     required_metadata = (
         metadata.contract_multiplier, metadata.quantity_step, metadata.minimum_quantity,
         metadata.last_price,
     )
     if not metadata.is_tradable:
-        reasons.append("MARKET_NOT_TRADABLE")
+        market_reasons.append("MARKET_NOT_TRADABLE")
     if any(value is None for value in required_metadata):
-        reasons.append("MARKET_METADATA_INCOMPLETE")
+        market_reasons.append("MARKET_METADATA_INCOMPLETE")
+    # Single-symbol exposure authority is a required capital input; a missing
+    # cap must fail closed rather than silently lenient-sizing the candidate.
     required_capital = (
         capital.available_capital, capital.capital_basis, capital.risk_budget,
         capital.max_position_notional, capital.remaining_exposure,
-        capital.remaining_position_capacity,
+        capital.remaining_position_capacity, capital.max_single_symbol_exposure,
     )
     if not capital.authority_fresh:
-        reasons.append("CAPITAL_AUTHORITY_STALE")
+        capital_reasons.append("CAPITAL_AUTHORITY_STALE")
     if not capital.execution_entry_allowed:
-        reasons.append("MM_ENTRY_LOCKED")
+        entry_reasons.append("MM_ENTRY_LOCKED")
     if any(value is None for value in required_capital):
-        reasons.append("CAPITAL_AUTHORITY_INCOMPLETE")
+        capital_reasons.append("CAPITAL_AUTHORITY_INCOMPLETE")
     elif capital.remaining_position_capacity <= 0:
-        reasons.append("POSITION_CAPACITY_EXHAUSTED")
-    if reasons:
+        capital_reasons.append("POSITION_CAPACITY_EXHAUSTED")
+
+    market_data_ready = not market_reasons
+    capital_authority_ready = not capital_reasons
+    mm_policy_eligible = not policy_reasons
+    entry_authority_enabled = bool(capital.execution_entry_allowed)
+
+    # Entry-authority lock is deliberately NOT a hard blocker: a candidate can
+    # be execution-quantity-valid while live order entry is disabled.
+    blocking = tuple(policy_reasons + market_reasons + capital_reasons)
+    if blocking:
         return PerMarketEligibilityResult(
-            metadata.canonical_symbol, False, False, False, None, tuple(reasons),
+            metadata.canonical_symbol, False, False, False, None,
+            tuple(list(blocking) + entry_reasons),
             capital.capital_authority, capital.risk_budget, capital.remaining_exposure,
             capital.remaining_position_capacity, metadata.metadata_evaluated_at,
             capital.evaluated_at, effective_leverage=effective_leverage,
+            market_data_ready=market_data_ready,
+            capital_authority_ready=capital_authority_ready,
+            mm_policy_eligible=mm_policy_eligible,
+            execution_quantity_valid=False,
+            entry_authority_enabled=entry_authority_enabled,
+            preselection_eligible=False,
         )
     result = calculate_position_size(PositionSizingInput(
         entry_price=metadata.last_price,
@@ -239,6 +282,7 @@ def evaluate_market_capital_eligibility(
         risk_base_capital=capital.capital_basis,
         maximum_position_notional=capital.max_position_notional,
         total_exposure_remaining=capital.remaining_exposure,
+        single_symbol_exposure_remaining=capital.max_single_symbol_exposure,
         available_capital=capital.available_capital,
         quantity_step=metadata.quantity_step,
         contract_multiplier=metadata.contract_multiplier,
@@ -252,12 +296,20 @@ def evaluate_market_capital_eligibility(
     result_reasons = list(result.reasons)
     if not feasible:
         result_reasons.append("MINIMUM_ORDER_NOT_FEASIBLE")
+    eligible = bool(feasible and not entry_reasons)
     return PerMarketEligibilityResult(
-        metadata.canonical_symbol, feasible, result.calculation_allowed, feasible,
-        result.position_quantity, tuple(result_reasons), capital.capital_authority,
+        metadata.canonical_symbol, eligible, result.calculation_allowed, feasible,
+        result.position_quantity, tuple(result_reasons + entry_reasons),
+        capital.capital_authority,
         capital.risk_budget, capital.remaining_exposure,
         capital.remaining_position_capacity, metadata.metadata_evaluated_at,
         capital.evaluated_at,
         result.final_position_notional,
         effective_leverage,
+        market_data_ready=market_data_ready,
+        capital_authority_ready=capital_authority_ready,
+        mm_policy_eligible=mm_policy_eligible,
+        execution_quantity_valid=feasible,
+        entry_authority_enabled=entry_authority_enabled,
+        preselection_eligible=eligible,
     )

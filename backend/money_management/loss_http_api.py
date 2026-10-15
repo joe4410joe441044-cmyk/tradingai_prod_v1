@@ -1502,6 +1502,10 @@ class MoneyManagementHttpBoundary:
             total_exposure_percent=(
                 base_config.total_exposure_pct if base_config is not None else None
             ),
+            single_symbol_exposure_percent=(
+                base_config.single_symbol_exposure_pct
+                if base_config is not None else None
+            ),
             open_exposure=(
                 metrics.open_exposure if isinstance(metrics, LossRuntimeMetrics) else None
             ),

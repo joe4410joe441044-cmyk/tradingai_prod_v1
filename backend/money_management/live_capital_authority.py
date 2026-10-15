@@ -84,6 +84,7 @@ def build_live_capital_eligibility(
         risk_budget=risk.risk_budget_remaining,
         max_position_notional=config.maximum_position_notional,
         total_exposure_percent=config.total_exposure_pct,
+        single_symbol_exposure_percent=config.single_symbol_exposure_pct,
         open_exposure=open_exposure,
         position_count=position_count,
         pending_order_count=pending_count,

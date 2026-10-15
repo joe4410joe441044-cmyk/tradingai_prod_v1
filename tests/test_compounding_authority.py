@@ -37,6 +37,7 @@ def authority(cfg, current):
         risk_budget=budget.risk_budget_remaining,
         max_position_notional=D("1000"),
         total_exposure_percent=D("100"),
+        single_symbol_exposure_percent=D("10"),
         open_exposure=D("0"),
         position_count=0,
         pending_order_count=0,

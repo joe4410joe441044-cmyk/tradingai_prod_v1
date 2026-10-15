@@ -377,6 +377,9 @@ class ExistingKucoinLiveAccountAuthority:
             risk_budget=_decimal(policy["riskBudget"]),
             max_position_notional=_decimal(policy["maxPositionNotional"]),
             total_exposure_percent=_decimal(policy["totalExposurePercent"]),
+            single_symbol_exposure_percent=_decimal(
+                policy.get("singleSymbolExposurePercent")
+            ),
             open_exposure=snapshot.current_exposure,
             position_count=policy["positionCount"] if safe else None,
             pending_order_count=policy["pendingOrderCount"] if safe else None,

@@ -405,6 +405,8 @@ def real_authoritative_capital():
         risk_budget=Decimal("5.00"),
         max_position_notional=Decimal("1.583673932"),
         total_exposure_percent=Decimal("20"),
+        single_symbol_exposure_percent=Decimal("20"),
+        max_single_symbol_exposure=Decimal("1.583673932"),
         max_total_exposure=Decimal("1.583673932"),
         remaining_exposure=Decimal("1.583673932"),
         theoretical_max_concurrent_positions=1,

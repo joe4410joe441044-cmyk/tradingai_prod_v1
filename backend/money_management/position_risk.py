@@ -32,6 +32,7 @@ class PositionSizingInput:
     quantity_step: Decimal
     contract_multiplier: Decimal
     risk_budget_remaining: Optional[Decimal] = None
+    single_symbol_exposure_remaining: Optional[Decimal] = None
 
     def __post_init__(self):
         for name in (
@@ -53,6 +54,12 @@ class PositionSizingInput:
         _decimal(
             "risk_budget_remaining",
             self.risk_budget_remaining,
+            nonnegative=True,
+            optional=True,
+        )
+        _decimal(
+            "single_symbol_exposure_remaining",
+            self.single_symbol_exposure_remaining,
             nonnegative=True,
             optional=True,
         )
@@ -164,15 +171,16 @@ def calculate_position_size(value):
         if value.risk_budget_remaining is not None
         else None
     )
-    limits = (
-        ("MAXIMUM_POSITION_NOTIONAL", value.maximum_position_notional),
-        ("TOTAL_EXPOSURE_REMAINING", value.total_exposure_remaining),
-        ("AVAILABLE_CAPITAL", value.available_capital),
-    ) + (
-        (("RISK_BUDGET_REMAINING", risk_budget_notional),)
-        if risk_budget_notional is not None
-        else ()
-    )
+    limits = [("MAXIMUM_POSITION_NOTIONAL", value.maximum_position_notional)]
+    if value.single_symbol_exposure_remaining is not None:
+        limits.append(
+            ("SINGLE_SYMBOL_EXPOSURE_REMAINING", value.single_symbol_exposure_remaining)
+        )
+    limits.append(("TOTAL_EXPOSURE_REMAINING", value.total_exposure_remaining))
+    limits.append(("AVAILABLE_CAPITAL", value.available_capital))
+    if risk_budget_notional is not None:
+        limits.append(("RISK_BUDGET_REMAINING", risk_budget_notional))
+    limits = tuple(limits)
     final_notional = min(raw_notional, *(amount for _, amount in limits))
     applied = tuple(
         name for name, amount in limits if amount == final_notional
