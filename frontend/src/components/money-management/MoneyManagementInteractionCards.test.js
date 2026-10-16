@@ -10,7 +10,10 @@ test("configuration card renders accessible string-preserving inputs", async () 
   assert.match(source, /htmlFor=\{inputId\}/);
   assert.match(source, /type="checkbox"/);
   assert.match(source, /type="text"/);
-  assert.match(source, /inputMode="decimal"/);
+  assert.match(source, /inputMode=\{inputMode\}/);
+  assert.match(source, /"numeric"/);
+  assert.match(source, /"decimal"/);
+  assert.match(source, /SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL/);
   assert.match(source, /aria-invalid/);
   assert.match(source, /Reset Draft/);
   assert.match(source, /Save Configuration/);

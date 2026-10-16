@@ -75,6 +75,16 @@ test("configuration fields exactly match the backend editable contract", () => {
       "riskPerTradePercent",
       "maximumPositionNotional",
       "singleSymbolExposurePercent",
+      "smallAccountMinimumContractMode",
+      "smallAccountAllowedSymbol",
+      "smallAccountMaxContracts",
+      "smallAccountMaxRiskPercent",
+      "smallAccountMaxAbsoluteRiskUsdt",
+      "smallAccountMaxLeverage",
+      "smallAccountRequireIsolated",
+      "smallAccountRequireFlatBeforeEntry",
+      "smallAccountRequireNoPending",
+      "smallAccountRequireManualSelection",
     ],
   );
 });

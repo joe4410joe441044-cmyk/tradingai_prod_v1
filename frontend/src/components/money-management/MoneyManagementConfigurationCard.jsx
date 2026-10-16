@@ -1,6 +1,10 @@
 import { useState } from "react";
 
 import MoneyManagementCardShell from "./MoneyManagementCardShell";
+import {
+    MONEY_MANAGEMENT_CONFIGURATION_SECTION,
+    SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL,
+} from "../../features/money-management/view/moneyManagementInteractionViewModel";
 
 function ConfigurationField({
     disabled,
@@ -11,6 +15,11 @@ function ConfigurationField({
 }) {
     const inputId = `mm-configuration-${field.key}`;
     const errorId = `${inputId}-error`;
+    const inputMode = field.type === "integer"
+        ? "numeric"
+        : field.type === "symbol"
+            ? "text"
+            : "decimal";
     return (
         <div className="mm-configuration-field">
             <label htmlFor={inputId}>{field.label}</label>
@@ -29,10 +38,11 @@ function ConfigurationField({
                     <input
                         aria-describedby={error ? errorId : undefined}
                         aria-invalid={Boolean(error)}
+                        autoCapitalize={field.type === "symbol" ? "characters" : undefined}
                         autoComplete="off"
                         disabled={disabled}
                         id={inputId}
-                        inputMode="decimal"
+                        inputMode={inputMode}
                         onChange={(event) => onChange({
                             [field.key]: event.target.value,
                         })}
@@ -90,6 +100,14 @@ export default function MoneyManagementConfigurationCard({
         configuration.draftStatus === "SAVING CONFIGURATION";
     const showDisabledReason = configuration.saveDisabledReason &&
         !configuration.saveDisabledReason.includes("no unsaved changes");
+    const coreFields = configuration.fields.filter(
+        (field) =>
+            field.section !== MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    );
+    const smallAccountFields = configuration.fields.filter(
+        (field) =>
+            field.section === MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    );
 
     const change = (patch) => {
         setFeedback(null);
@@ -104,6 +122,16 @@ export default function MoneyManagementConfigurationCard({
         const result = await onSave();
         if (result?.ok) setFeedback("Configuration saved");
     };
+    const renderField = (field) => (
+        <ConfigurationField
+            disabled={editingDisabled}
+            error={configuration.fieldErrors[field.key]}
+            field={field}
+            key={field.key}
+            onChange={change}
+            value={draft?.[field.key]}
+        />
+    );
 
     return (
         <MoneyManagementCardShell
@@ -134,17 +162,24 @@ export default function MoneyManagementConfigurationCard({
                 </p>
             )}
             <div className="mm-configuration-fields">
-                {configuration.fields.map((field) => (
-                    <ConfigurationField
-                        disabled={editingDisabled}
-                        error={configuration.fieldErrors[field.key]}
-                        field={field}
-                        key={field.key}
-                        onChange={change}
-                        value={draft?.[field.key]}
-                    />
-                ))}
+                {coreFields.map(renderField)}
             </div>
+            <section
+                aria-label={SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL}
+                className="mm-configuration-section mm-configuration-section--small-account"
+            >
+                <h4 className="mm-configuration-section__title">
+                    {SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL}
+                </h4>
+                <p className="mm-configuration-section__note">
+                    Approved profile: XRPUSDTM · 1 contract · ≤2.0% · ≤0.158 USDT ·
+                    ≤3x isolated. All requirements must remain enabled while the
+                    mode is on. Turning the mode off preserves the stored profile.
+                </p>
+                <div className="mm-configuration-fields">
+                    {smallAccountFields.map(renderField)}
+                </div>
+            </section>
             <div className="mm-action-row">
                 <button
                     disabled={Boolean(configuration.resetDisabledReason)}

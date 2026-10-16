@@ -15,6 +15,7 @@ import {
 import {
   buildMoneyManagementConfigurationPayload,
   configurationDraftFromAuthoritative,
+  MONEY_MANAGEMENT_SMALL_ACCOUNT_FIELDS,
   MoneyManagementContractError,
   normalizeConfigurationUpdateResponse,
   normalizeMoneyManagementConfiguration,
@@ -323,6 +324,14 @@ export function useMoneyManagement({
     }
     const authoritative = configurationDraftFromAuthoritative(config);
     if (!authoritative) return undefined;
+    // Small Account / Minimum Contract edits are safety-critical operator
+    // configuration. They are NEVER auto-persisted; the operator must use the
+    // explicit Save Configuration action. This also prevents a hidden
+    // auto-enable request for smallAccountMinimumContractMode.
+    const smallAccountDirty = MONEY_MANAGEMENT_SMALL_ACCOUNT_FIELDS.some(
+      (key) => authoritative[key] !== draft[key],
+    );
+    if (smallAccountDirty) return undefined;
     const hasChanges = Object.keys(authoritative).some(
       (key) => authoritative[key] !== draft[key],
     );

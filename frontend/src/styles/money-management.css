@@ -489,6 +489,31 @@
     letter-spacing: 0.04em;
 }
 
+.market-intelligence .mm-configuration-section {
+    display: grid;
+    width: 100%;
+    gap: var(--mm-field-gap);
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--mi-border-soft);
+}
+
+.market-intelligence .mm-configuration-section__title {
+    margin: 0;
+    color: var(--mi-text);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.market-intelligence .mm-configuration-section__note {
+    margin: 0;
+    color: var(--mi-text-muted);
+    font-size: 10px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
 .market-intelligence .mm-configuration-field input[type="text"],
 .market-intelligence .mm-configuration-field select {
     box-sizing: border-box;

@@ -6,7 +6,12 @@ import {
 } from "../utils/moneyManagementErrors.js";
 import { formatMoneyManagementTime } from "./moneyManagementViewModel.js";
 
-export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
+export const MONEY_MANAGEMENT_CONFIGURATION_SECTION = Object.freeze({
+  CORE: "core",
+  SMALL_ACCOUNT: "smallAccount",
+});
+
+const CORE_CONFIGURATION_FIELDS = Object.freeze([
   Object.freeze({
     key: "enabled",
     label: "Money Management Enabled",
@@ -74,6 +79,82 @@ export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
   }),
 ]);
 
+const SMALL_ACCOUNT_CONFIGURATION_FIELDS = Object.freeze([
+  Object.freeze({
+    key: "smallAccountMinimumContractMode",
+    label: "Small Account Minimum Contract Mode",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "boolean",
+  }),
+  Object.freeze({
+    key: "smallAccountAllowedSymbol",
+    label: "Allowed Symbol",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "symbol",
+  }),
+  Object.freeze({
+    key: "smallAccountMaxContracts",
+    label: "Max Contracts",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "integer",
+  }),
+  Object.freeze({
+    key: "smallAccountMaxRiskPercent",
+    label: "Max Risk Percent",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "decimal",
+  }),
+  Object.freeze({
+    key: "smallAccountMaxAbsoluteRiskUsdt",
+    label: "Max Absolute Risk USDT",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "decimal",
+  }),
+  Object.freeze({
+    key: "smallAccountMaxLeverage",
+    label: "Max Leverage",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "integer",
+  }),
+  Object.freeze({
+    key: "smallAccountRequireIsolated",
+    label: "Require Isolated",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "boolean",
+  }),
+  Object.freeze({
+    key: "smallAccountRequireFlatBeforeEntry",
+    label: "Require Flat Before Entry",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "boolean",
+  }),
+  Object.freeze({
+    key: "smallAccountRequireNoPending",
+    label: "Require No Pending",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "boolean",
+  }),
+  Object.freeze({
+    key: "smallAccountRequireManualSelection",
+    label: "Require Manual Selection",
+    section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
+    type: "boolean",
+  }),
+]);
+
+export const SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL =
+  "SMALL ACCOUNT / MINIMUM CONTRACT";
+
+export const MONEY_MANAGEMENT_CONFIGURATION_FIELDS = Object.freeze([
+  ...CORE_CONFIGURATION_FIELDS,
+  ...SMALL_ACCOUNT_CONFIGURATION_FIELDS,
+]);
+
+export const MONEY_MANAGEMENT_CONFIGURATION_CORE_FIELDS =
+  CORE_CONFIGURATION_FIELDS;
+export const MONEY_MANAGEMENT_CONFIGURATION_SMALL_ACCOUNT_FIELDS =
+  SMALL_ACCOUNT_CONFIGURATION_FIELDS;
+
 const VALIDATION_MESSAGES = Object.freeze({
   INVALID_BOOLEAN: "A boolean value is required.",
   INVALID_PERCENTAGE: "Enter a decimal greater than 0 within the field limit (risk 5%, exposure 500%, loss/drawdown 100%).",
@@ -88,6 +169,20 @@ const VALIDATION_MESSAGES = Object.freeze({
     "Weekly block must not exceed monthly block.",
   MONTHLY_BLOCK_MUST_BE_BELOW_DRAWDOWN:
     "Monthly block must be below maximum drawdown.",
+  INVALID_SYMBOL: "Enter a symbol such as XRPUSDTM.",
+  UNSUPPORTED_SYMBOL:
+    "Only XRPUSDTM is approved for Small Account minimum-contract mode.",
+  INVALID_INTEGER: "Enter a whole number greater than 0.",
+  SMALL_ACCOUNT_MAX_CONTRACTS:
+    "Small Account max contracts must be the integer 1.",
+  SMALL_ACCOUNT_MAX_RISK_PERCENT:
+    "Small Account max risk percent must be greater than 0 and at most 2.0.",
+  SMALL_ACCOUNT_MAX_ABSOLUTE_RISK_USDT:
+    "Small Account max absolute risk must be greater than 0 and at most 0.158 USDT.",
+  SMALL_ACCOUNT_MAX_LEVERAGE:
+    "Small Account max leverage must be an integer between 1 and 3.",
+  SMALL_ACCOUNT_REQUIREMENT:
+    "This requirement must remain enabled while Small Account mode is on.",
 });
 
 const displayValue = (value) => {

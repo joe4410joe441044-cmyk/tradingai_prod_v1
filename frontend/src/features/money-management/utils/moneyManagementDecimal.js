@@ -21,6 +21,11 @@ export function isStrictDecimalString(value) {
   return parseParts(value) !== null;
 }
 
+export function isIntegralDecimalString(value) {
+  const parts = parseParts(value);
+  return parts !== null && parts.fraction.length === 0;
+}
+
 export function normalizeDecimalString(value) {
   const parts = parseParts(value);
   if (!parts) {

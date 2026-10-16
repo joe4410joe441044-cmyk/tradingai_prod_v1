@@ -1,8 +1,65 @@
 import {
   compareDecimalStrings,
+  isIntegralDecimalString,
   isStrictDecimalString,
 } from "../utils/moneyManagementDecimal.js";
 import { isValidUtcIsoTimestamp } from "../utils/moneyManagementTime.js";
+
+// Editable Small Account / Minimum Contract fields. These mirror the exact
+// camelCase keys of the authoritative backend configuration contract
+// (backend/money_management/loss_http_api.py `_SMALL_ACCOUNT_FIELDS`).
+export const MONEY_MANAGEMENT_SMALL_ACCOUNT_FIELDS = Object.freeze([
+  "smallAccountMinimumContractMode",
+  "smallAccountAllowedSymbol",
+  "smallAccountMaxContracts",
+  "smallAccountMaxRiskPercent",
+  "smallAccountMaxAbsoluteRiskUsdt",
+  "smallAccountMaxLeverage",
+  "smallAccountRequireIsolated",
+  "smallAccountRequireFlatBeforeEntry",
+  "smallAccountRequireNoPending",
+  "smallAccountRequireManualSelection",
+]);
+
+// Approved Small Account profile bounds. The frontend must not weaken these;
+// the backend remains the write authority.
+export const APPROVED_SMALL_ACCOUNT_PROFILE = Object.freeze({
+  allowedSymbol: "XRPUSDTM",
+  maxContracts: "1",
+  maxRiskPercent: "2.0",
+  maxAbsoluteRiskUsdt: "0.158",
+  maxLeverage: "3",
+});
+
+const SMALL_ACCOUNT_REQUIREMENT_FIELDS = Object.freeze([
+  "smallAccountRequireIsolated",
+  "smallAccountRequireFlatBeforeEntry",
+  "smallAccountRequireNoPending",
+  "smallAccountRequireManualSelection",
+]);
+
+const SMALL_ACCOUNT_NUMERIC_RULES = Object.freeze({
+  smallAccountMaxContracts: Object.freeze({
+    integral: true,
+    maximum: APPROVED_SMALL_ACCOUNT_PROFILE.maxContracts,
+    code: "SMALL_ACCOUNT_MAX_CONTRACTS",
+  }),
+  smallAccountMaxRiskPercent: Object.freeze({
+    integral: false,
+    maximum: APPROVED_SMALL_ACCOUNT_PROFILE.maxRiskPercent,
+    code: "SMALL_ACCOUNT_MAX_RISK_PERCENT",
+  }),
+  smallAccountMaxAbsoluteRiskUsdt: Object.freeze({
+    integral: false,
+    maximum: APPROVED_SMALL_ACCOUNT_PROFILE.maxAbsoluteRiskUsdt,
+    code: "SMALL_ACCOUNT_MAX_ABSOLUTE_RISK_USDT",
+  }),
+  smallAccountMaxLeverage: Object.freeze({
+    integral: true,
+    maximum: APPROVED_SMALL_ACCOUNT_PROFILE.maxLeverage,
+    code: "SMALL_ACCOUNT_MAX_LEVERAGE",
+  }),
+});
 
 export const MONEY_MANAGEMENT_RISK_STATE = Object.freeze([
   "NORMAL",
@@ -157,6 +214,23 @@ function decimal(value, field, nullable = false) {
     );
   }
   return value;
+}
+
+function optionalSmallAccountDecimal(value, field) {
+  if (value === null || value === undefined) return null;
+  return decimal(value, field);
+}
+
+function smallAccountSymbol(value, field) {
+  if (value === null || value === undefined) {
+    return APPROVED_SMALL_ACCOUNT_PROFILE.allowedSymbol;
+  }
+  return text(value, field);
+}
+
+function smallAccountBoolean(value, field, fallback) {
+  if (value === null || value === undefined) return fallback;
+  return bool(value, field);
 }
 
 function utcTimestamp(value, field, nullable = false) {
@@ -351,6 +425,51 @@ export function normalizeMoneyManagementConfiguration(raw) {
     compoundingEnabled: bool(
       value.compoundingEnabled,
       "configuration.compoundingEnabled",
+    ),
+    smallAccountMinimumContractMode: smallAccountBoolean(
+      value.smallAccountMinimumContractMode,
+      "configuration.smallAccountMinimumContractMode",
+      false,
+    ),
+    smallAccountAllowedSymbol: smallAccountSymbol(
+      value.smallAccountAllowedSymbol,
+      "configuration.smallAccountAllowedSymbol",
+    ),
+    smallAccountMaxContracts: optionalSmallAccountDecimal(
+      value.smallAccountMaxContracts,
+      "configuration.smallAccountMaxContracts",
+    ),
+    smallAccountMaxRiskPercent: optionalSmallAccountDecimal(
+      value.smallAccountMaxRiskPercent,
+      "configuration.smallAccountMaxRiskPercent",
+    ),
+    smallAccountMaxAbsoluteRiskUsdt: optionalSmallAccountDecimal(
+      value.smallAccountMaxAbsoluteRiskUsdt,
+      "configuration.smallAccountMaxAbsoluteRiskUsdt",
+    ),
+    smallAccountMaxLeverage: optionalSmallAccountDecimal(
+      value.smallAccountMaxLeverage,
+      "configuration.smallAccountMaxLeverage",
+    ),
+    smallAccountRequireIsolated: smallAccountBoolean(
+      value.smallAccountRequireIsolated,
+      "configuration.smallAccountRequireIsolated",
+      true,
+    ),
+    smallAccountRequireFlatBeforeEntry: smallAccountBoolean(
+      value.smallAccountRequireFlatBeforeEntry,
+      "configuration.smallAccountRequireFlatBeforeEntry",
+      true,
+    ),
+    smallAccountRequireNoPending: smallAccountBoolean(
+      value.smallAccountRequireNoPending,
+      "configuration.smallAccountRequireNoPending",
+      true,
+    ),
+    smallAccountRequireManualSelection: smallAccountBoolean(
+      value.smallAccountRequireManualSelection,
+      "configuration.smallAccountRequireManualSelection",
+      true,
     ),
     revision: positiveInteger(
       value.revision,
@@ -592,6 +711,24 @@ export function configurationDraftFromAuthoritative(configuration) {
     maximumPositionNotional: configuration.maximumPositionNotional,
     singleSymbolExposurePercent: configuration.singleSymbolExposurePercent,
     compoundingEnabled: configuration.compoundingEnabled,
+    smallAccountMinimumContractMode:
+      configuration.smallAccountMinimumContractMode === true,
+    smallAccountAllowedSymbol:
+      configuration.smallAccountAllowedSymbol
+      ?? APPROVED_SMALL_ACCOUNT_PROFILE.allowedSymbol,
+    smallAccountMaxContracts: configuration.smallAccountMaxContracts ?? null,
+    smallAccountMaxRiskPercent: configuration.smallAccountMaxRiskPercent ?? null,
+    smallAccountMaxAbsoluteRiskUsdt:
+      configuration.smallAccountMaxAbsoluteRiskUsdt ?? null,
+    smallAccountMaxLeverage: configuration.smallAccountMaxLeverage ?? null,
+    smallAccountRequireIsolated:
+      configuration.smallAccountRequireIsolated !== false,
+    smallAccountRequireFlatBeforeEntry:
+      configuration.smallAccountRequireFlatBeforeEntry !== false,
+    smallAccountRequireNoPending:
+      configuration.smallAccountRequireNoPending !== false,
+    smallAccountRequireManualSelection:
+      configuration.smallAccountRequireManualSelection !== false,
   });
 }
 
@@ -607,6 +744,60 @@ const PERCENTAGE_FIELDS = Object.freeze([
   "riskPerTradePercent",
   "singleSymbolExposurePercent",
 ]);
+
+function validateSmallAccountDraft(draft, errors) {
+  const mode = draft.smallAccountMinimumContractMode;
+  if (mode !== undefined && typeof mode !== "boolean") {
+    errors.smallAccountMinimumContractMode = "INVALID_BOOLEAN";
+  }
+  const enabled = mode === true;
+
+  const symbol = draft.smallAccountAllowedSymbol;
+  if (symbol === undefined || symbol === null) {
+    if (enabled) errors.smallAccountAllowedSymbol = "INVALID_SYMBOL";
+  } else if (typeof symbol !== "string" || symbol.trim().length === 0) {
+    errors.smallAccountAllowedSymbol = "INVALID_SYMBOL";
+  } else if (
+    enabled
+    && symbol.trim().toUpperCase()
+      !== APPROVED_SMALL_ACCOUNT_PROFILE.allowedSymbol
+  ) {
+    errors.smallAccountAllowedSymbol = "UNSUPPORTED_SYMBOL";
+  }
+
+  for (const [field, rule] of Object.entries(SMALL_ACCOUNT_NUMERIC_RULES)) {
+    const value = draft[field];
+    const absent = value === undefined || value === null || value === "";
+    if (absent) {
+      // A stored-but-unconfigured value is preserved when the mode is off.
+      if (enabled) errors[field] = rule.code;
+      continue;
+    }
+    if (
+      !isStrictDecimalString(value)
+      || compareDecimalStrings(value, "0") <= 0
+    ) {
+      errors[field] = "INVALID_POSITIVE_DECIMAL";
+      continue;
+    }
+    if (rule.integral && !isIntegralDecimalString(value)) {
+      errors[field] = "INVALID_INTEGER";
+      continue;
+    }
+    if (enabled && compareDecimalStrings(value, rule.maximum) > 0) {
+      errors[field] = rule.code;
+    }
+  }
+
+  for (const field of SMALL_ACCOUNT_REQUIREMENT_FIELDS) {
+    const value = draft[field];
+    if (value !== undefined && typeof value !== "boolean") {
+      errors[field] = "INVALID_BOOLEAN";
+    } else if (enabled && value !== true) {
+      errors[field] = "SMALL_ACCOUNT_REQUIREMENT";
+    }
+  }
+}
 
 export function validateMoneyManagementConfigurationDraft(
   draft,
@@ -692,6 +883,7 @@ export function validateMoneyManagementConfigurationDraft(
       compareDecimalStrings(draft.singleSymbolExposurePercent, draft.totalExposurePercent) > 0) {
     errors.singleSymbolExposurePercent = "SYMBOL_EXPOSURE_EXCEEDS_TOTAL";
   }
+  validateSmallAccountDraft(draft, errors);
   if (!Number.isInteger(expectedRevision) || expectedRevision < 1) {
     errors.expectedRevision = "MISSING";
   }
@@ -728,8 +920,37 @@ export function buildMoneyManagementConfigurationPayload(
     maximumPositionNotional: draft.maximumPositionNotional,
     singleSymbolExposurePercent: draft.singleSymbolExposurePercent,
     compoundingEnabled: draft.compoundingEnabled,
+    smallAccountMinimumContractMode:
+      draft.smallAccountMinimumContractMode === true,
+    smallAccountAllowedSymbol: draft.smallAccountAllowedSymbol,
+    smallAccountRequireIsolated: draft.smallAccountRequireIsolated !== false,
+    smallAccountRequireFlatBeforeEntry:
+      draft.smallAccountRequireFlatBeforeEntry !== false,
+    smallAccountRequireNoPending:
+      draft.smallAccountRequireNoPending !== false,
+    smallAccountRequireManualSelection:
+      draft.smallAccountRequireManualSelection !== false,
+    ...buildSmallAccountNumericPayload(draft),
     expectedRevision,
   });
+}
+
+function buildSmallAccountNumericPayload(draft) {
+  const payload = {};
+  for (const field of [
+    "smallAccountMaxContracts",
+    "smallAccountMaxRiskPercent",
+    "smallAccountMaxAbsoluteRiskUsdt",
+    "smallAccountMaxLeverage",
+  ]) {
+    const value = draft[field];
+    // The backend rejects null for the required small-account decimals, so an
+    // unconfigured (null) value is omitted and preserved server-side instead.
+    if (value !== undefined && value !== null && value !== "") {
+      payload[field] = value;
+    }
+  }
+  return payload;
 }
 
 export function normalizeConfigurationUpdateResponse(raw) {
