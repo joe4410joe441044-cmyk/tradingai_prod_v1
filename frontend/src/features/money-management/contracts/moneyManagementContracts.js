@@ -116,6 +116,14 @@ export const MONEY_MANAGEMENT_OPEN_POSITION_STATE = Object.freeze([
   "UNKNOWN",
 ]);
 
+// Authoritative configuration provenance values accepted from the backend.
+// PERSISTED is emitted when a saved profile has been loaded from disk.
+export const MONEY_MANAGEMENT_CONFIGURATION_SOURCE = Object.freeze([
+  "DEFAULT",
+  "RUNTIME_OVERRIDE",
+  "PERSISTED",
+]);
+
 const WARNING_REASONS = new Set([
   "DAILY_LOSS_WARNING",
   "WEEKLY_LOSS_WARNING",
@@ -367,7 +375,7 @@ export function normalizeMoneyManagementMetrics(raw) {
 export function normalizeMoneyManagementConfiguration(raw) {
   const value = object(raw, "configuration");
   const source = text(value.source, "configuration.source");
-  if (!["DEFAULT", "RUNTIME_OVERRIDE"].includes(source)) {
+  if (!MONEY_MANAGEMENT_CONFIGURATION_SOURCE.includes(source)) {
     throw new MoneyManagementContractError(
       "configuration.source is invalid",
     );

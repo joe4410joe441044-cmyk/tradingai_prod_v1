@@ -5,6 +5,7 @@ import {
   buildMoneyManagementConfigurationPayload,
   configurationDraftFromAuthoritative,
   createSafeMoneyManagementStatus,
+  MONEY_MANAGEMENT_CONFIGURATION_SOURCE,
   MoneyManagementContractError,
   normalizeConfigurationUpdateResponse,
   normalizeMoneyManagementConfiguration,
@@ -199,6 +200,89 @@ test("maximum leverage normalization follows the active Backend value", () => {
     ).maximumLeverage,
     "3.5",
   );
+});
+
+test("configuration source accepts DEFAULT, RUNTIME_OVERRIDE, and PERSISTED", () => {
+  assert.deepEqual(
+    [...MONEY_MANAGEMENT_CONFIGURATION_SOURCE],
+    ["DEFAULT", "RUNTIME_OVERRIDE", "PERSISTED"],
+  );
+  for (const source of ["DEFAULT", "RUNTIME_OVERRIDE", "PERSISTED"]) {
+    const normalized = normalizeMoneyManagementConfiguration(
+      validConfiguration({ source }),
+    );
+    assert.equal(normalized.source, source);
+  }
+});
+
+test("persisted source with an approved Small Account profile normalizes", () => {
+  const raw = validConfiguration({
+    source: "PERSISTED",
+    revision: 2,
+    smallAccountMinimumContractMode: true,
+    smallAccountAllowedSymbol: "XRPUSDTM",
+    smallAccountMaxContracts: "1",
+    smallAccountMaxRiskPercent: "2.0",
+    smallAccountMaxAbsoluteRiskUsdt: "0.158",
+    smallAccountMaxLeverage: "3",
+    smallAccountRequireIsolated: true,
+    smallAccountRequireFlatBeforeEntry: true,
+    smallAccountRequireNoPending: true,
+    smallAccountRequireManualSelection: true,
+  });
+  const normalized = normalizeMoneyManagementConfiguration(raw);
+  assert.equal(normalized.source, "PERSISTED");
+  assert.equal(normalized.revision, 2);
+  assert.equal(normalized.smallAccountMinimumContractMode, true);
+  assert.equal(normalized.smallAccountAllowedSymbol, "XRPUSDTM");
+  assert.equal(normalized.smallAccountMaxContracts, "1");
+  assert.equal(normalized.smallAccountMaxRiskPercent, "2.0");
+  assert.equal(normalized.smallAccountMaxAbsoluteRiskUsdt, "0.158");
+  assert.equal(normalized.smallAccountMaxLeverage, "3");
+});
+
+test("status with embedded persisted configuration normalizes", () => {
+  const normalized = normalizeMoneyManagementStatus(validStatus({
+    configurationRevision: 2,
+    configuration: validConfiguration({
+      source: "PERSISTED",
+      revision: 2,
+    }),
+  }));
+  assert.equal(normalized.configuration.source, "PERSISTED");
+  assert.equal(normalized.configuration.revision, 2);
+});
+
+test("unknown configuration sources remain rejected", () => {
+  for (const source of [
+    "UNKNOWN",
+    "FILE",
+    "DISK",
+    "LOCAL",
+    "persisted",
+    "Default",
+    "",
+    0,
+    null,
+    {},
+  ]) {
+    assert.throws(
+      () => normalizeMoneyManagementConfiguration(validConfiguration({ source })),
+      MoneyManagementContractError,
+      `source=${JSON.stringify(source)} must be rejected`,
+    );
+  }
+});
+
+test("configuration normalization does not mutate the raw response", () => {
+  const raw = validConfiguration({ source: "PERSISTED", revision: 2 });
+  const snapshot = JSON.stringify(raw);
+  normalizeMoneyManagementConfiguration(raw);
+  normalizeMoneyManagementStatus(validStatus({
+    configurationRevision: 2,
+    configuration: raw,
+  }));
+  assert.equal(JSON.stringify(raw), snapshot);
 });
 
 test("configuration validation matches Backend strict threshold contract", () => {
