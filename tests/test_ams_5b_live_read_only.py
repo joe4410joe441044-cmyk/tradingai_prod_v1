@@ -44,6 +44,7 @@ def service(*, session=None, safety=None, active=None):
         position_provider=lambda: "FLAT",
         pending_order_provider=lambda: False,
         emergency_provider=lambda: True,
+        effective_leverage=Decimal("1"),
         clock=lambda: NOW,
     )
     return validation, session

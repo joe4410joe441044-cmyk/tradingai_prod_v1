@@ -28,6 +28,26 @@ def floor_contracts(quantity, step):
     return (quantity / step).to_integral_value(rounding=ROUND_DOWN) * step
 
 
+# The single canonical available-margin buffer. Execution order sizing and AMS
+# pre-selection eligibility both bound a candidate by this ratio so the two
+# authorities can never diverge on affordability.
+MARGIN_BUFFER_RATIO = Decimal("0.8")
+
+
+def margin_limited_notional(available, leverage):
+    """Canonical notional ceiling implied by available margin and leverage.
+
+    ``available_capital * MARGIN_BUFFER_RATIO * effective_leverage``. This is
+    the exact calculation Execution applies in ``OrderSizingAuthority`` and the
+    same primitive AMS capital eligibility must reuse (no second margin policy).
+    """
+    return (
+        number(available, zero=True)
+        * MARGIN_BUFFER_RATIO
+        * number(leverage)
+    )
+
+
 @dataclass(frozen=True)
 class OrderSizingAuthority:
     symbol: str
@@ -87,7 +107,7 @@ class OrderSizingAuthority:
     def notional_limit(self):
         return min(self.risk_budget / self.risk_fraction, self.position_cap,
                    self.symbol_capacity, self.total_capacity,
-                   self.available * Decimal("0.8") * self.leverage)
+                   margin_limited_notional(self.available, self.leverage))
 
     def validate(self, contracts, *, approved_base=None, sizing_policy_mode="NORMAL_MM"):
         contracts = number(contracts)
@@ -104,7 +124,7 @@ class OrderSizingAuthority:
             raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
         if notional > min(self.position_cap, self.symbol_capacity, self.total_capacity):
             raise SizingRejected("NO_VALID_QUANTITY_FOR_MM_EXPOSURE")
-        if notional / self.leverage > self.available * Decimal("0.8"):
+        if notional > margin_limited_notional(self.available, self.leverage):
             raise SizingRejected("NO_VALID_QUANTITY_FOR_AVAILABLE_MARGIN")
         if self.fixed_notional and notional > self.fixed_notional:
             raise SizingRejected("NORMALIZED_QUANTITY_EXCEEDS_FIXED_SIZE")
@@ -128,7 +148,7 @@ class OrderSizingAuthority:
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
             if minimum_notional > min(self.position_cap, self.symbol_capacity, self.total_capacity):
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_MM_EXPOSURE")
-            if minimum_notional / self.leverage > self.available * Decimal("0.8"):
+            if minimum_notional > margin_limited_notional(self.available, self.leverage):
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_AVAILABLE_MARGIN")
             raise SizingRejected("NO_VALID_QUANTITY_FOR_EXCHANGE_CONSTRAINTS")
         base, notional = self.validate(contracts)
@@ -163,7 +183,7 @@ class OrderSizingAuthority:
             raise SizingRejected("SMALL_ACCOUNT_RISK_PERCENT_EXCEEDED")
         if self.small_account_max_absolute_risk_usdt <= 0 or risk > self.small_account_max_absolute_risk_usdt:
             raise SizingRejected("SMALL_ACCOUNT_ABSOLUTE_RISK_EXCEEDED")
-        if notional / self.leverage > self.available * Decimal("0.8"):
+        if notional > margin_limited_notional(self.available, self.leverage):
             raise SizingRejected("NO_VALID_QUANTITY_FOR_AVAILABLE_MARGIN")
 
     def size(self):

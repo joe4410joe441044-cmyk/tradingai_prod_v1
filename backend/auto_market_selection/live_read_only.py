@@ -99,7 +99,7 @@ class LiveReadOnlyValidation:
         safety_provider, position_provider, pending_order_provider,
         emergency_provider, stop_loss_percent=Decimal("1"),
         effective_cost_percent=Decimal("0.2"), risk_percent=Decimal("0.5"),
-        effective_leverage=Decimal("1"),
+        effective_leverage=None,
         scanner=None, ranking_engine=None, clock=None,
     ):
         if not isinstance(public_client, KucoinFuturesPublicClient):
@@ -110,6 +110,15 @@ class LiveReadOnlyValidation:
         )
         if any(not callable(item) for item in providers):
             raise TypeError("Live read-only authority providers required")
+        # LIVE affordability consumes the canonical effective leverage resolved
+        # at START. A missing or malformed authority must fail closed: UNKNOWN
+        # leverage is never silently treated as an explicit 1x.
+        if (
+            not isinstance(effective_leverage, Decimal)
+            or not effective_leverage.is_finite()
+            or effective_leverage <= 0
+        ):
+            raise RuntimeError("LEVERAGE_AUTHORITY_UNAVAILABLE")
         self.client = public_client
         self.capital_provider = capital_provider
         self.active_symbol_provider = active_symbol_provider

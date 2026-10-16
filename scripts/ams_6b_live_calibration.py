@@ -20,13 +20,22 @@ SAFETY = {
     "governanceAvailable": True,
 }
 
+# Explicit synthetic calibration inputs.  This harness is market-data only and
+# is never represented as authoritative Live account or runtime authority.
+SYNTHETIC_CAPITAL_BASIS = Decimal("900")
+SYNTHETIC_SINGLE_SYMBOL_EXPOSURE_PERCENT = Decimal("10")
+SYNTHETIC_EFFECTIVE_LEVERAGE = Decimal("1")
+
 
 def fixed_market_only_capital(evaluated_at):
     """Synthetic feasibility input; never represented as Live account authority."""
     return build_capital_eligibility_contract(
         equity=Decimal("1000"), available_capital=Decimal("900"),
+        capital_basis=SYNTHETIC_CAPITAL_BASIS,
         risk_budget=Decimal("4.5"), max_position_notional=Decimal("100"),
-        total_exposure_percent=Decimal("20"), open_exposure=Decimal("0"),
+        total_exposure_percent=Decimal("20"),
+        single_symbol_exposure_percent=SYNTHETIC_SINGLE_SYMBOL_EXPOSURE_PERCENT,
+        open_exposure=Decimal("0"),
         position_count=0, pending_order_count=0, mm_regime="CALIBRATION_ONLY",
         policy_version="ams-6b-fixed-market-only", evaluated_at=evaluated_at,
     )
@@ -45,6 +54,7 @@ def main():
         active_symbol_provider=lambda: args.active_symbol, safety_provider=lambda: dict(SAFETY),
         position_provider=lambda: "FLAT", pending_order_provider=lambda: False,
         emergency_provider=lambda: True,
+        effective_leverage=SYNTHETIC_EFFECTIVE_LEVERAGE,
     )
     campaign = LiveCalibrationCampaign(validation)
     records = campaign.run(args.count, interval_seconds=args.interval)

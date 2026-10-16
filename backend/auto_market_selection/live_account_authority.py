@@ -364,8 +364,20 @@ class ExistingKucoinLiveAccountAuthority:
                 policy_version="money-management-config/v1",
             )
         required = ("riskBudget", "maxPositionNotional", "totalExposurePercent",
-                    "positionCount", "pendingOrderCount", "mmRegime", "policyVersion")
+                    "singleSymbolExposurePercent", "positionCount",
+                    "pendingOrderCount", "mmRegime", "policyVersion")
         if not isinstance(policy, Mapping) or any(key not in policy for key in required):
+            raise RuntimeError("LIVE_MM_POLICY_UNAVAILABLE")
+        # The single-symbol exposure cap is a required capital input. A missing,
+        # null, malformed or non-positive value must reject the whole policy
+        # loudly rather than silently making every candidate ineligible.
+        single_symbol_exposure_percent = _decimal(
+            policy["singleSymbolExposurePercent"]
+        )
+        if (
+            single_symbol_exposure_percent is None
+            or single_symbol_exposure_percent <= 0
+        ):
             raise RuntimeError("LIVE_MM_POLICY_UNAVAILABLE")
         safe = bool(
             snapshot.ready
@@ -377,9 +389,7 @@ class ExistingKucoinLiveAccountAuthority:
             risk_budget=_decimal(policy["riskBudget"]),
             max_position_notional=_decimal(policy["maxPositionNotional"]),
             total_exposure_percent=_decimal(policy["totalExposurePercent"]),
-            single_symbol_exposure_percent=_decimal(
-                policy.get("singleSymbolExposurePercent")
-            ),
+            single_symbol_exposure_percent=single_symbol_exposure_percent,
             open_exposure=snapshot.current_exposure,
             position_count=policy["positionCount"] if safe else None,
             pending_order_count=policy["pendingOrderCount"] if safe else None,

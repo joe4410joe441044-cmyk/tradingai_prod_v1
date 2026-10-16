@@ -87,7 +87,8 @@ def test_capital_contract_reuses_mm_builder_without_order_surface():
     snapshot = adapter.read()
     contract = adapter.build_capital_eligibility(snapshot, policy={
         "riskBudget": "4", "maxPositionNotional": "100",
-        "totalExposurePercent": "20", "positionCount": 0,
+        "totalExposurePercent": "20", "singleSymbolExposurePercent": "10",
+        "positionCount": 0,
         "pendingOrderCount": 0, "mmRegime": "NORMAL", "policyVersion": "live-mm/v1",
     })
     assert isinstance(contract, CapitalEligibilityContract)

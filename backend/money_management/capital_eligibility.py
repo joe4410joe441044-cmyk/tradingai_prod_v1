@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 
 from backend.market.kucoin_futures_public import FuturesContractMetadata
 
+from .order_sizing import margin_limited_notional
 from .position_risk import PositionSizingInput, calculate_position_size
 
 
@@ -274,6 +275,13 @@ def evaluate_market_capital_eligibility(
             entry_authority_enabled=entry_authority_enabled,
             preselection_eligible=False,
         )
+    # Margin affordability must match Execution's canonical ceiling:
+    # available_capital * MARGIN_BUFFER * effective_leverage. Feeding the
+    # leverage-aware ceiling into the shared MM sizing primitive keeps AMS
+    # pre-selection from advertising quantities Execution would reject.
+    margin_limited_capital = margin_limited_notional(
+        capital.available_capital, effective_leverage
+    )
     result = calculate_position_size(PositionSizingInput(
         entry_price=metadata.last_price,
         stop_loss_percent=stop_loss_percent,
@@ -283,7 +291,7 @@ def evaluate_market_capital_eligibility(
         maximum_position_notional=capital.max_position_notional,
         total_exposure_remaining=capital.remaining_exposure,
         single_symbol_exposure_remaining=capital.max_single_symbol_exposure,
-        available_capital=capital.available_capital,
+        available_capital=margin_limited_capital,
         quantity_step=metadata.quantity_step,
         contract_multiplier=metadata.contract_multiplier,
         risk_budget_remaining=capital.risk_budget,

@@ -67,7 +67,8 @@ def authority(exchange=None, **changes):
 
 POLICY = {
     "riskBudget": "4", "maxPositionNotional": "100",
-    "totalExposurePercent": "20", "positionCount": 0,
+    "totalExposurePercent": "20", "singleSymbolExposurePercent": "10",
+    "positionCount": 0,
     "pendingOrderCount": 0, "mmRegime": "NORMAL",
     "policyVersion": "live-mm/v1",
 }
