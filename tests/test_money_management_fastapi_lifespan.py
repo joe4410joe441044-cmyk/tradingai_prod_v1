@@ -2,7 +2,7 @@ import asyncio
 import importlib.util
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 
 @unittest.skipUnless(importlib.util.find_spec("fastapi"), "FastAPI not installed")
@@ -22,7 +22,11 @@ class FastApiMoneyManagementLifecycleTests(unittest.TestCase):
             return_value=registration,
         ) as startup:
             asyncio.run(self.main.startup_event())
-        startup.assert_called_once_with(self.main.app, logger=self.main.logger)
+        startup.assert_called_once_with(
+            self.main.app,
+            base_configuration_factory=ANY,
+            logger=self.main.logger,
+        )
 
     def test_shutdown_preserves_bot_then_money_management_order(self):
         events = []
@@ -76,8 +80,12 @@ class FastApiSourceIntegrationTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('@app.on_event("startup")', source)
         self.assertIn('@app.on_event("shutdown")', source)
-        self.assertIn("startup_money_management_application(app, logger=logger)", source)
-        self.assertIn("shutdown_money_management_application(app, logger=logger)", source)
+        self.assertIn("startup_money_management_application(", source)
+        self.assertIn("base_configuration_factory=", source)
+        self.assertIn("load_or_default_money_management_config", source)
+        self.assertIn(
+            "shutdown_money_management_application(app, logger=logger)", source
+        )
         self.assertLess(
             source.index("result = bot_manager.shutdown()"),
             source.rindex("shutdown_money_management_application(app, logger=logger)"),

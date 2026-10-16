@@ -93,6 +93,10 @@ from backend.money_management.loss_http_api import (
     register_money_management_http_boundary,
     unregister_money_management_http_boundary,
 )
+from backend.money_management.config_persistence import (
+    MoneyManagementConfigStore,
+    load_or_default_money_management_config,
+)
 from backend.api.recorder_proxy import (
     create_recorder_proxy_router,
 )
@@ -533,7 +537,16 @@ def health():
 async def startup_event():
     add_log("🔥 API STARTED")
     add_log("🧠 Production Execution Cognition Runtime Active")
-    startup_money_management_application(app, logger=logger)
+    mm_config_store = MoneyManagementConfigStore()
+    startup_money_management_application(
+        app,
+        base_configuration_factory=(
+            lambda: load_or_default_money_management_config(
+                store=mm_config_store
+            )
+        ),
+        logger=logger,
+    )
     start_money_management_cash_flow_runtime(app, logger=logger)
     saved_mm_config_provider = lambda: get_money_management_config(app)
     get_bot_manager().configure_money_management_config_provider(
@@ -560,6 +573,7 @@ async def startup_event():
             lambda: get_bot_manager()
             .get_money_management_position_sizing_authority()
         ),
+        config_store=mm_config_store,
     )
     register_money_management_execution_entry_gate(
         app,

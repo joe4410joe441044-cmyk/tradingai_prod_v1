@@ -58,6 +58,15 @@ os.environ["TRADINGAI_CONFIGURED_SYMBOL_PATH"] = str(
 )
 
 
+# D-LIVE-11A: isolate the durable Money Management configuration so no test can
+# read or write the Production logs/runtime destination file.
+_TEST_MM_CONFIG_DIR = Path(tempfile.gettempdir()) / "tradingai-mm-config-test"
+_TEST_MM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+_TEST_MM_CONFIG_PATH = _TEST_MM_CONFIG_DIR / "money_management_config.json"
+
+os.environ["TRADINGAI_MONEY_MANAGEMENT_CONFIG_PATH"] = str(_TEST_MM_CONFIG_PATH)
+
+
 def _test_store_path() -> Path:
     return Path(os.environ["PARAMETER_PERFORMANCE_PATH"])
 
@@ -68,6 +77,10 @@ def _test_saved_mode_path() -> Path:
 
 def _test_configured_symbol_path() -> Path:
     return Path(os.environ["TRADINGAI_CONFIGURED_SYMBOL_PATH"])
+
+
+def _test_mm_config_path() -> Path:
+    return Path(os.environ["TRADINGAI_MONEY_MANAGEMENT_CONFIG_PATH"])
 
 
 @pytest.fixture(autouse=True)
@@ -107,6 +120,22 @@ def _isolated_configured_symbol_authority():
     """Start every test with no committed configured MANUAL symbol."""
 
     path = _test_configured_symbol_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    yield path
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolated_money_management_configuration():
+    """Start every test with no committed Production MM configuration."""
+
+    path = _test_mm_config_path()
     try:
         path.unlink()
     except FileNotFoundError:

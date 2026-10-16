@@ -81,6 +81,11 @@ from .timeline import (
     MoneyManagementTimelineRecorder,
     MoneyManagementTimelineStore,
 )
+from .config_persistence import (
+    MoneyManagementConfigStore,
+    normalize_small_account_symbol,
+    validate_small_account_profile,
+)
 
 
 APPLICATION_STATE_ATTRIBUTE = "money_management_http_boundary"
@@ -420,9 +425,22 @@ _BASE_CONFIG_FIELDS = {
     "maximumDrawdownPercent": "maximum_drawdown_pct",
     "compoundingEnabled": "compounding_enabled",
 }
+_SMALL_ACCOUNT_FIELDS = {
+    "smallAccountMinimumContractMode": "small_account_minimum_contract_mode",
+    "smallAccountAllowedSymbol": "small_account_allowed_symbol",
+    "smallAccountMaxContracts": "small_account_max_contracts",
+    "smallAccountMaxRiskPercent": "small_account_max_risk_percent",
+    "smallAccountMaxAbsoluteRiskUsdt": "small_account_max_absolute_risk_usdt",
+    "smallAccountMaxLeverage": "small_account_max_leverage",
+    "smallAccountRequireIsolated": "small_account_require_isolated",
+    "smallAccountRequireFlatBeforeEntry": "small_account_require_flat_before_entry",
+    "smallAccountRequireNoPending": "small_account_require_no_pending",
+    "smallAccountRequireManualSelection": "small_account_require_manual_selection",
+}
 _REQUEST_FIELDS = frozenset((
     *_CONFIG_FIELDS,
     *_BASE_CONFIG_FIELDS,
+    *_SMALL_ACCOUNT_FIELDS,
     "enabled",
     "expectedRevision",
 ))
@@ -479,6 +497,27 @@ def _strict_nonnegative_percentage(name, value):
     return result
 
 
+def _strict_positive_number(name, value):
+    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+        raise ValueError(f"{name} must be a positive number")
+    if isinstance(value, str) and not value.strip():
+        raise ValueError(f"{name} must be a positive number")
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{name} must be a valid number") from None
+    if not result.is_finite() or result <= 0:
+        raise ValueError(f"{name} must be positive")
+    return result
+
+
+def _strict_positive_integral_decimal(name, value):
+    result = _strict_positive_number(name, value)
+    if result != result.to_integral_value():
+        raise ValueError(f"{name} must be a whole number")
+    return result
+
+
 class MoneyManagementHttpBoundary:
     """Application-scoped HTTP service with no network or filesystem access."""
 
@@ -491,6 +530,7 @@ class MoneyManagementHttpBoundary:
         timeline_recorder=None,
         capital_authority_provider=None,
         position_sizing_authority_provider=None,
+        config_store=None,
     ):
         if dispatcher is not None and not isinstance(
             dispatcher, LossRuntimeUpdateDispatcher
@@ -528,6 +568,11 @@ class MoneyManagementHttpBoundary:
         self._position_sizing_authority_provider = (
             position_sizing_authority_provider
         )
+        if config_store is not None and not isinstance(
+            config_store, MoneyManagementConfigStore
+        ):
+            raise TypeError("config store invalid")
+        self._config_store = config_store
         self._projection_dispatcher = LossGovernanceProjectionDispatcher(
             timestamp_source=self._timestamp_source
         )
@@ -562,6 +607,20 @@ class MoneyManagementHttpBoundary:
         self._configuration_updated_at = self._now()
         self._recovery_in_progress = False
         self._lock = RLock()
+        self._seed_persisted_configuration_revision()
+
+    def _seed_persisted_configuration_revision(self):
+        if self._config_store is None:
+            return
+        try:
+            state = self._config_store.load()
+        except Exception:
+            return
+        if state is None:
+            return
+        self._configuration_revision = state.config_revision
+        self._configuration_updated_at = state.updated_at
+        self._configuration_source = "PERSISTED"
 
     def get_history(self, **query):
         if self._timeline_recorder is None:
@@ -1550,6 +1609,61 @@ class MoneyManagementHttpBoundary:
             mode=actual_runtime_mode.value if actual_runtime_mode is not None else None,
         )
 
+    def _normalize_small_account_update(self, payload):
+        update = {}
+        if "smallAccountMinimumContractMode" in payload:
+            value = payload["smallAccountMinimumContractMode"]
+            if type(value) is not bool:
+                raise ValueError("smallAccountMinimumContractMode must be boolean")
+            update["small_account_minimum_contract_mode"] = value
+        if "smallAccountAllowedSymbol" in payload:
+            update["small_account_allowed_symbol"] = normalize_small_account_symbol(
+                payload["smallAccountAllowedSymbol"]
+            )
+        if "smallAccountMaxContracts" in payload:
+            update["small_account_max_contracts"] = _strict_positive_integral_decimal(
+                "smallAccountMaxContracts",
+                payload["smallAccountMaxContracts"],
+            )
+        if "smallAccountMaxRiskPercent" in payload:
+            update["small_account_max_risk_percent"] = _strict_positive_number(
+                "smallAccountMaxRiskPercent",
+                payload["smallAccountMaxRiskPercent"],
+            )
+        if "smallAccountMaxAbsoluteRiskUsdt" in payload:
+            value = payload["smallAccountMaxAbsoluteRiskUsdt"]
+            update["small_account_max_absolute_risk_usdt"] = (
+                None
+                if value is None
+                else _strict_positive_number(
+                    "smallAccountMaxAbsoluteRiskUsdt",
+                    value,
+                )
+            )
+        if "smallAccountMaxLeverage" in payload:
+            update["small_account_max_leverage"] = _strict_positive_number(
+                "smallAccountMaxLeverage",
+                payload["smallAccountMaxLeverage"],
+            )
+        for external, internal in (
+            ("smallAccountRequireIsolated", "small_account_require_isolated"),
+            (
+                "smallAccountRequireFlatBeforeEntry",
+                "small_account_require_flat_before_entry",
+            ),
+            ("smallAccountRequireNoPending", "small_account_require_no_pending"),
+            (
+                "smallAccountRequireManualSelection",
+                "small_account_require_manual_selection",
+            ),
+        ):
+            if external in payload:
+                value = payload[external]
+                if type(value) is not bool:
+                    raise ValueError(f"{external} must be boolean")
+                update[internal] = value
+        return update
+
     def _normalize_update(self, payload):
         if not isinstance(payload, Mapping):
             self._error(
@@ -1622,6 +1736,14 @@ class MoneyManagementHttpBoundary:
                 422,
                 "CONFIGURATION_INVALID",
                 "Base configuration value is invalid.",
+            )
+        try:
+            base_update.update(self._normalize_small_account_update(payload))
+        except (TypeError, ValueError):
+            self._error(
+                422,
+                "CONFIGURATION_INVALID",
+                "Small account configuration value is invalid.",
             )
         if base_update.get("risk_per_trade_pct", Decimal("0")) > Decimal("5"):
             self._error(
@@ -1811,6 +1933,16 @@ class MoneyManagementHttpBoundary:
                     "CONFIGURATION_INVALID",
                     "Base configuration is inconsistent.",
                 )
+            if base_candidate is not None:
+                try:
+                    validate_small_account_profile(base_candidate)
+                except ValueError:
+                    self._error(
+                        422,
+                        "CONFIGURATION_INVALID",
+                        "Small account configuration is inconsistent with the "
+                        "approved profile.",
+                    )
             if (
                 candidate == self._configuration
                 and target_enabled == self._enabled
@@ -1824,6 +1956,20 @@ class MoneyManagementHttpBoundary:
                     status.configuration,
                     status,
                 )
+            next_revision = self._configuration_revision + 1
+            persist_config = (
+                base_candidate if base_candidate is not None else current_base_config
+            )
+            if self._config_store is not None and persist_config is not None:
+                try:
+                    self._config_store.save(persist_config, next_revision)
+                except Exception:
+                    self._error(
+                        503,
+                        "CONFIGURATION_PERSISTENCE_FAILED",
+                        "Money Management configuration could not be persisted durably.",
+                        True,
+                    )
             hook_registration = self._hook_registration()
             if hook_registration is not None:
                 hook_registration.hook.invalidate_evaluation()
@@ -1843,8 +1989,8 @@ class MoneyManagementHttpBoundary:
             ):
                 self._base_config_provider.replace_config(base_candidate)
             self._enabled = target_enabled
-            self._configuration_revision += 1
-            revision = self._configuration_revision
+            self._configuration_revision = next_revision
+            revision = next_revision
             self._configuration_source = "RUNTIME_OVERRIDE"
             self._configuration_updated_at = now
         reevaluation = (
@@ -2266,6 +2412,7 @@ def register_money_management_http_boundary(
     timeline_directory=None,
     capital_authority_provider=None,
     position_sizing_authority_provider=None,
+    config_store=None,
 ):
     state = getattr(app, "state", None)
     if state is None:
@@ -2299,6 +2446,7 @@ def register_money_management_http_boundary(
             timeline_recorder=timeline_recorder,
             capital_authority_provider=capital_authority_provider,
             position_sizing_authority_provider=position_sizing_authority_provider,
+            config_store=config_store,
         )
         # Publish the existing official lifecycle snapshot at registration;
         # startup health must not wait for an unrelated bot-runtime event.
