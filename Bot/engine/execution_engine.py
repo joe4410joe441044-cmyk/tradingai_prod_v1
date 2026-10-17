@@ -2030,7 +2030,14 @@ class ExecutionEngine:
                 "reason": "POSITION_ALREADY_OPEN",
             }
 
-        price = self.get_price()
+        try:
+            price = self.get_sizing_price()
+        except SizingRejected as exc:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": str(exc),
+            }
         if authority_context is None:
             authority_context = getattr(self, "_manual_sizing_authority_context", None)
         try:
@@ -2154,6 +2161,31 @@ class ExecutionEngine:
             self.logger.exception("GET_PRICE EXCEPTION")
 
             return 0.0
+
+    def get_sizing_price(self):
+        """Return a positive read-only price for sizing previews.
+
+        Immediately after a LIVE runtime starts, the order-book stream may not
+        have published its first price yet. That transient state must not turn
+        an otherwise valid Small Account authority into a zero-price sizing
+        input. Use the existing public ticker reader only for sizing and its
+        preflight validation; never guess a value or bypass final validation.
+        """
+
+        try:
+            return float(number(self.get_price()))
+        except SizingRejected:
+            pass
+
+        if self.mode == "live" and self.exchange is not None:
+            read_price = getattr(self.exchange, "get_price", None)
+            if callable(read_price):
+                try:
+                    return float(number(read_price(self.symbol)))
+                except Exception:
+                    pass
+
+        raise SizingRejected("SIZING_PRICE_UNAVAILABLE")
 
     def flatten_paper_position(
         self,
@@ -3851,13 +3883,18 @@ class ExecutionEngine:
         # unrealized PnL; adding cumulative realized PnL again double-counts it.
         equity = balance + float(self.unrealized_pnl or 0)
 
-        price = self.get_price()
-
         try:
-            preview = self._order_sizing_authority(price=price).size()
-        except Exception as exc:
-            preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected)
-                       else "SIZING_AUTHORITY_UNAVAILABLE"}
+            price = self.get_sizing_price()
+        except SizingRejected as exc:
+            price = None
+            preview = {"valid": False, "reason": str(exc)}
+
+        if price is not None:
+            try:
+                preview = self._order_sizing_authority(price=price).size()
+            except Exception as exc:
+                preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected)
+                           else "SIZING_AUTHORITY_UNAVAILABLE"}
 
         risk_state = self.update_drawdown_state()
 

@@ -176,6 +176,41 @@ def test_small_account_manual_entry_preserves_policy_to_final_validation():
     assert captured[0]["marginMode"] == "ISOLATED"
 
 
+def test_running_preview_uses_read_only_ticker_until_orderbook_price_arrives():
+    manager, engine, client, captured, _recorder = _small_account_manager()
+    engine.price_manager = PriceManager(0)
+    client.get_price = lambda symbol: float(PRICE)
+
+    preparation = manager.get_manual_trade_preparation()
+    status = engine.get_result()
+
+    assert preparation["valid"] is True
+    assert preparation["candidate"]["price"] == float(PRICE)
+    assert preparation["sizingPolicyMode"] == "SMALL_ACCOUNT_MINIMUM_CONTRACT"
+    assert preparation["candidateContracts"] == "1"
+    assert status["price"] == float(PRICE)
+    assert status["preview"]["valid"] is False
+    assert status["preview"]["reason"] == "SMALL_ACCOUNT_REQUIRES_MANUAL"
+    assert captured == []
+
+
+def test_unavailable_running_sizing_price_fails_closed_without_name_error():
+    manager, engine, client, captured, _recorder = _small_account_manager()
+    engine.price_manager = PriceManager(0)
+    client.get_price = lambda symbol: 0
+
+    preparation = manager.get_manual_trade_preparation()
+    status = engine.get_result()
+
+    assert preparation["valid"] is False
+    assert preparation["reason"] == "SIZING_PRICE_UNAVAILABLE"
+    assert status["preview"] == {
+        "valid": False,
+        "reason": "SIZING_PRICE_UNAVAILABLE",
+    }
+    assert captured == []
+
+
 def test_engine_final_revalidation_rejects_two_small_account_contracts():
     _manager, engine, _client, _captured, _recorder = _small_account_manager()
     engine._manual_sizing_authority_context = _authority_context()

@@ -106,6 +106,7 @@ from backend.money_management.risk_percent_authority import (
     resolve_risk_percent_authority,
     status_risk_percent_authority,
 )
+from backend.money_management.order_sizing import SizingRejected
 from backend.money_management.loss_authoritative_runtime_metrics import (
     AuthoritativeLossRuntimeMetricsState,
 )
@@ -4399,8 +4400,9 @@ class BotManager:
                     "actualMarginMode": margin_authority.get("actualMode"),
                     "marginModeCompatible": margin_authority.get("compatible") is True,
                 }
+                sizing_price = engine.get_sizing_price()
                 preview = engine._order_sizing_authority(
-                    price=engine.get_price(), authority_context=preview_context
+                    price=sizing_price, authority_context=preview_context
                 ).size()
             except Exception as exc:
                 preview = {"valid": False, "reason": str(exc) if isinstance(exc, SizingRejected) else "SIZING_AUTHORITY_UNAVAILABLE"}
@@ -4413,7 +4415,7 @@ class BotManager:
                     "notional": preview.get("position_size"),
                     "requiredMargin": preview.get("required_margin"),
                     "sizingMode": preview.get("sizing_mode"),
-                    "price": engine.get_price(),
+                    "price": sizing_price,
                     "priceTimestamp": time.time(),
                     "valid": True,
                     **{key: value for key, value in preview.items() if key not in {"valid", "qty", "position_size", "required_margin", "sizing_mode"}},
