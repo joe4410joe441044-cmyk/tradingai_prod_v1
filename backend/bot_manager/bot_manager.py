@@ -9051,8 +9051,10 @@ class BotManager:
         Pure configuration write. It never starts the runtime, arms LIVE order
         entry, constructs an execution engine, changes ``realOrderAllowed`` /
         ``liveOrderEntryAllowed`` / ``executionEnabled``, changes the margin
-        mode or leverage, or places an order. A structurally absent or
-        placeholder symbol fails closed without mutating the authority.
+        mode or leverage, or places an order. Recommitting the same normalized
+        authority is an idempotent success that preserves its revision,
+        timestamp, and durable file. A structurally absent or placeholder
+        symbol fails closed without mutating the authority.
         """
 
         normalized = self._normalize_configured_symbol(symbol)
@@ -9086,6 +9088,15 @@ class BotManager:
                         "expectedRevision": expected,
                     }
 
+            if normalized == self.configured_symbol:
+                return {
+                    "success": True,
+                    "changed": False,
+                    "configuredSymbol": self.configured_symbol,
+                    "configuredSymbolRevision": self.configured_symbol_revision,
+                    "configuredSymbolUpdatedAt": self.configured_symbol_updated_at,
+                }
+
             updated_at = time.time()
             next_revision = self.configured_symbol_revision + 1
 
@@ -9109,6 +9120,7 @@ class BotManager:
 
             return {
                 "success": True,
+                "changed": True,
                 "configuredSymbol": normalized,
                 "configuredSymbolRevision": next_revision,
                 "configuredSymbolUpdatedAt": updated_at,

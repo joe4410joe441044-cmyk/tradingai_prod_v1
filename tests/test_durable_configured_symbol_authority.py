@@ -108,6 +108,93 @@ def test_set_configured_symbol_normalizes_xrpusdtm(tmp_path):
     assert result["configuredSymbol"] == EXCHANGE_SYMBOL
 
 
+def test_same_configured_symbol_is_noop_without_revision_or_persist(tmp_path):
+    manager = _manager(tmp_path)
+    manager.set_configured_symbol(EXCHANGE_SYMBOL)
+    revision = manager.configured_symbol_revision
+    updated_at = manager.configured_symbol_updated_at
+
+    with patch.object(manager, "_persist_configured_symbol_authority") as persist:
+        result = manager.set_configured_symbol(EXCHANGE_SYMBOL)
+
+    assert result == {
+        "success": True,
+        "changed": False,
+        "configuredSymbol": EXCHANGE_SYMBOL,
+        "configuredSymbolRevision": revision,
+        "configuredSymbolUpdatedAt": updated_at,
+    }
+    assert manager.configured_symbol_revision == revision
+    assert persist.call_count == 0
+
+
+def test_normalization_equivalent_configured_symbol_is_noop(tmp_path):
+    manager = _manager(tmp_path)
+    manager.set_configured_symbol(EXCHANGE_SYMBOL)
+    revision = manager.configured_symbol_revision
+
+    with patch.object(manager, "_persist_configured_symbol_authority") as persist:
+        result = manager.set_configured_symbol(SYMBOL)
+
+    assert result["success"] is True
+    assert result["changed"] is False
+    assert result["configuredSymbol"] == EXCHANGE_SYMBOL
+    assert result["configuredSymbolRevision"] == revision
+    assert manager.configured_symbol_revision == revision
+    assert persist.call_count == 0
+
+
+def test_different_configured_symbol_increments_and_persists_once(tmp_path):
+    manager = _manager(tmp_path)
+    manager.set_configured_symbol(EXCHANGE_SYMBOL)
+    revision = manager.configured_symbol_revision
+
+    with patch.object(
+        manager,
+        "_persist_configured_symbol_authority",
+        wraps=manager._persist_configured_symbol_authority,
+    ) as persist:
+        result = manager.set_configured_symbol("ETHUSDT")
+
+    assert result["success"] is True
+    assert result["changed"] is True
+    assert result["configuredSymbol"] == "ETHUSDTM"
+    assert result["configuredSymbolRevision"] == revision + 1
+    assert manager.configured_symbol_revision == revision + 1
+    assert persist.call_count == 1
+
+
+def test_invalid_configured_symbol_fails_closed_without_persist(tmp_path):
+    manager = _manager(tmp_path)
+
+    with patch.object(manager, "_persist_configured_symbol_authority") as persist:
+        result = manager.set_configured_symbol("UNKNOWN")
+
+    assert result["success"] is False
+    assert result["reason"] == "INVALID_CONFIGURED_SYMBOL"
+    assert manager.get_configured_symbol() is None
+    assert manager.configured_symbol_revision == 0
+    assert persist.call_count == 0
+
+
+def test_same_symbol_after_restart_preserves_durable_authority_bytes(tmp_path):
+    path = tmp_path / "configured_symbol_authority.json"
+    first = BotManager(configured_symbol_path=str(path))
+    first.set_configured_symbol(EXCHANGE_SYMBOL)
+    before = path.read_bytes()
+
+    restarted = BotManager(configured_symbol_path=str(path))
+    revision = restarted.configured_symbol_revision
+    with patch.object(restarted, "_persist_configured_symbol_authority") as persist:
+        result = restarted.set_configured_symbol(SYMBOL)
+
+    assert result["success"] is True
+    assert result["changed"] is False
+    assert restarted.configured_symbol_revision == revision
+    assert path.read_bytes() == before
+    assert persist.call_count == 0
+
+
 @pytest.mark.parametrize(
     "value",
     [None, "", "   ", "NONE", "NULL", "UNKNOWN", "NOT AVAILABLE", "not available"],
@@ -369,6 +456,27 @@ def test_manual_start_establishes_configured_symbol(tmp_path):
 
     assert result["success"] is True
     assert manager.get_configured_symbol() == EXCHANGE_SYMBOL
+
+
+def test_manual_start_same_symbol_does_not_mutate_authority(tmp_path):
+    manager = _manager(tmp_path)
+    manager.set_configured_symbol(EXCHANGE_SYMBOL)
+    revision = manager.configured_symbol_revision
+    engine = object()
+    manager.engine = engine
+
+    with patch.object(manager, "_persist_configured_symbol_authority") as persist:
+        result = manager._establish_configured_symbol_on_start({
+            "symbol": SYMBOL,
+            "selection_mode": "MANUAL",
+        })
+
+    assert result["success"] is True
+    assert result["changed"] is False
+    assert manager.get_configured_symbol() == EXCHANGE_SYMBOL
+    assert manager.configured_symbol_revision == revision
+    assert manager.engine is engine
+    assert persist.call_count == 0
 
 
 def test_auto_start_never_writes_manual_destination(tmp_path):
