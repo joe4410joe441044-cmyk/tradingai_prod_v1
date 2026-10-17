@@ -170,6 +170,10 @@ class StatusResponse(BaseModel):
 
     runtimeMode: str = "NONE"
 
+    nextStartMode: str = "PAPER"
+
+    nextStartModeSource: str = "SELECTED_MODE"
+
     safetyReason: str = "DRY_RUN_ACTIVE"
 
     allowLive: bool = False

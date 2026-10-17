@@ -5998,6 +5998,55 @@ class BotManager:
         self._store_market_snapshot(snapshot)
         return True
 
+    def _saved_mode_authority_resolution(self):
+        """Return the committed destination when it is structurally valid."""
+
+        saved_mode = str(
+            getattr(self, "saved_mode", SAVED_MODE_PAPER)
+        ).strip().lower()
+        saved_revision = int(
+            getattr(self, "saved_mode_revision", 0) or 0
+        )
+        if saved_revision > 0 and saved_mode in ("paper", "live"):
+            return saved_mode, True
+        return None, False
+
+    def _resolve_next_start_mode(self, fallback_mode, fallback_dry_run):
+        """Single authority for the destination the NEXT START would use.
+
+        Both the START resolver and the STOPPED readiness projection consume
+        this helper so they can never drift. A valid committed saved mode wins
+        over the caller/legacy fallback; without one the fallback is preserved
+        and never silently promoted to LIVE.
+        """
+
+        saved_mode, saved_mode_is_authoritative = (
+            self._saved_mode_authority_resolution()
+        )
+        if saved_mode_is_authoritative:
+            return {
+                "mode": saved_mode.upper(),
+                "dryRun": saved_mode == "paper",
+                "authoritative": True,
+                "source": "SAVED_MODE",
+            }
+
+        fallback_mode = str(fallback_mode or "").strip().lower()
+        if fallback_mode in ("paper", "live"):
+            return {
+                "mode": fallback_mode.upper(),
+                "dryRun": fallback_dry_run,
+                "authoritative": False,
+                "source": "SELECTED_MODE",
+            }
+
+        return {
+            "mode": None,
+            "dryRun": None,
+            "authoritative": False,
+            "source": "INVALID_MODE",
+        }
+
     def _resolve_start_mode(self, config):
         """Resolve the START requested mode from the saved-mode authority.
 
@@ -6007,41 +6056,23 @@ class BotManager:
         behaviour is preserved.
         """
 
-        body_mode = str(config.get("mode", "")).strip().lower()
-        saved_mode = str(
-            getattr(self, "saved_mode", SAVED_MODE_PAPER)
-        ).strip().lower()
-        saved_revision = int(
-            getattr(self, "saved_mode_revision", 0) or 0
-        )
-        saved_mode_is_authoritative = (
-            saved_revision > 0 and saved_mode in ("paper", "live")
+        resolution = self._resolve_next_start_mode(
+            config.get("mode", ""),
+            config.get("dry_run", True),
         )
 
-        requested_mode = (
-            saved_mode if saved_mode_is_authoritative else body_mode
-        )
-
-        if requested_mode not in ("paper", "live"):
+        if resolution["mode"] is None:
             return {
                 "mode": None,
                 "dryRun": None,
-                "authoritative": saved_mode_is_authoritative,
+                "authoritative": resolution["authoritative"],
                 "reason": "INVALID_MODE",
             }
 
-        if saved_mode_is_authoritative:
-            return {
-                "mode": requested_mode,
-                "dryRun": requested_mode == "paper",
-                "authoritative": True,
-                "reason": None,
-            }
-
         return {
-            "mode": requested_mode,
-            "dryRun": config.get("dry_run", True),
-            "authoritative": False,
+            "mode": resolution["mode"].lower(),
+            "dryRun": resolution["dryRun"],
+            "authoritative": resolution["authoritative"],
             "reason": None,
         }
 
@@ -13970,17 +14001,61 @@ class BotManager:
         # next-START destination; ``runtimeMode`` describes an ATTACHED engine
         # only (NONE while STOPPED). Neither grants execution authority.
         saved_mode = self.get_saved_mode()
+        runtime_attached = bool(
+            self._running or self.engine is not None
+        )
 
         runtime_mode = (
             selected_mode
-            if (self._running or self.engine is not None)
+            if runtime_attached
             else "NONE"
         )
 
-        live_readiness = self._build_live_readiness_snapshot(
-            selected_mode,
+        # One authority for the NEXT START. While STOPPED the readiness
+        # projection must describe the same destination START will use. While
+        # RUNNING the attached runtime remains authoritative.
+        next_start_resolution = self._resolve_next_start_mode(
+            self.config.get("mode", "paper"),
             dry_run,
         )
+        next_start_mode = (
+            next_start_resolution["mode"] or selected_mode
+        )
+        next_start_mode_source = next_start_resolution["source"]
+
+        if runtime_attached:
+            readiness_mode = selected_mode
+            readiness_dry_run = dry_run
+        else:
+            readiness_mode = next_start_mode
+            readiness_dry_run = (
+                next_start_resolution["dryRun"]
+                if next_start_resolution["mode"] is not None
+                else dry_run
+            )
+
+        live_readiness = self._build_live_readiness_snapshot(
+            readiness_mode,
+            readiness_dry_run,
+        )
+
+        if not runtime_attached and (
+            readiness_mode != selected_mode
+            or readiness_dry_run != dry_run
+        ):
+            # Projecting the next-START destination must never widen
+            # real-order authority. Preserve the unchanged fail-closed
+            # authority computed from the current runtime selection.
+            authority_readiness = self._build_live_readiness_snapshot(
+                selected_mode,
+                dry_run,
+            )
+            live_readiness["ready"] = bool(
+                authority_readiness.get("ready", False)
+            )
+            live_readiness["realOrderAllowed"] = bool(
+                authority_readiness.get("realOrderAllowed", False)
+            )
 
         real_order_allowed = bool(
             live_readiness.get("realOrderAllowed", False)
@@ -14561,6 +14636,12 @@ class BotManager:
 
             # Mode of the currently attached RUNNING engine; NONE while stopped.
             "runtimeMode": runtime_mode,
+
+            # Canonical destination the NEXT START will use. While STOPPED it
+            # matches the START resolver authority (savedMode when committed).
+            "nextStartMode": next_start_mode,
+
+            "nextStartModeSource": next_start_mode_source,
 
             "safetyReason": safety_reason,
 
