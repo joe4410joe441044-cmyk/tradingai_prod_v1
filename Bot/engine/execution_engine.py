@@ -1819,6 +1819,21 @@ class ExecutionEngine:
             result.get("reason") or "EXECUTION_AUTHORITY_DENIED"
         )
 
+    def _entry_preapproval_sizing_policy_mode(self):
+        """Return the approved sizing provenance carried by the MM admission."""
+
+        preapproval = self.execution_entry_preapproval
+
+        if not isinstance(preapproval, dict):
+            return None
+
+        decision = preapproval.get("decision")
+
+        if not isinstance(decision, dict):
+            return None
+
+        return decision.get("sizingPolicyMode")
+
     def _entry_preapproval_matches(self, order):
         """Return True only for an unconsumed exact-order MM admission."""
 
@@ -2628,9 +2643,15 @@ class ExecutionEngine:
             "traceId": signal.get("traceId"),
         }
 
+        sizing_policy_mode = self._entry_preapproval_sizing_policy_mode()
+
         try:
             authority = self._order_sizing_authority(price=price, fresh=True)
-            authority.validate(number(qty) / authority.multiplier, approved_base=preview.get("qty"))
+            authority.validate(
+                number(qty) / authority.multiplier,
+                approved_base=preview.get("qty"),
+                sizing_policy_mode=sizing_policy_mode or "NORMAL_MM",
+            )
         except Exception as exc:
             return self._entry_rejection(str(exc) if isinstance(exc, SizingRejected)
                                          else "SIZING_AUTHORITY_UNAVAILABLE")
@@ -2774,7 +2795,9 @@ class ExecutionEngine:
                     price=order["price"],
                     leverage=self.config.get("effective_leverage"),
                     sizing_validator=lambda **final: self._validate_final_entry_quantity(
-                        **final, approved_base=qty, side=order["side"], trace_id=order.get("traceId")),
+                        **final, approved_base=qty, side=order["side"],
+                        trace_id=order.get("traceId"),
+                        sizing_policy_mode=sizing_policy_mode),
                 )
 
                 runtime_debug("Live execution raw result=%s", raw_res)
@@ -3795,14 +3818,19 @@ class ExecutionEngine:
         )
 
     def _validate_final_entry_quantity(self, *, symbol, contracts, price, rules,
-                                       leverage, approved_base, side, trace_id):
+                                       leverage, approved_base, side, trace_id,
+                                       sizing_policy_mode=None):
         """Adapter callback: recheck the exact wire quantity with fresh capital/MM."""
         authority = self._order_sizing_authority(price=price, rules=rules, fresh=True)
         if symbol != authority.symbol or number(leverage) != authority.leverage:
             raise SizingRejected("FINAL_SIZING_CONTEXT_CHANGED")
-        preapproval = self.execution_entry_preapproval if isinstance(self.execution_entry_preapproval, dict) else {}
-        policy_mode = (preapproval.get("decision") or {}).get("sizingPolicyMode", "NORMAL_MM")
-        base, _ = authority.validate(contracts, approved_base=approved_base, sizing_policy_mode=policy_mode)
+        if sizing_policy_mode is None:
+            sizing_policy_mode = self._entry_preapproval_sizing_policy_mode()
+        base, _ = authority.validate(
+            contracts,
+            approved_base=approved_base,
+            sizing_policy_mode=sizing_policy_mode or "NORMAL_MM",
+        )
         allowed, _ = self._evaluate_execution_entry_guard({
             "symbol": self.symbol, "side": side, "qty": float(base),
             "price": float(price), "traceId": trace_id,

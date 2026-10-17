@@ -117,6 +117,8 @@ class OrderSizingAuthority:
         if approved_base is not None and base > number(approved_base):
             raise SizingRejected("NORMALIZED_QUANTITY_EXCEEDS_APPROVAL")
         notional = base * self.price
+        if sizing_policy_mode not in {"NORMAL_MM", "SMALL_ACCOUNT_MINIMUM_CONTRACT"}:
+            raise SizingRejected("SIZING_POLICY_MODE_UNKNOWN")
         if sizing_policy_mode == "SMALL_ACCOUNT_MINIMUM_CONTRACT":
             self._validate_small_account_candidate(contracts, notional)
             return base, notional
