@@ -8,12 +8,16 @@ realOrderAllowed=true proved the engine latch was armed.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from backend.api.bot_api import StatusResponse
 from backend.bot_manager.bot_manager import BotManager
 
 
 def _status_with_latch(*, armed: bool, runtime_start: bool = True):
     manager = BotManager()
+    manager.engine = SimpleNamespace(mode="live", paper_fills=[], trade_history=[])
+    manager._running = True
     manager.config["mode"] = "live"
     manager.config["dry_run"] = False
     manager.config["liveRuntimeStartAllowed"] = runtime_start

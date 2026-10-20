@@ -172,6 +172,8 @@ class StatusResponse(BaseModel):
 
     nextStartMode: str = "PAPER"
 
+    nextStartDryRun: bool = True
+
     nextStartModeSource: str = "SELECTED_MODE"
 
     safetyReason: str = "DRY_RUN_ACTIVE"

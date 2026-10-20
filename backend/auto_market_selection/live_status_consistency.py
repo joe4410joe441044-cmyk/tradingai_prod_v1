@@ -25,6 +25,14 @@ REASON_ORDER = (
     ("livePnlAccountingAvailable", "LIVE_PNL_ACCOUNTING_UNAVAILABLE"),
 )
 
+# While STOPPED, readiness reasons that are explicitly about the NEXT START
+# must use the canonical next-START destination. The legacy selected-mode
+# checks remain present and describe only the current in-memory selection.
+NEXT_START_CHECK_PREFERENCE = {
+    "selectedModeLive": "nextStartModeLive",
+    "dryRunDisabled": "nextStartDryRunDisabled",
+}
+
 REAL_ACCOUNT_SOURCES = frozenset({
     "REAL_LIVE_ACCOUNT",
     "KUCOIN_FUTURES_READ_ONLY",
@@ -75,11 +83,28 @@ def derive_live_readiness(readiness, real_account=None, *, reported_reasons=None
     if "governanceAllow" not in checks and "governanceAllow" in result:
         checks["governanceAllow"] = result.get("governanceAllow") is True
 
-    reasons = [
-        reason for key, reason in REASON_ORDER
-        if key in checks and not checks[key]
-        and not (key == "executionEnabled" and result.get("entryAuthority") == "MANUAL")
-    ]
+    next_start_projection_active = str(
+        result.get("nextStartMode") or ""
+    ).strip().upper() in ("PAPER", "LIVE")
+
+    reasons = []
+    for key, reason in REASON_ORDER:
+        effective_key = (
+            NEXT_START_CHECK_PREFERENCE.get(key, key)
+            if next_start_projection_active
+            else key
+        )
+        if effective_key not in checks:
+            effective_key = key
+        if (
+            effective_key in checks
+            and not checks[effective_key]
+            and not (
+                effective_key == "executionEnabled"
+                and result.get("entryAuthority") == "MANUAL"
+            )
+        ):
+            reasons.append(reason)
     if position_valid and position_state == "OPEN":
         position_index = next(
             (index for index, reason in enumerate(reasons) if reason.startswith("PENDING_")),
