@@ -1958,6 +1958,8 @@ class BotManager:
         self,
         selected_mode,
         dry_run,
+        next_start_mode=None,
+        next_start_dry_run=None,
     ):
 
         if (
@@ -2314,6 +2316,28 @@ class BotManager:
             ),
         })
         readiness["checks"] = checks
+
+        # STOPPED-state projection: keep the legacy current-selection checks
+        # untouched and add explicit next-START checks. Reason derivation
+        # prefers the next-START checks whenever this projection is active, so
+        # a committed saved LIVE destination cannot be masked by an ephemeral
+        # in-memory PAPER selection.
+        if next_start_mode is not None and next_start_dry_run is not None:
+            next_start_mode_upper = str(
+                next_start_mode
+            ).strip().upper()
+            checks.update({
+                "nextStartModeLive": (
+                    next_start_mode_upper == SAVED_MODE_LIVE
+                ),
+                "nextStartDryRunDisabled": (
+                    bool(next_start_dry_run) is False
+                ),
+            })
+            readiness["checks"] = checks
+            readiness["nextStartMode"] = next_start_mode_upper
+            readiness["nextStartDryRun"] = bool(next_start_dry_run)
+
         return derive_live_readiness(
             readiness,
             real_account,
@@ -14001,61 +14025,59 @@ class BotManager:
         # next-START destination; ``runtimeMode`` describes an ATTACHED engine
         # only (NONE while STOPPED). Neither grants execution authority.
         saved_mode = self.get_saved_mode()
-        runtime_attached = bool(
-            self._running or self.engine is not None
-        )
-
+        runtime_attached = self.engine is not None
+        engine_mode = str(getattr(self.engine, "mode", "") or "").strip().upper()
         runtime_mode = (
-            selected_mode
-            if runtime_attached
-            else "NONE"
-        )
+            engine_mode if engine_mode in SAVED_MODE_VALUES else selected_mode
+        ) if runtime_attached else "NONE"
 
-        # One authority for the NEXT START. While STOPPED the readiness
-        # projection must describe the same destination START will use. While
-        # RUNNING the attached runtime remains authoritative.
+        # START retains its rejecting resolver. Only the read-only projection
+        # uses PAPER as a safe display fallback for an invalid selection.
         next_start_resolution = self._resolve_next_start_mode(
-            self.config.get("mode", "paper"),
-            dry_run,
+            selected_mode, self.config.get("dry_run", True)
         )
-        next_start_mode = (
-            next_start_resolution["mode"] or selected_mode
-        )
+        next_start_mode = next_start_resolution["mode"] or SAVED_MODE_PAPER
         next_start_mode_source = next_start_resolution["source"]
-
-        if runtime_attached:
-            readiness_mode = selected_mode
-            readiness_dry_run = dry_run
-        else:
-            readiness_mode = next_start_mode
-            readiness_dry_run = (
-                next_start_resolution["dryRun"]
-                if next_start_resolution["mode"] is not None
-                else dry_run
-            )
-
-        live_readiness = self._build_live_readiness_snapshot(
-            readiness_mode,
-            readiness_dry_run,
+        # Keep raw fallback identity: START rejects integers, strings and None.
+        # The bool API projects invalid values fail-closed, with the existing
+        # START rejection reason below; it must not silently normalize them.
+        resolved_dry_run = next_start_resolution["dryRun"]
+        next_start_dry_run = (
+            resolved_dry_run if type(resolved_dry_run) is bool else True
         )
-
-        if not runtime_attached and (
-            readiness_mode != selected_mode
-            or readiness_dry_run != dry_run
-        ):
-            # Projecting the next-START destination must never widen
-            # real-order authority. Preserve the unchanged fail-closed
-            # authority computed from the current runtime selection.
-            authority_readiness = self._build_live_readiness_snapshot(
-                selected_mode,
-                dry_run,
-            )
-            live_readiness["ready"] = bool(
-                authority_readiness.get("ready", False)
-            )
-            live_readiness["realOrderAllowed"] = bool(
-                authority_readiness.get("realOrderAllowed", False)
-            )
+        next_start_rejection = None
+        if next_start_resolution["mode"] is None:
+            next_start_rejection = "INVALID_MODE"
+        elif next_start_mode == SAVED_MODE_LIVE and resolved_dry_run is not False:
+            next_start_rejection = "LIVE_DRY_RUN_REQUIRED"
+        elif next_start_mode == SAVED_MODE_PAPER and resolved_dry_run is not True:
+            next_start_rejection = "PAPER_DRY_RUN_REQUIRED"
+        live_readiness = self._build_live_readiness_snapshot(
+            selected_mode,
+            dry_run,
+            next_start_mode=next_start_mode if not runtime_attached else None,
+            next_start_dry_run=next_start_dry_run if not runtime_attached else None,
+        )
+        live_readiness = dict(live_readiness)
+        live_readiness.update({
+            "selectedMode": selected_mode,
+            "dryRun": dry_run,
+            "runtimeMode": runtime_mode,
+            "nextStartMode": next_start_mode,
+            "nextStartDryRun": next_start_dry_run,
+            "nextStartModeSource": next_start_mode_source,
+        })
+        if not runtime_attached:
+            if next_start_rejection:
+                live_readiness["blockReasons"] = list(dict.fromkeys([
+                    *live_readiness.get("blockReasons", []), next_start_rejection,
+                ]))
+            live_readiness["ready"] = False
+            live_readiness["realOrderAllowed"] = False
+            live_readiness["liveOrderEntryAllowed"] = False
+            live_readiness["executionEntryAllowed"] = False
+            if not live_readiness.get("blockReasons"):
+                live_readiness["blockReasons"] = ["LIVE_RUNTIME_NOT_STARTED"]
 
         real_order_allowed = bool(
             live_readiness.get("realOrderAllowed", False)
@@ -14252,6 +14274,10 @@ class BotManager:
             execution_mode,
             real_order_allowed,
         )
+        if not runtime_attached:
+            trade_settings = dict(trade_settings)
+            trade_settings["liveOrderEntryAllowed"] = False
+            trade_settings["executionEntryAllowed"] = False
         account_runtime = self._build_account_runtime(
             snapshot,
             live_readiness,
@@ -14390,9 +14416,9 @@ class BotManager:
             # /api/bot/status report DISARMED after a successful ARM (E2E #002).
             "liveRuntimeStartAllowed": trade_settings.get("liveRuntimeStartAllowed") is True,
 
-            "liveOrderEntryAllowed": trade_settings.get("liveOrderEntryAllowed") is True,
+            "liveOrderEntryAllowed": runtime_attached and trade_settings.get("liveOrderEntryAllowed") is True,
 
-            "executionEntryAllowed": trade_settings.get("executionEntryAllowed") is True,
+            "executionEntryAllowed": runtime_attached and trade_settings.get("executionEntryAllowed") is True,
 
             "liveReadiness": live_readiness,
 
@@ -14642,6 +14668,8 @@ class BotManager:
             "nextStartMode": next_start_mode,
 
             "nextStartModeSource": next_start_mode_source,
+
+            "nextStartDryRun": next_start_dry_run,
 
             "safetyReason": safety_reason,
 
