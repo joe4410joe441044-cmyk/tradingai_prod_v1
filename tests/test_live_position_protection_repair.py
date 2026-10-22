@@ -514,6 +514,9 @@ def test_g_disarmed_gov_off_natural_sl_exit_still_fires():
 def test_g_disarmed_gov_off_strategy_exit_still_fires():
     engine, _, closes = _start_synced("SELL")
     _disarmed_gov_off(engine)
+    # A restart-synced position has no inferred ownership; bind the known BOT
+    # origin explicitly. Unknown ownership fails closed (D-LIVE-14R4).
+    engine.actual_position["entry_authority"] = "BOT"
     engine.exit_evaluator = lambda state, info: {"decision": "EXIT", "reason": "MOMENTUM_DECAY"}
     engine.on_price("GALAUSDT", ENTRY, microstructure_state={"k": 1})
     assert [reason for _, reason in closes] == ["MOMENTUM_DECAY"]

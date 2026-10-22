@@ -1536,6 +1536,17 @@ class ExecutionEngine:
             return None
         if self.actual_position.get("state") != "OPEN":
             return None
+
+        # Strategy exits are BOT-owned only.  A MANUAL-created position must
+        # never be closed autonomously by a strategy decision such as
+        # MICROSTRUCTURE_REVERSAL.  Missing / unrecognized provenance fails
+        # closed: an unknown position is never silently treated as BOT-owned.
+        entry_authority = str(
+            self.actual_position.get("entry_authority") or ""
+        ).strip().upper()
+        if entry_authority != "BOT":
+            return None
+
         if not isinstance(microstructure_state, dict):
             return None
 
@@ -2604,6 +2615,14 @@ class ExecutionEngine:
             if isinstance(signal, dict)
             else ""
         )
+        if not entry_authority and isinstance(authority_context, dict):
+            # The BOT signal contract omits entryAuthority; the manager-owned
+            # authority guard is the authoritative BOT/MANUAL origin binding.
+            origin = str(
+                authority_context.get("entryAuthority") or ""
+            ).strip().upper()
+            if origin in ("BOT", "MANUAL"):
+                entry_authority = origin
 
         preview = self.get_result()["preview"]
 
@@ -3051,6 +3070,16 @@ class ExecutionEngine:
                     self.actual_position = (
                         self._attach_live_position_protection(pos)
                     )
+                    if (
+                        isinstance(self.actual_position, dict)
+                        and entry_authority in ("BOT", "MANUAL")
+                    ):
+                        # Persist the entry ownership on the actual position so
+                        # strategy-exit evaluation can never infer ownership
+                        # from the current control authority.
+                        self.actual_position["entry_authority"] = (
+                            entry_authority
+                        )
 
                     if pos:
                         # A newly observed exchange position begins a new

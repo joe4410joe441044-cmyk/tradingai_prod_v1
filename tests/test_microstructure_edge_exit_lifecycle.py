@@ -77,12 +77,14 @@ def open_paper_position(
     coin_qty=1.0,
     entry_time=None,
     trace_id="trace-exit-1",
+    entry_authority="BOT",
 ):
     multiplier = 0.001
     contracts = coin_qty / multiplier
     engine.actual_position = {
         "state": "OPEN",
         "side": side,
+        "entry_authority": entry_authority,
         "entry_price": entry,
         "qty": contracts,
         "coin_qty": coin_qty,

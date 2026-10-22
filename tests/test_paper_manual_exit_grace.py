@@ -2,9 +2,12 @@
 
 The grace is a bounded, default-OFF, PAPER-only mechanism that defers ONLY the
 strategy/microstructure automatic exit evaluator for MANUAL-origin positions
-while the position age is below ``PAPER_MANUAL_EXIT_GRACE_MS``.  It must never
-affect LIVE, BOT-origin positions, manual close, or emergency flatten, and it
-must resume normal automatic exits once the grace expires.
+while the position age is below ``PAPER_MANUAL_EXIT_GRACE_MS``.
+
+D-LIVE-14R4 adds the permanent ownership boundary: strategy exits are only
+evaluated for BOT-owned positions.  A MANUAL-owned position therefore stays
+suppressed before and after the grace, and unknown ownership fails closed.
+Manual close, emergency flatten, SL/TP and trailing remain unaffected.
 """
 
 import os
@@ -76,7 +79,7 @@ def _strategy_exit(engine, price):
     return engine._evaluate_strategy_exit(price, _state())
 
 
-def test_default_grace_off_keeps_existing_automatic_exit(monkeypatch):
+def test_manual_ownership_suppresses_automatic_exit_without_grace(monkeypatch):
     monkeypatch.delenv(GRACE_ENV, raising=False)
     manager, engine, portfolio, price, recorder = _manual_manager()
     assert _open(manager, "BUY", "grace-default-entry")["success"] is True
@@ -85,11 +88,12 @@ def test_default_grace_off_keeps_existing_automatic_exit(monkeypatch):
     _bind_exit(manager, engine)
     engine.on_price(SYMBOL, price.price, _state())
 
-    # Default grace 0 => the strategy automatic exit still closes the position.
-    assert engine.actual_position is None
+    # MANUAL ownership always suppresses strategy exits, even with grace off.
+    assert engine.actual_position is not None
+    assert _strategy_exit(engine, price.price) is None
 
 
-def test_paper_manual_grace_defers_then_resumes(monkeypatch):
+def test_manual_ownership_stays_suppressed_after_grace(monkeypatch):
     monkeypatch.setenv(GRACE_ENV, "10000")
     manager, engine, portfolio, price, recorder = _manual_manager()
     assert _open(manager, "BUY", "grace-defer-entry")["success"] is True
@@ -98,16 +102,19 @@ def test_paper_manual_grace_defers_then_resumes(monkeypatch):
 
     _bind_exit(manager, engine)
 
-    # Inside the grace: the strategy automatic exit is deferred (no exit).
+    # Inside the grace: no strategy exit.
+    assert manager._paper_manual_exit_grace_active(engine) is True
     engine.on_price(SYMBOL, price.price, _state())
     assert engine.actual_position is not None
     assert _strategy_exit(engine, price.price) is None
 
-    # After the grace: normal automatic exits resume and close the position.
+    # After the grace: the grace is inactive, but MANUAL ownership still
+    # suppresses the strategy exit.
     position["entry_time"] = time.time() - 20.0
-    assert _strategy_exit(engine, price.price) == "TEST_EXIT"
+    assert manager._paper_manual_exit_grace_active(engine) is False
+    assert _strategy_exit(engine, price.price) is None
     engine.on_price(SYMBOL, price.price, _state())
-    assert engine.actual_position is None
+    assert engine.actual_position is not None
 
 
 def test_bot_origin_position_has_no_grace(monkeypatch):
@@ -118,10 +125,11 @@ def test_bot_origin_position_has_no_grace(monkeypatch):
     engine.actual_position["entry_authority"] = "BOT"
     _bind_exit(manager, engine)
 
+    assert manager._paper_manual_exit_grace_active(engine) is False
     assert _strategy_exit(engine, price.price) == "TEST_EXIT"
 
 
-def test_live_mode_has_no_grace(monkeypatch):
+def test_live_mode_has_no_grace_and_manual_stays_suppressed(monkeypatch):
     monkeypatch.setenv(GRACE_ENV, "10000")
     manager, engine, portfolio, price, recorder = _manual_manager()
     assert _open(manager, "BUY", "grace-live-entry")["success"] is True
@@ -129,10 +137,11 @@ def test_live_mode_has_no_grace(monkeypatch):
     engine.mode = "live"
     _bind_exit(manager, engine)
 
-    assert _strategy_exit(engine, price.price) == "TEST_EXIT"
+    assert manager._paper_manual_exit_grace_active(engine) is False
+    assert _strategy_exit(engine, price.price) is None
 
 
-def test_unknown_mode_has_no_grace(monkeypatch):
+def test_unknown_mode_has_no_grace_and_manual_stays_suppressed(monkeypatch):
     monkeypatch.setenv(GRACE_ENV, "10000")
     manager, engine, portfolio, price, recorder = _manual_manager()
     assert _open(manager, "BUY", "grace-unknown-mode-entry")["success"] is True
@@ -140,10 +149,11 @@ def test_unknown_mode_has_no_grace(monkeypatch):
     engine.mode = "something-else"
     _bind_exit(manager, engine)
 
-    assert _strategy_exit(engine, price.price) == "TEST_EXIT"
+    assert manager._paper_manual_exit_grace_active(engine) is False
+    assert _strategy_exit(engine, price.price) is None
 
 
-def test_unknown_position_origin_has_no_grace(monkeypatch):
+def test_unknown_position_origin_fails_closed(monkeypatch):
     monkeypatch.setenv(GRACE_ENV, "10000")
     manager, engine, portfolio, price, recorder = _manual_manager()
     assert _open(manager, "BUY", "grace-unknown-origin-entry")["success"] is True
@@ -151,7 +161,8 @@ def test_unknown_position_origin_has_no_grace(monkeypatch):
     engine.actual_position["entry_authority"] = None
     _bind_exit(manager, engine)
 
-    assert _strategy_exit(engine, price.price) == "TEST_EXIT"
+    assert manager._paper_manual_exit_grace_active(engine) is False
+    assert _strategy_exit(engine, price.price) is None
 
 
 def test_grace_requires_manual_control_authority(monkeypatch):
@@ -162,7 +173,9 @@ def test_grace_requires_manual_control_authority(monkeypatch):
     manager.control_authority = CONTROL_AUTHORITY_BOT
     _bind_exit(manager, engine)
 
-    assert _strategy_exit(engine, price.price) == "TEST_EXIT"
+    assert manager._paper_manual_exit_grace_active(engine) is False
+    # Ownership comes from the position, not the current control authority.
+    assert _strategy_exit(engine, price.price) is None
 
 
 def test_manual_close_long_allowed_during_grace(monkeypatch):
