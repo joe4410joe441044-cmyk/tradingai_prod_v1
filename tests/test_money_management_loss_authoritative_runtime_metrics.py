@@ -546,17 +546,20 @@ class AuthoritativeRuntimeMetricsTests(unittest.TestCase):
         self.assertIsNone(snapshot.position_count)
         self.assertFalse(snapshot.is_complete)
 
-    def test_malformed_close_delta_fails_closed_without_zero(self):
+    def test_malformed_close_delta_fails_closed_without_erasing_authority(self):
         snapshot = observe(
             self.new_state(),
             realized_pnl=True,
             realized_pnl_before=D("0"),
             close_event_id="bad-close",
         )
-        self.assertIsNone(snapshot.daily_realized_pnl)
-        self.assertIsNone(snapshot.trade_count_daily)
+        self.assertEqual(snapshot.daily_realized_pnl, D("0"))
+        self.assertEqual(snapshot.weekly_realized_pnl, D("0"))
+        self.assertEqual(snapshot.monthly_realized_pnl, D("0"))
+        self.assertEqual(snapshot.trade_count_daily, 0)
         self.assertTrue(snapshot.available)
         self.assertFalse(snapshot.observation_valid)
+        self.assertFalse(snapshot.is_complete)
         result = BotManagerLossRuntimeMetricsSource(
             Reader(snapshot), timestamp_source=lambda: NOW + timedelta(seconds=1)
         ).read_metrics(

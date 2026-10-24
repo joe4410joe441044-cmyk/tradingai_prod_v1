@@ -515,6 +515,7 @@ class BotManager:
                 self.runtime_instance_id
             )
         )
+        self.money_management_period_authority = None
         self.money_management_maintenance_pending_order_count = None
         self.stopped_paper_durable_snapshot_path = (
             self._default_stopped_paper_durable_snapshot_path()
@@ -6399,9 +6400,12 @@ class BotManager:
             if self._notify_money_management_lifecycle("STARTING") is not True:
                 raise RuntimeError("MONEY_MANAGEMENT_START_LIFECYCLE_FAILED")
 
+            authority = self.money_management_period_authority
             self.money_management_runtime_metrics.begin_runtime_session(
                 current_session,
                 datetime.now(timezone.utc),
+                period_state=authority[0] if authority else None,
+                period_state_source=authority[1] if authority else None,
             )
 
             add_log(
@@ -7782,6 +7786,11 @@ class BotManager:
             state_source,
             as_of,
             preserve_periods=maintenance_candidate,
+        )
+        self.money_management_period_authority = (
+            persisted_state,
+            state_source,
+            as_of,
         )
         if not (
             maintenance_candidate

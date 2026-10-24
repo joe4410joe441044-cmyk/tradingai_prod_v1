@@ -308,16 +308,30 @@ class AuthoritativeLossRuntimeMetricsState:
         self._trade_count_authority_scope = None
         self._trade_count_authority_session_id = None
         self._seen_close_events = set()
+        self._period_authority = None
 
     @property
     def runtime_instance_id(self):
         return self._runtime_instance_id
 
-    def begin_runtime_session(self, session_id, as_of):
+    def begin_runtime_session(
+        self,
+        session_id,
+        as_of,
+        *,
+        period_state=None,
+        period_state_source=None,
+    ):
         """Establish a zero-count baseline owned by one new runtime session."""
 
         _count("session_id", session_id)
         at = _utc("as_of", as_of)
+        if period_state is not None:
+            if not isinstance(period_state, PersistedLossState):
+                raise TypeError("period state must be persisted loss state")
+            if period_state_source is None:
+                raise TypeError("period state source required")
+            StateSource(period_state_source)
         with self._lock:
             if (
                 self._trade_count_authority_scope == "RUNTIME_SESSION"
@@ -332,13 +346,37 @@ class AuthoritativeLossRuntimeMetricsState:
             # context only.  A new runtime session must earn availability
             # from its own observation before its baseline may be dispatched.
             self._observed = False
+            state = period_state
+            source = period_state_source
+            if state is None and self._period_authority is not None:
+                state, source = self._period_authority
+            if state is not None:
+                StateSource(source)
+                self._rehydrate_missing_periods_locked(state, at)
             self._as_of = at
             self._revision += 1
             return self._snapshot_locked()
 
-    def begin_paper_session(self, session_id, as_of):
+    def _rehydrate_missing_periods_locked(self, state, at):
+        daily_key, weekly_key, monthly_key = self._period_keys(at)
+        periods = (
+            ("_daily_pnl", state.daily_state, daily_key),
+            ("_weekly_pnl", state.weekly_state, weekly_key),
+            ("_monthly_pnl", state.monthly_state, monthly_key),
+        )
+        for name, persisted, current_key in periods:
+            if getattr(self, name) is not None:
+                continue
+            if persisted.net_realized_pnl is None:
+                continue
+            if persisted.period_id == current_key:
+                setattr(self, name, persisted.net_realized_pnl)
+            elif at >= persisted.period_end:
+                setattr(self, name, Decimal("0"))
+
+    def begin_paper_session(self, session_id, as_of, **kwargs):
         """Backward-compatible alias for the runtime-session baseline."""
-        return self.begin_runtime_session(session_id, as_of)
+        return self.begin_runtime_session(session_id, as_of, **kwargs)
 
     @staticmethod
     def _period_keys(at):
@@ -385,6 +423,7 @@ class AuthoritativeLossRuntimeMetricsState:
             self._trade_count_monthly = 0 if counts_known else None
             if not preserve_periods:
                 self._roll_periods_locked(at)
+            self._period_authority = (state, source)
             self._as_of = at
             self._source_state = f"RESTORED_{source.value}"
             self._initialized = True
@@ -635,14 +674,7 @@ class AuthoritativeLossRuntimeMetricsState:
                         if before is not None and after is not None
                         else None
                     )
-                    if delta is None:
-                        self._daily_pnl = None
-                        self._weekly_pnl = None
-                        self._monthly_pnl = None
-                        self._trade_count_daily = None
-                        self._trade_count_weekly = None
-                        self._trade_count_monthly = None
-                    else:
+                    if delta is not None:
                         for name in ("_daily_pnl", "_weekly_pnl", "_monthly_pnl"):
                             current = getattr(self, name)
                             setattr(
