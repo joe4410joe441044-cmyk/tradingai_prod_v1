@@ -124,6 +124,29 @@ def get_money_management_status(request: Request):
         )
 
 
+@router.post("/execution-entry-preview")
+def preview_money_management_execution_entry(request: Request):
+    boundary = _boundary(request)
+    if boundary is None:
+        return _safe_error(
+            503,
+            "MONEY_MANAGEMENT_UNAVAILABLE",
+            "Money Management execution entry preview is unavailable.",
+            True,
+        )
+    try:
+        return boundary.preview_execution_entry().to_dict()
+    except MoneyManagementApiBoundaryException as error:
+        return _boundary_error(error)
+    except Exception:
+        return _safe_error(
+            503,
+            "INTERNAL_STATE_UNAVAILABLE",
+            "Money Management execution entry preview is unavailable.",
+            True,
+        )
+
+
 @router.get("/configuration")
 def get_money_management_configuration(request: Request):
     boundary = _boundary(request)

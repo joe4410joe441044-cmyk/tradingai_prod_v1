@@ -108,9 +108,11 @@ def _source_timestamp(source: str, payload: Mapping[str, object] | None) -> date
     if source == "moneyManagement":
         eligibility = _nested(payload, "capitalEligibility")
         metrics = _nested(payload, "metrics")
+        # Prefer the canonical MM projection timestamp over a nested capital
+        # observation that may carry an older account-update timestamp.
         raw = _first(
-            (eligibility, payload, metrics),
-            "sourceEvaluatedAt", "evaluatedAt", "generatedAt", "metricsGeneratedAt",
+            (payload, eligibility, metrics),
+            "sourceEvaluatedAt", "generatedAt", "evaluatedAt", "metricsGeneratedAt",
         )
     else:
         raw = _first(
@@ -397,6 +399,37 @@ def build_supervisor_snapshot(
         else _string(_first(mm_layers, "ruinGuardStatus"), "moneyManagement.ruinGuardStatus")
     )
 
+    mm_authority_fresh = _bool(
+        _first(mm_layers, "authorityFresh"), "moneyManagement.authorityFresh"
+    )
+    mm_execution_entry_allowed = _bool(
+        _first(mm_layers, "executionEntryAllowed"),
+        "moneyManagement.executionEntryAllowed",
+    )
+    mm_available = _bool(
+        _first((mm_data,), "available"), "moneyManagement.available"
+    )
+    if mm_fresh is not Freshness.FRESH or mm_available is False:
+        # A non-fresh or explicitly unavailable source must never claim current
+        # authority or a current execution-entry permission. This is a label
+        # correction, not a new Money Management decision.
+        if mm_authority_fresh is True:
+            mm_authority_fresh = False
+            warnings.append(warning(
+                SupervisorFailureCode.INPUT_CONFLICTED,
+                "moneyManagement", "authorityFresh",
+                "non-current Money Management source cannot claim current authority",
+                mm_at,
+            ))
+        if mm_execution_entry_allowed is True:
+            mm_execution_entry_allowed = None
+            warnings.append(warning(
+                SupervisorFailureCode.INPUT_CONFLICTED,
+                "moneyManagement", "executionEntryAllowed",
+                "non-current Money Management source cannot claim current entry permission",
+                mm_at,
+            ))
+
     money_management = MoneyManagementSnapshot(
         capitalAuthority=_string(_first(mm_layers, "capitalAuthority"), "moneyManagement.capitalAuthority"),
         capitalSource=capital_source,
@@ -411,10 +444,10 @@ def build_supervisor_snapshot(
                                            "moneyManagement.remainingPositionCapacity", non_negative=True),
         ruinGuardStatus=ruin_guard_status,
         compoundingEnabled=_bool(_first(mm_layers, "compoundingEnabled"), "moneyManagement.compoundingEnabled"),
-        executionEntryAllowed=_bool(_first(mm_layers, "executionEntryAllowed"), "moneyManagement.executionEntryAllowed"),
+        executionEntryAllowed=mm_execution_entry_allowed,
         policyVersion=_string(_first(mm_layers, "policyVersion"), "moneyManagement.policyVersion"),
         evaluatedAt=mm_at,
-        authorityFresh=_bool(_first(mm_layers, "authorityFresh"), "moneyManagement.authorityFresh"),
+        authorityFresh=mm_authority_fresh,
         drawdown=_decimal(_first(metric_layers, "drawdown", "drawdownPercent"), "moneyManagement.drawdown"),
         currentExposure=_decimal(_first(metric_layers, "currentExposure", "openExposure"),
                                  "moneyManagement.currentExposure", non_negative=True),

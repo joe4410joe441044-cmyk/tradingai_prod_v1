@@ -123,7 +123,16 @@ def _governance_payload(raw: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _money_management_payload(raw: Mapping[str, object]) -> Mapping[str, object]:
-    result = _selected(raw, ("sourceEvaluatedAt", "generatedAt", "freshness", "riskState"))
+    result = _selected(
+        raw,
+        (
+            "sourceEvaluatedAt",
+            "generatedAt",
+            "freshness",
+            "available",
+            "riskState",
+        ),
+    )
     eligibility = _selected_nested(
         raw,
         "capitalEligibility",

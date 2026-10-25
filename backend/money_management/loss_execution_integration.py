@@ -172,6 +172,7 @@ class LossExecutionAdmissionResult:
     order_created: bool = False
     provider_call: bool = False
     exchange_call: bool = False
+    detail_reason: Optional[str] = None
 
     def __post_init__(self):
         if self.operation is not None:
@@ -215,6 +216,15 @@ class LossExecutionAdmissionResult:
             )
         ):
             raise ValueError("admission result cannot claim execution")
+        if self.detail_reason is not None:
+            if (
+                not isinstance(self.detail_reason, str)
+                or not self.detail_reason.strip()
+            ):
+                raise ValueError("detail reason invalid")
+            object.__setattr__(
+                self, "detail_reason", self.detail_reason.strip()
+            )
         object.__setattr__(
             self,
             "generated_at",
@@ -241,10 +251,19 @@ class LossExecutionAdmissionResult:
             "orderCreated": self.order_created,
             "providerCall": self.provider_call,
             "exchangeCall": self.exchange_call,
+            "detailReason": self.detail_reason,
         }
 
 
-def _admission(operation, decision, reason, at, revision=None, sequence=None):
+def _admission(
+    operation,
+    decision,
+    reason,
+    at,
+    revision=None,
+    sequence=None,
+    detail_reason=None,
+):
     allowed = decision is LossExecutionEntryDecision.ALLOW
     return LossExecutionAdmissionResult(
         operation,
@@ -255,6 +274,7 @@ def _admission(operation, decision, reason, at, revision=None, sequence=None):
         revision,
         sequence,
         accepted=allowed,
+        detail_reason=detail_reason,
     )
 
 
@@ -296,6 +316,25 @@ class MoneyManagementExecutionEntryGate:
             raise ValueError("maximum projection age must be positive")
         self._maximum_projection_age = maximum_projection_age
         self._lock = RLock()
+
+    def preview_new_entry(self):
+        """Non-ordering preview of the canonical NEW_ENTRY authority.
+
+        This deliberately delegates to :meth:`evaluate` so the preview and the
+        real new-entry gate share the exact same refresh, projection, and guard
+        path. BUY/SELL is irrelevant to MM entry permission, so a deterministic
+        NEW_BUY probe with a nominal positive quantity is used; no order,
+        reservation, position, account, or exchange mutation occurs.
+        """
+
+        return self.evaluate(
+            LossExecutionIntent(
+                "BUY",
+                Decimal("1"),
+                False,
+                explicit_operation=LossExecutionOperation.NEW_BUY,
+            )
+        )
 
     def evaluate(self, intent):
         try:
@@ -428,6 +467,7 @@ class MoneyManagementExecutionEntryGate:
                     now,
                     result.revision,
                     result.sequence,
+                    detail_reason=result.reason,
                 )
             reason = {
                 LossExecutionEntryDecision.ALLOW:
@@ -446,6 +486,7 @@ class MoneyManagementExecutionEntryGate:
                 result.generated_at,
                 result.revision,
                 result.sequence,
+                detail_reason=result.reason,
             )
 
 

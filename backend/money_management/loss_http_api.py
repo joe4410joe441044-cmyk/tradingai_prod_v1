@@ -20,6 +20,11 @@ from .loss_application_registration import (
     MoneyManagementConfigProvider,
     MoneyManagementSafeApplicationStatus,
 )
+from .loss_execution_integration import (
+    APPLICATION_STATE_ATTRIBUTE as EXECUTION_ENTRY_GATE_STATE_ATTRIBUTE,
+    LossExecutionAdmissionResult,
+    MoneyManagementExecutionEntryGateRegistration,
+)
 from .loss_governance_projection_dispatcher import (
     LossGovernanceProjectionDispatcher,
     dispatch_money_management_governance_projection,
@@ -117,6 +122,46 @@ def _serialize(value):
 
 def _values(items):
     return tuple(item.value for item in items)
+
+
+def _position_state(metrics, engine):
+    if metrics is not None:
+        count = metrics.position_count
+        if count == 0:
+            return "FLAT"
+        if count is not None and count > 0:
+            return metrics.position_side if metrics.position_side in (
+                "LONG",
+                "SHORT",
+                "OPEN",
+            ) else "OPEN"
+    if getattr(engine, "actual_position", None) is None:
+        return "UNKNOWN"
+    return "OPEN"
+
+
+def _pending_order_state(metrics, engine):
+    if metrics is not None:
+        count = metrics.pending_order_count
+        if count == 0:
+            return "NONE"
+        if count is not None and count > 0:
+            return "PENDING"
+    pending = getattr(engine, "pending_order", None)
+    if pending is True:
+        return "PENDING"
+    if pending is False:
+        return "NONE"
+    return "UNKNOWN"
+
+
+def _runtime_symbol(hook_registration):
+    bot_manager = getattr(hook_registration, "bot_manager", None)
+    engine = getattr(bot_manager, "engine", None)
+    symbol = getattr(engine, "symbol", None)
+    if not isinstance(symbol, str) or not symbol.strip():
+        symbol = getattr(bot_manager, "symbol", None)
+    return symbol.strip() if isinstance(symbol, str) and symbol.strip() else None
 
 
 @dataclass(frozen=True)
@@ -408,6 +453,72 @@ class MoneyManagementRecoveryResponse:
         }
 
 
+@dataclass(frozen=True)
+class MoneyManagementExecutionEntryPreviewResponse:
+    available: bool
+    decision: str
+    allowed: bool
+    reason: str
+    requested_at: datetime
+    evaluated_at: datetime
+    freshness: str
+    metrics_fresh: bool
+    runtime_metrics_status: str
+    projection_status: str
+    projection_revision: Optional[int]
+    projection_sequence: Optional[int]
+    mm_lifecycle: str
+    runtime_mode: Optional[str]
+    symbol: Optional[str]
+    entry_authority: Optional[str]
+    position_state: str
+    pending_order_state: str
+    executes_order: bool
+    side_effects: object
+    operation: Optional[str] = None
+    metrics_generated_at: Optional[datetime] = None
+    projection_generated_at: Optional[datetime] = None
+    daily_pnl: Optional[Decimal] = None
+    weekly_pnl: Optional[Decimal] = None
+    monthly_pnl: Optional[Decimal] = None
+    period_pnl_known: bool = False
+    reason_detail: Optional[str] = None
+
+    def to_dict(self):
+        return {
+            "schemaVersion": HTTP_BOUNDARY_SCHEMA_VERSION,
+            "scope": "MONEY_MANAGEMENT_EXECUTION_ENTRY_AUTHORITY",
+            "available": self.available,
+            "decision": self.decision,
+            "allowed": self.allowed,
+            "reason": self.reason,
+            "reasonDetail": self.reason_detail,
+            "requestedAt": _serialize(self.requested_at),
+            "evaluatedAt": _serialize(self.evaluated_at),
+            "freshness": self.freshness,
+            "metricsFresh": self.metrics_fresh,
+            "metricsGeneratedAt": _serialize(self.metrics_generated_at),
+            "runtimeMetricsStatus": self.runtime_metrics_status,
+            "projectionStatus": self.projection_status,
+            "projectionGeneratedAt": _serialize(self.projection_generated_at),
+            "projectionRevision": self.projection_revision,
+            "projectionSequence": self.projection_sequence,
+            "mmLifecycle": self.mm_lifecycle,
+            "runtimeMode": self.runtime_mode,
+            "symbol": self.symbol,
+            "entryAuthority": self.entry_authority,
+            "positionState": self.position_state,
+            "pendingOrderState": self.pending_order_state,
+            "executesOrder": self.executes_order,
+            "sideEffects": self.side_effects,
+            "operation": self.operation,
+            "dailyPnl": _serialize(self.daily_pnl),
+            "weeklyPnl": _serialize(self.weekly_pnl),
+            "monthlyPnl": _serialize(self.monthly_pnl),
+            "periodPnlKnown": self.period_pnl_known,
+        }
+
+
 _CONFIG_FIELDS = {
     "dailyWarningPercent": "daily_warning_pct",
     "dailyBlockPercent": "daily_block_pct",
@@ -673,6 +784,42 @@ class MoneyManagementHttpBoundary:
             if isinstance(value, MoneyManagementRuntimeHookRegistration)
             else None
         )
+
+    def _refresh_current_authority(self):
+        """Refresh in-memory authority without mutating trading state.
+
+        This is the same canonical refresh used by the execution-entry gate.
+        It is only attempted while the MM application is READY, RUNNING, and
+        runtime-available so stopped/recovery states keep their fail-closed
+        presentation.
+        """
+
+        hook_registration = self._hook_registration()
+        if hook_registration is None:
+            return None
+        state = getattr(self._app, "state", None)
+        # Only refresh when the canonical execution-entry gate is present. This
+        # keeps the legacy status contract (no projection publication/refresh)
+        # for compositions that do not participate in the entry authority path.
+        if not isinstance(
+            getattr(state, EXECUTION_ENTRY_GATE_STATE_ATTRIBUTE, None),
+            MoneyManagementExecutionEntryGateRegistration,
+        ):
+            return hook_registration
+        registration = getattr(state, "money_management", None)
+        if (
+            isinstance(registration, MoneyManagementApplicationRegistration)
+            and registration.composition_status
+            is CompositionReadinessStatus.READY
+            and registration.safe_status.lifecycle_state
+            is ApplicationLifecycleState.RUNNING
+            and registration.safe_status.runtime_available
+        ):
+            try:
+                hook_registration.hook.refresh_authority()
+            except Exception:
+                pass
+        return hook_registration
 
     def _configuration_response(
         self,
@@ -1151,6 +1298,7 @@ class MoneyManagementHttpBoundary:
             return None
 
     def get_status(self):
+        hook_registration = self._refresh_current_authority()
         now = self._now()
         with self._lock:
             enabled = self._enabled
@@ -1170,7 +1318,6 @@ class MoneyManagementHttpBoundary:
             getattr(self._app, "state", None), "money_management", None
         )
         cash_flow_authority = get_money_management_cash_flow_status(self._app)
-        hook_registration = self._hook_registration()
         bot_manager = getattr(hook_registration, "bot_manager", None)
         bot_session_lifecycle = getattr(bot_manager, "lifecycle_state", None)
         bot_session_running = bot_session_lifecycle == "RUNNING"
@@ -1611,6 +1758,181 @@ class MoneyManagementHttpBoundary:
             correlation_baseline,
             correlation_complete,
             mode=actual_runtime_mode.value if actual_runtime_mode is not None else None,
+        )
+
+    def preview_execution_entry(self):
+        """Return the canonical non-ordering NEW_ENTRY authority decision.
+
+        The preview delegates to the same execution-entry gate instance that
+        guards real new entries. No order, reservation, position, account,
+        control, settings, or exchange mutation is performed.
+        """
+
+        requested_at = self._now()
+        gate_registration = getattr(
+            getattr(self._app, "state", None),
+            EXECUTION_ENTRY_GATE_STATE_ATTRIBUTE,
+            None,
+        )
+        gate_available = isinstance(
+            gate_registration, MoneyManagementExecutionEntryGateRegistration
+        )
+        admission = None
+        if gate_available:
+            try:
+                candidate = gate_registration.gate.preview_new_entry()
+            except Exception:
+                candidate = None
+            if isinstance(candidate, LossExecutionAdmissionResult):
+                admission = candidate
+        observed_at = self._now()
+
+        hook_registration = self._hook_registration()
+        dispatcher = self._dispatcher
+        metrics_result = (
+            dispatcher.get_last_metrics_result()
+            if isinstance(dispatcher, LossRuntimeUpdateDispatcher)
+            else None
+        )
+        metrics = (
+            metrics_result.metrics
+            if isinstance(metrics_result, LossRuntimeMetricsReadResult)
+            and isinstance(metrics_result.metrics, LossRuntimeMetrics)
+            else None
+        )
+        public = get_money_management_governance_projection(self._app)
+        registration = getattr(
+            getattr(self._app, "state", None), "money_management", None
+        )
+        lifecycle_status = None
+        if (
+            isinstance(registration, MoneyManagementApplicationRegistration)
+            and registration.lifecycle_adapter is not None
+        ):
+            try:
+                lifecycle_status = registration.lifecycle_adapter.get_status()
+            except Exception:
+                lifecycle_status = None
+
+        metrics_fresh = bool(
+            metrics is not None
+            and metrics.data_quality is LossRuntimeDataQuality.COMPLETE
+            and metrics.captured_at <= observed_at
+            and observed_at - metrics.captured_at <= self._maximum_metrics_age
+        )
+        projection_fresh = bool(
+            isinstance(public, LossGovernancePublicSnapshot)
+            and public.generated_at <= observed_at
+            and observed_at - public.generated_at <= self._maximum_metrics_age
+        )
+        projection = (
+            public.projection
+            if isinstance(public, LossGovernancePublicSnapshot)
+            else None
+        )
+        if metrics_fresh and projection_fresh:
+            freshness = "FRESH"
+        elif metrics is None and projection is None:
+            freshness = "UNKNOWN"
+        else:
+            freshness = "STALE"
+
+        bot_manager = getattr(hook_registration, "bot_manager", None)
+        engine = getattr(bot_manager, "engine", None)
+        runtime_mode = self._actual_runtime_mode(hook_registration)
+
+        if admission is not None:
+            decision = admission.decision.value
+            allowed = admission.allowed is True
+            reason = admission.reason.value
+            reason_detail = admission.detail_reason or reason
+            evaluated_at = admission.generated_at
+            operation = (
+                admission.operation.value if admission.operation else None
+            )
+            available = decision != "UNKNOWN"
+        else:
+            decision = "UNKNOWN"
+            allowed = False
+            reason = "MONEY_MANAGEMENT_GATE_UNAVAILABLE"
+            reason_detail = None
+            evaluated_at = observed_at
+            operation = None
+            available = False
+
+        if allowed and not (metrics_fresh and projection_fresh):
+            # Fail closed even if a baseline canonical evaluation could allow
+            # from persisted state: a preview may only report ALLOW with fresh,
+            # current observation evidence.
+            decision = "UNKNOWN"
+            allowed = False
+            available = False
+            reason = (
+                "AUTHORITATIVE_METRICS_INCOMPLETE"
+                if not metrics_fresh
+                else "INTERNAL_STATE_UNAVAILABLE"
+            )
+            reason_detail = "PREVIEW_REQUIRES_FRESH_CANONICAL_AUTHORITY"
+
+        side_effects = {
+            "authorityObservationRefreshAttempted": gate_available,
+            "executesOrder": False,
+            "reservesOrder": False,
+            "reservesPosition": False,
+            "mutatesOrderState": False,
+            "mutatesPosition": False,
+            "mutatesAccount": False,
+            "mutatesTradingControl": False,
+            "mutatesSettings": False,
+            "callsExchange": False,
+            "startsOrStopsRuntime": False,
+        }
+        daily_pnl = metrics.daily_pnl if metrics is not None else None
+        weekly_pnl = metrics.weekly_pnl if metrics is not None else None
+        monthly_pnl = metrics.monthly_pnl if metrics is not None else None
+        return MoneyManagementExecutionEntryPreviewResponse(
+            available,
+            decision,
+            allowed,
+            reason,
+            requested_at,
+            evaluated_at,
+            freshness,
+            metrics_fresh,
+            metrics_result.status.value
+            if isinstance(metrics_result, LossRuntimeMetricsReadResult)
+            else LossRuntimeMetricsReadStatus.UNAVAILABLE.value,
+            projection.entry_permission.value
+            if projection is not None
+            else "UNKNOWN",
+            public.revision
+            if isinstance(public, LossGovernancePublicSnapshot)
+            else None,
+            public.sequence
+            if isinstance(public, LossGovernancePublicSnapshot)
+            else None,
+            lifecycle_status.lifecycle_state.value
+            if lifecycle_status is not None
+            else "UNAVAILABLE",
+            runtime_mode.value if runtime_mode is not None else None,
+            _runtime_symbol(hook_registration),
+            getattr(bot_manager, "control_authority", None),
+            _position_state(metrics, engine),
+            _pending_order_state(metrics, engine),
+            False,
+            side_effects,
+            operation,
+            metrics.captured_at if metrics is not None else None,
+            public.generated_at
+            if isinstance(public, LossGovernancePublicSnapshot)
+            else None,
+            daily_pnl,
+            weekly_pnl,
+            monthly_pnl,
+            daily_pnl is not None
+            and weekly_pnl is not None
+            and monthly_pnl is not None,
+            reason_detail,
         )
 
     def _normalize_small_account_update(self, payload):
