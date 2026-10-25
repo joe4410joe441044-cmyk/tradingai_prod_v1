@@ -3191,6 +3191,22 @@ class BotManager:
                     "controlRevision": revision,
                 }
 
+            # A safe symbol-switch transaction owns new-entry admission for the
+            # duration of its pause.  The manager-level request gate checks this
+            # synchronously, and this final revalidation closes the race where a
+            # switch begins after the manual request has already been accepted
+            # but before the engine commits the entry.
+            if (
+                self.symbol_switch_transaction_id is not None
+                or self._symbol_switch_entry_paused
+            ):
+                return {
+                    "allowed": False,
+                    "reason": "SYMBOL_SWITCH_IN_PROGRESS",
+                    "controlAuthority": authority,
+                    "controlRevision": revision,
+                }
+
             reservation = self.execution_admission_reservation
 
             if (
@@ -4160,6 +4176,25 @@ class BotManager:
                     signature,
                     self._manual_trade_deny(
                         "RUNTIME_NOT_READY",
+                        request_id=request_id,
+                    ),
+                )
+
+            # AUTO Market Selection may change the active symbol at runtime.
+            # While the canonical safe-switch transaction holds its new-entry
+            # pause, a human entry must fail closed exactly like a BOT entry.
+            # Market Selection and Execution Control remain orthogonal: this
+            # guard does not disable AUTO or MANUAL, it only serializes entry
+            # against a symbol transition.
+            if (
+                self.symbol_switch_transaction_id is not None
+                or self._symbol_switch_entry_paused
+            ):
+                return self._record_manual_trade(
+                    request_id,
+                    signature,
+                    self._manual_trade_deny(
+                        "SYMBOL_SWITCH_IN_PROGRESS",
                         request_id=request_id,
                     ),
                 )

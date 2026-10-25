@@ -598,3 +598,161 @@ def test_d4_symbol_context_guard_denies_stale_symbol_intent():
     assert valid["success"] is True
     assert valid["symbol"] == SYMBOL
     assert engine.actual_position["runtimeSymbolContext"]["symbol"] == SYMBOL
+
+
+# =========================
+# MANUAL ENTRY AUTHORITY CONTRACT MATRIX
+# =========================
+#
+# Market Selection (MANUAL=SELECT / AUTO) and Execution Control (BOT /
+# MANUAL) are orthogonal.  These tests pin all four combinations and the
+# AUTO safe-symbol-switch entry pause without weakening any shared gate.
+
+@pytest.mark.parametrize("selection_mode", ["MANUAL", "AUTO"])
+def test_manual_entry_authority_matrix_select_or_auto_manual(selection_mode):
+    manager, engine, _portfolio, _price, _rec = _build_manager(
+        selection_mode=selection_mode
+    )
+    # Manual entry is the human entry authority; it must not wait for the BOT
+    # strategy loop, cycle completion or a strategy entry signal.
+    manager.loop_state = "STOPPED"
+    governance_state["execution_enabled"] = False
+    manager.latest_runtime_result = {
+        "strategyOutput": {"strategy": {"direction": "HOLD"}},
+        "tradingCycle": {
+            "step": 4,
+            "status": "WAITING",
+            "rootBlocker": "MICROSTRUCTURE_ENTRY_SIGNAL_WAITING",
+        },
+    }
+
+    preparation = manager.get_manual_trade_preparation()
+    assert preparation["valid"] is True
+    assert preparation["symbol"] == manager.activeSymbol
+
+    result = _trade(manager, "BUY", f"matrix-{selection_mode}-manual")
+    assert result["success"] is True
+    assert result["entryAuthority"] == "MANUAL"
+    assert result["controlAuthority"] == CONTROL_AUTHORITY_MANUAL
+    assert engine.actual_position["entry_authority"] == "MANUAL"
+
+
+@pytest.mark.parametrize("selection_mode", ["MANUAL", "AUTO"])
+def test_manual_entry_authority_matrix_select_or_auto_bot(selection_mode):
+    manager, engine, _portfolio, _price, _rec = _build_manager(
+        selection_mode=selection_mode
+    )
+    # BOT owns new-entry authority; human MANUAL entry is denied.
+    governance_state["execution_enabled"] = True
+    manager.control_authority = CONTROL_AUTHORITY_BOT
+    manager._mirror_control_authority()
+    manager.loop_state = "RUNNING"
+
+    denied = _trade(manager, "BUY", f"matrix-{selection_mode}-bot-manual")
+    assert denied["success"] is False
+    assert denied["reason"] == "MANUAL_CONTROL_REQUIRED"
+    assert engine.actual_position is None
+
+    # The BOT strategy path remains independently available.
+    with manager.execution_authority_lock:
+        manager._begin_execution_admission("BOT")
+    try:
+        decision = manager._authorize_bot_execution_entry({
+            "side": "BUY",
+            "entryAuthority": "BOT",
+            "runtimeSymbolContext": manager._manual_runtime_symbol_context(
+                manager.activeSymbol
+            ),
+        })
+    finally:
+        with manager.execution_authority_lock:
+            manager.execution_admission_reservation = None
+
+    assert decision["allowed"] is True
+    assert decision["entryAuthority"] == CONTROL_AUTHORITY_BOT
+    assert engine.actual_position is None
+
+
+def test_auto_selected_symbol_is_the_manual_execution_symbol():
+    manager, engine, _portfolio, _price, _rec = _build_manager(
+        selection_mode="AUTO"
+    )
+    # AUTO has selected BLUR, not the operator's configured XRP destination.
+    manager.configured_symbol = "XRPUSDTM"
+    manager._active_symbol = "BLURUSDT"
+    engine.symbol = "BLURUSDT"
+    manager.orderbook_symbol = "BLURUSDTM"
+
+    preparation = manager.get_manual_trade_preparation()
+    assert preparation["symbol"] == "BLURUSDT"
+
+    stale = _trade(manager, "BUY", "auto-sym-stale", expectedSymbol="XRPUSDTM")
+    assert stale["success"] is False
+    assert stale["reason"] == "DENY_STALE_INTENT"
+    assert engine.actual_position is None
+
+    entry = _trade(manager, "BUY", "auto-sym-valid", expectedSymbol="BLURUSDT")
+    assert entry["success"] is True
+    assert entry["symbol"] == "BLURUSDT"
+    assert entry["position"]["runtimeSymbolContext"]["symbol"] == "BLURUSDT"
+    assert entry["position"]["runtimeSymbolContext"]["exchangeSymbol"] == "BLURUSDTM"
+
+
+def test_xrp_compact_symbol_normalizes_to_futures_contract():
+    from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+
+    assert BotManager._normalize_configured_symbol("XRPUSDT") == "XRPUSDTM"
+    assert BotManager._normalize_configured_symbol("xrpusdtm") == "XRPUSDTM"
+    assert to_kucoin_futures_symbol("XRPUSDT") == "XRPUSDTM"
+
+
+def test_manual_entry_denied_during_auto_symbol_switch_pause():
+    manager, engine, _portfolio, _price, recorder = _build_manager(
+        selection_mode="AUTO"
+    )
+    manager.symbol_switch_transaction_id = "switch-tx-1"
+    manager._symbol_switch_entry_paused = True
+
+    denied = _trade(manager, "BUY", "switch-paused-manual")
+    assert denied["success"] is False
+    assert denied["reason"] == "SYMBOL_SWITCH_IN_PROGRESS"
+    assert recorder.intents == []
+    assert engine.paper_orders == []
+    assert engine.actual_position is None
+
+
+def test_manual_entry_denied_when_switch_starts_after_request_acceptance(
+    monkeypatch,
+):
+    manager, engine, _portfolio, _price, recorder = _build_manager(
+        selection_mode="AUTO"
+    )
+    original_try_entry = engine.try_entry
+
+    def switch_started_before_commit(signal):
+        # Simulate the AUTO safe-switch transaction acquiring its entry pause
+        # after the manual request passed the manager's synchronous gates but
+        # before the engine commit boundary revalidates authority.
+        manager.symbol_switch_transaction_id = "switch-tx-race"
+        manager._symbol_switch_entry_paused = True
+        return original_try_entry(signal)
+
+    monkeypatch.setattr(engine, "try_entry", switch_started_before_commit)
+
+    denied = _trade(manager, "BUY", "switch-race-manual")
+    assert denied["success"] is False
+    assert denied["reason"] == "SYMBOL_SWITCH_IN_PROGRESS"
+    assert engine.paper_orders == []
+    assert engine.actual_position is None
+    assert engine.execution_entry_preapproval is None
+
+
+def test_manual_entry_still_fails_closed_on_stale_market_data():
+    manager, engine, _portfolio, _price, _rec = _build_manager()
+    engine.last_market_update = time.time() - 30.0
+    engine.price_ready = True
+
+    denied = _trade(manager, "BUY", "stale-market-manual")
+    assert denied["success"] is False
+    assert engine.paper_orders == []
+    assert engine.actual_position is None

@@ -590,7 +590,7 @@ def test_bot_admission_still_requires_automation(loop, auto, allowed):
     exchange.place_order.assert_not_called()
 
 
-@pytest.mark.parametrize("change", ["governance", "revision", "pending", "runtime", "quantity"])
+@pytest.mark.parametrize("change", ["governance", "revision", "pending", "runtime", "quantity", "switch"])
 def test_manual_rechecks_context_at_execution_boundary(monkeypatch, change):
     manager, engine, exchange, _ = _build_live_manager()
     original = engine.try_entry
@@ -605,6 +605,9 @@ def test_manual_rechecks_context_at_execution_boundary(monkeypatch, change):
             manager.get_authoritative_pending_order_state = lambda **kw: {"known": True, "pending": True, "safe": False}
         elif change == "runtime":
             manager.lifecycle_state = "STOPPED"
+        elif change == "switch":
+            manager.symbol_switch_transaction_id = "switch-mid-request"
+            manager._symbol_switch_entry_paused = True
         elif change == "quantity":
             signal["boundQuantity"] *= 2
         return original(signal)
