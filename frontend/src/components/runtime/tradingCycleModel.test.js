@@ -214,3 +214,68 @@ test('tradingCycleModel - positional status remains without diagnostics', () => 
     assert.equal(model.stages[4].status, STATUS.CURRENT);
     assert.equal(model.stages[4].diagnostic, null);
 });
+
+const manualDiagnosticsFixture = () => ({
+    schemaVersion: 1,
+    controlAuthority: 'MANUAL',
+    cycleState: 'MANUAL_ON_DEMAND',
+    rootBlocker: null,
+    rootBlockerStep: null,
+    manualEntry: {
+        state: 'READY_ON_DEMAND',
+        entryPathLabel: 'HUMAN BUY/SELL -> MONEY MANAGEMENT -> GOVERNANCE -> EXECUTION',
+        strategyCycleRequired: false,
+        aiDecisionRequired: false,
+        moneyManagement: 'READY_ON_DEMAND',
+        governance: 'WAITING_FOR_MANUAL_REQUEST',
+        execution: 'WAITING_FOR_MANUAL_REQUEST',
+    },
+    steps: STAGES.map((stage) => ({
+        index: stage.index,
+        key: stage.key,
+        name: stage.label,
+        status: stage.index === 4 || stage.index === 5
+            ? STATUS.BYPASSED
+            : [6, 7, 8].includes(stage.index)
+                ? STATUS.WAITING
+                : stage.index < 4
+                    ? STATUS.COMPLETED
+                    : STATUS.NOT_REACHED,
+        manualEntryRelevance: stage.index === 4
+            ? 'BOT_ONLY'
+            : stage.index === 5
+                ? 'NOT_APPLICABLE'
+                : [6, 7, 8].includes(stage.index)
+                    ? 'MANUAL_ON_DEMAND_GATE'
+                    : 'POST_POSITION',
+        blocksManualEntry: [6, 7, 8].includes(stage.index),
+        manualEntryState: stage.index === 6 ? 'READY_ON_DEMAND' : null,
+        dependencyState: null,
+        rootBlockerStep: null,
+    })),
+});
+
+test('tradingCycleModel - manual diagnostics expose authority and entry path', () => {
+    const model = createTradingCycleModel(
+        { currentStageIndex: 4, currentActivity: 'EVALUATING_STRATEGY' },
+        manualDiagnosticsFixture(),
+    );
+    assert.equal(model.controlAuthority, 'MANUAL');
+    assert.equal(model.isManual, true);
+    assert.equal(model.manualEntry.state, 'READY_ON_DEMAND');
+    assert.equal(model.manualEntry.strategyCycleRequired, false);
+    assert.equal(model.stages[4].status, STATUS.BYPASSED);
+    assert.equal(model.stages[5].status, STATUS.BYPASSED);
+    assert.equal(model.stages[4].manualEntryLabel, 'BOT ONLY');
+    assert.equal(model.stages[5].manualEntryLabel, 'NOT APPLICABLE');
+    assert.equal(model.stages[6].manualEntryLabel, 'ON DEMAND');
+});
+
+test('tradingCycleModel - bot diagnostics do not render manual labels', () => {
+    const model = createTradingCycleModel(
+        { currentStageIndex: 4, currentActivity: 'EVALUATING_STRATEGY' },
+        diagnosticsFixture(),
+    );
+    assert.equal(model.isManual, false);
+    assert.equal(model.stages[4].manualEntryLabel, null);
+});

@@ -124,12 +124,18 @@ const createTradingCycleDiagnosticsModel = (diagnostics) => {
         ? root.rootBlockerStep
         : null;
 
+    const controlAuthority = root ? root.controlAuthority ?? null : null;
+
     return {
         available: byIndex.size === STAGES.length,
         schemaVersion: root ? root.schemaVersion ?? null : null,
+        controlAuthority,
+        isManual: String(controlAuthority || '').toUpperCase() === 'MANUAL',
         cycleState: root ? root.cycleState ?? null : null,
         rootBlocker: root ? root.rootBlocker ?? null : null,
         rootBlockerStep,
+        manualEntry: root ? root.manualEntry ?? null : null,
+        botStrategyCycle: root ? root.botStrategyCycle ?? null : null,
         stepFor: (index) => byIndex.get(index) || null,
         byIndex,
     };
@@ -175,6 +181,20 @@ const createTradingCycleModel = (decision, diagnostics = null) => {
     }
 
     const diagnosticsModel = createTradingCycleDiagnosticsModel(diagnostics);
+    const isManual = diagnosticsModel.isManual;
+
+    const manualEntryLabel = (diagnostic) => {
+        if (!isManual || !diagnostic) return null;
+        const relevance = diagnostic.manualEntryRelevance;
+        if (relevance === 'BOT_ONLY') return 'BOT ONLY';
+        if (relevance === 'NOT_APPLICABLE') return 'NOT APPLICABLE';
+        if (relevance === 'MANUAL_ON_DEMAND_GATE') {
+            if (diagnostic.manualEntryState === 'ALLOW') return 'ON DEMAND · ALLOW';
+            if (diagnostic.manualEntryState === 'BLOCKED') return 'ON DEMAND · BLOCKED';
+            return 'ON DEMAND';
+        }
+        return null;
+    };
 
     return {
         stages: STAGES.map(stage => {
@@ -186,6 +206,7 @@ const createTradingCycleModel = (decision, diagnostics = null) => {
                 ...stage,
                 status: diagnostic?.status || positionalStatus,
                 diagnostic: diagnostic || null,
+                manualEntryLabel: manualEntryLabel(diagnostic),
             };
         }),
         currentStage: currentStageIndex === null ? null : STAGES.find(s => s.index === currentStageIndex),
@@ -194,6 +215,9 @@ const createTradingCycleModel = (decision, diagnostics = null) => {
         nextStage,
         selectedSymbol,
         diagnostics: diagnosticsModel,
+        controlAuthority: diagnosticsModel.controlAuthority,
+        isManual,
+        manualEntry: diagnosticsModel.manualEntry,
     };
 };
 

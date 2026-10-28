@@ -5557,6 +5557,42 @@ Collapsed by default; expands to show runtime diagnostics.
 /* =========================================================
 TRADING CYCLE
 ========================================================= */
+.trading-decision-manual-context {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 10px 12px 0;
+    padding: 9px 12px;
+    border: 1px solid #2d6ea3;
+    border-left: 3px solid #57b8ff;
+    border-radius: 8px;
+    background: rgba(87, 184, 255, 0.08);
+}
+
+.trading-decision-manual-context strong {
+    color: #9fd4ff;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+}
+
+.trading-decision-manual-context span {
+    color: #b8c6d8;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.trading-cycle-stage-manual {
+    margin-top: 6px;
+    padding: 2px 5px;
+    border: 1px solid #526176;
+    border-radius: 4px;
+    color: #b9c7db;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+}
+
 .trading-cycle-flow {
     --tc-step-width: 156px;
     --tc-arrow-gap: 24px;

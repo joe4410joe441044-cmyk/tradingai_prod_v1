@@ -454,3 +454,81 @@ test('retained strategy data is labeled in decision details and current action',
     assert.ok(activity.includes('CURRENT_EVALUATION_NOT_ESTABLISHED'));
     assert.ok(!activity.includes('EVALUATING_STRATEGY'));
 });
+
+const manualDiagnosticsFixture = () => ({
+    schemaVersion: 1,
+    controlAuthority: 'MANUAL',
+    cycleState: 'MANUAL_ON_DEMAND',
+    rootBlocker: null,
+    rootBlockerStep: null,
+    manualEntry: {
+        state: 'READY_ON_DEMAND',
+        entryPathLabel: 'HUMAN BUY/SELL -> MONEY MANAGEMENT -> GOVERNANCE -> EXECUTION',
+        strategyCycleRequired: false,
+        aiDecisionRequired: false,
+        moneyManagement: 'READY_ON_DEMAND',
+        governance: 'WAITING_FOR_MANUAL_REQUEST',
+        execution: 'WAITING_FOR_MANUAL_REQUEST',
+    },
+    steps: Array.from({ length: 15 }, (_, index) => ({
+        index,
+        key: `step-${index}`,
+        name: `Step ${index}`,
+        status: index === 4 || index === 5
+            ? 'BYPASSED'
+            : [6, 7, 8].includes(index)
+                ? 'WAITING'
+                : index < 4 ? 'COMPLETED' : 'NOT_REACHED',
+        reasonCode: 'MANUAL_ENTRY_AUTHORITY',
+        reasonText: 'Manual Control Authority - the human BUY/SELL is the entry decision.',
+        current: 'NOT_REQUIRED',
+        required: 'HUMAN_ENTRY_DECISION',
+        comparison: 'BYPASSED',
+        blockerType: 'NONE',
+        actionable: 'NO',
+        relatedParameters: [],
+        parameterLocation: null,
+        nextCondition: 'MANUAL_ENTRY_REQUEST',
+        nextStep: index + 1,
+        source: 'controlAuthority=MANUAL',
+        evaluatedAt: 1000,
+        freshness: { state: 'FRESH', ageSeconds: 0, evaluatedAt: 1000 },
+        dependencyState: null,
+        rootBlockerStep: null,
+        manualEntryRelevance: index === 4
+            ? 'BOT_ONLY'
+            : index === 5
+                ? 'NOT_APPLICABLE'
+                : [6, 7, 8].includes(index)
+                    ? 'MANUAL_ON_DEMAND_GATE'
+                    : 'POST_POSITION',
+        blocksManualEntry: [6, 7, 8].includes(index),
+        manualEntryState: index === 6 ? 'READY_ON_DEMAND' : null,
+    })),
+});
+
+test('manual diagnostics render authority context and BOT-only labels', async () => {
+    const renderer = await renderCard({ diagnostics: manualDiagnosticsFixture() });
+
+    const nodes = descendants(renderer.root);
+    const manualContext = nodes.find((node) => node.props?.['data-testid'] === 'trading-cycle-manual-context');
+    assert.ok(manualContext, 'manual authority context is rendered');
+    const manualContextText = normalizedText(manualContext);
+    assert.ok(manualContextText.includes('CONTROL AUTHORITY: MANUAL'));
+    assert.ok(manualContextText.includes('HUMAN BUY/SELL'));
+
+    const manualBadges = nodes
+        .filter((node) => typeof node.props?.className === 'string'
+            && node.props.className.includes('trading-cycle-stage-manual'))
+        .map((node) => normalizedText(node));
+    assert.ok(manualBadges.includes('BOT ONLY'));
+    assert.ok(manualBadges.includes('NOT APPLICABLE'));
+    assert.ok(manualBadges.includes('ON DEMAND'));
+
+    openStep(renderer, 4);
+    const bodyText = normalizedText(findBodyById(renderer.root, stepBodyId(4)));
+    assert.ok(bodyText.includes('MANUAL ENTRY'));
+    assert.ok(bodyText.includes('NOT REQUIRED FOR MANUAL ENTRY'));
+    assert.ok(bodyText.includes('BOT_ONLY'));
+    assert.ok(!bodyText.includes('THIS STEP (ROOT BLOCKER)'));
+});
