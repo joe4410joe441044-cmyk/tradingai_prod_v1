@@ -57,7 +57,7 @@ const formatFreshness = (freshness) => {
     return Number.isFinite(age) ? `${state} (${age}s)` : String(state);
 };
 
-const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
+const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep, isManual = false }) => {
     const diagnostic = stage.diagnostic;
 
     if (!diagnostic) {
@@ -133,6 +133,20 @@ const StepDiagnosticsPanel = ({ stage, rootBlocker, rootBlockerStep }) => {
                         )}
                     </dd>
                 </div>
+
+                {isManual && diagnostic.manualEntryRelevance && (
+                    <div className="step-diagnostics__row">
+                        <dt>MANUAL ENTRY</dt>
+                        <dd>
+                            <strong className="step-diagnostics__value">
+                                {diagnostic.blocksManualEntry
+                                    ? 'REQUIRED SHARED GATE'
+                                    : 'NOT REQUIRED FOR MANUAL ENTRY'}
+                            </strong>
+                            <span className="step-diagnostics__hint">{diagnostic.manualEntryRelevance}</span>
+                        </dd>
+                    </div>
+                )}
 
                 <div className="step-diagnostics__row">
                     <dt>BLOCKER TYPE</dt>
@@ -212,6 +226,9 @@ const TradingCycleStage = ({ stage, open, onToggle }) => (
             <div className="trading-cycle-stage-index">{stage.index}</div>
             <div className="trading-cycle-stage-label">{stage.label}</div>
             <div className="trading-cycle-stage-status">{stage.status}</div>
+            {stage.manualEntryLabel && (
+                <div className="trading-cycle-stage-manual">{stage.manualEntryLabel}</div>
+            )}
         </div>
         <div className="trading-cycle-stage-details">
             <button
@@ -264,7 +281,7 @@ const TradingCycleFlow = ({ stages, selectedStepIndex, onSelectStep }) => {
 // Non-modal right-side overlay.  The drawer is position:fixed so opening it
 // never reflows the Trading Cycle flow or the surrounding dashboard; the
 // operator can keep the cycle in view while reading diagnostics.
-const TradingCycleDiagnosticsDrawer = ({ stage, onClose, overlayRef, rootBlocker, rootBlockerStep }) => {
+const TradingCycleDiagnosticsDrawer = ({ stage, onClose, overlayRef, rootBlocker, rootBlockerStep, isManual = false }) => {
     if (!stage) return null;
 
     const isRootBlocker = Number.isInteger(rootBlockerStep) && rootBlockerStep === stage.index;
@@ -314,6 +331,7 @@ const TradingCycleDiagnosticsDrawer = ({ stage, onClose, overlayRef, rootBlocker
                         stage={stage}
                         rootBlocker={rootBlocker}
                         rootBlockerStep={rootBlockerStep}
+                        isManual={isManual}
                     />
                 </div>
             </aside>
@@ -496,6 +514,24 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
                 </div>
             </header>
 
+            {model.isManual && (
+                <div
+                    className="trading-decision-manual-context"
+                    data-testid="trading-cycle-manual-context"
+                >
+                    <strong>CONTROL AUTHORITY: MANUAL</strong>
+                    <span>
+                        MANUAL ENTRY PATH: {model.manualEntry?.entryPathLabel
+                            || 'HUMAN BUY/SELL -> MONEY MANAGEMENT -> GOVERNANCE -> EXECUTION'}
+                    </span>
+                    <span>
+                        BOT strategy steps are bypassed for manual entry. The human BUY/SELL is the
+                        entry decision authority; Money Management, Governance and Execution are
+                        evaluated on the manual request.
+                    </span>
+                </div>
+            )}
+
             {/* Main Trading Cycle Flow */}
             <TradingCycleFlow
                 stages={model.stages}
@@ -510,6 +546,7 @@ export default function TradingDecisionCard({ decision, diagnostics = null, last
                 overlayRef={drawerOverlayRef}
                 rootBlocker={rootBlocker}
                 rootBlockerStep={rootBlockerStep}
+                isManual={model.isManual}
             />
 
             {/* Current Activity Panel */}

@@ -97,6 +97,56 @@ BLOCKING_STAGE_TO_STEP = {
     "EXECUTION": 8,
 }
 
+CONTROL_AUTHORITY_BOT = "BOT"
+CONTROL_AUTHORITY_MANUAL = "MANUAL"
+CONTROL_AUTHORITY_VALUES = (CONTROL_AUTHORITY_BOT, CONTROL_AUTHORITY_MANUAL)
+
+# How each STEP relates to a MANUAL new-entry request.  Manual execution and
+# the BOT strategy pipeline are orthogonal: the human BUY/SELL is the entry
+# decision authority and never has to wait for STEP 4/STEP 5.  MM, Governance
+# and Execution remain shared gates, but they are evaluated on demand when the
+# human request is submitted, not by advancing the BOT cycle.
+MANUAL_STEP_RELEVANCE = {
+    0: "SHARED_PREREQUISITE",
+    1: "SHARED_PREREQUISITE",
+    2: "SHARED_PREREQUISITE",
+    3: "BOT_ONLY",
+    4: "BOT_ONLY",
+    5: "NOT_APPLICABLE",
+    6: "MANUAL_ON_DEMAND_GATE",
+    7: "MANUAL_ON_DEMAND_GATE",
+    8: "MANUAL_ON_DEMAND_GATE",
+    9: "POST_POSITION",
+    10: "POST_POSITION",
+    11: "POST_POSITION",
+    12: "POST_POSITION",
+    13: "OBSERVATIONAL",
+    14: "OBSERVATIONAL",
+}
+
+_BOT_ONLY_STEPS = frozenset(
+    index for index, value in MANUAL_STEP_RELEVANCE.items() if value == "BOT_ONLY"
+)
+_MANUAL_ON_DEMAND_STEPS = frozenset(
+    index
+    for index, value in MANUAL_STEP_RELEVANCE.items()
+    if value == "MANUAL_ON_DEMAND_GATE"
+)
+
+# BOT-cycle blockers that a MANUAL new-entry request must never inherit as its
+# own root blocker.  Shared blockers (market data, settlement, emergency) stay
+# authoritative.
+_BOT_CYCLE_ONLY_BLOCKING_STAGES = frozenset(
+    {"PYTHON STRATEGY", "MONEY MANAGEMENT", "GOVERNANCE"}
+)
+
+MANUAL_ENTRY_PATH = (
+    "HUMAN_BUY_SELL",
+    "MONEY_MANAGEMENT",
+    "GOVERNANCE",
+    "EXECUTION",
+)
+
 # entryReadiness condition code -> blocker class.  Values are canonical codes
 # emitted by ``MicrostructureEdgeStrategy.build_entry_readiness``.
 _CONDITION_BLOCKER_TYPE = {
@@ -195,6 +245,84 @@ def _numeric(value: Any) -> Optional[float]:
 
 def _actionable_for(blocker_type: Optional[str]) -> str:
     return _BLOCKER_ACTIONABLE.get(blocker_type, Actionable.UNKNOWN)
+
+
+def _normalize_control_authority(value: Any) -> Optional[str]:
+    normalized = _clean_str(value)
+    if normalized is None:
+        return None
+    normalized = normalized.upper()
+    return normalized if normalized in CONTROL_AUTHORITY_VALUES else None
+
+
+def _resolve_control_authority(
+    context: Mapping[str, Any], explicit: Any = None
+) -> str:
+    """Read the canonical control authority without ever inventing a switch.
+
+    Legacy callers that did not expose an authority keep the historical BOT
+    projection so existing BOT diagnostics are unchanged.
+    """
+
+    authority = _normalize_control_authority(explicit)
+    if authority is None:
+        authority = _normalize_control_authority(context.get("controlAuthority"))
+    if authority is None:
+        execution_control = _mapping(context.get("executionControl"))
+        authority = _normalize_control_authority(
+            execution_control.get("controlAuthority")
+        )
+    if authority is None:
+        governance = _mapping(context.get("governance"))
+        authority = _normalize_control_authority(
+            governance.get("control_authority")
+            or governance.get("controlAuthority")
+        )
+    return authority or CONTROL_AUTHORITY_BOT
+
+
+def _manual_money_management_authority(
+    context: Mapping[str, Any], explicit: Any = None
+) -> Optional[dict]:
+    """Optional canonical MANUAL MM authority, supplied by the caller.
+
+    This adapter never evaluates Money Management.  When a caller already has
+    the canonical non-ordering execution-entry authority it may pass it here so
+    the diagnostics can display it; otherwise the truthful state is
+    ``READY_ON_DEMAND`` (not evaluated yet).
+    """
+
+    candidate = explicit
+    if not isinstance(candidate, Mapping):
+        candidate = context.get("manualMoneyManagementAuthority")
+    if not isinstance(candidate, Mapping):
+        candidate = context.get("manualEntryMoneyManagementAuthority")
+    return dict(candidate) if isinstance(candidate, Mapping) else None
+
+
+def _manual_mm_state(authority: Optional[Mapping[str, Any]]) -> str:
+    if not authority:
+        return "READY_ON_DEMAND"
+    if authority.get("available") is False:
+        return "UNKNOWN"
+    allowed = authority.get("allowed")
+    if allowed is True:
+        return "ALLOW"
+    if allowed is False:
+        return "BLOCK"
+    decision = _clean_str(authority.get("decision"))
+    if decision == "ALLOW":
+        return "ALLOW"
+    if decision in {"BLOCK", "DENY", "DENIED"}:
+        return "BLOCK"
+    return "UNKNOWN"
+
+
+def _blocks_manual_entry(index: int) -> bool:
+    return MANUAL_STEP_RELEVANCE.get(index) in {
+        "SHARED_PREREQUISITE",
+        "MANUAL_ON_DEMAND_GATE",
+    }
 
 
 def _strategy_state(runtime_result: Optional[Mapping[str, Any]]) -> dict:
@@ -1279,11 +1407,20 @@ def build_trading_cycle_diagnostics(
     runtime_result: Optional[Mapping[str, Any]] = None,
     context: Optional[Mapping[str, Any]] = None,
     evaluated_at: Any = None,
+    control_authority: Any = None,
+    manual_money_management_authority: Any = None,
 ) -> dict:
     """Return the additive ``tradingCycleDiagnostics`` contract.
 
     All arguments are optional and observation-only.  Exactly fifteen STEP
     entries are always returned, indexed 0..14.
+
+    ``control_authority`` is resolved from the explicit argument, then the
+    canonical ``context.controlAuthority`` / ``context.executionControl``
+    projection.  When it is ``MANUAL`` the BOT strategy steps (Micro Edge
+    Strategy / AI Decision) are represented as bypassed for manual entry and
+    can never become the MANUAL root blocker.  Money Management, Governance
+    and Execution remain shared gates evaluated on the human BUY/SELL request.
     """
 
     decision = _mapping(trading_decision)
@@ -1294,6 +1431,12 @@ def build_trading_cycle_diagnostics(
     close_state = _mapping(decision.get("closeState"))
     stages = _mapping(decision.get("stages"))
     parameter_authority = _mapping(strategy.get("parameterAuthority"))
+    resolved_authority = _resolve_control_authority(ctx, control_authority)
+    manual_authority = resolved_authority == CONTROL_AUTHORITY_MANUAL
+    manual_mm_authority = _manual_money_management_authority(
+        ctx, manual_money_management_authority
+    )
+    manual_mm_state = _manual_mm_state(manual_mm_authority)
 
     if evaluated_at is None:
         evaluated_at = decision.get("timestamp")
@@ -1324,7 +1467,10 @@ def build_trading_cycle_diagnostics(
     # Other blockers retain their own canonical current-state dependencies.
     if not current_evaluation and strategy_blocked:
         blocking_stage = None
-    root = _root_blocker(
+
+    # Preserve the BOT-cycle root separately so the UI can show both truths in
+    # MANUAL mode without collapsing them into one misleading state.
+    bot_root = _root_blocker(
         bot_running=bot_running,
         blocking_stage=blocking_stage,
         blocking_reason=decision.get("blockingReason"),
@@ -1332,8 +1478,68 @@ def build_trading_cycle_diagnostics(
         close_state=close_state,
         evaluated_at=evaluated_at,
     )
+    if bot_root and bot_root.get("step") == 4:
+        bot_root.update(provenance)
+    bot_root_step = (
+        bot_root.get("step")
+        if isinstance(bot_root, dict) and isinstance(bot_root.get("step"), int)
+        else None
+    )
+
+    # A MANUAL new-entry request never inherits a BOT-only strategy blocker.
+    manual_blocking_stage = blocking_stage
+    if (
+        manual_authority
+        and manual_blocking_stage
+        and manual_blocking_stage.upper() in _BOT_CYCLE_ONLY_BLOCKING_STAGES
+    ):
+        manual_blocking_stage = None
+    root = _root_blocker(
+        bot_running=bot_running,
+        blocking_stage=manual_blocking_stage,
+        blocking_reason=decision.get("blockingReason"),
+        entry_readiness=entry_readiness,
+        close_state=close_state,
+        evaluated_at=evaluated_at,
+    )
     if root and root.get("step") == 4:
         root.update(provenance)
+    if manual_authority and root is None and bot_running:
+        emergency = _clean_str(ctx.get("emergencyState"))
+        if emergency is not None and emergency.upper() != "READY":
+            root = {
+                "step": 7,
+                "reasonCode": "EMERGENCY_STOP_ACTIVE",
+                "reasonText": "Governance blocks new entry while Emergency Stop is active.",
+                "blockerType": BlockerType.AUTHORITY,
+                "source": "status.emergencyState",
+                "evaluatedAt": evaluated_at,
+            }
+    if (
+        manual_authority
+        and root is None
+        and manual_mm_authority is not None
+        and manual_mm_state in {"BLOCK", "UNKNOWN"}
+    ):
+        reason = (
+            _clean_str(manual_mm_authority.get("reason"))
+            or ("MANUAL_MM_AUTHORITY_UNAVAILABLE" if manual_mm_state == "UNKNOWN"
+                else "MANUAL_MM_BLOCKED")
+        )
+        root = {
+            "step": 6,
+            "reasonCode": reason,
+            "reasonText": (
+                "Money Management does not allow the manual entry."
+                if manual_mm_state == "BLOCK"
+                else "Canonical Money Management authority is unavailable; "
+                "manual entry remains fail-closed."
+            ),
+            "blockerType": BlockerType.PARAMETER
+            if manual_mm_state == "BLOCK" else BlockerType.UNKNOWN,
+            "source": "money-management.execution-entry-preview",
+            "evaluatedAt": evaluated_at,
+        }
     root_step = (
         root.get("step")
         if isinstance(root, dict) and isinstance(root.get("step"), int)
@@ -1348,6 +1554,8 @@ def build_trading_cycle_diagnostics(
         cycle_state = "BLOCKED"
     elif _mapping(stages.get("execution")).get("positionState") == "OPEN":
         cycle_state = "POSITION_OPEN"
+    elif manual_authority:
+        cycle_state = "MANUAL_ON_DEMAND"
     else:
         cycle_state = "RUNNING"
 
@@ -1384,8 +1592,9 @@ def build_trading_cycle_diagnostics(
             dependency_state = f"WAITING_FOR_STEP_{root_step}"
             root_blocker_step = root_step
 
-        elif (bot_running and root_step is None and strategy_blocked
-              and not current_evaluation and current_index == 4 and index > 4):
+        elif (not manual_authority and bot_running and root_step is None
+              and strategy_blocked and not current_evaluation
+              and current_index == 4 and index > 4):
             # Preserve the existing entry dependency without promoting the
             # retained suppression reason to a current root blocker.
             effective = StepStatus.WAITING
@@ -1431,6 +1640,146 @@ def build_trading_cycle_diagnostics(
                         "evaluation": _NOT_AVAILABLE,
                         "strategyLoop": runtime_state["status"],
                     }
+
+        manual_entry_state = None
+        if manual_authority:
+            if index in (4, 5):
+                bot_cycle_view = {
+                    "status": effective,
+                    "current": details.get("current"),
+                    "reasonCode": details.get("reasonCode"),
+                    "reasonText": details.get("reasonText"),
+                    "comparison": details.get("comparison"),
+                    "blockerType": _classify_blocker_type(
+                        details.get("blockerType")
+                    ),
+                }
+                manual_entry_state = "BYPASSED"
+                effective = StepStatus.BYPASSED
+                dependency_state = None
+                root_blocker_step = None
+                details = {
+                    **details,
+                    "status": effective,
+                    "current": "NOT_REQUIRED",
+                    "required": "HUMAN_ENTRY_DECISION",
+                    "comparison": "BYPASSED",
+                    "reasonCode": "MANUAL_ENTRY_AUTHORITY",
+                    "reasonText": (
+                        "Manual Control Authority - the human BUY/SELL is the "
+                        "entry decision; this BOT strategy step is not required."
+                    ),
+                    "blockerType": BlockerType.NONE,
+                    "actionable": Actionable.NO,
+                    "nextCondition": "MANUAL_ENTRY_REQUEST",
+                    "source": "controlAuthority=MANUAL",
+                    "extra": {
+                        **dict(details.get("extra") or {}),
+                        "botCycle": bot_cycle_view,
+                    },
+                }
+            elif index in _MANUAL_ON_DEMAND_STEPS:
+                bot_cycle_view = {
+                    "status": effective,
+                    "current": details.get("current"),
+                    "reasonCode": details.get("reasonCode"),
+                    "reasonText": details.get("reasonText"),
+                    "comparison": details.get("comparison"),
+                    "blockerType": _classify_blocker_type(
+                        details.get("blockerType")
+                    ),
+                }
+                if root_step is not None and index == root_step:
+                    manual_entry_state = "BLOCKED"
+                    details = {
+                        **details,
+                        "status": StepStatus.BLOCKED,
+                        "current": root.get("reasonCode"),
+                        "required": {
+                            6: "MONEY_MANAGEMENT_ALLOW",
+                            7: "GOVERNANCE_ALLOWED",
+                            8: "HUMAN_BUY_SELL_REQUEST",
+                        }[index],
+                        "comparison": "BLOCK",
+                        "reasonCode": root.get("reasonCode"),
+                        "reasonText": root.get("reasonText"),
+                        "blockerType": root.get("blockerType"),
+                        "actionable": _actionable_for(root.get("blockerType")),
+                        "nextCondition": {
+                            6: "RISK_APPROVED",
+                            7: "GOVERNANCE_APPROVED",
+                            8: "ORDER_ACKNOWLEDGED",
+                        }[index],
+                        "source": root.get("source"),
+                        "extra": {
+                            **dict(details.get("extra") or {}),
+                            "botCycle": bot_cycle_view,
+                        },
+                    }
+                elif root_step is None or root_step > index:
+                    if index == 6 and manual_mm_state == "ALLOW":
+                        manual_entry_state = "ALLOW"
+                        reason_code = "MANUAL_MM_AUTHORITY_ALLOW"
+                        reason_text = (
+                            "Canonical Money Management authority allows the "
+                            "manual entry; nothing is submitted until the "
+                            "human BUY/SELL request."
+                        )
+                        current = "ALLOW"
+                    else:
+                        manual_entry_state = (
+                            "READY_ON_DEMAND" if index == 6
+                            else "WAITING_FOR_MANUAL_REQUEST"
+                        )
+                        reason_code = {
+                            6: "MANUAL_MM_READY_ON_DEMAND",
+                            7: "MANUAL_GOVERNANCE_WAITING_FOR_REQUEST",
+                            8: "MANUAL_EXECUTION_WAITING_FOR_REQUEST",
+                        }[index]
+                        reason_text = {
+                            6: "Money Management is evaluated when a human "
+                               "BUY/SELL request is submitted. No manual "
+                               "request is pending.",
+                            7: "Governance is evaluated when a human BUY/SELL "
+                               "request is submitted. No manual request is "
+                               "pending.",
+                            8: "Execution waits for a human BUY/SELL request. "
+                               "No manual order has been submitted.",
+                        }[index]
+                        current = "NOT_REQUESTED"
+                    effective = StepStatus.WAITING
+                    dependency_state = None
+                    root_blocker_step = None
+                    details = {
+                        **details,
+                        "status": effective,
+                        "current": current,
+                        "required": {
+                            6: "MONEY_MANAGEMENT_ALLOW",
+                            7: "GOVERNANCE_ALLOWED",
+                            8: "HUMAN_BUY_SELL_REQUEST",
+                        }[index],
+                        "comparison": "WAITING",
+                        "reasonCode": reason_code,
+                        "reasonText": reason_text,
+                        "blockerType": BlockerType.NONE,
+                        "actionable": Actionable.NO,
+                        "nextCondition": {
+                            6: "RISK_APPROVED",
+                            7: "GOVERNANCE_APPROVED",
+                            8: "ORDER_ACKNOWLEDGED",
+                        }[index],
+                        "source": "controlAuthority=MANUAL",
+                        "extra": {
+                            **dict(details.get("extra") or {}),
+                            "botCycle": bot_cycle_view,
+                        },
+                    }
+                else:
+                    manual_entry_state = "WAITING_FOR_SHARED_PREREQUISITE"
+            else:
+                manual_entry_state = MANUAL_STEP_RELEVANCE[index]
+
         source_timestamp = (provenance["evaluatedAt"] if strategy_derived
                             else decision.get("timestamp"))
         freshness = _freshness(evaluated_at, source_timestamp)
@@ -1456,6 +1805,9 @@ def build_trading_cycle_diagnostics(
             "freshness": freshness,
             "dependencyState": dependency_state,
             "rootBlockerStep": root_blocker_step,
+            "manualEntryRelevance": MANUAL_STEP_RELEVANCE[index],
+            "blocksManualEntry": _blocks_manual_entry(index),
+            "manualEntryState": manual_entry_state,
         }
         if strategy_derived:
             step.update(provenance)
@@ -1466,6 +1818,51 @@ def build_trading_cycle_diagnostics(
             step["extra"] = deepcopy(details["extra"])
         steps.append(step)
 
+    manual_entry = None
+    if manual_authority:
+        position_open = (
+            _mapping(stages.get("execution")).get("positionState") == "OPEN"
+        )
+        if not bot_running:
+            manual_state = "RUNTIME_NOT_RUNNING"
+        elif root_step is not None:
+            manual_state = "BLOCKED"
+        elif position_open:
+            manual_state = "POSITION_OPEN"
+        elif current_index == 14:
+            manual_state = "NO_NEW_ENTRY_REQUIRED"
+        else:
+            manual_state = "READY_ON_DEMAND"
+
+        if manual_mm_authority is not None:
+            manual_mm_projection = manual_mm_state
+        else:
+            manual_mm_projection = "READY_ON_DEMAND"
+
+        manual_entry = {
+            "state": manual_state,
+            "entryPath": list(MANUAL_ENTRY_PATH),
+            "entryPathLabel": (
+                "HUMAN BUY/SELL -> MONEY MANAGEMENT -> GOVERNANCE -> EXECUTION"
+            ),
+            "strategyCycleRequired": False,
+            "microEdgeStrategyRequired": False,
+            "aiDecisionRequired": False,
+            "sharedBlockerStep": root_step,
+            "moneyManagement": (
+                "BLOCKED" if root_step == 6
+                else manual_mm_projection
+            ),
+            "governance": (
+                "BLOCKED" if root_step == 7
+                else "WAITING_FOR_MANUAL_REQUEST"
+            ),
+            "execution": (
+                "BLOCKED" if root_step == 8
+                else "WAITING_FOR_MANUAL_REQUEST"
+            ),
+        }
+
     return {
         "schemaVersion": SCHEMA_VERSION,
         "source": SOURCE,
@@ -1474,8 +1871,23 @@ def build_trading_cycle_diagnostics(
         "diagnosticsGeneratedAt": evaluated_at,
         "evaluationProvenance": provenance,
         "runtimeState": deepcopy(runtime_state),
+        "controlAuthority": resolved_authority,
         "cycleState": cycle_state,
         "rootBlocker": deepcopy(root),
         "rootBlockerStep": root_step,
+        "manualEntry": deepcopy(manual_entry),
+        "botStrategyCycle": {
+            "cycleState": "BOT_STOPPED" if not bot_running else (
+                "CLOSE_CONFIRMED" if current_index == 14 else (
+                    "BLOCKED" if bot_root is not None else (
+                        "POSITION_OPEN"
+                        if _mapping(stages.get("execution")).get("positionState")
+                        == "OPEN" else "RUNNING"
+                    )
+                )
+            ),
+            "rootBlocker": deepcopy(bot_root),
+            "rootBlockerStep": bot_root_step,
+        },
         "steps": steps,
     }
