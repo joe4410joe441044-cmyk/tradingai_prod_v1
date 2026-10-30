@@ -1194,6 +1194,61 @@ class ExecutionEngine:
             or str(self.config.get("mode", "") or "").strip().upper() == "LIVE"
         )
 
+    def _sizing_contract_rules(self):
+        """Contract metadata installed by the canonical sizing authority.
+
+        The cache is written immediately before the entry commit, so position
+        accounting never needs a redundant network read.
+        """
+        cached = self._sizing_contract_cache
+        if (
+            isinstance(cached, tuple)
+            and len(cached) >= 3
+            and cached[0] == self.symbol
+            and isinstance(cached[2], dict)
+        ):
+            return cached[2]
+
+        provider = self.sizing_contract_provider
+        if not callable(provider):
+            return None
+
+        try:
+            rules = provider(self.symbol)
+        except Exception:
+            return None
+
+        if not isinstance(rules, dict):
+            return None
+        self._sizing_contract_cache = (self.symbol, time.time(), rules)
+        return rules
+
+    def _contract_rules_for_position(self):
+        """Canonical contract metadata for the PAPER position being opened.
+
+        When a PAPER runtime carries an exchange adapter, that adapter's
+        ``get_symbol_rules`` is the contract authority.  Otherwise the sizing
+        authority cache/provider is reused.  There is no fabricated fallback.
+        """
+        provider = (
+            getattr(self.exchange, "get_symbol_rules", None)
+            if self.exchange is not None
+            else None
+        )
+        if callable(provider):
+            try:
+                rules = provider(self.symbol)
+            except Exception:
+                rules = None
+            if isinstance(rules, dict):
+                return rules
+        return self._sizing_contract_rules()
+
+    def _paper_contract_multiplier(self):
+        """Legacy PAPER multiplier fallback from the sizing authority only."""
+        rules = self._sizing_contract_rules() or {}
+        return _positive_finite(rules.get("multiplier"))
+
     def _position_multiplier(self, position):
         """Contract multiplier for PnL/size. LIVE: authoritative or ``None``."""
 
@@ -1207,8 +1262,8 @@ class ExecutionEngine:
         if self._is_live_execution():
             return None
 
-        # PAPER positions always carry a multiplier; legacy default retained.
-        return 0.001
+        # PAPER: derive from canonical contract metadata, never a fixed default.
+        return self._paper_contract_multiplier()
 
     @staticmethod
     def _position_protection_levels(position):
@@ -2774,6 +2829,19 @@ class ExecutionEngine:
 
             if self.mode == "paper":
 
+                # Contract count authority: the same canonical symbol/contract
+                # metadata that sized this entry.  A missing multiplier fails
+                # closed before any PAPER order/fill is created; never fall
+                # back to a fabricated contract size.
+                rules = self._contract_rules_for_position()
+                paper_multiplier = _positive_finite(
+                    (rules or {}).get("multiplier")
+                )
+                if paper_multiplier is None:
+                    return self._entry_rejection(
+                        "PAPER_CONTRACT_MULTIPLIER_UNAVAILABLE"
+                    )
+
                 raw_res = place_order_safe(
                     self.portfolio,
                     order
@@ -2960,20 +3028,7 @@ class ExecutionEngine:
                     **source_identity,
                 })
 
-                rules = (
-                    self.exchange.get_symbol_rules(
-                        self.symbol
-                    )
-                    if self.exchange
-                    else {
-                        "multiplier": 0.001
-                    }
-                )
-
-                multiplier = rules.get(
-                    "multiplier",
-                    0.001
-                )
+                multiplier = paper_multiplier
 
                 contracts = qty / multiplier
 
