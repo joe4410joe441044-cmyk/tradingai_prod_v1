@@ -71,6 +71,10 @@ def paper_engine(price=100.0):
         "tp_percent": 2,
     })
     engine.set_execution_entry_guard(allow_entry)
+    # Production PAPER composition always installs the canonical contract
+    # metadata authority; positions must never fabricate a contract size.
+    from sizing_support import install_sizing
+    install_sizing(engine)
     engine.start()
     engine.on_price(engine.symbol, price)
     return engine, manager, portfolio
