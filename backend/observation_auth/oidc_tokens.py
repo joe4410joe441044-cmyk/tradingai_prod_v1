@@ -60,7 +60,7 @@ def verify_id_token(token, *, keys, issuer, audience, nonce, now, skew):
         header = json.loads(_b64url(header_b))
     except (ValueError, json.JSONDecodeError, TypeError):
         return 'INVALID_TOKEN'
-    if not isinstance(header, dict) or header.get('alg') != 'RS256':
+    if not isinstance(header, dict) or header.get('alg') != 'RS256' or 'crit' in header:
         return 'ALGORITHM_REJECTED'
     kid = header.get('kid')
     if not isinstance(kid, str) or not kid:
@@ -84,12 +84,23 @@ def verify_id_token(token, *, keys, issuer, audience, nonce, now, skew):
         )
     except InvalidSignature:
         return 'INVALID_SIGNATURE'
+    except Exception:
+        return 'INVALID_SIGNATURE'
     if payload.get('iss') != issuer:
         return 'WRONG_ISSUER'
     aud = payload.get('aud')
-    audiences = aud if isinstance(aud, list) else [aud]
-    if audience not in audiences:
+    if isinstance(aud, str):
+        audiences = [aud]
+    elif isinstance(aud, list) and len(aud) == 1 and isinstance(aud[0], str):
+        audiences = aud
+    else:
         return 'WRONG_AUDIENCE'
+    if audiences != [audience]:
+        return 'WRONG_AUDIENCE'
+    if 'azp' in payload:
+        azp = payload.get('azp')
+        if not isinstance(azp, str) or azp != audience:
+            return 'WRONG_AUTHORIZED_PARTY'
     exp = payload.get('exp')
     iat = payload.get('iat')
     if type(exp) is not int or type(iat) is not int or type(now) is not int:
@@ -104,7 +115,11 @@ def verify_id_token(token, *, keys, issuer, audience, nonce, now, skew):
     if len(got) != len(nonce) or not hmac.compare_digest(got, nonce):
         return 'NONCE_MISMATCH'
     subject = payload.get('sub')
-    if not isinstance(subject, str) or not subject:
+    if (
+        not isinstance(subject, str)
+        or not 1 <= len(subject) <= 255
+        or any(ord(ch) < 33 or ord(ch) > 126 for ch in subject)
+    ):
         return 'MISSING_SUBJECT'
     return {'subject': subject}
 

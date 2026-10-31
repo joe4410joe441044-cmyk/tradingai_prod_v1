@@ -116,6 +116,7 @@ def _config(**overrides):
         'issuer': 'https://accounts.google.com',
         'client_id': 'example-client.apps.googleusercontent.com',
         'redirect_uri': REDIRECT,
+        'client_secret': 'c' * 32,
         'session_secret': 'o' * 32,
         'secure_cookie': False,
         'insecure_redirect_allowed': True,
@@ -198,7 +199,7 @@ def test_f11d14_01_router_is_mounted_on_the_application():
     assert '/api/observation/auth/oidc/status' in paths
     assert '/api/observation/auth/oidc/logout' in paths
     source = open('backend/main.py', encoding='utf-8').read()
-    assert 'mount_observation_oidc(app)' in source
+    assert 'mount_observation_oidc(app, load_observation_oidc_settings().config)' in source
 
 
 def test_f11d14_02_feature_flag_off_rejects_the_flow_without_secrets():

@@ -73,7 +73,9 @@ def test_f11d15_06_default_config_stays_off_without_a_secret():
         'backend/observation_auth/observation_oidc.sample.json', encoding='utf-8'))
     assert sample['enabled'] is False
     assert 'client_secret' not in sample
-    denied = ObservationOidcConfig({'enabled': True, 'client_secret': 'x'})
+    idle = ObservationOidcConfig({'enabled': False, 'client_secret': 'x' * 32})
+    assert idle.disabled_reason() == 'FEATURE_DISABLED'
+    denied = ObservationOidcConfig({'enabled': True, 'password': 'x' * 32})
     assert denied.disabled_reason() == 'SECRET_CONFIG_REJECTED'
 
 

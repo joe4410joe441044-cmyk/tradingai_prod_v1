@@ -88,6 +88,7 @@ def _config(**overrides):
         'issuer': 'https://accounts.google.com',
         'client_id': 'example-client.apps.googleusercontent.com',
         'redirect_uri': REDIRECT,
+        'client_secret': 'c' * 32,
         'session_secret': 'o' * 32,
         'secure_cookie': False,
         'insecure_redirect_allowed': True,
@@ -495,9 +496,16 @@ def test_f11d13_30_oidc_modules_do_not_call_the_exchange_or_google():
         assert '/etc/tradingai' not in source
 
 
-def test_f11d13_31_secret_configuration_is_rejected():
-    app, _exchanger, _clock = _app(_config(client_secret='not-stored'))
-    response = TestClient(app).get('/api/observation/auth/oidc/start')
-    assert response.status_code == 403
-    assert response.json()['reason'] == 'SECRET_CONFIG_REJECTED'
-    assert 'not-stored' not in response.text
+def test_f11d13_31_secret_configuration_is_not_disclosed():
+    secret = 'c' * 32
+    app, _exchanger, _clock = _app(_config(client_secret=secret))
+    response = TestClient(app).get(
+        '/api/observation/auth/oidc/start', follow_redirects=False)
+    assert response.status_code == 302
+    assert secret not in response.headers['location']
+    assert secret not in response.text
+    denied_app, _exchanger, _clock = _app(_config(password='not-stored-value!!'))
+    denied = TestClient(denied_app).get('/api/observation/auth/oidc/start')
+    assert denied.status_code == 403
+    assert denied.json()['reason'] == 'SECRET_CONFIG_REJECTED'
+    assert 'not-stored' not in denied.text

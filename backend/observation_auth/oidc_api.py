@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from backend.observation_auth.oidc_config import AUTHORIZATION_ENDPOINT, ObservationOidcConfig
+from backend.observation_auth.oidc_exchange import TokenExchangeResult
 from backend.observation_auth.oidc_tokens import (
     ObservationSessionStore, TransactionStore, allowlist_decision, pkce_pair,
     token_kid, verify_id_token)
@@ -108,7 +109,11 @@ def create_observation_oidc_router(
         if isinstance(consumed, str):
             return deny(consumed)
         issued = exchanger.exchange(code, consumed['verifier'], config.redirect_uri)
-        if isinstance(issued, dict):
+        if isinstance(issued, TokenExchangeResult):
+            if not issued.ok:
+                return deny(issued.reason or 'TOKEN_EXCHANGE_FAILED')
+            issued = issued.id_token
+        elif isinstance(issued, dict):
             issued = issued.get('id_token')
         if not isinstance(issued, str) or not issued:
             return deny('TOKEN_EXCHANGE_FAILED')
@@ -181,7 +186,7 @@ def observation_session_authorizes_trading(_cookie=None, **_ignored):
     return False
 
 
-def stage_b_execution_gate():
+def stage_b_execution_gate(*_args, **_ignored):
     """Stage B stays closed inside the OIDC release.
 
     This does not import the KuCoin Stage B adapter and it does not open an
