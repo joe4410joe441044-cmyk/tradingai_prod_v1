@@ -1020,6 +1020,15 @@ from backend.observation_auth.oidc_mount import mount_observation_oidc
 
 mount_observation_oidc(app)
 
+# ------------------------------------------------------------
+# AI CONTEXT
+# Read-only operator routes. Registration does not start runtime.
+# ------------------------------------------------------------
+
+from backend.context.api_router import context_router
+
+app.include_router(context_router)
+
 # ============================================================
 # ROOT
 # ============================================================

@@ -229,9 +229,13 @@ SYMBOL_AUTHORITY_UNAVAILABLE = "SYMBOL_AUTHORITY_UNAVAILABLE"
 
 class BotManager:
 
+    _publication_init_lock = threading.Lock()
+
     def __init__(self, saved_mode_path=None, configured_symbol_path=None):
 
         self.engine = None
+        self._context_publication_lock = threading.Lock()
+        self._context_publication = None
 
         # Canonical PAPER parameter authority resolver.  Lazily created so the
         # import cost and the runtime store probe happen only for PAPER.  LIVE
@@ -336,6 +340,7 @@ class BotManager:
         # alias backed by this same value; it is not separately stored.
         self._active_symbol = None
         self.selection_mode = "MANUAL"
+        self._note_selection_determined()
         self.auto_market_selection_observation = None
         self.production_ams_mm_config_provider = None
         self.money_management_config_provider = None
@@ -872,13 +877,13 @@ class BotManager:
                 != self.account_snapshot_generation
             ):
                 snapshot["generation"] = self.account_snapshot_generation
-                self.real_account_snapshot = snapshot
+                self._assign_real_account_snapshot(snapshot)
             return self.real_account_snapshot
 
         self.account_snapshot_generation += 1
         self.account_read_client = None
         self.account_read_client_exchange = None
-        self.real_account_snapshot = (
+        self._assign_real_account_snapshot(
             self._empty_real_account_snapshot(
                 normalized_exchange,
                 self.account_snapshot_generation,
@@ -961,7 +966,7 @@ class BotManager:
                 or "STALE_ACCOUNT_DATA"
             )
 
-        self.real_account_snapshot = snapshot
+        self._assign_real_account_snapshot(snapshot)
 
         return snapshot
 
@@ -1021,7 +1026,7 @@ class BotManager:
             "loading": True,
             "lastAttempt": now,
         })
-        self.real_account_snapshot = loading_snapshot
+        self._assign_real_account_snapshot(loading_snapshot)
 
         def commit(next_snapshot):
             current_exchange = self._normalize_account_exchange()
@@ -1029,7 +1034,7 @@ class BotManager:
                 generation == self.account_snapshot_generation
                 and exchange == current_exchange
             ):
-                self.real_account_snapshot = next_snapshot
+                self._assign_real_account_snapshot(next_snapshot)
                 return next_snapshot
 
             stale_snapshot = dict(next_snapshot)
@@ -1672,6 +1677,17 @@ class BotManager:
             self.paper_account_state = state
             self.account_snapshot = runtime_snapshot
             self.paper_account_runtime_snapshot = runtime_snapshot
+            if (
+                self._paper_snapshot_mm_projection(runtime_snapshot)
+                != self._paper_snapshot_mm_projection(snapshot)
+            ):
+                self._invalidate_mm_observation_evidence(
+                    "PAPER_CAPITAL_RESET"
+                )
+            self._publish_context_snapshot(
+                paper_account=runtime_snapshot,
+                update_paper=True,
+            )
             self._observe_money_management_runtime_metrics(
                 before=snapshot,
                 event_type="PAPER_CAPITAL_RESET",
@@ -3386,6 +3402,11 @@ class BotManager:
             **context,
         )
         self.latest_runtime_result = result
+        self._publish_context_snapshot(
+            runtime_result=result,
+            update_runtime=True,
+            update_paper=True,
+        )
 
         if isinstance(result, dict):
             result["runtimeSnapshotAuthority"] = {
@@ -3823,6 +3844,11 @@ class BotManager:
                     request_id=request_id,
                 )
 
+            if mode == "paper":
+                self._invalidate_mm_observation_evidence(
+                    "PAPER_MANUAL_ENTRY"
+                )
+
             return {
                 "success": True,
                 "denied": False,
@@ -3983,6 +4009,11 @@ class BotManager:
         event_key = (
             f"{self.runtime_instance_id}:"
             f"{self.session_id}:MANUAL_CLOSE:{request_id}"
+        )
+        self._invalidate_mm_observation_evidence(
+            "PAPER_MANUAL_CLOSE"
+            if mode == "paper"
+            else "LIVE_MANUAL_CLOSE"
         )
         self._finalize_manual_close_money_management(
             before, event_key
@@ -4518,6 +4549,39 @@ class BotManager:
             return self._arm_live_order_entry()
         return self._disarm_live_order_entry()
 
+    def _note_selection_determined(self):
+        """Record the clock of a selection assignment that already happened."""
+
+        self.selection_determined_at = (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+
+    def _remember_execution_authority(self, result):
+        """Keep the authority result this call already returned.
+
+        The cache is observational. It does not arm, disarm, or reread config.
+        """
+
+        if isinstance(result, dict):
+            fragment = {}
+            for source, target in (
+                ("executionEntryAllowed", "entryAllowed"),
+                ("liveOrderEntryAllowed", "liveOrderAllowed"),
+                ("realOrderAllowed", "realOrderAllowed"),
+            ):
+                value = result.get(source)
+                if type(value) is bool:
+                    fragment[target] = value
+            reason = result.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                fragment["rootBlocker"] = reason.strip()
+            if fragment:
+                fragment["producerObservedAt"] = (
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                )
+                self.execution_authority_cache = fragment
+        return result
+
     def _arm_live_order_entry(self):
 
         selected_mode = str(
@@ -4561,7 +4625,7 @@ class BotManager:
         # gate; an unknown or unsafe pending-order position authority fails
         # closed here.
         if reasons:
-            return {
+            return self._remember_execution_authority({
                 "success": False,
                 "armed": False,
                 "liveOrderEntryAllowed": False,
@@ -4569,13 +4633,13 @@ class BotManager:
                 "executionEntryAllowed": False,
                 "reason": reasons[0],
                 "blockReasons": reasons,
-            }
+            })
 
         # Engine consumes the arming and re-asserts its full readiness netting
         # (exchange, credentials, balance/position sync, emergency).
         arming = self.engine.set_live_order_entry_authority(True)
         if arming.get("success") is not True:
-            return {
+            return self._remember_execution_authority({
                 "success": False,
                 "armed": False,
                 "liveOrderEntryAllowed": False,
@@ -4583,21 +4647,21 @@ class BotManager:
                 "executionEntryAllowed": False,
                 "reason": arming.get("reason") or "LIVE_ARM_PREFLIGHT_FAILED",
                 "blockReasons": arming.get("blockReasons") or [],
-            }
+            })
 
         # Propagate for status / observability (manager copy).
         self.config["liveOrderEntryAllowed"] = True
         self.config["realOrderAllowed"] = True
         self.config["executionEntryAllowed"] = True
 
-        return {
+        return self._remember_execution_authority({
             "success": True,
             "armed": True,
             "liveOrderEntryAllowed": True,
             "realOrderAllowed": True,
             "executionEntryAllowed": True,
             "reason": "LIVE_ORDER_ENTRY_ARMED",
-        }
+        })
 
     def _disarm_live_order_entry(self):
 
@@ -4611,14 +4675,14 @@ class BotManager:
         self.config["realOrderAllowed"] = False
         self.config["executionEntryAllowed"] = False
 
-        return {
+        return self._remember_execution_authority({
             "success": True,
             "armed": False,
             "liveOrderEntryAllowed": False,
             "realOrderAllowed": False,
             "executionEntryAllowed": False,
             "reason": "LIVE_ORDER_ENTRY_DISARMED",
-        }
+        })
 
     def _recheck_stale_stopped_paper_start_authority(
         self,
@@ -4732,12 +4796,15 @@ class BotManager:
             if value is not None and str(value).strip()
             else None
         )
+        previous = getattr(self, "_active_symbol", None)
         if (
             getattr(self, "_running", False)
-            and normalized != getattr(self, "_active_symbol", None)
+            and normalized != previous
         ):
             raise RuntimeError("RUNNING_SYMBOL_SWITCH_UNSUPPORTED")
         self._active_symbol = normalized
+        if normalized != previous:
+            self._note_selection_determined()
 
     def _set_active_symbol_for_start(self, symbol):
         if self._running:
@@ -5623,6 +5690,7 @@ class BotManager:
         if requested not in ("MANUAL", "AUTO"):
             requested = "MANUAL"
         self.selection_mode = "MANUAL"
+        self._note_selection_determined()
         if requested != "AUTO":
             self.stop_auto_market_selection_runtime()
             return self.selection_mode
@@ -5634,6 +5702,7 @@ class BotManager:
             runtime_state = lifecycle_status.get("amsRuntimeState") or lifecycle_status.get("runtimeState")
             if runtime_state in ("READY", "RUNNING_CYCLE") and lifecycle_status.get("enabled", True) is not False:
                 self.selection_mode = "AUTO"
+                self._note_selection_determined()
                 return self.selection_mode
             reason_codes = lifecycle_status.get("reasonCodes") or []
             reason = reason_codes[0] if isinstance(reason_codes, (list, tuple)) and reason_codes else "AUTO_RUNTIME_AUTHORITY_UNKNOWN"
@@ -5721,6 +5790,7 @@ class BotManager:
                 or not proposed_symbol or new_feed is None or not runtime_id):
             return False
         self._active_symbol = str(proposed_symbol).strip().upper()
+        self._note_selection_determined()
         self.ws = new_feed
         self.active_runtime_id = runtime_id
         self.orderbook_symbol = exchange_symbol
@@ -7055,6 +7125,12 @@ class BotManager:
                         money_management_before = (
                             self._money_management_runtime_event_signature()
                         )
+                        price_before = getattr(
+                            self.engine, "latest_price", None
+                        )
+                        unrealized_before = getattr(
+                            self.engine, "unrealized_pnl", None
+                        )
 
                         self.engine.on_price(
                             self.symbol,
@@ -7068,6 +7144,11 @@ class BotManager:
 
                         money_management_after = (
                             self._money_management_runtime_event_signature()
+                        )
+                        self._invalidate_mm_observation_if_paper_inputs_changed(
+                            money_management_before,
+                            price_before,
+                            unrealized_before,
                         )
 
                         money_management_event = (
@@ -7876,6 +7957,13 @@ class BotManager:
             self.money_management_maintenance_pending_order_count = (
                 1 if observation.pending_order else 0
             )
+            if getattr(observation, "freshness", None) == "FRESH":
+                noted = self._note_mm_observation_completion(
+                    metrics,
+                    input_scope="PAPER_ENGINE_ACCOUNT",
+                )
+                if noted is not None:
+                    metrics = noted
             return metrics
         except (TypeError, ValueError, TimeoutError, ArithmeticError):
             self.money_management_maintenance_pending_order_count = None
@@ -8102,6 +8190,211 @@ class BotManager:
                     )
             return MappingProxyType(mapping)
 
+    @staticmethod
+    def _live_account_input_completeness(snapshot):
+        """Classify one already copied LIVE cache. This does not refresh it."""
+
+        if not isinstance(snapshot, dict):
+            return "UNKNOWN"
+        source = "KUCOIN_FUTURES_READ_ONLY"
+        balance_recorded = snapshot.get("balanceSource") == source
+        position_recorded = snapshot.get("positionSource") == source
+        if balance_recorded and position_recorded:
+            balance_present = any(
+                snapshot.get(name) is not None
+                for name in ("balance", "equity", "availableBalance")
+            )
+            position_present = (
+                "positions" in snapshot and snapshot.get("positions") is not None
+            )
+            if (
+                balance_present
+                and position_present
+                and snapshot.get("authenticated") is True
+                and snapshot.get("stale") is False
+            ):
+                return "COMPLETE"
+            return "UNKNOWN"
+        if balance_recorded:
+            return "BALANCE_ONLY"
+        if position_recorded:
+            return "POSITION_ONLY"
+        if (
+            snapshot.get("balanceSource") is None
+            and snapshot.get("positionSource") is None
+            and (
+                "balanceSource" in snapshot or "positionSource" in snapshot
+            )
+        ):
+            return "NONE"
+        return "UNKNOWN"
+
+    def _copied_live_source_evidence(self, snapshot):
+        """Copy source fields already present on the cache. Do not fill gaps."""
+
+        if not isinstance(snapshot, dict):
+            return {}
+        evidence = {}
+        balance_source = snapshot.get("balanceSource")
+        position_source = snapshot.get("positionSource")
+        if isinstance(balance_source, str) and balance_source:
+            evidence["live_balance_source"] = balance_source
+        if isinstance(position_source, str) and position_source:
+            evidence["live_position_source"] = position_source
+        authenticated = snapshot.get("authenticated")
+        if type(authenticated) is bool:
+            evidence["live_authenticated"] = authenticated
+        stale = snapshot.get("stale")
+        if type(stale) is bool:
+            evidence["live_stale"] = stale
+        last_sync = snapshot.get("lastSync")
+        if (
+            not isinstance(last_sync, bool)
+            and isinstance(last_sync, (int, float))
+            and math.isfinite(last_sync)
+            and last_sync >= 0
+        ):
+            evidence["live_source_observed_at"] = datetime.fromtimestamp(
+                last_sync, tz=timezone.utc
+            )
+        generation = snapshot.get("generation")
+        if type(generation) is int and generation >= 0:
+            evidence["live_snapshot_generation"] = generation
+        return evidence
+
+    def _note_mm_observation_completion(
+        self, metrics, *, input_scope, live_source=None
+    ):
+        """Stamp a completion clock after observe has already returned."""
+
+        if getattr(metrics, "observation_valid", False) is not True:
+            return None
+        revision = getattr(metrics, "revision", None)
+        if type(revision) is not int:
+            return None
+        note = getattr(
+            self.money_management_runtime_metrics,
+            "note_mm_observation_completed",
+            None,
+        )
+        if not callable(note):
+            return None
+        payload = {
+            "completed_at": datetime.now(timezone.utc),
+            "metrics_revision": revision,
+            "input_scope": input_scope,
+            "input_completeness": "COMPLETE",
+        }
+        if input_scope == "LIVE_ACCOUNT_CACHE" and isinstance(live_source, dict):
+            payload.update(live_source)
+        return note(**payload)
+
+    def _invalidate_mm_observation_evidence(self, reason=None):
+        """Withdraw a published completion clock without writing a new one."""
+
+        metrics = getattr(self, "money_management_runtime_metrics", None)
+        invalidate = getattr(
+            metrics, "invalidate_mm_observation_evidence", None
+        )
+        if not callable(invalidate):
+            return None
+        if reason is None:
+            return invalidate()
+        return invalidate(reason)
+
+    def _invalidate_mm_observation_if_paper_inputs_changed(
+        self,
+        before_signature,
+        price_before,
+        unrealized_before,
+    ):
+        """Invalidate after a PAPER engine mutation and before observe."""
+
+        engine = getattr(self, "engine", None)
+        if str(getattr(engine, "mode", "") or "").strip().lower() != "paper":
+            return None
+        after_signature = self._money_management_runtime_event_signature()
+        price_after = getattr(engine, "latest_price", None)
+        unrealized_after = getattr(engine, "unrealized_pnl", None)
+        if (
+            before_signature == after_signature
+            and price_before == price_after
+            and unrealized_before == unrealized_after
+        ):
+            return None
+        return self._invalidate_mm_observation_evidence(
+            "PAPER_INPUT_MUTATION"
+        )
+
+    @staticmethod
+    def _mm_projection_value(value):
+        if isinstance(value, dict):
+            return tuple(
+                sorted(
+                    (
+                        str(key),
+                        BotManager._mm_projection_value(item),
+                    )
+                    for key, item in value.items()
+                )
+            )
+        if isinstance(value, (list, tuple)):
+            return tuple(
+                BotManager._mm_projection_value(item) for item in value
+            )
+        return value
+
+    def _live_account_mm_projection(self, snapshot):
+        if not isinstance(snapshot, dict):
+            return None
+        return (
+            snapshot.get("balance"),
+            snapshot.get("equity"),
+            snapshot.get("availableBalance"),
+            self._mm_projection_value(snapshot.get("positions")),
+            snapshot.get("balanceSource"),
+            snapshot.get("positionSource"),
+            snapshot.get("authenticated"),
+            snapshot.get("stale"),
+        )
+
+    def _assign_real_account_snapshot(self, snapshot):
+        previous_snapshot = getattr(self, "real_account_snapshot", None)
+        previous = self._live_account_mm_projection(previous_snapshot)
+        self.real_account_snapshot = snapshot
+        if self._live_account_mm_projection(snapshot) != previous:
+            self._invalidate_mm_observation_evidence(
+                self._live_cache_change_reason(previous_snapshot, snapshot)
+            )
+        return snapshot
+
+    def _live_cache_change_reason(self, previous_snapshot, snapshot):
+        previous = self._live_account_mm_projection(previous_snapshot)
+        current = self._live_account_mm_projection(snapshot)
+        if previous is None or current is None or previous[:4] != current[:4]:
+            return "LIVE_ACCOUNT_CACHE_MUTATION"
+        if previous[4:6] != current[4:6]:
+            return "LIVE_SOURCE_CHANGED"
+        if previous[6] != current[6]:
+            return "LIVE_AUTHENTICATION_CHANGED"
+        if previous[7] != current[7]:
+            return "LIVE_CACHE_STALE"
+        return "LIVE_ACCOUNT_CACHE_MUTATION"
+
+    @classmethod
+    def _paper_snapshot_mm_projection(cls, snapshot):
+        if not isinstance(snapshot, dict):
+            return None
+        return (
+            snapshot.get("balance"),
+            snapshot.get("equity"),
+            snapshot.get("availableBalance"),
+            snapshot.get("realizedPnl"),
+            snapshot.get("unrealizedPnl"),
+            cls._mm_projection_value(snapshot.get("position")),
+            cls._mm_projection_value(snapshot.get("positions")),
+        )
+
     def _observe_money_management_runtime_metrics(
         self,
         before,
@@ -8114,8 +8407,15 @@ class BotManager:
             return None
 
         mode = str(getattr(engine, "mode", "") or "").strip().lower()
+        live_completeness = None
+        paper_capture_saved = False
         if mode == "paper":
+            previous_account_snapshot = getattr(self, "account_snapshot", None)
             snapshot = self._capture_account_snapshot()
+            paper_capture_saved = (
+                getattr(self, "account_snapshot", None) is snapshot
+                and snapshot is not previous_account_snapshot
+            )
             observed_at = datetime.now(timezone.utc)
             position = (
                 snapshot.get("positions")
@@ -8158,8 +8458,11 @@ class BotManager:
                 and snapshot.get("stale") is not True
                 else "UNAVAILABLE"
             )
+            classifier = getattr(self, "_live_account_input_completeness", None)
+            if callable(classifier):
+                live_completeness = classifier(snapshot)
 
-        return self.money_management_runtime_metrics.observe(
+        observed = self.money_management_runtime_metrics.observe(
             as_of=observed_at,
             session_id=self.session_id,
             balance=snapshot.get("balance"),
@@ -8194,6 +8497,22 @@ class BotManager:
             ),
             source_state=observation_source_state,
         )
+        if getattr(observed, "observation_valid", False) is not True:
+            return observed
+        if mode == "paper" and paper_capture_saved:
+            noted = self._note_mm_observation_completion(
+                observed,
+                input_scope="PAPER_ENGINE_ACCOUNT",
+            )
+            return noted if noted is not None else observed
+        if mode != "paper" and live_completeness == "COMPLETE":
+            noted = self._note_mm_observation_completion(
+                observed,
+                input_scope="LIVE_ACCOUNT_CACHE",
+                live_source=self._copied_live_source_evidence(snapshot),
+            )
+            return noted if noted is not None else observed
+        return observed
 
     def _capture_account_snapshot(self):
 
@@ -13279,6 +13598,10 @@ class BotManager:
                 money_management_after = (
                     self._money_management_runtime_event_signature()
                 )
+                if money_management_before != money_management_after:
+                    self._invalidate_mm_observation_evidence(
+                        "PAPER_EMERGENCY_FLATTEN"
+                    )
                 money_management_event = (
                     self._classify_money_management_runtime_event(
                         money_management_before,
@@ -13448,6 +13771,7 @@ class BotManager:
         # Bot shutdown revokes both selection and transient Live AUTO authority.
         self.stop_auto_market_selection_runtime()
         self.selection_mode = "MANUAL"
+        self._note_selection_determined()
         self.stop_live_auto_control()
 
         self._set_lifecycle_state(
@@ -13509,7 +13833,22 @@ class BotManager:
             # Capture the last backend-owned values before removing the
             # engine.  /api/bot/status and /ws continue serving this snapshot
             # while execution is stopped.
+            mm_stop_mode = (
+                str(getattr(engine, "mode", "") or "").strip().lower()
+                if engine is not None
+                else ""
+            )
+            mm_stop_reason = (
+                "PAPER_RUNTIME_STOP"
+                if mm_stop_mode == "paper"
+                else "LIVE_RUNTIME_STOP"
+                if mm_stop_mode == "live"
+                else None
+            )
+            previous_account_snapshot = self.account_snapshot
             self._capture_account_snapshot()
+            if self.account_snapshot is not previous_account_snapshot:
+                self._invalidate_mm_observation_evidence(mm_stop_reason)
 
             engine_mode = self._normalize_emergency_mode(
                 getattr(engine, "mode", None)
@@ -13648,6 +13987,7 @@ class BotManager:
                 and execution_engine is None
             ):
                 self.engine = None
+                self._invalidate_mm_observation_evidence(mm_stop_reason)
 
             self._running = False
 
@@ -14978,6 +15318,107 @@ class BotManager:
             "available": True,
             "reason": None,
         }
+
+    # =========================
+    # OWNER-PUBLISHED CONTEXT SNAPSHOT
+    # =========================
+
+    def _ensure_context_publication(self):
+
+        if getattr(self, "_context_publication_lock", None) is not None:
+            if getattr(self, "_context_publication", None) is None:
+                from backend.bot_manager.owner_snapshot import (
+                    unavailable_owner_snapshot,
+                )
+                self._context_publication = unavailable_owner_snapshot()
+            return
+        with BotManager._publication_init_lock:
+            if getattr(self, "_context_publication_lock", None) is None:
+                from backend.bot_manager.owner_snapshot import (
+                    unavailable_owner_snapshot,
+                )
+                self._context_publication_lock = threading.Lock()
+                self._context_publication = unavailable_owner_snapshot()
+
+    def _paper_cache_for_publication(self, paper_account, update_paper):
+
+        if not update_paper:
+            return None, False
+        if isinstance(paper_account, dict):
+            return paper_account, True
+        lock = getattr(self, "paper_capital_lock", None)
+        if lock is None or not lock.acquire(blocking=False):
+            return None, False
+        try:
+            cached = getattr(self, "paper_account_runtime_snapshot", None)
+        finally:
+            lock.release()
+        if isinstance(cached, dict):
+            return cached, True
+        return None, False
+
+    def _publish_context_snapshot(
+        self,
+        runtime_result=None,
+        paper_account=None,
+        update_runtime=False,
+        update_paper=False,
+        runtime_domains=None,
+    ):
+        """Store a JSON copy of values the caller already holds.
+
+        The publication lock is taken only after every other lock is released.
+        This method does not refresh an account or evaluate a strategy.
+        Held caches are copied when they already contain a safe fragment.
+        """
+
+        try:
+            from datetime import datetime, timezone
+
+            from backend.bot_manager.owner_snapshot import (
+                held_runtime_domains,
+                merge_owner_snapshot,
+            )
+
+            self._ensure_context_publication()
+            paper_value, paper_flag = self._paper_cache_for_publication(
+                paper_account,
+                update_paper,
+            )
+            domains = held_runtime_domains(self)
+            if isinstance(runtime_domains, dict):
+                domains = dict(domains or {})
+                domains.update(runtime_domains)
+            published_at = datetime.now(timezone.utc).isoformat()
+            with self._context_publication_lock:
+                self._context_publication = merge_owner_snapshot(
+                    self._context_publication,
+                    paper_account=paper_value,
+                    runtime_result=runtime_result,
+                    update_paper=paper_flag,
+                    update_runtime=update_runtime,
+                    published_at=published_at,
+                    runtime_domains=domains,
+                )
+        except Exception:
+            return None
+
+    def export_context_snapshot(self):
+        """Return a defensive copy of the stored publication, or UNAVAILABLE."""
+
+        from backend.context.snapshot_copy import copy_json_snapshot
+        from backend.bot_manager.owner_snapshot import unavailable_owner_snapshot
+
+        self._ensure_context_publication()
+        with self._context_publication_lock:
+            stored = self._context_publication
+            if not isinstance(stored, dict):
+                stored = unavailable_owner_snapshot()
+            try:
+                exported = copy_json_snapshot(stored)
+            except Exception:
+                exported = unavailable_owner_snapshot()
+        return exported
 
     # =========================
     # STATUS

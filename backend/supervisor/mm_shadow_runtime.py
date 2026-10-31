@@ -333,6 +333,7 @@ def evaluate_mm_shadow(
     evaluated_at: datetime,
     *,
     timeout_seconds: float = MM_SHADOW_PROVIDER_TIMEOUT_SECONDS,
+    canonical_context: Mapping | None = None,
 ) -> MMShadowRuntimeResult:
     """Evaluate a snapshot without exposing or acquiring operational capability."""
     context = build_mm_shadow_context(snapshot)
@@ -383,6 +384,14 @@ def evaluate_mm_shadow(
             requestedAt=evaluated_at,
         )
         provider_input = json.loads(request.stable_json())
+        if canonical_context is not None:
+            from backend.context.shared_answer_context import (
+                provider_payload_with_context,
+            )
+
+            provider_input = provider_payload_with_context(
+                provider_input, canonical_context
+            )
         result = provider.generate_structured_output(
             provider_input,
             MMSupervisorAssessment,

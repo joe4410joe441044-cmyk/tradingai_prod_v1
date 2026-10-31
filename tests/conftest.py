@@ -132,6 +132,21 @@ def _isolated_configured_symbol_authority():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_supervisor_held_evaluation_cache():
+    """Keep completed-evaluation memory inside the test that created it."""
+
+    import sys
+
+    module = sys.modules.get("backend.supervisor.held_evaluation_cache")
+    if module is not None:
+        module.reset_holder()
+    yield
+    module = sys.modules.get("backend.supervisor.held_evaluation_cache")
+    if module is not None:
+        module.reset_holder()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_money_management_configuration():
     """Start every test with no committed Production MM configuration."""
 
