@@ -1010,6 +1010,16 @@ app.include_router(
     prefix="/api"
 )
 
+# ------------------------------------------------------------
+# OBSERVATION OIDC
+# Registration is not activation.  The flag stays off until a
+# complete config object is supplied by a future mount caller.
+# ------------------------------------------------------------
+
+from backend.observation_auth.oidc_mount import mount_observation_oidc
+
+mount_observation_oidc(app)
+
 # ============================================================
 # ROOT
 # ============================================================

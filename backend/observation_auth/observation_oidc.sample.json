@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "issuer": "https://accounts.google.com",
+  "client_id": "",
+  "redirect_uri": "",
+  "session_secret": "",
+  "allowlist": [],
+  "jwks_cache_ttl_seconds": 300,
+  "note": "SAMPLE ONLY. Disabled. No client secret. The backend route is /api/observation/auth/oidc/callback. A public redirect URI is not decided here."
+}
