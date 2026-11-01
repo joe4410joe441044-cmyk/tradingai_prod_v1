@@ -24,15 +24,22 @@ function ConfigurationField({
         <div className="mm-configuration-field">
             <label htmlFor={inputId}>{field.label}</label>
             {field.type === "boolean" ? (
-                <input
-                    checked={value === true}
-                    disabled={disabled}
-                    id={inputId}
-                    onChange={(event) => onChange({
-                        [field.key]: event.target.checked,
-                    })}
-                    type="checkbox"
-                />
+                <div className="mm-configuration-boolean">
+                    <input
+                        checked={value === true}
+                        disabled={disabled}
+                        id={inputId}
+                        onChange={(event) => onChange({
+                            [field.key]: event.target.checked,
+                        })}
+                        type="checkbox"
+                    />
+                    {field.key === "smallAccountMinimumContractMode" && (
+                        <span data-testid="small-account-mode-toggle-state">
+                            {value === true ? "ON" : value === false ? "OFF" : "UNKNOWN"}
+                        </span>
+                    )}
+                </div>
             ) : (
                 <div>
                     <input

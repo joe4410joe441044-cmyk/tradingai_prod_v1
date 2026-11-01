@@ -14,6 +14,9 @@ test("configuration card renders accessible string-preserving inputs", async () 
   assert.match(source, /"numeric"/);
   assert.match(source, /"decimal"/);
   assert.match(source, /SMALL_ACCOUNT_CONFIGURATION_SECTION_LABEL/);
+  assert.match(source, /small-account-mode-toggle-state/);
+  assert.match(source, /value === true \? "ON" : value === false \? "OFF" : "UNKNOWN"/);
+  assert.doesNotMatch(source, /botStart|createOrder|LIVE ARM|setLeverage/i);
   assert.match(source, /aria-invalid/);
   assert.match(source, /Reset Draft/);
   assert.match(source, /Save Configuration/);

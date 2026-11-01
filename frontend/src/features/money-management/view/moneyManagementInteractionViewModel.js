@@ -82,7 +82,7 @@ const CORE_CONFIGURATION_FIELDS = Object.freeze([
 const SMALL_ACCOUNT_CONFIGURATION_FIELDS = Object.freeze([
   Object.freeze({
     key: "smallAccountMinimumContractMode",
-    label: "Small Account Minimum Contract Mode",
+    label: "SMALL ACCOUNT MODE",
     section: MONEY_MANAGEMENT_CONFIGURATION_SECTION.SMALL_ACCOUNT,
     type: "boolean",
   }),
