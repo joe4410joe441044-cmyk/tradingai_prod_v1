@@ -1,0 +1,4 @@
+:root { color-scheme: dark; background: #050b13; }
+html, body, #root { margin: 0; min-height: 100%; }
+body { background: radial-gradient(circle at 50% 0%, #10223a, #050b13 42rem); }
+.cc-prop-preview { min-height: 100vh; }

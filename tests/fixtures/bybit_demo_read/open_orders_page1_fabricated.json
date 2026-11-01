@@ -1,0 +1,52 @@
+{
+  "_FIXTURE": "FABRICATED/SYNTHETIC Bybit Demo V5 open-order page 1. Not a real account, key, order or response.",
+  "_SCHEMA_SOURCE": "https://bybit-exchange.github.io/docs/v5/order/open-order",
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "linear",
+    "list": [
+      {
+        "category": "linear",
+        "orderId": "fabricated-order-0001",
+        "orderLinkId": "fabricated-client-0001",
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+        "orderType": "Limit",
+        "orderStatus": "PartiallyFilled",
+        "price": "59000.00",
+        "qty": "0.05",
+        "leavesQty": "0.02",
+        "cumExecQty": "0.03",
+        "cumExecValue": "1770.00",
+        "avgPrice": "59000.00",
+        "reduceOnly": false,
+        "positionIdx": 1,
+        "createdTime": "1767225590000",
+        "updatedTime": "1767225595000"
+      },
+      {
+        "category": "linear",
+        "orderId": "fabricated-order-0002",
+        "orderLinkId": "",
+        "symbol": "ETHUSDT",
+        "side": "Sell",
+        "orderType": "Market",
+        "orderStatus": "New",
+        "price": "0",
+        "qty": "0.20",
+        "leavesQty": "0.20",
+        "cumExecQty": "0",
+        "cumExecValue": "0",
+        "avgPrice": "",
+        "reduceOnly": true,
+        "positionIdx": 0,
+        "createdTime": "1767225592000",
+        "updatedTime": "1767225592000"
+      }
+    ],
+    "nextPageCursor": "fabricated-order-page-2"
+  },
+  "retExtInfo": {},
+  "time": 1767225600000
+}

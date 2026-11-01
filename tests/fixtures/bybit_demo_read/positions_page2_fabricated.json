@@ -1,0 +1,27 @@
+{
+  "_FIXTURE": "FABRICATED/SYNTHETIC Bybit Demo V5 position page 2. Not a real account, key, symbol or response.",
+  "_SCHEMA_SOURCE": "https://bybit-exchange.github.io/docs/v5/position",
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "linear",
+    "list": [
+      {
+        "category": "linear",
+        "symbol": "SOLUSDT",
+        "positionIdx": 2,
+        "side": "Sell",
+        "size": "1.50",
+        "avgPrice": "150.25",
+        "markPrice": "155.00",
+        "positionValue": "232.50",
+        "unrealisedPnl": "-7.125",
+        "leverage": "3",
+        "positionStatus": "Normal"
+      }
+    ],
+    "nextPageCursor": ""
+  },
+  "retExtInfo": {},
+  "time": 1767225601000
+}

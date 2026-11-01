@@ -1,0 +1,40 @@
+{
+  "_FIXTURE": "FABRICATED/SYNTHETIC Bybit Demo V5 wallet-balance response. Not a real account, key, UID or response.",
+  "_SCHEMA_SOURCE": "https://bybit-exchange.github.io/docs/v5/account/wallet-balance",
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "list": [
+      {
+        "accountType": "UNIFIED",
+        "totalEquity": "10250.75",
+        "totalWalletBalance": "10000.00",
+        "totalMarginBalance": "10100.25",
+        "totalAvailableBalance": "9000.50",
+        "totalPerpUPL": "-150.25",
+        "coin": [
+          {
+            "coin": "USDT",
+            "equity": "10050.25",
+            "usdValue": "10050.25",
+            "walletBalance": "10000.00",
+            "locked": "0",
+            "unrealisedPnl": "-150.25",
+            "cumRealisedPnl": "500.00"
+          },
+          {
+            "coin": "BTC",
+            "equity": "0.002",
+            "usdValue": "200.50",
+            "walletBalance": "0.002",
+            "locked": "0",
+            "unrealisedPnl": "0",
+            "cumRealisedPnl": "0"
+          }
+        ]
+      }
+    ]
+  },
+  "retExtInfo": {},
+  "time": 1767225600000
+}

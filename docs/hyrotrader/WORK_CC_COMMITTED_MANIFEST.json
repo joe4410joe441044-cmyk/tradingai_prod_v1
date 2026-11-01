@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "taskId": "CC-2V",
+  "workstream": "HyroTrader PROP Trading",
+  "createdAt": "2026-11-01T18:43:54+09:00",
+  "sourceBaseHead": "95c6122877affac71d58e2eb6c9a53d554788937",
+  "validatedCurrentMainSnapshot": "f344864344b0b99a598f674b3e2e4a367bc9fb25",
+  "visualAcceptance": "PENDING_ENVIRONMENT_ERROR",
+  "selfHashExcluded": true,
+  "totalEntries": 58,
+  "entries": [
+    {
+      "path": "backend/accounts/__init__.py",
+      "role": "backend_source",
+      "sha256": "3994fe5125493bcb4896b85449bec291b107eeb0a87d266f4b60577107834009"
+    },
+    {
+      "path": "backend/accounts/models.py",
+      "role": "backend_source",
+      "sha256": "c0ec9661932d73708a9f162027055ee277a70fdc559f5364152e91d472d39189"
+    },
+    {
+      "path": "backend/accounts/registry_contract.py",
+      "role": "backend_source",
+      "sha256": "d03c9133e486d16d878e4e1002f1ea8e16de070a0d7dbcfbb9a4dca321dfcf8b"
+    },
+    {
+      "path": "backend/accounts/registry_models.py",
+      "role": "backend_source",
+      "sha256": "683a0b9c6589da2da434defce1edc9f8270a700b6502cccb7de77c885f6828da"
+    },
+    {
+      "path": "backend/accounts/registry_store.py",
+      "role": "backend_source",
+      "sha256": "3dec2c7342dfb102bbae9ec7169f0cf9c928739bfaf67bcbe098afe851cd090a"
+    },
+    {
+      "path": "backend/accounts/resolver.py",
+      "role": "backend_source",
+      "sha256": "7b59eb8a9409dcd78d9fa912bd88fd00825fe2bb95143d6b16eded10d9eff3bd"
+    },
+    {
+      "path": "backend/execution/adapter_contracts.py",
+      "role": "backend_source",
+      "sha256": "83685a06447d5a9163bff83837a1bb3a8971a034153d2b0c2d80163713593c03"
+    },
+    {
+      "path": "backend/execution/bybit_demo_http_sender.py",
+      "role": "backend_source",
+      "sha256": "d4f40c5137264e54a7e39f25cf7517d6b0e554c77ebe4d8dce1a1c629e6a503b"
+    },
+    {
+      "path": "backend/execution/bybit_demo_read_adapter.py",
+      "role": "backend_source",
+      "sha256": "2be8c02ea341cbe362a068f31ab12e21f57c717c42156b65de8068192587b495"
+    },
+    {
+      "path": "backend/execution/bybit_key_info.py",
+      "role": "backend_source",
+      "sha256": "dcd9031afef6ff23bc33d5866b8b6807d24686173459b6d975bbe60d172d8170"
+    },
+    {
+      "path": "backend/execution/bybit_server_time.py",
+      "role": "backend_source",
+      "sha256": "6cd0b9ca58ddda57d42da649325016fa58186e6376308c0821674f85b25996fc"
+    },
+    {
+      "path": "backend/execution/bybit_v5_signed_transport.py",
+      "role": "backend_source",
+      "sha256": "9d0fac538506d5f65d02a8e91977bc948d902eaaa0eaa42454ff46add3b23f66"
+    },
+    {
+      "path": "backend/execution/bybit_v5_signing.py",
+      "role": "backend_source",
+      "sha256": "3e1c781b60a5ec6a41a0876d43922b5efeab6c18317967bb218494012717e029"
+    },
+    {
+      "path": "backend/execution/read_only_adapter_contracts.py",
+      "role": "backend_source",
+      "sha256": "0106435c0f4dcfa71880f6e510303054e9ddc227a5b44fc8bdad6bb16e2a5096"
+    },
+    {
+      "path": "backend/execution/read_only_bootstrap.py",
+      "role": "backend_source",
+      "sha256": "4bef00c96e045535922743bc9f827be43e83b881fb0678bcb842dd99b852ea2b"
+    },
+    {
+      "path": "backend/execution/read_only_credential_file_provider.py",
+      "role": "backend_source",
+      "sha256": "51879bdaf78785cfc528c29bdf82102bf885eb76dd8d4dfb317c286c5a5d2e60"
+    },
+    {
+      "path": "backend/execution/read_only_credentials.py",
+      "role": "backend_source",
+      "sha256": "ea55a5ca8effa35482449de37f455bc692180b3df3cd5d44da8050729c78b789"
+    },
+    {
+      "path": "backend/execution/read_only_observations.py",
+      "role": "backend_source",
+      "sha256": "f05d2166ba02c8559a25197ff990d2baf85e5b46200d2178e8e4144f38acb164"
+    },
+    {
+      "path": "backend/execution/read_only_policy.py",
+      "role": "backend_source",
+      "sha256": "e255128b2fcc52ea2cff2c5fd4b8c91e2f208820c65acf192bb83d4028baa515"
+    },
+    {
+      "path": "backend/execution/read_only_transport.py",
+      "role": "backend_source",
+      "sha256": "57f96bb0713c493c067a29d418f013c33b9ab5a3ced5541a0b8fe555fc8f2050"
+    },
+    {
+      "path": "backend/prop_trading/__init__.py",
+      "role": "backend_source",
+      "sha256": "ed3ce81da577051cd920be4431c6049d7393fe4d910fcea8f604857d2fc2ce5d"
+    },
+    {
+      "path": "backend/prop_trading/context_projection.py",
+      "role": "backend_source",
+      "sha256": "63f4922b9cdad33de559f595c71bd789310afb80de3c4f4aca3d607316fbab18"
+    },
+    {
+      "path": "backend/prop_trading/contracts.py",
+      "role": "backend_source",
+      "sha256": "5a19029530a157df89e32844010fadc594b3c06c948237bd289d0acc245c75d9"
+    },
+    {
+      "path": "frontend/prop-accounts-preview/index.html",
+      "role": "frontend_source",
+      "sha256": "368e529bf7c25a1c5d8cd535ad0d612b9ab12f0206e1d9b7a43ac3da70ecb55d"
+    },
+    {
+      "path": "frontend/prop-accounts-preview/main.jsx",
+      "role": "frontend_source",
+      "sha256": "84157c2bedc543a9c6c316be2efbe2fe88d278c0dc6dd1e5cac7679748cd3ff9"
+    },
+    {
+      "path": "frontend/prop-accounts-preview/preview.css",
+      "role": "frontend_source",
+      "sha256": "e7f79addbdd7c13b20d15e65f13a9c4f7e53033764bd63b7ddee8341052bf991"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropAccountsPanel.jsx",
+      "role": "frontend_source",
+      "sha256": "a6768dc584f48fe0c76c2224a6d35a3c3c07f471852a3a733375286af49d0883"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropAccountsPanel.test.js",
+      "role": "frontend_source",
+      "sha256": "613f822b1beda9d2f0d7024223a3848b0d4c98a8660607399e8961544218eb51"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/prop-accounts.css",
+      "role": "frontend_source",
+      "sha256": "cb71b14b892f4207c86d84ade79bd85b57833133906c16edeb8ee708b30d9580"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsFixtures.js",
+      "role": "frontend_source",
+      "sha256": "ed823b23f861f7d11d101728a23c2d7a0498d19613d896373cdbb6e48533b6a8"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsViewModel.js",
+      "role": "frontend_source",
+      "sha256": "de995afe0326c4f664672fb87a5c4aec98830416bab82348fc390b9e549ae2aa"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsViewModel.test.js",
+      "role": "frontend_source",
+      "sha256": "54ef438086adff889c86af4b910d58cebe40482144088eba793f3428400262d1"
+    },
+    {
+      "path": "frontend/vite.prop-accounts-preview.config.js",
+      "role": "frontend_source",
+      "sha256": "9400c47ff26874280f3343f2565ae6a2bcacc0da1e2191fac256e77cb7756935"
+    },
+    {
+      "path": "tests/fixtures/bybit_demo_read/open_orders_page1_fabricated.json",
+      "role": "test_or_fixture",
+      "sha256": "12ea4aabe1347a015679f49374628bb4eaa4bfc75c5d40ecfdeb6e238cad22cb"
+    },
+    {
+      "path": "tests/fixtures/bybit_demo_read/open_orders_page2_fabricated.json",
+      "role": "test_or_fixture",
+      "sha256": "7fedc329a3f87b884fe04ba9c12d85f17794a0317df3866a04e9e5b8db28570a"
+    },
+    {
+      "path": "tests/fixtures/bybit_demo_read/positions_page1_fabricated.json",
+      "role": "test_or_fixture",
+      "sha256": "d59c6261d65a6b8d71ca74b51cfab89f24a7cd8d45969f577b890d3080d76668"
+    },
+    {
+      "path": "tests/fixtures/bybit_demo_read/positions_page2_fabricated.json",
+      "role": "test_or_fixture",
+      "sha256": "3c2585ed4a1c92e7acbcf24a01e673989ff2d7ffbdf1500ea63bbe12c66e7f9d"
+    },
+    {
+      "path": "tests/fixtures/bybit_demo_read/wallet_balance_fabricated.json",
+      "role": "test_or_fixture",
+      "sha256": "5269b024bad99c5875c125ba31ab8906613db9e0909485f31930b34d04a7544b"
+    },
+    {
+      "path": "tests/test_account_identity_contract.py",
+      "role": "test_or_fixture",
+      "sha256": "8a0ac550ec47878d6d6727ed464ad9020e0291e2e64098df38c0412e6935a327"
+    },
+    {
+      "path": "tests/test_account_resolver.py",
+      "role": "test_or_fixture",
+      "sha256": "b95a9d126274996c869e3aa6678d54a01c81a89f6ab643f053d5fad4d6ff40e5"
+    },
+    {
+      "path": "tests/test_bybit_demo_http_sender.py",
+      "role": "test_or_fixture",
+      "sha256": "7f6914c2aef4a861e6f97cd42693aba641c1160f46468370763411f2757770cf"
+    },
+    {
+      "path": "tests/test_bybit_demo_read_adapter.py",
+      "role": "test_or_fixture",
+      "sha256": "c83832dfd14826e4d07dfeb512597f063859a94b4341a2c498958ffac1cdf957"
+    },
+    {
+      "path": "tests/test_bybit_key_info_readiness.py",
+      "role": "test_or_fixture",
+      "sha256": "2c95ab881a8baafbc93a101425dc25a198065ef8c0f47789dd71bef86d623f83"
+    },
+    {
+      "path": "tests/test_bybit_v5_signed_boundary.py",
+      "role": "test_or_fixture",
+      "sha256": "b1e71c9b7b2b55789c2c3a2ab40c9bbdbdc80fa15317684d851428cc6405b4c6"
+    },
+    {
+      "path": "tests/test_cc2m_auth_boundary_regression.py",
+      "role": "test_or_fixture",
+      "sha256": "0bf8e8013f4599fb0f5ab515bcf1285a21be74d6aafc1b38834b7932404b7d4a"
+    },
+    {
+      "path": "tests/test_cc2n_offline_integration.py",
+      "role": "test_or_fixture",
+      "sha256": "5622e182f66a4f117209e6f7e8417e66796c2888f471f1fa02f580f41b07ddca"
+    },
+    {
+      "path": "tests/test_durable_account_registry.py",
+      "role": "test_or_fixture",
+      "sha256": "b4506af62834a4803d6193f89b05549783d04a5063ee36dfaf5a5d108fc56929"
+    },
+    {
+      "path": "tests/test_execution_adapter_contract.py",
+      "role": "test_or_fixture",
+      "sha256": "d1b9c699b5bbc2516758aad3faa1ac9683e394d97cb855dc89ddfef672025887"
+    },
+    {
+      "path": "tests/test_execution_adapter_read_contract.py",
+      "role": "test_or_fixture",
+      "sha256": "4785b99aba9c7e664016160b1ca818a8f6aa338bbc4cdaba14723abf1afb545a"
+    },
+    {
+      "path": "tests/test_prop_context_projection.py",
+      "role": "test_or_fixture",
+      "sha256": "159ecb26628876616038ebf9848119a623ae0b00efe6df74be849f19dab0ba11"
+    },
+    {
+      "path": "tests/test_prop_trading_contracts.py",
+      "role": "test_or_fixture",
+      "sha256": "c65a9da8ded6915aa8ef371146af719c1201a7861b897f6e1fe07fb8a26e3993"
+    },
+    {
+      "path": "tests/test_read_only_adapter_contracts.py",
+      "role": "test_or_fixture",
+      "sha256": "470b86d89c6d100b3fb5bf649103d9e45afd45e0343465bbb18910704cf31942"
+    },
+    {
+      "path": "tests/test_read_only_credential_file_provider.py",
+      "role": "test_or_fixture",
+      "sha256": "47dd5a6f100d18d058df38fd7e9aacde66768bfd4fd97f37c68c8bc169621519"
+    },
+    {
+      "path": "tests/test_read_only_credentials.py",
+      "role": "test_or_fixture",
+      "sha256": "9f28286e9824f9affa5ab7719b2798c4570d7ed801e5ddc0bfcc3beb9543b360"
+    },
+    {
+      "path": "tests/test_registry_contract_fixes.py",
+      "role": "test_or_fixture",
+      "sha256": "f377d754e010e7a958f9d6aeae8bd8237d70392bee50af1c87579eed4fc9ad38"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_STATUS.md",
+      "role": "preservation_document",
+      "sha256": "7bdad993415b825f7b2b6ac46a9acb11223b9d1aca14d6325dc72f5e0a40fd4b"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_ARCHITECTURE.md",
+      "role": "preservation_document",
+      "sha256": "864325126589d6d9dc3b1e1200a6bd2aae4997a685d54d8ea9e7fc51fafbd26c"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_VALIDATION.md",
+      "role": "preservation_document",
+      "sha256": "3e11e7c4e5634efe3dae1416def8934a9cc5f5acfd2450b376366dcbd3a59d78"
+    }
+  ]
+}
