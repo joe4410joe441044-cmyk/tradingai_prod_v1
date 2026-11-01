@@ -13,19 +13,15 @@ import re
 
 from backend.accounts.models import AccountIdentity, AccountType, ensure_account_match
 from .contracts import (
-    Completeness,
     DataQuality,
-    EvaluationState,
-    FreshnessState,
     PropAccountObservation,
     PropRuleDefinition,
     PropRuleEvaluation,
-    VerificationStatus,
 )
 
 
 _SAFE_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_.:-]{0,127}$")
-PROP_ACCOUNT_CONTEXT_SCHEMA_VERSION = "tradingai-prop-account-context/v1"
+PROP_ACCOUNT_CONTEXT_SCHEMA_VERSION = "tradingai-prop-account-context/v2"
 _EVIDENCE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
@@ -112,20 +108,8 @@ class PropAccountContext:
     def availability(self) -> str:
         if self.observation.quality is DataQuality.INVALID:
             return "UNAVAILABLE"
-        if (
-            self.observation.quality is DataQuality.COMPLETE
-            and self.observation.freshness is FreshnessState.FRESH
-            and self.evaluation.overall_state in {EvaluationState.PASS, EvaluationState.BLOCK}
-            and self.rule_definition is not None
-            and self.rule_definition.completeness is Completeness.COMPLETE
-            and self.rule_definition.verification_status is VerificationStatus.VERIFIED
-            and self.rule_definition.effective_from <= self.evaluation.evaluated_at
-            and (
-                self.rule_definition.effective_to is None
-                or self.evaluation.evaluated_at < self.rule_definition.effective_to
-            )
-        ):
-            return "READY"
+        # v2 fails closed until an account-bound Rules Snapshot and evaluation
+        # evidence link are deliberately integrated in a later task.
         return "PARTIAL"
 
     def to_dict(self) -> dict[str, Any]:
@@ -135,6 +119,7 @@ class PropAccountContext:
         return {
             "schemaVersion": PROP_ACCOUNT_CONTEXT_SCHEMA_VERSION,
             "availability": self.availability,
+            "rulesSnapshotStatus": "RULES_SNAPSHOT_REQUIRED",
             "observedAt": observation["observed_at"],
             "account": {
                 "accountId": self.identity.account_id.value,
@@ -173,9 +158,7 @@ class PropAccountContext:
                 "evaluationId": evaluation["evaluation_id"],
                 "ruleSetId": evaluation["rule_set_id"],
                 "ruleSetRevision": evaluation["rule_set_revision"],
-                "evaluationTrust": (
-                    "VERIFIED" if self.availability == "READY" else "UNVERIFIED"
-                ),
+                "evaluationTrust": "UNVERIFIED",
                 "overallState": evaluation["overall_state"],
                 "entryAllowed": evaluation["entry_allowed"],
                 "blockingRuleCodes": evaluation["blocking_rule_codes"],

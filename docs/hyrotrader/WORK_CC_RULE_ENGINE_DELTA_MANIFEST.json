@@ -1,0 +1,83 @@
+{
+  "schema_version": "tradingai-work-cc-rule-engine-delta-manifest/v1",
+  "generated_at": "2026-11-02T06:15:38+09:00",
+  "timezone": "Asia/Tokyo",
+  "task_id": "TRADINGAI-WORK-CC-3G-TEMPORAL-OUTCOME-FIX-AND-PRESERVATION-1",
+  "branch": "feature/hyrotrader-integration",
+  "base_commit": "6c6f0ed29ed016b81b47830a4fc04bf3aaf1a8b4",
+  "scope": "CC-3A through CC-3G cumulative uncommitted Rule Engine, provenance, Complete Bundle, tests, and tracked documentation delta",
+  "hash_algorithm": "sha256",
+  "manifest_self_hash_policy": "This manifest is excluded from its own file hash list.",
+  "exclusions": [
+    "tmp",
+    "cache",
+    "build output",
+    "secrets",
+    "real account data",
+    "WORK_CC_COMMITTED_MANIFEST.json"
+  ],
+  "validation": {
+    "focused_socket_guarded": "11 passed",
+    "final_unique_regression": "256 passed in 7.55s",
+    "official_account_profile_activated": false,
+    "execution_authority_granted": false,
+    "runtime_wired": false,
+    "ui_integrated": false,
+    "bb_integrated": false
+  },
+  "file_count": 13,
+  "files": [
+    {
+      "path": "backend/prop_trading/__init__.py",
+      "sha256": "e5b9e2e01184365ebb6b54208e7f9a3ad1261221707ee9ccf25179f8098cf32b"
+    },
+    {
+      "path": "backend/prop_trading/context_projection.py",
+      "sha256": "ae7cbe6c221fc33fca32b10914b69ecee9e48c54c974a9678500f0a8d41adcae"
+    },
+    {
+      "path": "backend/prop_trading/complete_evaluation.py",
+      "sha256": "a97accd8d0c1cb5cfee44182d6f5413ec1fa2d391d9a37523ba2c19c6bd78a54"
+    },
+    {
+      "path": "backend/prop_trading/provenance.py",
+      "sha256": "316aab4ff589a941fbf3c39bcdb3964534b12980d2e94dc12a8af4f83379aa34"
+    },
+    {
+      "path": "backend/prop_trading/rule_engine.py",
+      "sha256": "d032eac4983da525bda5c0a7d13c88cef12ac83bef16380ef27976e358856592"
+    },
+    {
+      "path": "tests/test_prop_context_projection.py",
+      "sha256": "a5b2caea959208779ba684ecdd73122e7c68a67e3ed4a6381ce1c132733dff47"
+    },
+    {
+      "path": "tests/test_prop_complete_evaluation.py",
+      "sha256": "70939881307024b3529553c90d4e1b79bdd3c86271436e5e852988a66a1be8ca"
+    },
+    {
+      "path": "tests/test_prop_rule_engine.py",
+      "sha256": "3f0b7c35704b3b055d9674b9d59a0da451686a530480534656bd132baa4ff5d7"
+    },
+    {
+      "path": "tests/test_prop_rule_provenance.py",
+      "sha256": "bd38bb17d1df0194034fe7dc17d03b5e454df80188782da2ac593acb639e773f"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_ARCHITECTURE.md",
+      "sha256": "836960d954d4686ec433ab185592d6c401c78332fc6bc05515400c66aa72eaeb"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_STATUS.md",
+      "sha256": "3a42db3c813715cba20911b3c25f8c4573b807c6af3d00a97fd7181588016be1"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_RULE_ENGINE.md",
+      "sha256": "1c420e7fa55cc0de8cbece12a90684abf8e7db78f8b6e4740edffa212b349762"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_VALIDATION.md",
+      "sha256": "2c90f99a6e87852f2735bab1f48de8151a9d8eaca8dfe2c1bcbf1743967f76cb"
+    }
+  ]
+}

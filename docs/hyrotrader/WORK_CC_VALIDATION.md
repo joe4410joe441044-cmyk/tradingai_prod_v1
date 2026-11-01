@@ -25,3 +25,18 @@ CC-2V did not rerun tests or builds. It reconciled the preserved files against t
 Manual visual acceptance is pending. The available image viewer failed with an environment-level sandbox/network-namespace error before any screenshot could be inspected, so there are no assessable manual visual findings.
 
 Release integration also remains blocked on external observer-key eligibility, completion of PROP rule authority, Bollinger Band/runtime integration, and a separately approved current-main integration review. No push, merge, deployment, production runtime change, real API request, or order action is part of this validation.
+
+## CC-3G Rule Engine preservation validation
+
+CC-3G added 11 focused regressions for observation receipt/source cutoff boundaries,
+cutoff equality, aggregate last-page receipt, missing receipt, retroactive distinction,
+recomputed candidate-status tampering, constructor revalidation, nested Coverage
+tampering, synthetic-to-operational purpose tampering, and PASS/BLOCK/UNKNOWN round
+trips. The focused set passed 11 tests under an explicit socket guard.
+
+The final non-overlapping regression command covered Complete Bundle, Rule Engine,
+provenance, context projection, DTO contracts, account identity/resolution/registry,
+durable registry, CC-2N offline integration, and CC-2M auth-boundary tests. Result:
+256 passed in 7.55 seconds. Pytest cache and Python bytecode were disabled. All inputs
+were synthetic/fabricated; no API, credential, real account, runtime, UI, BB, service,
+or order operation was used.

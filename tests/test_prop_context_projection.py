@@ -226,7 +226,7 @@ def rule_definition(**changes):
     return PropRuleDefinition(**values)
 
 
-def test_f02_ready_requires_complete_verified_effective_rule():
+def test_account_bound_snapshot_is_required_before_projection_can_be_ready():
     verified = build_prop_account_context(
         identity=identity(),
         observation=complete_observation(),
@@ -234,8 +234,9 @@ def test_f02_ready_requires_complete_verified_effective_rule():
         authority=AuthorityObservation(True, (), "READ_ONLY_PROJECTION"),
         rule_definition=rule_definition(),
     )
-    assert verified.availability == "READY"
-    assert verified.to_dict()["ruleEvaluation"]["evaluationTrust"] == "VERIFIED"
+    assert verified.availability == "PARTIAL"
+    assert verified.to_dict()["ruleEvaluation"]["evaluationTrust"] == "UNVERIFIED"
+    assert verified.to_dict()["rulesSnapshotStatus"] == "RULES_SNAPSHOT_REQUIRED"
 
     partial = build_prop_account_context(
         identity=identity(),

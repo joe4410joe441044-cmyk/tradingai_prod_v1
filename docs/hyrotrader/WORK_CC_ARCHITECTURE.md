@@ -21,4 +21,29 @@ The fixture preview derives its view model from static fabricated data. The comp
 
 ## Deferred integration
 
-The PROP rule engine, including daily-loss, maximum-loss, consistency, phase, and payout authority, is not complete. Bollinger Band strategy integration and production runtime composition are intentionally deferred. Those concerns must be reviewed in a separately approved integration task; they must not be duplicated inside the fixture UI.
+The synthetic PROP rule engine is an isolated pure calculation layer. It reuses the v1 rule, observation, result, and evaluation DTOs and an explicit caller-supplied daily baseline. Calculation v2 uses an engine-local exact Decimal context and explicit entry risk gates. Static maximum loss, daily loss, and profit-target progress are supported only under an explicit synthetic policy. Profit target is informational/completion progress, never an entry gate. `entry_allowed` is calculation compatibility, not runtime or execution authority.
+
+Immutable Rules Snapshot and Baseline Source v1 contracts form the evidence foundation. Evidence Link v1 remains readable legacy provenance but does not bind the complete evaluation result. Evidence Link v2 binds complete evaluation and Bundle digests and validates as-of information availability. Canonical unkeyed digests detect content changes but provide no authentication.
+
+Active Selection v1 is an immutable explicit selection record and pure validator, not a repository or activation. Required-rule Coverage v1 is checked against the fixed evaluator-v2 capability set. Complete Bundle v1 validates the account/selection/snapshot/baseline/observation/policy/coverage/time graph. The pure wrapper calculates from that one Bundle and emits a linked Complete Outcome without accepting an injected result. Historical as-of and retroactive analysis are separate purposes.
+
+The existing projection remains fail-closed context v2: Complete Bundle/Link v2 is not wired into it, so it remains PARTIAL with `RULES_SNAPSHOT_REQUIRED`. No durable selector, source provider, runtime composition, execution authority, or BB integration is added.
+
+Official account profiles, consistency, minimum-day, phase completion, payout authority, trailing persistence, Bollinger Band strategy integration, and production runtime composition are intentionally deferred. Those concerns must be reviewed in separately approved tasks; they must not be duplicated inside the fixture UI or inferred from a calculation PASS.
+
+## CC-3G invariant ownership
+
+Temporal availability belongs to Complete Bundle validation rather than the low-level
+calculation API. The Bundle compares both observation source time and final receipt
+time with its explicit knowledge cutoff. Aggregate producers are responsible for using
+the last required page/endpoint receipt. This keeps clock-skew tolerance inside the
+Engine from becoming an as-of provenance exception.
+
+Operational candidate status is a derived projection, not caller authority. One pure
+backend derivation function is used by the wrapper and Complete Outcome validation.
+The Outcome still grants no execution authority. Content digests bind deterministic
+content, while evidence authenticity and trusted execution origin remain separate
+governance concerns.
+
+These invariants add no runtime composition. Context v2 remains PARTIAL and the
+fixture UI and BB context chain remain disconnected.
