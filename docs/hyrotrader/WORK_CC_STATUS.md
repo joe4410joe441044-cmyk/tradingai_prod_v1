@@ -39,3 +39,15 @@ authenticity remains an external prerequisite rather than being mislabeled as fi
 The current preservation is synthetic/offline only. Official account profile activation,
 runtime/MM/execution wiring, UI integration, BB integration, real API access, secrets,
 registry mutation, and order authority remain absent.
+
+
+## CC-3H fixture UI and handoff
+
+A deterministic generator now evaluates synthetic Complete Bundles through the pure wrapper and emits the strict read-only projection v1 consumed by the isolated fixture UI. Evaluation scenarios are independent from the ten connection scenarios. Every scenario remains execution-disabled; BB integration, official profile activation, runtime, MM, real API, and Production UI remain absent.
+
+## CC-3I projection acceptance and preservation
+
+The projection boundary now explicitly retains execution mode, execution venue, and
+generation-time freshness. The fixture consumer rejects wrong account scope,
+unsupported schema, missing timestamps/freshness/coverage, authority promotion, and
+malformed Decimal values. BB owner acceptance and integration remain unperformed.

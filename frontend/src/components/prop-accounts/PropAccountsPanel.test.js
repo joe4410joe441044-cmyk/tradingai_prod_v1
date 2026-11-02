@@ -25,14 +25,24 @@ async function loadComponent() {
     const transformed = await vite.transformWithOxc(source, sourceUrl.pathname);
     const temporary = await mkdtemp("/tmp/cc-2s-component-test-");
     const output = join(temporary, "PropAccountsPanel.mjs");
+    const outcomeCardUrl = new URL("./PropOutcomeCard.jsx", import.meta.url);
+    const outcomeCardSource = await readFile(outcomeCardUrl, "utf8");
+    const outcomeCardTransformed = await vite.transformWithOxc(outcomeCardSource, outcomeCardUrl.pathname);
+    const outcomeCardOutput = join(temporary, "PropOutcomeCard.mjs");
     const modelUrl = new URL("../../features/prop-accounts/propAccountsViewModel.js", import.meta.url).href;
     const fixturesUrl = new URL("../../features/prop-accounts/propAccountsFixtures.js", import.meta.url).href;
+    const outcomeFixturesUrl = new URL("../../features/prop-accounts/propOutcomeFixtures.js", import.meta.url).href;
     const code = transformed.code
         .replace(/from\s+["']react\/jsx-runtime["']/g, `from "${jsxRuntimeStub}"`)
         .replace(/from\s+["']react["']/g, `from "${reactStub}"`)
         .replace('from "../../features/prop-accounts/propAccountsViewModel.js"', `from "${modelUrl}"`)
         .replace('from "../../features/prop-accounts/propAccountsFixtures.js"', `from "${fixturesUrl}"`)
+        .replace('from "./PropOutcomeCard.jsx"', `from "${pathToFileURL(outcomeCardOutput).href}"`)
+        .replace('from "../../features/prop-accounts/propOutcomeFixtures.js"', `from "${outcomeFixturesUrl}"`)
         .replace('import "./prop-accounts.css";', "");
+    const outcomeCardCode = outcomeCardTransformed.code
+        .replace(/from\s+["']react\/jsx-runtime["']/g, `from "${jsxRuntimeStub}"`);
+    await writeFile(outcomeCardOutput, outcomeCardCode);
     await writeFile(output, code);
     try {
         return await import(`${pathToFileURL(output).href}?test=${Date.now()}`);
@@ -184,4 +194,27 @@ test("invalid collection data is never rendered as a normal empty list", () => {
     assert.match(positions, /FAILED/);
     assert.match(positions, /取得できませんでした/);
     assert.doesNotMatch(positions, /正常な空一覧/);
+});
+
+
+test("synthetic evaluation scenarios render without execution or challenge authority", () => {
+    const passing = render("connected_read_only", PROP_ACCOUNT_ID, { evaluationScenarioId: "calculation_pass" });
+    assert.match(textOf(byTestId(passing, "outcome-card")), /計算結果 — PASS/);
+    assert.match(textOf(byTestId(passing, "outcome-card")), /計算上の適合 ≠ 取引可能/);
+    assert.match(textOf(byTestId(passing, "outcome-card")), /Challenge合格・READY・実行権限を意味しません/);
+
+    const blocked = render("connected_read_only", PROP_ACCOUNT_ID, { evaluationScenarioId: "maximum_loss_block" });
+    assert.match(textOf(byTestId(blocked, "outcome-card")), /計算結果 — BLOCK/);
+    assert.match(textOf(byTestId(blocked, "outcome-rule-results")), /STATIC_MAXIMUM_LOSS BLOCK/);
+
+    const unknown = render("connected_read_only", PROP_ACCOUNT_ID, { evaluationScenarioId: "unsupported_required_rule" });
+    assert.match(textOf(byTestId(unknown, "outcome-summary")), /UNKNOWN.*PARTIAL.*DISABLED/);
+    assert.ok(byTestId(unknown, "outcome-evidence-details"));
+});
+
+test("pre-evaluation rejection has no fabricated outcome and normal account hides PROP outcome", () => {
+    const rejected = render("connected_read_only", PROP_ACCOUNT_ID, { evaluationScenarioId: "pre_evaluation_validation_failure" });
+    assert.match(textOf(byTestId(rejected, "outcome-card")), /Complete Outcomeは生成されていません/);
+    const normal = render("connected_read_only", NORMAL_ACCOUNT_ID);
+    assert.equal(byTestId(normal, "outcome-card"), undefined);
 });

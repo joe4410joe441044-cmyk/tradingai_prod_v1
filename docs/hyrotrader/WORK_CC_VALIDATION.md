@@ -40,3 +40,16 @@ durable registry, CC-2N offline integration, and CC-2M auth-boundary tests. Resu
 256 passed in 7.55 seconds. Pytest cache and Python bytecode were disabled. All inputs
 were synthetic/fabricated; no API, credential, real account, runtime, UI, BB, service,
 or order operation was used.
+
+
+## CC-3H validation scope
+
+New tests cover deterministic wrapper generation, strict projection, account/link/candidate/cutoff tampering, Decimal/currency preservation, secret-field exclusion, frontend schema/account/authority fail-closed behavior, PASS/BLOCK/UNKNOWN/unsupported/target progress display, pre-evaluation rejection, existing ten-state regression, and isolated build. The generated sample is shared across backend/frontend rather than duplicated manually.
+
+## CC-3I targeted acceptance
+
+Focused backend projection and Complete Outcome tests passed 44 tests. Focused
+frontend fixture-validator and panel tests passed 15 tests with the existing
+canonical frontend dependencies. Two independent fixture regenerations were byte
+identical and matched the updated checked-in generated JSON. No full suite, build, or
+browser/visual rerun was performed because the limited contract fix did not change

@@ -1,0 +1,630 @@
+{
+  "schemaVersion": "tradingai-prop-synthetic-outcome-fixtures/v1",
+  "projectionSchemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+  "generatedAt": "2026-11-02T00:00:00Z",
+  "synthetic": true,
+  "purpose": "FIXTURE_UI_AND_READ_ONLY_HANDOFF",
+  "scenarios": [
+    {
+      "id": "calculation_pass",
+      "label": "計算上PASS（取引可能ではない）",
+      "outcome": {
+        "schemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+        "sourceOutcomeSchemaVersion": "tradingai-prop-complete-evaluation-outcome/v1",
+        "synthetic": true,
+        "purpose": "READ_ONLY_CURRENT",
+        "accountScope": {
+          "accountId": "acc_20000000000040008000000000000002",
+          "identityRevision": 3,
+          "executionMode": "EXTERNAL_SIMULATION",
+          "executionVenue": "BYBIT_DEMO",
+          "program": "HYROTRADER",
+          "planId": "SYNTHETIC-NOT-OFFICIAL",
+          "phase": "CHALLENGE",
+          "currency": "USDT"
+        },
+        "evaluatedAt": "2026-11-02T00:00:00Z",
+        "knowledgeCutoffAt": "2026-11-02T00:00:00Z",
+        "references": {
+          "bundleId": "bundle-cc-3h-pass",
+          "snapshotId": "snapshot-cc-3h-synthetic",
+          "snapshotDigest": "sha256:c1f7a7f8f78a15acc02285c209b1c9ff4a191ecdc0880c826db6df7ec446f942",
+          "baselineId": "baseline-cc-3h",
+          "baselineDigest": "sha256:31c5c367c9c3991226a1d2ed0e719d486a8e47a67abac7629fbb4a385c2b7026",
+          "observationId": "observation-cc-3h",
+          "observationDigest": "sha256:f531a4f4473ece5c54c049d0bf7e2d02ffd2cef22a30c8a427c11d89c7f9c520",
+          "evidenceLinkId": "link-cc-3h-calculation_pass",
+          "evidenceLinkDigest": "sha256:bb3fd726cbe4ecf8ee76016ceef208394e856df07bac294151e2c5ba2d238a66",
+          "outcomeDigest": "sha256:b3428cfb7a376339604b68c1bb5a9ac0003069ca925b3fcfc40311fdbdd66c09"
+        },
+        "provenanceValidation": {
+          "status": "STRICTLY_VALIDATED",
+          "scope": "STRUCTURE_SEMANTICS_AND_REFERENCE_CONSISTENCY_ONLY",
+          "authenticityGuaranteed": false,
+          "realAccountEligibilityGuaranteed": false
+        },
+        "coverage": {
+          "schemaVersion": "tradingai-prop-required-rule-coverage/v1",
+          "completeness": "COMPLETE",
+          "operationallyComplete": false,
+          "unknownReasonCodes": [],
+          "items": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/static_maximum_loss"
+              ]
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/daily_loss"
+              ]
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "PROGRESS_ONLY",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/profit_target"
+              ]
+            }
+          ]
+        },
+        "calculation": {
+          "schemaVersion": "tradingai-prop-rule-evaluation/v1",
+          "calculationVersion": "tradingai-prop-rule-engine/v2",
+          "operation": "READ_ONLY",
+          "freshnessState": "FRESH",
+          "overallState": "PASS",
+          "entryAllowed": null,
+          "candidateStatus": "NOT_APPLICABLE",
+          "blockingRuleCodes": [],
+          "unknownRuleCodes": [],
+          "warnings": [
+            "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+          ],
+          "ruleResults": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "state": "PASS",
+              "unit": "USDT",
+              "actual": "0",
+              "threshold": "6000",
+              "headroom": "6000",
+              "reasonCode": null
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "state": "PASS",
+              "unit": "USDT",
+              "actual": "0",
+              "threshold": "4000",
+              "headroom": "4000",
+              "reasonCode": null
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "state": "NOT_APPLICABLE",
+              "unit": "USDT",
+              "actual": "0",
+              "threshold": "10000",
+              "headroom": "10000",
+              "reasonCode": "TARGET_NOT_REACHED"
+            }
+          ]
+        },
+        "authority": {
+          "executionAuthorityGranted": false,
+          "runtimeReady": false,
+          "tradeReady": false,
+          "reasonCode": "READ_ONLY_CONTEXT_NO_EXECUTION_AUTHORITY"
+        }
+      }
+    },
+    {
+      "id": "maximum_loss_block",
+      "label": "最大損失BLOCK",
+      "outcome": {
+        "schemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+        "sourceOutcomeSchemaVersion": "tradingai-prop-complete-evaluation-outcome/v1",
+        "synthetic": true,
+        "purpose": "READ_ONLY_CURRENT",
+        "accountScope": {
+          "accountId": "acc_20000000000040008000000000000002",
+          "identityRevision": 3,
+          "executionMode": "EXTERNAL_SIMULATION",
+          "executionVenue": "BYBIT_DEMO",
+          "program": "HYROTRADER",
+          "planId": "SYNTHETIC-NOT-OFFICIAL",
+          "phase": "CHALLENGE",
+          "currency": "USDT"
+        },
+        "evaluatedAt": "2026-11-02T00:00:00Z",
+        "knowledgeCutoffAt": "2026-11-02T00:00:00Z",
+        "references": {
+          "bundleId": "bundle-cc-3h-block",
+          "snapshotId": "snapshot-cc-3h-synthetic",
+          "snapshotDigest": "sha256:c1f7a7f8f78a15acc02285c209b1c9ff4a191ecdc0880c826db6df7ec446f942",
+          "baselineId": "baseline-cc-3h",
+          "baselineDigest": "sha256:31c5c367c9c3991226a1d2ed0e719d486a8e47a67abac7629fbb4a385c2b7026",
+          "observationId": "observation-cc-3h",
+          "observationDigest": "sha256:95c6753e5b23c2b50fd9dadba922443f855a171a1b99faf298d1042a2109d0e0",
+          "evidenceLinkId": "link-cc-3h-maximum_loss_block",
+          "evidenceLinkDigest": "sha256:fd7085f33dc8b257e6ddcfa24c2e47194ff4142b24b9ca2d149dc6e0c46c24ca",
+          "outcomeDigest": "sha256:3f588150ae0b76aef892732d3ae3044b068b26b1dc0cb1f4ef12be84f9dbd0a1"
+        },
+        "provenanceValidation": {
+          "status": "STRICTLY_VALIDATED",
+          "scope": "STRUCTURE_SEMANTICS_AND_REFERENCE_CONSISTENCY_ONLY",
+          "authenticityGuaranteed": false,
+          "realAccountEligibilityGuaranteed": false
+        },
+        "coverage": {
+          "schemaVersion": "tradingai-prop-required-rule-coverage/v1",
+          "completeness": "COMPLETE",
+          "operationallyComplete": false,
+          "unknownReasonCodes": [],
+          "items": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/static_maximum_loss"
+              ]
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/daily_loss"
+              ]
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "PROGRESS_ONLY",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/profit_target"
+              ]
+            }
+          ]
+        },
+        "calculation": {
+          "schemaVersion": "tradingai-prop-rule-evaluation/v1",
+          "calculationVersion": "tradingai-prop-rule-engine/v2",
+          "operation": "READ_ONLY",
+          "freshnessState": "FRESH",
+          "overallState": "BLOCK",
+          "entryAllowed": null,
+          "candidateStatus": "NOT_APPLICABLE",
+          "blockingRuleCodes": [
+            "STATIC_MAXIMUM_LOSS",
+            "DAILY_LOSS"
+          ],
+          "unknownRuleCodes": [],
+          "warnings": [
+            "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+          ],
+          "ruleResults": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "state": "BLOCK",
+              "unit": "USDT",
+              "actual": "10000",
+              "threshold": "6000",
+              "headroom": "-4000",
+              "reasonCode": "MAXIMUM_LOSS_BREACH"
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "state": "BLOCK",
+              "unit": "USDT",
+              "actual": "10000",
+              "threshold": "4000",
+              "headroom": "-6000",
+              "reasonCode": "DAILY_LOSS_BREACH"
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "state": "NOT_APPLICABLE",
+              "unit": "USDT",
+              "actual": "0",
+              "threshold": "10000",
+              "headroom": "10000",
+              "reasonCode": "TARGET_NOT_REACHED"
+            }
+          ]
+        },
+        "authority": {
+          "executionAuthorityGranted": false,
+          "runtimeReady": false,
+          "tradeReady": false,
+          "reasonCode": "READ_ONLY_CONTEXT_NO_EXECUTION_AUTHORITY"
+        }
+      }
+    },
+    {
+      "id": "required_information_unknown",
+      "label": "必須情報不足UNKNOWN",
+      "outcome": {
+        "schemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+        "sourceOutcomeSchemaVersion": "tradingai-prop-complete-evaluation-outcome/v1",
+        "synthetic": true,
+        "purpose": "READ_ONLY_CURRENT",
+        "accountScope": {
+          "accountId": "acc_20000000000040008000000000000002",
+          "identityRevision": 3,
+          "executionMode": "EXTERNAL_SIMULATION",
+          "executionVenue": "BYBIT_DEMO",
+          "program": "HYROTRADER",
+          "planId": "SYNTHETIC-NOT-OFFICIAL",
+          "phase": "CHALLENGE",
+          "currency": "USDT"
+        },
+        "evaluatedAt": "2026-11-02T00:00:00Z",
+        "knowledgeCutoffAt": "2026-11-02T00:00:00Z",
+        "references": {
+          "bundleId": "bundle-cc-3h-unknown",
+          "snapshotId": "snapshot-cc-3h-synthetic",
+          "snapshotDigest": "sha256:c1f7a7f8f78a15acc02285c209b1c9ff4a191ecdc0880c826db6df7ec446f942",
+          "baselineId": "baseline-cc-3h",
+          "baselineDigest": "sha256:31c5c367c9c3991226a1d2ed0e719d486a8e47a67abac7629fbb4a385c2b7026",
+          "observationId": "observation-cc-3h",
+          "observationDigest": "sha256:6ce8eba0219b0b464bb1e4142c592b9fc02fcab9a703db5942e0f2b7afb9c3a5",
+          "evidenceLinkId": "link-cc-3h-required_information_unknown",
+          "evidenceLinkDigest": "sha256:89c9d0c4f240eb239c69ad697b4a5e245b7708cfcac36861aa948bfd1c345260",
+          "outcomeDigest": "sha256:61cb93e4e4cd3f8998caf4c6e416e641164d3678574c52801c4919fd06e526d7"
+        },
+        "provenanceValidation": {
+          "status": "STRICTLY_VALIDATED",
+          "scope": "STRUCTURE_SEMANTICS_AND_REFERENCE_CONSISTENCY_ONLY",
+          "authenticityGuaranteed": false,
+          "realAccountEligibilityGuaranteed": false
+        },
+        "coverage": {
+          "schemaVersion": "tradingai-prop-required-rule-coverage/v1",
+          "completeness": "COMPLETE",
+          "operationallyComplete": false,
+          "unknownReasonCodes": [],
+          "items": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/static_maximum_loss"
+              ]
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/daily_loss"
+              ]
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "PROGRESS_ONLY",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/profit_target"
+              ]
+            }
+          ]
+        },
+        "calculation": {
+          "schemaVersion": "tradingai-prop-rule-evaluation/v1",
+          "calculationVersion": "tradingai-prop-rule-engine/v2",
+          "operation": "READ_ONLY",
+          "freshnessState": "FRESH",
+          "overallState": "UNKNOWN",
+          "entryAllowed": null,
+          "candidateStatus": "NOT_APPLICABLE",
+          "blockingRuleCodes": [],
+          "unknownRuleCodes": [
+            "STATIC_MAXIMUM_LOSS",
+            "DAILY_LOSS",
+            "PROFIT_TARGET"
+          ],
+          "warnings": [
+            "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+          ],
+          "ruleResults": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "state": "UNKNOWN",
+              "unit": "UNKNOWN",
+              "actual": null,
+              "threshold": null,
+              "headroom": null,
+              "reasonCode": "EQUITY_MISSING"
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "state": "UNKNOWN",
+              "unit": "UNKNOWN",
+              "actual": null,
+              "threshold": null,
+              "headroom": null,
+              "reasonCode": "EQUITY_MISSING"
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "state": "UNKNOWN",
+              "unit": "UNKNOWN",
+              "actual": null,
+              "threshold": null,
+              "headroom": null,
+              "reasonCode": "BALANCE_MISSING"
+            }
+          ]
+        },
+        "authority": {
+          "executionAuthorityGranted": false,
+          "runtimeReady": false,
+          "tradeReady": false,
+          "reasonCode": "READ_ONLY_CONTEXT_NO_EXECUTION_AUTHORITY"
+        }
+      }
+    },
+    {
+      "id": "unsupported_required_rule",
+      "label": "必須ルール未対応",
+      "outcome": {
+        "schemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+        "sourceOutcomeSchemaVersion": "tradingai-prop-complete-evaluation-outcome/v1",
+        "synthetic": true,
+        "purpose": "HISTORICAL_AS_OF",
+        "accountScope": {
+          "accountId": "acc_20000000000040008000000000000002",
+          "identityRevision": 3,
+          "executionMode": "EXTERNAL_SIMULATION",
+          "executionVenue": "BYBIT_DEMO",
+          "program": "HYROTRADER",
+          "planId": "SYNTHETIC-NOT-OFFICIAL",
+          "phase": "CHALLENGE",
+          "currency": "USDT"
+        },
+        "evaluatedAt": "2026-11-02T00:00:00Z",
+        "knowledgeCutoffAt": "2026-11-02T00:00:00Z",
+        "references": {
+          "bundleId": "bundle-cc-3h-unsupported",
+          "snapshotId": "snapshot-cc-3h-synthetic",
+          "snapshotDigest": "sha256:c1f7a7f8f78a15acc02285c209b1c9ff4a191ecdc0880c826db6df7ec446f942",
+          "baselineId": null,
+          "baselineDigest": null,
+          "observationId": "observation-cc-3h",
+          "observationDigest": "sha256:f531a4f4473ece5c54c049d0bf7e2d02ffd2cef22a30c8a427c11d89c7f9c520",
+          "evidenceLinkId": "link-cc-3h-unsupported_required_rule",
+          "evidenceLinkDigest": "sha256:6bab6906a7e045d5b42c15479cf2337ae698ce873120d66687dda1eb7ca5dc2d",
+          "outcomeDigest": "sha256:63538d06e657cd96ebbdd0585decc42832ba90c4ca9002e5f1424cadd3004d9e"
+        },
+        "provenanceValidation": {
+          "status": "STRICTLY_VALIDATED",
+          "scope": "STRUCTURE_SEMANTICS_AND_REFERENCE_CONSISTENCY_ONLY",
+          "authenticityGuaranteed": false,
+          "realAccountEligibilityGuaranteed": false
+        },
+        "coverage": {
+          "schemaVersion": "tradingai-prop-required-rule-coverage/v1",
+          "completeness": "PARTIAL",
+          "operationallyComplete": false,
+          "unknownReasonCodes": [
+            "REQUIRED_RULE_COVERAGE_INCOMPLETE",
+            "RULE_APPLICABILITY_UNRESOLVED"
+          ],
+          "items": [
+            {
+              "ruleCode": "UNSUPPORTED_REQUIRED_RULE",
+              "requirementStatus": "UNRESOLVED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "UNSUPPORTED",
+              "unresolvedReasonCodes": [
+                "RULE_APPLICABILITY_UNRESOLVED"
+              ],
+              "evidenceRefs": [
+                "synthetic://cc-3h/unsupported"
+              ]
+            }
+          ]
+        },
+        "calculation": {
+          "schemaVersion": "tradingai-prop-rule-evaluation/v1",
+          "calculationVersion": "tradingai-prop-rule-engine/v2",
+          "operation": "ENTRY",
+          "freshnessState": "FRESH",
+          "overallState": "UNKNOWN",
+          "entryAllowed": null,
+          "candidateStatus": "NOT_APPLICABLE",
+          "blockingRuleCodes": [],
+          "unknownRuleCodes": [
+            "UNSUPPORTED_REQUIRED_RULE"
+          ],
+          "warnings": [
+            "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+          ],
+          "ruleResults": [
+            {
+              "ruleCode": "UNSUPPORTED_REQUIRED_RULE",
+              "state": "UNKNOWN",
+              "unit": "UNKNOWN",
+              "actual": null,
+              "threshold": null,
+              "headroom": null,
+              "reasonCode": "UNSUPPORTED_REQUIRED_RULE"
+            }
+          ]
+        },
+        "authority": {
+          "executionAuthorityGranted": false,
+          "runtimeReady": false,
+          "tradeReady": false,
+          "reasonCode": "READ_ONLY_CONTEXT_NO_EXECUTION_AUTHORITY"
+        }
+      }
+    },
+    {
+      "id": "profit_target_reached",
+      "label": "利益目標到達（Challenge合格ではない）",
+      "outcome": {
+        "schemaVersion": "tradingai-prop-outcome-read-only-context/v1",
+        "sourceOutcomeSchemaVersion": "tradingai-prop-complete-evaluation-outcome/v1",
+        "synthetic": true,
+        "purpose": "READ_ONLY_CURRENT",
+        "accountScope": {
+          "accountId": "acc_20000000000040008000000000000002",
+          "identityRevision": 3,
+          "executionMode": "EXTERNAL_SIMULATION",
+          "executionVenue": "BYBIT_DEMO",
+          "program": "HYROTRADER",
+          "planId": "SYNTHETIC-NOT-OFFICIAL",
+          "phase": "CHALLENGE",
+          "currency": "USDT"
+        },
+        "evaluatedAt": "2026-11-02T00:00:00Z",
+        "knowledgeCutoffAt": "2026-11-02T00:00:00Z",
+        "references": {
+          "bundleId": "bundle-cc-3h-target",
+          "snapshotId": "snapshot-cc-3h-synthetic",
+          "snapshotDigest": "sha256:c1f7a7f8f78a15acc02285c209b1c9ff4a191ecdc0880c826db6df7ec446f942",
+          "baselineId": "baseline-cc-3h",
+          "baselineDigest": "sha256:31c5c367c9c3991226a1d2ed0e719d486a8e47a67abac7629fbb4a385c2b7026",
+          "observationId": "observation-cc-3h",
+          "observationDigest": "sha256:4d40396ea86568f48636b87e2c2c896277f1304cbb01c2234ce7998fd8525bad",
+          "evidenceLinkId": "link-cc-3h-profit_target_reached",
+          "evidenceLinkDigest": "sha256:78d767cd12de093431a3388347c646141fea210ff155c1c76da8a87df9b0bfc0",
+          "outcomeDigest": "sha256:f762c89b16ef808d44d8f8fe2ccce9f6988033bcb96826513a28d6f9a527bf8b"
+        },
+        "provenanceValidation": {
+          "status": "STRICTLY_VALIDATED",
+          "scope": "STRUCTURE_SEMANTICS_AND_REFERENCE_CONSISTENCY_ONLY",
+          "authenticityGuaranteed": false,
+          "realAccountEligibilityGuaranteed": false
+        },
+        "coverage": {
+          "schemaVersion": "tradingai-prop-required-rule-coverage/v1",
+          "completeness": "COMPLETE",
+          "operationallyComplete": false,
+          "unknownReasonCodes": [],
+          "items": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/static_maximum_loss"
+              ]
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "ENTRY_RISK_GATE",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/daily_loss"
+              ]
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "requirementStatus": "CONFIRMED_REQUIRED",
+              "role": "PROGRESS_ONLY",
+              "supportStatus": "SUPPORTED",
+              "unresolvedReasonCodes": [],
+              "evidenceRefs": [
+                "synthetic://cc-3h/profit_target"
+              ]
+            }
+          ]
+        },
+        "calculation": {
+          "schemaVersion": "tradingai-prop-rule-evaluation/v1",
+          "calculationVersion": "tradingai-prop-rule-engine/v2",
+          "operation": "READ_ONLY",
+          "freshnessState": "FRESH",
+          "overallState": "PASS",
+          "entryAllowed": null,
+          "candidateStatus": "NOT_APPLICABLE",
+          "blockingRuleCodes": [],
+          "unknownRuleCodes": [],
+          "warnings": [
+            "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+          ],
+          "ruleResults": [
+            {
+              "ruleCode": "STATIC_MAXIMUM_LOSS",
+              "state": "PASS",
+              "unit": "USDT",
+              "actual": "-11000",
+              "threshold": "6000",
+              "headroom": "17000",
+              "reasonCode": null
+            },
+            {
+              "ruleCode": "DAILY_LOSS",
+              "state": "PASS",
+              "unit": "USDT",
+              "actual": "-11000",
+              "threshold": "4000",
+              "headroom": "15000",
+              "reasonCode": null
+            },
+            {
+              "ruleCode": "PROFIT_TARGET",
+              "state": "PASS",
+              "unit": "USDT",
+              "actual": "11000",
+              "threshold": "10000",
+              "headroom": "-1000",
+              "reasonCode": "TARGET_REACHED"
+            }
+          ]
+        },
+        "authority": {
+          "executionAuthorityGranted": false,
+          "runtimeReady": false,
+          "tradeReady": false,
+          "reasonCode": "READ_ONLY_CONTEXT_NO_EXECUTION_AUTHORITY"
+        }
+      }
+    },
+    {
+      "id": "pre_evaluation_validation_failure",
+      "label": "評価前検証失敗（Outcomeなし）",
+      "rejection": {
+        "stage": "BUNDLE_CONSTRUCTION",
+        "errorCode": "ACCOUNT_SCOPE_MISMATCH",
+        "message": "入力scope不一致のため評価前に拒否。Outcomeは生成されません。",
+        "outcome": null
+      }
+    }
+  ]
+}

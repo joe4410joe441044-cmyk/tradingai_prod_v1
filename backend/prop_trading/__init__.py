@@ -75,6 +75,11 @@ from .complete_evaluation import (
     validate_temporal_provenance,
 )
 
+from .outcome_projection import (
+    PROP_OUTCOME_READ_ONLY_CONTEXT_SCHEMA_VERSION,
+    project_outcome_read_only_context,
+)
+
 __all__ = (
     "PROP_ACCOUNT_OBSERVATION_SCHEMA_VERSION",
     "PROP_RULE_DEFINITION_SCHEMA_VERSION",
@@ -142,4 +147,6 @@ __all__ = (
     "resolve_active_selection",
     "validate_active_selection",
     "validate_temporal_provenance",
+    "PROP_OUTCOME_READ_ONLY_CONTEXT_SCHEMA_VERSION",
+    "project_outcome_read_only_context",
 )

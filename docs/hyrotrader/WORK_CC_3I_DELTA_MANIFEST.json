@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "taskId": "TRADINGAI-WORK-CC-3I-PROJECTION-ACCEPTANCE-HANDOFF-AND-PRESERVATION-1",
+  "workstream": "HyroTrader PROP Trading / Work CC",
+  "createdAt": "2026-11-02T19:15:43+09:00",
+  "deltaBaseHead": "6d2d3febb74935d397b8ca81a376a19ef75d0568",
+  "selfHashExcluded": true,
+  "selfHashPolicy": "This manifest file is excluded from entries and its own SHA-256 is not asserted.",
+  "totalEntries": 16,
+  "entries": [
+    {
+      "path": "backend/prop_trading/__init__.py",
+      "role": "backend_source",
+      "sha256": "240f4877dc8a920e14fca3e9638805630896436b34184fc44af45bc91672b3a3"
+    },
+    {
+      "path": "backend/prop_trading/outcome_projection.py",
+      "role": "backend_source",
+      "sha256": "fd7f9f79f21b3b8ee01613e37cc6832c4b2998508684db3caa88f0fa720dfffe"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_ARCHITECTURE.md",
+      "role": "handoff_documentation",
+      "sha256": "03c9d57c883dec80d66242b8daafc498ce5168e93445258d4cdbe03c067073a0"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_BB_READ_ONLY_HANDOFF.md",
+      "role": "handoff_documentation",
+      "sha256": "3f092a39c530cd041c865f5add10d443c3b41ec2e582cbce7af1ec404d589de6"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_RULE_ENGINE.md",
+      "role": "handoff_documentation",
+      "sha256": "87081b7d4bf9b89d021ea023ee4535f5a525fbce43cffdb2f29b0f97a5dd2505"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_STATUS.md",
+      "role": "preservation_documentation",
+      "sha256": "5e5aebf4618c5693f5de0456865afe611c115d33fc4771cf738231f4e6337082"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_VALIDATION.md",
+      "role": "preservation_documentation",
+      "sha256": "d5f24b91cb390a6e35e0a2e73180cac070ce3751fd99fcbb243de3581404d74b"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropAccountsPanel.jsx",
+      "role": "frontend_source",
+      "sha256": "502c5b4a72e2a0a6dbaf089d1123afa24643a9af1bfd68d2ad6f971e7ec11dc6"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropAccountsPanel.test.js",
+      "role": "frontend_test",
+      "sha256": "52a1385c0d565c523d97336e4655857121d4bbe46ce68d16caa470a840218e61"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropOutcomeCard.jsx",
+      "role": "frontend_source",
+      "sha256": "d102367f426b8da98f50be83226dcf5dfa428ca91ea077e4d5e41df6d97ce7d9"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/prop-accounts.css",
+      "role": "frontend_source",
+      "sha256": "f4dbd44a9ea3bbf5aa3b8530d2c4069b48e7447389a5ca7aec3f8b524b172673"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/generatedSyntheticOutcomes.json",
+      "role": "generated_synthetic_fixture",
+      "sha256": "8dd5032ca1a6dce177209cb5aefbe621943ce30d20d27fce9238366a47ffa336"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propOutcomeFixtures.js",
+      "role": "frontend_source",
+      "sha256": "77a9d37490bdfe18b5028f5f0b061bd7b6d9a78c6e0f5e9fde10e16e22fae49e"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propOutcomeFixtures.test.js",
+      "role": "frontend_test",
+      "sha256": "ac6881bae572df777324125a8ac81b07bd93ebf0fcedd2b6dfee7c23f499a8ae"
+    },
+    {
+      "path": "scripts/generate_prop_outcome_fixtures.py",
+      "role": "fixture_generator",
+      "sha256": "b0d5a4ff83dce7ddfea26f214bd59752a6b3fd7a83b94d6ab527bb2f8e433aa7"
+    },
+    {
+      "path": "tests/test_prop_outcome_projection.py",
+      "role": "backend_test",
+      "sha256": "9a033f0af68568a22c71fb5dd5b560071ca0d08942be17a8c2381785255e2974"
+    }
+  ]
+}

@@ -101,3 +101,8 @@ No wire schema version changed. Rule DTOs remain v1, calculation remains v2, con
 remains v2, Evidence Link remains v2 with isolated legacy v1, and Selection, Coverage,
 Bundle, and Outcome remain v1. No official profile, runtime authority, UI consumer, BB
 consumer, durable store, real source, API, credential, or order connection was added.
+
+
+## CC-3H read-only Outcome projection
+
+The Complete Outcome wire schema remains v1. A new derived schema, `tradingai-prop-outcome-read-only-context/v1`, exposes synthetic purpose, account scope, cutoff, evidence references, coverage, calculation/candidate state, Decimal strings, units, safe reason codes, and explicit false authority flags. Projection requires strict Complete Outcome deserialization and reuses CC-3G temporal and semantic checks. It does not assert evidence authenticity, official-rule validity, real-account eligibility, Challenge completion, runtime readiness, or trading authority.

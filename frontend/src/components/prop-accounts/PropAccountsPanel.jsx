@@ -13,6 +13,9 @@ import {
     createPropAccountsFixture,
 } from "../../features/prop-accounts/propAccountsFixtures.js";
 
+import PropOutcomeCard from "./PropOutcomeCard.jsx";
+import { PROP_OUTCOME_SCENARIOS, getOutcomeScenario } from "../../features/prop-accounts/propOutcomeFixtures.js";
+
 import "./prop-accounts.css";
 
 const LABELS = {
@@ -241,6 +244,8 @@ export function PropAccountsView({
     onScenarioChange = () => {},
     onDetailsOpen = () => {},
     onDetailsClose = () => {},
+    evaluationScenarioId = "calculation_pass",
+    onEvaluationScenarioChange = () => {},
 }) {
     if (viewModel?.status !== "READY") {
         return (
@@ -281,6 +286,13 @@ export function PropAccountsView({
                     value={scenarioId}
                 >
                     {scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
+                </select>
+            </section>
+
+            <section className="cc-prop-accounts__scenario" aria-label="synthetic evaluation fixture scenario">
+                <label htmlFor="cc-prop-evaluation-scenario">評価scenario（接続scenarioとは独立）</label>
+                <select id="cc-prop-evaluation-scenario" onChange={(event) => onEvaluationScenarioChange(event.target.value)} value={evaluationScenarioId}>
+                    {PROP_OUTCOME_SCENARIOS.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
                 </select>
             </section>
 
@@ -355,6 +367,13 @@ export function PropAccountsView({
 
             <RulesCard account={account} />
 
+            {accountSummary.accountType === "PROP" && <PropOutcomeCard scenario={getOutcomeScenario(evaluationScenarioId, {
+                accountId: accountSummary.accountId,
+                executionMode: accountSummary.environment,
+                executionVenue: accountSummary.platform,
+                phase: accountSummary.phase,
+            })} />}
+
             <section className="cc-prop-accounts__authority" data-testid="readiness-authority-card">
                 <div><span>Observer connection</span><strong>{connection.state}</strong><small>サンプル上の接続状態</small></div>
                 <div><span>Key eligibility</span><strong>{connection.keyEligibility}</strong><small>外部確認が必要</small></div>
@@ -382,6 +401,7 @@ export default function PropAccountsPanel({ fixtureOverride = null }) {
     const [scenarioId, setScenarioId] = useState("not_configured");
     const [viewedAccountId, setViewedAccountId] = useState(PROP_ACCOUNT_ID);
     const [detailsOpen, setDetailsOpen] = useState(false);
+    const [evaluationScenarioId, setEvaluationScenarioId] = useState("calculation_pass");
     const viewModel = useMemo(() => normalizePropAccountsView(
         fixtureOverride ?? createPropAccountsFixture({ scenarioId, viewedAccountId }),
     ), [fixtureOverride, scenarioId, viewedAccountId]);
@@ -395,6 +415,11 @@ export default function PropAccountsPanel({ fixtureOverride = null }) {
             }}
             onDetailsClose={() => setDetailsOpen(false)}
             onDetailsOpen={() => setDetailsOpen(true)}
+            evaluationScenarioId={evaluationScenarioId}
+            onEvaluationScenarioChange={(nextScenario) => {
+                setEvaluationScenarioId(nextScenario);
+                setDetailsOpen(false);
+            }}
             onScenarioChange={(nextScenario) => {
                 setScenarioId(nextScenario);
                 setDetailsOpen(false);

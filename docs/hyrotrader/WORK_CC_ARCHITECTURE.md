@@ -47,3 +47,15 @@ governance concerns.
 
 These invariants add no runtime composition. Context v2 remains PARTIAL and the
 fixture UI and BB context chain remain disconnected.
+
+
+## CC-3H projection path
+
+`CompleteEvaluationOutcome` -> strict round-trip validation -> `project_outcome_read_only_context` -> generated JSON -> fixture-only `PropAccountsPanel`. The same JSON is the proposed BB sample, so UI and handoff do not duplicate calculation logic. Connection scenarios and evaluation scenarios remain separate axes. No provider, event bus, API route, storage, runtime, MM, or execution composition was added.
+
+## CC-3I consumer boundary
+
+The read-only projection carries the canonical account id, identity revision,
+execution mode, execution venue, program, plan, phase, and currency. Consumer scope
+matching is fail-closed and never falls back across accounts. Freshness is retained as
+a generation-time state; current-time staleness remains a consumer responsibility.

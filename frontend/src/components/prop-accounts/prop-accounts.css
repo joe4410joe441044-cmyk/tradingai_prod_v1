@@ -108,6 +108,13 @@
 .cc-prop-accounts__authority .is-disabled { color: var(--cc-prop-danger); }
 .cc-prop-accounts__ai { display: grid; gap: 14px; }
 .cc-prop-accounts__ai p { color: var(--cc-prop-muted); }
+.cc-prop-accounts__outcome { border-color: #9b7bd8; }
+.cc-prop-accounts__outcome-summary { display: grid; gap: 1px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cc-prop-accounts__outcome-summary > div { background: #101b32; display: grid; gap: 7px; min-width: 0; padding: 14px; }
+.cc-prop-accounts__outcome-summary strong, .cc-prop-accounts__outcome dd { overflow-wrap: anywhere; }
+.cc-prop-accounts__outcome .is-disabled { color: var(--cc-prop-danger); }
+.cc-prop-accounts__outcome details { background: #101b32; border-radius: 10px; padding: 14px; }
+.cc-prop-accounts__outcome summary { cursor: pointer; font-weight: 700; }
 
 .cc-prop-accounts__details-button { background: #163b4b; border: 1px solid var(--cc-prop-cyan); border-radius: 10px; color: var(--cc-prop-text); cursor: pointer; justify-self: start; padding: 12px 18px; }
 .cc-prop-accounts__details { background: #0d1928; border: 2px solid var(--cc-prop-cyan); border-radius: 16px; box-shadow: 0 20px 70px #000b; display: grid; gap: 18px; inset: 5vh max(5vw, calc((100vw - 1200px) / 2)); max-height: 90vh; overflow: auto; padding: 22px; position: fixed; z-index: 10; }
@@ -121,6 +128,7 @@
     .cc-prop-accounts__axis-grid, .cc-prop-accounts__authority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .cc-prop-accounts__collections { grid-template-columns: 1fr; }
     .cc-prop-accounts__metrics, .cc-prop-accounts__rule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cc-prop-accounts__outcome-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 600px) {
@@ -129,5 +137,6 @@
     .cc-prop-accounts__execution { min-width: 0; text-align: left; }
     .cc-prop-accounts__section-title p { text-align: left; }
     .cc-prop-accounts__account-options, .cc-prop-accounts__axis-grid, .cc-prop-accounts__metrics, .cc-prop-accounts__rule-grid, .cc-prop-accounts__authority { grid-template-columns: 1fr; }
+    .cc-prop-accounts__outcome-summary { grid-template-columns: 1fr; }
     .cc-prop-accounts__details { inset: 2vh 10px; max-height: 96vh; }
 }
