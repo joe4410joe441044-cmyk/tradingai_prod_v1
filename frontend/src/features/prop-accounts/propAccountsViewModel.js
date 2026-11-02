@@ -15,6 +15,7 @@ const QUALITY_STATES = new Set(["COMPLETE", "PARTIAL", "STALE", "FAILED", "UNKNO
 const RULE_STATES = new Set(["READY", "BLOCKED", "RULES_UNKNOWN", "NOT_APPLICABLE"]);
 const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
 const ACCOUNT_ID = /^acc_[0-9a-f]{32}$/;
+const CURRENCY = /^[A-Z0-9]{3,12}$/;
 const INVALID_AMOUNT = Object.freeze({ status: "INVALID_AMOUNT" });
 
 const record = (value) => (
@@ -162,10 +163,20 @@ export function normalizeAccount(value) {
     const environment = enumValue(summary?.environment, ENVIRONMENTS);
     const label = text(summary?.label);
     const platform = text(summary?.platform);
+    const identityRevision = Number.isInteger(summary?.identityRevision) && summary.identityRevision > 0
+        ? summary.identityRevision
+        : null;
+    const program = text(summary?.program);
+    const planId = text(summary?.planId);
+    const phase = text(summary?.phase);
+    const currency = text(summary?.currency);
     if (!accountId || !ACCOUNT_ID.test(accountId) || !accountType || !environment || !label || !platform) {
         return null;
     }
 
+    if (accountType === "PROP" && (!identityRevision || !program || !planId || !phase || !currency || !CURRENCY.test(currency))) {
+        return null;
+    }
     const connectionSource = record(source.connection);
     const observationSource = record(source.observation);
     const rulesSource = record(source.propRules);
@@ -192,8 +203,12 @@ export function normalizeAccount(value) {
             accountId,
             label,
             accountType,
+            identityRevision: accountType === "PROP" ? identityRevision : null,
+            program: accountType === "PROP" ? program : null,
+            planId: accountType === "PROP" ? planId : null,
             platform,
-            phase: accountType === "PROP" ? (text(summary.phase) ?? "UNKNOWN") : "NOT_APPLICABLE",
+            phase: accountType === "PROP" ? phase : "NOT_APPLICABLE",
+            currency: accountType === "PROP" ? currency : null,
             environment,
         }),
         connection: Object.freeze({

@@ -369,9 +369,13 @@ export function PropAccountsView({
 
             {accountSummary.accountType === "PROP" && <PropOutcomeCard scenario={getOutcomeScenario(evaluationScenarioId, {
                 accountId: accountSummary.accountId,
+                identityRevision: accountSummary.identityRevision,
                 executionMode: accountSummary.environment,
                 executionVenue: accountSummary.platform,
+                program: accountSummary.program,
+                planId: accountSummary.planId,
                 phase: accountSummary.phase,
+                currency: accountSummary.currency,
             })} />}
 
             <section className="cc-prop-accounts__authority" data-testid="readiness-authority-card">

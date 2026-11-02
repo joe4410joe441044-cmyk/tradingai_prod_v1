@@ -51,3 +51,12 @@ The projection boundary now explicitly retains execution mode, execution venue, 
 generation-time freshness. The fixture consumer rejects wrong account scope,
 unsupported schema, missing timestamps/freshness/coverage, authority promotion, and
 malformed Decimal values. BB owner acceptance and integration remain unperformed.
+
+## CC-3J BB acceptance-contract clarification
+
+The isolated fixture consumer now binds all eight account-scope fields from the
+selected PROP descriptor and rejects incomplete, null, mismatched, operational, or
+unknown-purpose projections without fallback. The handoff separates diagnostic
+projection fields, fixture display fields, and the future minimal BB AI-context
+allowlist. BB reacceptance, BB code, runtime connection, Production application,
+and execution authority remain absent.

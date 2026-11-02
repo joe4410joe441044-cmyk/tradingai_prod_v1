@@ -11,9 +11,13 @@ import { PROP_ACCOUNT_ID } from "./propAccountsFixtures.js";
 
 const EXPECTED_SCOPE = Object.freeze({
     accountId: PROP_ACCOUNT_ID,
+    identityRevision: 3,
     executionMode: "EXTERNAL_SIMULATION",
     executionVenue: "BYBIT_DEMO",
+    program: "HYROTRADER",
+    planId: "SYNTHETIC-NOT-OFFICIAL",
     phase: "CHALLENGE",
+    currency: "USDT",
 });
 
 test("backend-generated scenarios are frontend-readable and authority-free", () => {
@@ -67,4 +71,47 @@ test("missing timestamps, freshness, or coverage never become a normal current o
     const coverage = structuredClone(PROP_OUTCOME_SCENARIOS[0]);
     delete coverage.outcome.coverage.unknownReasonCodes;
     assert.equal(normalizeOutcomeScenario(coverage, EXPECTED_SCOPE).errorCode, "INVALID_OUTCOME_COVERAGE");
+});
+
+test("all eight account-scope fields are exact and complete", () => {
+    const replacements = {
+        accountId: "acc_ffffffffffffffffffffffffffffffff",
+        identityRevision: 4,
+        executionMode: "LIVE",
+        executionVenue: "OTHER_DEMO",
+        program: "OTHER_PROP",
+        planId: "OTHER-PLAN",
+        phase: "FUNDED",
+        currency: "USD",
+    };
+    for (const [field, replacement] of Object.entries(replacements)) {
+        const mismatch = structuredClone(PROP_OUTCOME_SCENARIOS[0]);
+        mismatch.outcome.accountScope[field] = replacement;
+        assert.equal(normalizeOutcomeScenario(mismatch, EXPECTED_SCOPE).errorCode, "OUTCOME_ACCOUNT_SCOPE_MISMATCH", field);
+
+        for (const absent of [undefined, null]) {
+            const incomplete = structuredClone(PROP_OUTCOME_SCENARIOS[0]);
+            if (absent === undefined) delete incomplete.outcome.accountScope[field];
+            else incomplete.outcome.accountScope[field] = absent;
+            assert.equal(normalizeOutcomeScenario(incomplete, EXPECTED_SCOPE).errorCode, "INVALID_OUTCOME_ACCOUNT_SCOPE", `${field}:${absent}`);
+
+            const expected = { ...EXPECTED_SCOPE };
+            if (absent === undefined) delete expected[field];
+            else expected[field] = absent;
+            assert.equal(normalizeOutcomeScenario(PROP_OUTCOME_SCENARIOS[0], expected).errorCode, "OUTCOME_EXPECTED_SCOPE_INVALID", `expected:${field}:${absent}`);
+        }
+    }
+});
+
+test("fixture purpose allowlist accepts read-only analysis and rejects operational or unknown values", () => {
+    for (const purpose of ["READ_ONLY_CURRENT", "HISTORICAL_AS_OF", "RETROACTIVE_ANALYSIS"]) {
+        const scenario = structuredClone(PROP_OUTCOME_SCENARIOS[0]);
+        scenario.outcome.purpose = purpose;
+        assert.equal(normalizeOutcomeScenario(scenario, EXPECTED_SCOPE).status, "READY", purpose);
+    }
+    for (const purpose of ["OPERATIONAL_CANDIDATE", "FUTURE_PURPOSE"]) {
+        const scenario = structuredClone(PROP_OUTCOME_SCENARIOS[0]);
+        scenario.outcome.purpose = purpose;
+        assert.equal(normalizeOutcomeScenario(scenario, EXPECTED_SCOPE).errorCode, "INVALID_OUTCOME_PURPOSE", purpose);
+    }
 });

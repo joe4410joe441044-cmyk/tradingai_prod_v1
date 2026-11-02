@@ -4,7 +4,14 @@ export const PROP_OUTCOME_FIXTURE_SCHEMA = "tradingai-prop-synthetic-outcome-fix
 export const PROP_OUTCOME_CONTEXT_SCHEMA = "tradingai-prop-outcome-read-only-context/v1";
 const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-const PURPOSES = new Set(["READ_ONLY_CURRENT", "HISTORICAL_AS_OF", "RETROACTIVE_ANALYSIS"]);
+const ACCOUNT_ID = /^acc_[0-9a-f]{32}$/;
+const CURRENCY = /^[A-Z0-9]{3,12}$/;
+// Fixture-display policy only. BB must own and accept its production consumer policy.
+const FIXTURE_READ_ONLY_PURPOSES = new Set(["READ_ONLY_CURRENT", "HISTORICAL_AS_OF", "RETROACTIVE_ANALYSIS"]);
+const SCOPE_FIELDS = Object.freeze([
+    "accountId", "identityRevision", "executionMode", "executionVenue",
+    "program", "planId", "phase", "currency",
+]);
 const FRESHNESS_STATES = new Set(["FRESH", "STALE", "UNKNOWN"]);
 const COMPLETENESS_STATES = new Set(["COMPLETE", "PARTIAL", "UNKNOWN"]);
 const STATES = new Set(["PASS", "BLOCK", "UNKNOWN", "NOT_APPLICABLE"]);
@@ -12,12 +19,16 @@ const invalid = (errorCode) => Object.freeze({ status: "INVALID", errorCode });
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTextArray = (value) => Array.isArray(value) && value.every(isText);
 
+function isCompleteScope(scope) {
+    return scope && typeof scope === "object"
+        && ACCOUNT_ID.test(scope.accountId)
+        && Number.isInteger(scope.identityRevision) && scope.identityRevision > 0
+        && [scope.executionMode, scope.executionVenue, scope.program, scope.planId, scope.phase].every(isText)
+        && isText(scope.currency) && CURRENCY.test(scope.currency);
+}
+
 function matchesExpectedScope(scope, expectedScope) {
-    return expectedScope && typeof expectedScope === "object"
-        && scope?.accountId === expectedScope.accountId
-        && scope?.executionMode === expectedScope.executionMode
-        && scope?.executionVenue === expectedScope.executionVenue
-        && (expectedScope.phase === undefined || scope?.phase === expectedScope.phase);
+    return SCOPE_FIELDS.every((field) => scope[field] === expectedScope[field]);
 }
 
 export function normalizeOutcomeScenario(value, expectedScope) {
@@ -28,10 +39,10 @@ export function normalizeOutcomeScenario(value, expectedScope) {
     }
     const outcome = value.outcome;
     if (outcome?.schemaVersion !== PROP_OUTCOME_CONTEXT_SCHEMA) return invalid("UNSUPPORTED_OUTCOME_SCHEMA");
-    if (outcome.synthetic !== true || !PURPOSES.has(outcome.purpose)) return invalid("INVALID_OUTCOME_PURPOSE");
+    if (outcome.synthetic !== true || !FIXTURE_READ_ONLY_PURPOSES.has(outcome.purpose)) return invalid("INVALID_OUTCOME_PURPOSE");
+    if (!isCompleteScope(expectedScope)) return invalid("OUTCOME_EXPECTED_SCOPE_INVALID");
+    if (!isCompleteScope(outcome.accountScope)) return invalid("INVALID_OUTCOME_ACCOUNT_SCOPE");
     if (!matchesExpectedScope(outcome.accountScope, expectedScope)) return invalid("OUTCOME_ACCOUNT_SCOPE_MISMATCH");
-    if (!Number.isInteger(outcome.accountScope.identityRevision) || outcome.accountScope.identityRevision < 1
-        || ![outcome.accountScope.program, outcome.accountScope.planId, outcome.accountScope.phase, outcome.accountScope.currency].every(isText)) return invalid("INVALID_OUTCOME_ACCOUNT_SCOPE");
     if (!UTC_TIMESTAMP.test(outcome.evaluatedAt) || !UTC_TIMESTAMP.test(outcome.knowledgeCutoffAt)) return invalid("INVALID_OUTCOME_TIMESTAMPS");
     if (outcome.authority?.executionAuthorityGranted !== false || outcome.authority?.runtimeReady !== false || outcome.authority?.tradeReady !== false) return invalid("OUTCOME_AUTHORITY_NOT_DISABLED");
     if (outcome.provenanceValidation?.status !== "STRICTLY_VALIDATED"

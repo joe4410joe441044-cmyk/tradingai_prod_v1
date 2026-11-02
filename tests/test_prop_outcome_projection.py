@@ -36,6 +36,17 @@ def test_projection_strictly_round_trips_and_preserves_decimal_currency_and_auth
         "currency": "USDT",
     }
     assert projected["calculation"]["freshnessState"] == "FRESH"
+    assert projected["calculation"]["warnings"] == [
+        "RULE_COMPATIBILITY_ONLY_NO_EXECUTION_AUTHORITY"
+    ]
+    evidence_refs = [
+        ref
+        for item in projected["coverage"]["items"]
+        for ref in item["evidenceRefs"]
+    ]
+    assert evidence_refs
+    assert all("://" in ref for ref in evidence_refs)
+    assert projected["references"]["bundleId"]
     assert projected["calculation"]["ruleResults"][0]["threshold"] == "6000"
     assert projected["authority"] == {
         "executionAuthorityGranted": False,

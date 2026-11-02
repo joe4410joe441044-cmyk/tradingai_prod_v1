@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "tradingai-work-cc-accepted-delta-manifest/v1",
+  "recordedAt": "2026-11-03T06:35:51+09:00",
+  "baseCommit": "4a93902478fcbb84d66f8ce443f0f48bb99ae58c",
+  "sourceBranch": "feature/hyrotrader-integration",
+  "acceptanceEvidence": {
+    "kind": "USER_SUPPLIED_BB_REACCEPTANCE",
+    "providerReacceptance": "ACCEPTED",
+    "blockingCcFindings": "NONE",
+    "bbIntegrationStatus": "NOT_READY",
+    "independentTestRerun": "NOT_STARTED_PERMISSION_REVIEW_TIMEOUT",
+    "basis": "EXISTING_VALIDATION_AND_EXACT_HASH_MATCH"
+  },
+  "acceptedFileCount": 10,
+  "acceptedFiles": [
+    {
+      "path": "docs/hyrotrader/WORK_CC_BB_READ_ONLY_HANDOFF.md",
+      "role": "bb_read_only_handoff_contract",
+      "sha256": "25027fbe5837356c941c10c1b4cab9209b24e285caabe056f0d0676627062648"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_STATUS.md",
+      "role": "cc_status_record",
+      "sha256": "00564d45330891d76fabe2a878b1e582ab5e02b93fd6bcd530503b65d69cde08"
+    },
+    {
+      "path": "docs/hyrotrader/WORK_CC_VALIDATION.md",
+      "role": "cc_validation_record",
+      "sha256": "ec027cbc272ea29c33a17b0fb4ee3699d2ea5a5c055167ff79f53600be265a2b"
+    },
+    {
+      "path": "frontend/src/components/prop-accounts/PropAccountsPanel.jsx",
+      "role": "selected_account_scope_binding",
+      "sha256": "951b680790c5d597c99cd0800f0d1c68d54ca3a14034861ced4e2caee96b84ae"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsFixtures.js",
+      "role": "synthetic_account_descriptor",
+      "sha256": "61f902f564ffbd46059416911966c0b5e07e8d8f73ab5501431c91f7e0d08d76"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsViewModel.js",
+      "role": "fixture_account_scope_normalization",
+      "sha256": "93dd307fa43a8a72c53edd5f84421f834e171c30e5e8df2b0f8f1939e35537a2"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propAccountsViewModel.test.js",
+      "role": "fixture_account_scope_regression",
+      "sha256": "b856b9c4af95f138e7d87b4e369084dc7cbba81343f476ca2a2b4cce8c5ec644"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propOutcomeFixtures.js",
+      "role": "fixture_display_scope_and_purpose_validator",
+      "sha256": "152e94a5402eb1d2eff83fbba563d0c9441ed68e029eb3bed65d35b32f1740f9"
+    },
+    {
+      "path": "frontend/src/features/prop-accounts/propOutcomeFixtures.test.js",
+      "role": "scope_and_purpose_policy_regression",
+      "sha256": "709c85097a39d62d398cbd4209976b5ef27f85fb326383ca031dda3d42612c2a"
+    },
+    {
+      "path": "tests/test_prop_outcome_projection.py",
+      "role": "diagnostic_projection_privacy_boundary_regression",
+      "sha256": "cdf9b4e898b54a095bf89034bf90826915bd28492df99ff197144cec841e1342"
+    }
+  ],
+  "generatedSample": {
+    "path": "frontend/src/features/prop-accounts/generatedSyntheticOutcomes.json",
+    "role": "unchanged_deterministic_six_scenario_sample",
+    "sha256": "8dd5032ca1a6dce177209cb5aefbe621943ce30d20d27fce9238366a47ffa336"
+  },
+  "newPreservationDocs": [
+    {
+      "path": "docs/hyrotrader/WORK_CC_3J_BB_ACCEPTANCE.md",
+      "role": "user_supplied_bb_reacceptance_record",
+      "sha256": "3a4d036e4d89a38461e1eadceafcc11542189eb225e73c17a92e1d039f2f0e52"
+    }
+  ],
+  "manifest": {
+    "path": "docs/hyrotrader/WORK_CC_3J_ACCEPTED_MANIFEST.json",
+    "sha256": null,
+    "hashPolicy": "SELF_EXCLUDED"
+  }
+}

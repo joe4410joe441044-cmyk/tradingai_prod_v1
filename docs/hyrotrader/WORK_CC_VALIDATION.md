@@ -53,3 +53,14 @@ frontend fixture-validator and panel tests passed 15 tests with the existing
 canonical frontend dependencies. Two independent fixture regenerations were byte
 identical and matched the updated checked-in generated JSON. No full suite, build, or
 browser/visual rerun was performed because the limited contract fix did not change
+
+## CC-3J targeted validation
+
+Focused backend projection and Complete Outcome tests passed 44 tests. Focused
+frontend view-model, fixture-validator, and panel tests passed 29 tests. The scope
+mutation matrix covers all eight fields with mismatch, missing, and null cases;
+purpose tests reject operational and unknown values without correction. Two
+independent generations were byte-identical and matched the checked-in sample SHA-256
+`8dd5032ca1a6dce177209cb5aefbe621943ce30d20d27fce9238366a47ffa336`. The
+isolated PROP preview build passed with 22 modules. No full suite, browser/visual,
+BB reacceptance, runtime, Production, network, credential, or authority action ran.

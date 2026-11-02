@@ -56,11 +56,25 @@ missing, malformed, or unsupported freshness must fail closed and must not be tr
 as a normal current projection. The fixed synthetic fixture date must not be advanced
 to make fabricated data appear current.
 
-Only typed codes and constrained opaque references are projected; observation source,
-warnings/free-form messages, raw venue responses, UIDs, IPs, credentials, signatures,
-and filesystem paths are not consumer context. This boundary prevents those fields
-from being introduced by this projector, but it does not independently prove the
-authenticity or confidentiality of upstream evidence.
+## Privacy boundaries
+
+The CC diagnostic projection intentionally retains typed warning codes, coverage evidence references, and reference IDs/digests for provenance and coverage review. These diagnostic fields are not a BB AI-context allowlist.
+
+The CC fixture UI displays normalized result states/reasons and an evidence-link ID. It does not display calculation warnings or coverage evidence references.
+
+A future BB AI context must use a separate minimal allowlist: normalized states, coverage/completeness, typed reason codes, Decimal strings with currency/unit, and freshness timestamps/state. It must exclude warnings, evidence references, every reference ID/digest, raw/free-form responses, UIDs, IPs, credentials, signatures, and paths.
+
+Reference syntax permits constrained `:` and `/` characters. A path- or URI-like reference can therefore be structurally valid while remaining ineligible for BB AI context; syntactic safety is not privacy or AI-context safety.
+
+## Fixture validator scope ownership
+
+`propOutcomeFixtures.js` is the isolated CC fixture-display boundary. Its expected scope comes from the selected normalized PROP account descriptor, not from the outcome payload. It is not BB's production exact-shape validator and does not claim validation of future coverage subversions, arbitrary reference shapes, or a complete BB candidate payload.
+
+All eight scope fields are required and exact: `accountId`, `identityRevision`, `executionMode`, `executionVenue`, `program`, `planId`, `phase`, and `currency`. Missing, null, malformed, or mismatched values fail closed with no fallback or cross-account inference.
+
+## Purpose boundary
+
+Complete Outcome supports more producer purposes. This fixture read-only consumer accepts only `READ_ONLY_CURRENT`, `HISTORICAL_AS_OF`, and `RETROACTIVE_ANALYSIS`; `OPERATIONAL_CANDIDATE` and unknown purposes fail closed. Expansion requires an explicit policy change and BB reacceptance.
 
 
 ## Synthetic scenarios and sample files
@@ -95,7 +109,7 @@ creation. This document is handoff-ready only; BB acceptance is not performed.
 
 1. Accept the checked-in v1 synthetic sample without network, registry, storage, or runtime access.
 2. Reject any schema other than `tradingai-prop-outcome-read-only-context/v1`.
-3. Reject an account id/revision/execution-mode/execution-venue/plan/phase mismatch with the BB request scope; never fall back to another account.
+3. Require and exactly bind account id/revision/execution-mode/execution-venue/program/plan/phase/currency to the BB request scope; reject missing, null, or mismatched values and never fall back.
 4. Reject `executionAuthorityGranted`, `runtimeReady`, or `tradeReady` when not false.
 5. Preserve Decimal strings and distinguish null, zero, negative, and invalid values.
 6. Preserve PASS, BLOCK, UNKNOWN, NOT_APPLICABLE, incomplete coverage, and reason codes.

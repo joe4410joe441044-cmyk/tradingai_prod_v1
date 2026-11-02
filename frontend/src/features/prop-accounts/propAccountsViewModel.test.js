@@ -24,12 +24,30 @@ test("ten required scenarios normalize with independent axes and disabled execut
         const account = selectedAccount(view);
         assert.equal(account.accountSummary.accountId, PROP_ACCOUNT_ID);
         assert.equal(account.executionCapability.authorityState, "DISABLED");
+        assert.deepEqual(
+            [account.accountSummary.accountId, account.accountSummary.identityRevision, account.accountSummary.environment, account.accountSummary.platform, account.accountSummary.program, account.accountSummary.planId, account.accountSummary.phase, account.accountSummary.currency],
+            [PROP_ACCOUNT_ID, 3, "EXTERNAL_SIMULATION", "BYBIT_DEMO", "HYROTRADER", "SYNTHETIC-NOT-OFFICIAL", scenario.id === "not_configured" ? "UNKNOWN" : "CHALLENGE", "USDT"],
+        );
         assert.equal(account.executionCapability.grantsExecutionAuthority, false);
         assert.equal(account.aiContext.status, "NOT_INTEGRATED");
         assert.equal(account.aiContext.grantsExecutionAuthority, false);
         assert.equal(typeof account.connection.state, "string");
         assert.equal(typeof account.observation.quality, "string");
         assert.equal(typeof account.propRules.readiness, "string");
+    }
+});
+
+test("PROP account descriptor requires every outcome scope field and never falls back", () => {
+    for (const field of ["identityRevision", "program", "planId", "phase", "currency"]) {
+        const fixture = createPropAccountsFixture({ scenarioId: "connected_read_only" });
+        fixture.accounts[1] = {
+            ...fixture.accounts[1],
+            accountSummary: { ...fixture.accounts[1].accountSummary, [field]: null },
+        };
+        const view = normalizePropAccountsView(fixture);
+        assert.equal(view.status, "INVALID", field);
+        assert.equal(view.errorCode, "INVALID_ACCOUNT_SCOPE", field);
+        assert.equal(selectedAccount(view), null, field);
     }
 });
 
