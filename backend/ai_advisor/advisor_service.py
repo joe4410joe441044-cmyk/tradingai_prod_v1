@@ -209,6 +209,10 @@ class AdvisorService:
                 provider_request,
                 service_input.canonicalContextBlock,
             )
+            provider_request = _with_canonical_block(
+                provider_request,
+                service_input.knowledgeContextBlock,
+            )
         except Exception:
             return _failure(AdvisorServiceFailureCode.ADVISOR_PROVIDER_REQUEST_INVALID)
 

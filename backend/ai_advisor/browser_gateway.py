@@ -71,6 +71,9 @@ from backend.ai_advisor.models import (
     Freshness,
 )
 from backend.ai_advisor.request_safety import evaluate_advisor_request
+from backend.knowledge_hub.advisor_supervisor_connection import (
+    attach_advisor_knowledge,
+)
 from backend.ai_advisor.response_models import (
     REJECTED_SUMMARY,
     AdvisorForbiddenClaim,
@@ -470,6 +473,27 @@ def _attach_canonical_context(
         return service_input
 
 
+def _attach_knowledge_context(
+    service_input: AdvisorServiceInput,
+    identity: str | None,
+    question: str,
+):
+    """Attach the opt-in knowledge block beside the BB context.
+
+    This is default OFF and requires an authenticated identity. Any failure
+    returns the caller's existing input unchanged.
+    """
+
+    try:
+        return attach_advisor_knowledge(
+            service_input,
+            question=question,
+            identity=identity,
+        )
+    except Exception:
+        return service_input
+
+
 def _read_runtime_response(
     composition: AdvisorBrowserGatewayComposition,
     now: datetime,
@@ -717,6 +741,11 @@ def create_browser_gateway_router(
             service_input = _attach_canonical_context(
                 service_input,
                 request.app,
+                browser_request.prompt,
+            )
+            service_input = _attach_knowledge_context(
+                service_input,
+                identity,
                 browser_request.prompt,
             )
             task = asyncio.create_task(

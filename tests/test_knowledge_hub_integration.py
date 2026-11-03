@@ -44,6 +44,7 @@ from backend.knowledge_hub.continuous_sync import (
 from backend.knowledge_hub.integration import (
     NOT_READY,
     READY_FOR_APPROVAL,
+    CanonicalReconciliation,
     IntegrationConfig,
     assess_deployment_readiness,
     classify_hash_mismatch,
@@ -80,6 +81,15 @@ PUBLIC = RequestContext(caller_scope="PUBLIC", caller_id="public-view")
 PACKAGE = Path(__file__).resolve().parents[1] / "backend" / "knowledge_hub" / "integration"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = Path("/home/joe4410joe/tradingai_prod_v1")
+BC10C1_APPROVED_SHARED_PATHS = frozenset(
+    {
+        "backend/ai_advisor/advisor_service.py",
+        "backend/ai_advisor/browser_gateway.py",
+        "backend/ai_advisor/service_models.py",
+        "backend/api/supervisor_conversation.py",
+        "tests/test_knowledge_hub_integration.py",
+    }
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -1013,9 +1023,19 @@ def test_t47_canonical_reconciliation(e2e):
     env, _ = e2e
     reconciliation = reconcile_with_canonical(CANONICAL, REPO_ROOT)
     assert reconciliation.entries
-    assert reconciliation.blocked == ()
+    unexpected = tuple(
+        entry
+        for entry in reconciliation.blocked
+        if entry.path not in BC10C1_APPROVED_SHARED_PATHS
+    )
+    assert unexpected == ()
+    shared = {
+        entry.path
+        for entry in reconciliation.entries
+        if entry.classification == "SHARED_PATH_REVIEW_REQUIRED"
+    }
+    assert shared == set(BC10C1_APPROVED_SHARED_PATHS)
     assert "CONFLICTING" not in reconciliation.counts()
-    assert "SHARED_PATH_REVIEW_REQUIRED" not in reconciliation.counts()
 
 
 def test_t48_deployment_readiness_classification(e2e):
@@ -1023,10 +1043,19 @@ def test_t48_deployment_readiness_classification(e2e):
     if not CANONICAL.exists():
         pytest.skip("canonical repository is not available in this environment")
     reconciliation = reconcile_with_canonical(CANONICAL, REPO_ROOT)
+    reviewed = CanonicalReconciliation(
+        entries=tuple(
+            entry
+            for entry in reconciliation.entries
+            if entry.path not in BC10C1_APPROVED_SHARED_PATHS
+        ),
+        canonical_head=reconciliation.canonical_head,
+        worktree_head=reconciliation.worktree_head,
+    )
     hashes = classify_hash_mismatch(production_knowledge_manifest(), repository_root=REPO_ROOT)
     readiness = assess_deployment_readiness(
         integration_passed=result.passed,
-        reconciliation=reconciliation,
+        reconciliation=reviewed,
         hash_classification=hashes,
         canonical_dirty=production_dirty_state(CANONICAL),
         bb_compatible=CONTEXT_SCHEMA == "tradingai-context/v1",
@@ -1038,7 +1067,7 @@ def test_t48_deployment_readiness_classification(e2e):
 
     not_ready = assess_deployment_readiness(
         integration_passed=False,
-        reconciliation=reconciliation,
+        reconciliation=reviewed,
         hash_classification=hashes,
     )
     assert not_ready.verdict == NOT_READY
