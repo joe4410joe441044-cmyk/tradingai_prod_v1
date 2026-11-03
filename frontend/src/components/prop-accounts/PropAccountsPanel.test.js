@@ -15,6 +15,11 @@ const reactStub = moduleUrl([
     "export const useMemo=(factory)=>factory();",
     "export const useState=(value)=>[value,()=>{}];",
 ].join(""));
+const offlineWorkflowStub = moduleUrl([
+    "export default function OfflinePropWorkflow(){",
+    "return {type:'section',props:{'data-testid':'offline-workflow',children:'隔離デモ / 架空データ / 実口座未接続'}};",
+    "}",
+].join(""));
 
 async function loadComponent() {
     const dependencyRoot = process.env.TRADINGAI_FRONTEND_NODE_MODULES;
@@ -38,6 +43,7 @@ async function loadComponent() {
         .replace('from "../../features/prop-accounts/propAccountsViewModel.js"', `from "${modelUrl}"`)
         .replace('from "../../features/prop-accounts/propAccountsFixtures.js"', `from "${fixturesUrl}"`)
         .replace('from "./PropOutcomeCard.jsx"', `from "${pathToFileURL(outcomeCardOutput).href}"`)
+        .replace('from "./OfflinePropWorkflow.jsx"', `from "${offlineWorkflowStub}"`)
         .replace('from "../../features/prop-accounts/propOutcomeFixtures.js"', `from "${outcomeFixturesUrl}"`)
         .replace('import "./prop-accounts.css";', "");
     const outcomeCardCode = outcomeCardTransformed.code
@@ -89,7 +95,8 @@ test("fixture banner and disabled execution remain visible in all scenarios", as
     const { PROP_FIXTURE_SCENARIOS } = await import("../../features/prop-accounts/propAccountsFixtures.js");
     for (const { id } of PROP_FIXTURE_SCENARIOS) {
         const node = render(id);
-        assert.match(textOf(byTestId(node, "fixture-banner")), /サンプル表示 \/ 実口座未接続/);
+        assert.match(textOf(byTestId(node, "fixture-banner")), /隔離デモ \/ 架空データ \/ 実口座未接続/);
+        assert.match(textOf(byTestId(node, "offline-workflow")), /隔離デモ \/ 架空データ \/ 実口座未接続/);
         assert.match(textOf(byTestId(node, "execution-state")), /DISABLED/);
         const buttonLabels = descendants(node)
             .filter((item) => item?.type === "button")

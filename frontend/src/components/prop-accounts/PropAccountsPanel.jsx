@@ -14,6 +14,7 @@ import {
 } from "../../features/prop-accounts/propAccountsFixtures.js";
 
 import PropOutcomeCard from "./PropOutcomeCard.jsx";
+import OfflinePropWorkflow from "./OfflinePropWorkflow.jsx";
 import { PROP_OUTCOME_SCENARIOS, getOutcomeScenario } from "../../features/prop-accounts/propOutcomeFixtures.js";
 
 import "./prop-accounts.css";
@@ -250,7 +251,7 @@ export function PropAccountsView({
     if (viewModel?.status !== "READY") {
         return (
             <main className="cc-prop-accounts" data-testid="prop-accounts-invalid">
-                <div className="cc-prop-accounts__fixture-banner">サンプル表示 / 実口座未接続</div>
+                <div className="cc-prop-accounts__fixture-banner">隔離デモ / 架空データ / 実口座未接続 — サンプル表示</div>
                 <section className="cc-prop-accounts__invalid" role="alert">
                     <h1>表示データを安全に読み込めませんでした</h1>
                     <p>{shown(viewModel?.errorCode, "INVALID_VIEW_MODEL")}</p>
@@ -267,16 +268,20 @@ export function PropAccountsView({
     return (
         <main className="cc-prop-accounts" data-testid="prop-accounts-panel">
             <div className="cc-prop-accounts__fixture-banner" data-testid="fixture-banner">
-                <strong>サンプル表示 / 実口座未接続</strong>
-                <span>この画面は架空データです。実API・Registry・runtime・注文経路には接続していません。</span>
+                <strong>隔離デモ / 架空データ / 実口座未接続</strong>
+                <span>サンプル表示です。実API・Registry・runtime・注文経路には接続していません。</span>
             </div>
 
             <header className="cc-prop-accounts__hero">
-                <div><span>FIXTURE-ONLY PREVIEW</span><h1>PROP Account Status</h1></div>
+                <div><span>ISOLATED SYNTHETIC PREVIEW</span><h1>PROP Account Status</h1></div>
                 <div className="cc-prop-accounts__execution" data-testid="execution-authority">
                     <span>EXECUTION AUTHORITY</span><strong>DISABLED</strong>
                 </div>
             </header>
+
+            <OfflinePropWorkflow />
+
+            <div className="cc-prop-accounts__mode-divider"><span>FIXED SCENARIO MODE</span><strong>以下は従来の固定fixture画面</strong></div>
 
             <section className="cc-prop-accounts__scenario" aria-label="開発用fixture scenario">
                 <label htmlFor="cc-prop-scenario">開発preview用scenario（実運用設定ではありません）</label>

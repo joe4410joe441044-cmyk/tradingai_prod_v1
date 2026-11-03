@@ -64,3 +64,33 @@ independent generations were byte-identical and matched the checked-in sample SH
 `8dd5032ca1a6dce177209cb5aefbe621943ce30d20d27fce9238366a47ffa336`. The
 isolated PROP preview build passed with 22 modules. No full suite, browser/visual,
 BB reacceptance, runtime, Production, network, credential, or authority action ran.
+
+## CC-4B offline workflow acceptance
+
+CC-4B is a same-agent, separate review stage rather than an independent third-party
+review. It matched all 14 CC-4A source/test/doc hashes to the CC-4A report before
+modification.
+
+Five bounded findings were fixed and covered by regression checks: stale async
+controller/unmount/double-submit ownership, Decimal digit/exponent boundary
+validation, duplicate/malformed/slow HTTP request handling, threaded session
+serialization, and form/status accessibility associations.
+
+The final non-overlapping backend command covered the offline workflow, Account
+Registry, rule contracts, Rule Engine, provenance, Complete Evaluation, and outcome
+projection: 183 passed in 5.51 seconds. The final frontend command covered workflow,
+view-model, outcome fixture, and panel tests: 34 passed. Python compile and diff
+whitespace checks passed. The isolated Vite build transformed 25 modules and wrote
+only tmp/cc-4a-prop-offline-preview-dist.
+
+Automated browser acceptance verified associated form help, keyboard focus order,
+one request for same-tick double submit, safe Decimal error and PASS recovery,
+loading-time input invalidation with no stale result, mobile overflow absence, zero
+external requests, zero page errors, and zero unexpected console errors. One
+expected browser resource message accompanied the intentional HTTP 400 validation
+case. The previously documented image-viewer bwrap failure was not repeated, so
+manual visual acceptance remains unconfirmed.
+
+No Production backend, registry, credential, exchange, LLM, runtime, order,
+operational UI, Production dist, BC file, or provider projection was accessed or
+changed.

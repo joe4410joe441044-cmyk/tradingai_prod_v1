@@ -17,7 +17,19 @@ The authentication boundary is validated offline with fabricated credentials and
 
 ## UI isolation
 
-The fixture preview derives its view model from static fabricated data. The component and preview contain no runtime endpoint, network client, WebSocket, browser storage, or order mutation. Existing operational trading screens are neither imported nor modified.
+The fixed-scenario preview derives its view model from static fabricated data. The
+CC-4A/4B input mode adds one dedicated browser client that can call only the
+loopback synthetic evaluator on 127.0.0.1:4188 from the exact preview origin. The
+preview contains no Production endpoint, WebSocket, browser storage, credential,
+exchange, runtime, or order mutation. Existing operational trading screens are
+neither imported nor modified.
+
+The local evaluator is an unauthenticated development boundary. Loopback binding,
+exact Host/Origin checks, minimal routes, JSON/body limits, duplicate-key rejection,
+and body-read timeout reduce accidental local misuse, but do not turn it into an
+authenticated multi-user service. It must not be exposed beyond the local preview.
+Its process-local session serializes account creation, revision, and evaluation so a
+threaded HTTP request cannot mix account revisions.
 
 ## Deferred integration
 

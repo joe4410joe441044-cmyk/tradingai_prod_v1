@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "tradingai-work-cc-offline-workflow-delta-manifest/v1",
+  "taskId": "TRADINGAI-WORK-CC-4B-OFFLINE-WORKFLOW-ACCEPTANCE-AND-PRESERVATION-1",
+  "workstream": "HyroTrader PROP Trading / Work CC",
+  "createdAt": "2026-11-04T03:26:59+09:00",
+  "deltaBaseHead": "18028d49f6fa5b976d39a49d386aa49fd88be4de",
+  "sourceBranch": "feature/hyrotrader-integration",
+  "reviewIndependence": "SAME_AGENT_SEPARATE_REVIEW_STAGE",
+  "visualAcceptance": "UNCONFIRMED_KNOWN_BWRAP_ENVIRONMENT_ERROR",
+  "selfHashExcluded": true,
+  "selfHashPolicy": "This manifest is part of the preserved commit but is intentionally excluded from its own entries and SHA-256 set.",
+  "totalEntries": 16,
+  "entries": [
+    {"path": "backend/prop_trading/offline_server.py", "role": "dedicated loopback HTTP adapter", "sha256": "71c0253930648b7d3ae85f03413d8d06ccb3f68fec047c2d6f06d83324c9de1e"},
+    {"path": "backend/prop_trading/offline_workflow.py", "role": "synthetic session and pure-evaluator workflow", "sha256": "7c3fd6a200bb707b8463db39f48140a11955db21a0e187cbf07bdee7ea0a72c7"},
+    {"path": "docs/hyrotrader/WORK_CC_ARCHITECTURE.md", "role": "architecture boundary documentation", "sha256": "a76fb88bfd954e74b520ef98a998a8a685a847e9cd001347609591d9ed922bf9"},
+    {"path": "docs/hyrotrader/WORK_CC_OFFLINE_PROP_WORKFLOW.md", "role": "offline workflow operator and boundary guide", "sha256": "affef5bb39a26a91ea8daf8f69e2e815a6f2964175cf5d66f35af924104e5718"},
+    {"path": "docs/hyrotrader/WORK_CC_STATUS.md", "role": "workstream status documentation", "sha256": "46dbc268054e32843b444853e1cc2a86448248be87696c119c108b8ddcd1679e"},
+    {"path": "docs/hyrotrader/WORK_CC_VALIDATION.md", "role": "acceptance evidence documentation", "sha256": "15de8132e1c32a79934c31b01b1ec8c2d37f74852e785e965553f051f5349b3a"},
+    {"path": "frontend/src/components/prop-accounts/OfflinePropWorkflow.jsx", "role": "isolated synthetic input workflow UI", "sha256": "e9f64386eb052c745ea5b5201a4a8fab0ad6d0ad2d5a99a61ec9086d8191d729"},
+    {"path": "frontend/src/components/prop-accounts/PropAccountsPanel.jsx", "role": "isolated fixture panel integration", "sha256": "6de85e450819c4228618d6cb2476a29c4b005abd13a5c18e074eebabf76ade29"},
+    {"path": "frontend/src/components/prop-accounts/PropAccountsPanel.test.js", "role": "panel regression tests", "sha256": "d8d48914cb2812d355ad27229b22715390e0bdcf2c70cd6f7fb7bf2ff67dd206"},
+    {"path": "frontend/src/components/prop-accounts/prop-accounts.css", "role": "isolated workflow presentation and accessibility styles", "sha256": "4580b0f28ad61ea5efa8e8832528ba4dc112f4ab2595144a589ff92e315bbaec"},
+    {"path": "frontend/src/features/prop-accounts/offlinePropWorkflow.js", "role": "frontend request and stale-response guards", "sha256": "b8b9b74ef931d371e6d47e2bad6f55b51708c3e995551b359726622e9f8b9164"},
+    {"path": "frontend/src/features/prop-accounts/offlinePropWorkflow.test.js", "role": "frontend workflow regression tests", "sha256": "84f9e18c561a38fb5cb9885e65c60c562c383b437804cd25c2c81706bb355c69"},
+    {"path": "frontend/src/features/prop-accounts/offlinePropWorkflowClient.js", "role": "dedicated loopback-only client", "sha256": "2170a3cdb12b9cbb93693bf6aa56c4ef50b9d47718194cc3c6aaa94c7d156fd3"},
+    {"path": "frontend/vite.prop-accounts-preview.config.js", "role": "isolated preview configuration", "sha256": "d353641d30b295ff60a9c377a01097c5eac81e62185a935a1523eada007460ba"},
+    {"path": "scripts/serve_prop_offline_workflow.py", "role": "local synthetic evaluator entry point", "sha256": "b87652e99f8ab4b96341162749173f4638ebaa8d7d6517e2aae854788a6d5404"},
+    {"path": "tests/test_prop_offline_workflow.py", "role": "backend workflow and HTTP boundary regressions", "sha256": "1cf28e6ffd8fed4084edc2a816be0945fe380a0d1b7f8389fab96a2be302fade"}
+  ]
+}

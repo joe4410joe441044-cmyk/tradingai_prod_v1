@@ -17,7 +17,7 @@ export default {
         ],
     },
     build: {
-        outDir: resolve(frontendDirectory, "../tmp/cc-2s-prop-preview-dist"),
+        outDir: resolve(frontendDirectory, "../tmp/cc-4a-prop-offline-preview-dist"),
         emptyOutDir: true,
     },
     server: {
