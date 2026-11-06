@@ -22,6 +22,8 @@ const loadApp = async () => {
     const moneyManagementStub = moduleUrl("export default()=>({type:'main',props:{children:'MONEY MANAGEMENT PAGE'}})");
     const marketRecorderStub = moduleUrl("export default()=>({type:'main',props:{children:'MARKET RECORDER PAGE'}})");
     const supervisorStub = moduleUrl("export default()=>({type:'main',props:{children:'SUPERVISOR PAGE'}})");
+    const propDemoStub = moduleUrl("export default()=>({type:'main',props:{children:'PROP ISOLATED DEMO PAGE'}})");
+    const propFeatureStub = moduleUrl("export const PROP_ISOLATED_DEMO_ENABLED=false;export const PROP_ISOLATED_DEMO_PATH='/prop-isolated-demo';");
     const dashboardMarketProviderStub = moduleUrl(
         "export const DashboardMarketContextProvider=({children})=>children",
     );
@@ -33,6 +35,9 @@ const loadApp = async () => {
         .replace('from "./components/AppNavigation";', `from "${navigationStub}";`)
         .replace('from "./pages/TradeHistoryPage";', `from "${moduleUrl("export default()=>({type:'main',props:{children:'TRADE HISTORY PAGE'}})")}";`)
         .replace('from "./pages/ParameterSettingsPage";', `from "${moduleUrl("export default()=>({type:'main',props:{children:'PARAMETER SETTINGS PAGE'}})")}";`)
+        .replace('from "./pages/PropIsolatedDemoPage";', `from "${propDemoStub}";`)
+        .replace('from "./features/prop-accounts/propIsolatedDemoFeature.js";', `from "${propFeatureStub}";`)
+        .replace('from "./appRouteModel.js";', `from "${new URL("./appRouteModel.js", import.meta.url).href}";`)
         .replace('from "./pages/AccountStatusPage";', `from "${accountStatusStub}";`)
         .replace('from "./pages/AIAdvisorPage";', `from "${advisorStub}";`)
         .replace('from "./pages/Dashboard";', `from "${dashboardStub}";`)
@@ -115,10 +120,20 @@ test("AI Advisor route explicitly stops the global trading WebSocket", async () 
         "utf8",
     );
 
-    assert.match(source, /advisorActive = currentPath === AI_ADVISOR_PATH/);
+    assert.match(source, /runtimeSuppressed = currentPath === AI_ADVISOR_PATH/);
+    assert.match(source, /currentPath === PROP_ISOLATED_DEMO_PATH/);
     assert.match(source, /stopWebSocketRuntime\(\)/);
     assert.match(runtimeSource, /runtimeStopped = true/);
     assert.match(runtimeSource, /if \(!runtimeStopped && !intentionallyClosed\)/);
+});
+
+test("PROP route is default OFF and resolves only with the explicit flag", async () => {
+    globalThis.__appState = undefined;
+    globalThis.window = { location: { pathname: "/" } };
+    await loadApp();
+    const { resolveAppPath } = await import("./appRouteModel.js");
+    assert.equal(resolveAppPath("/prop-isolated-demo"), "/");
+    assert.equal(resolveAppPath("/prop-isolated-demo", true), "/prop-isolated-demo");
 });
 
  test("App mounts independent Trade History", async () => {

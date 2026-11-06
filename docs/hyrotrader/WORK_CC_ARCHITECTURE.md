@@ -31,6 +31,23 @@ authenticated multi-user service. It must not be exposed beyond the local previe
 Its process-local session serializes account creation, revision, and evaluation so a
 threaded HTTP request cannot mix account revisions.
 
+CC-4D adds a second adapter for the application without changing the local preview.
+Its route and navigation are strict default OFF behind independent frontend/backend
+flags. The adapter reuses the existing operator-session and CSRF middleware, checks
+same-origin `Origin`/Host/scheme, parses strict bounded JSON while streaming, and
+calls the same `OfflinePropSession` pure conversion/evaluation path. Its browser
+client has only three fixed relative `/api/prop-accounts/synthetic/...` paths; no
+arbitrary host or CORS allowance exists.
+
+Because account creation, revision, and evaluation are separate preserved actions,
+the application adapter uses a bounded per-operator-session in-memory registry.
+Session expiry is the entry lifetime, expired entries are removed on access, and an
+LRU cap of 64 bounds retained sessions. There is no persistence or background task.
+The application page suppresses the global trading WebSocket while active and does
+not import runtime, order, exchange, credential, registry, or settings mutation
+services. Account Status remains a PAPER/REAL read-only projection with only a
+separate conditional link.
+
 ## Deferred integration
 
 The synthetic PROP rule engine is an isolated pure calculation layer. It reuses the v1 rule, observation, result, and evaluation DTOs and an explicit caller-supplied daily baseline. Calculation v2 uses an engine-local exact Decimal context and explicit entry risk gates. Static maximum loss, daily loss, and profit-target progress are supported only under an explicit synthetic policy. Profit target is informational/completion progress, never an entry gate. `entry_allowed` is calculation compatibility, not runtime or execution authority.

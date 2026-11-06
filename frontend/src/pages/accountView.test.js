@@ -25,6 +25,8 @@ const loadModule = async () => {
     const temporary = await mkdtemp(join(directory, ".account-view-test-"));
     const output = join(temporary, "AccountStatusPage.mjs");
     const modelUrl = new URL("../components/runtime/accountRuntimeModel.js", import.meta.url).href;
+    const featureUrl = new URL("../features/prop-accounts/propIsolatedDemoFeature.js", import.meta.url).href;
+    const navigationUrl = new URL("../utils/appNavigation.js", import.meta.url).href;
     const statusMetricStub = moduleUrl(
         "export default (props)=>({type:'div',props:{children:[{type:'span',props:{'data-testid':props.testId,children:props.value}},props.label]}});",
     );
@@ -40,6 +42,8 @@ const loadModule = async () => {
             .replace('"../components/runtime/CurrentPositionCard.jsx"', '"./CurrentPositionCard.mjs"')
             .replace('"../components/runtime/LastPositionEventCard.jsx"', '"./LastPositionEventCard.mjs"')
             .replace('from "../hooks/usePolling";', `from "${usePollingStub}";`)
+            .replace('from "../features/prop-accounts/propIsolatedDemoFeature.js";', `from "${featureUrl}";`)
+            .replace('from "../utils/appNavigation.js";', `from "${navigationUrl}";`)
             .replace('from "../components/runtime/PaperCapitalControl";', `from "${paperCapitalStub}";`)
             .replace('from "../components/runtime/StatusMetric";', `from "${statusMetricStub}";`)
             .replace('from "../components/runtime/accountRuntimeModel";', `from "${modelUrl}";`));

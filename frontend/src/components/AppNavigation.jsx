@@ -1,49 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { navigateTo } from "../utils/appNavigation";
+import { PROP_ISOLATED_DEMO_ENABLED } from "../features/prop-accounts/propIsolatedDemoFeature.js";
 
 import {
     loadNavigationItems,
     reorderAndPersistNavigationItems,
 } from "./appNavigationModel";
-
-const DASHBOARD_PATH = "/";
-const MARKET_INTELLIGENCE_PATH = "/market-intelligence";
-const AI_ADVISOR_PATH = "/ai-advisor";
-const MONEY_MANAGEMENT_PATH = "/money-management";
-const MARKET_RECORDER_PATH = "/market-recorder";
-const SUPERVISOR_PATH = "/supervisor";
-const ACCOUNT_STATUS_PATH = "/account-status";
-const PARAMETER_SETTINGS_PATH = "/parameter-settings";
-const TRADE_HISTORY_PATH = "/trade-history";
-
-const APP_PATHS = new Set([
-    DASHBOARD_PATH,
-    MARKET_INTELLIGENCE_PATH,
-    AI_ADVISOR_PATH,
-    MONEY_MANAGEMENT_PATH,
-    MARKET_RECORDER_PATH,
-    SUPERVISOR_PATH,
-    ACCOUNT_STATUS_PATH,
-    PARAMETER_SETTINGS_PATH,
-    TRADE_HISTORY_PATH,
-]);
-
-const resolveAppPath = (pathname) => (
-    APP_PATHS.has(pathname) ? pathname : DASHBOARD_PATH
-);
-
-const NAVIGATION_ITEMS = [
-    { label: "DASHBOARD", path: DASHBOARD_PATH },
-    { label: "MARKET INTELLIGENCE", path: MARKET_INTELLIGENCE_PATH },
-    { label: "AI ADVISOR", path: AI_ADVISOR_PATH },
-    { label: "MONEY MANAGEMENT", path: MONEY_MANAGEMENT_PATH },
-    { label: "MARKET RECORDER", path: MARKET_RECORDER_PATH },
-    { label: "SUPERVISOR", path: SUPERVISOR_PATH },
-    { label: "ACCOUNT STATUS", path: ACCOUNT_STATUS_PATH },
-    { label: "PARAMETER SETTINGS", path: PARAMETER_SETTINGS_PATH },
-    { label: "TRADE HISTORY / 取引履歴", path: TRADE_HISTORY_PATH },
-];
+import { buildNavigationItems, resolveNavigationPath } from "./appNavigationRoutes.js";
 
 export function NavigationTabs({
     currentPath,
@@ -92,9 +56,13 @@ const resolveNavigationStorage = () => {
     }
 };
 
-export default function AppNavigation({ currentPath, onPathChange }) {
+export default function AppNavigation({
+    currentPath,
+    onPathChange,
+    propDemoEnabled = PROP_ISOLATED_DEMO_ENABLED,
+}) {
     const [items, setItems] = useState(() => (
-        loadNavigationItems(NAVIGATION_ITEMS, resolveNavigationStorage())
+        loadNavigationItems(buildNavigationItems(propDemoEnabled), resolveNavigationStorage())
     ));
     const [draggedPath, setDraggedPath] = useState(null);
     const draggedPathRef = useRef(null);
@@ -103,7 +71,7 @@ export default function AppNavigation({ currentPath, onPathChange }) {
 
     useEffect(() => {
         const syncPath = () => {
-            const resolvedPath = resolveAppPath(window.location.pathname);
+            const resolvedPath = resolveNavigationPath(window.location.pathname, propDemoEnabled);
 
             if (resolvedPath !== window.location.pathname) {
                 window.history.replaceState({}, "", resolvedPath);
@@ -116,7 +84,7 @@ export default function AppNavigation({ currentPath, onPathChange }) {
         window.addEventListener("popstate", syncPath);
 
         return () => window.removeEventListener("popstate", syncPath);
-    }, [onPathChange]);
+    }, [onPathChange, propDemoEnabled]);
 
     const navigate = (event, path) => {
         if (suppressClickRef.current) {

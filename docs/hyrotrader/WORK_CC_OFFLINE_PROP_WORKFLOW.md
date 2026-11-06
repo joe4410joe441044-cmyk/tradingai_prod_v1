@@ -90,3 +90,40 @@ mobile overflow, and stale-result removal.
 The fixed-scenario mode remains below the workflow for regression and demonstration.
 Neither mode grants runtime or trade authority, and profit-target arrival is not
 shown as Challenge completion.
+
+## CC-4D application route (default OFF)
+
+The operational application can expose the same workflow on the independent
+`/prop-isolated-demo` route. This does not replace the loopback preview above.
+Both switches are strict and accept only the exact lowercase value `true`:
+
+- frontend: `VITE_PROP_ISOLATED_DEMO_ENABLED=true`
+- backend: `PROP_ISOLATED_DEMO_ENABLED=true`
+
+Unset, `false`, mixed-case, whitespace-padded, numeric, and other values are OFF.
+The frontend switch cannot enable the backend. When the backend switch is OFF, the
+dedicated routes return the fixed `PROP_DEMO_DISABLED` response without invoking
+the evaluator:
+
+- `POST /api/prop-accounts/synthetic/accounts`
+- `POST /api/prop-accounts/synthetic/accounts/revise`
+- `POST /api/prop-accounts/synthetic/evaluate`
+
+These routes reuse the validated operator session and the existing double-submit
+CSRF cookie/header middleware. They additionally require a same-origin `Origin`,
+accept strict UTF-8 JSON only, reject duplicate keys and non-finite JSON numbers,
+and apply the 32 KiB limit while streaming even without `Content-Length`. No CORS
+permission is added and the browser client uses fixed relative paths only.
+
+The create/revise/evaluate UI requires short-lived mutable account state. It is
+therefore stored only in a process-local registry keyed by the validated operator
+session ID. Entries inherit the session expiry, expired entries are evicted on
+access, and the least-recent entry is removed above 64 sessions. No background
+cleanup task, disk persistence, cross-session lookup, registry access, or logout
+payload is introduced. A session cannot resolve an account created by another
+session.
+
+The application route stops the global trading WebSocket while displayed and has
+no polling, automatic evaluation, credential input, START/order control, trading
+settings mutation, or fallback outcome. The normal Account Status selector remains
+PAPER/REAL only; its optional PROP link is a separate navigation action.

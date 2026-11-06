@@ -9,7 +9,7 @@ Work CC preserves an isolated foundation for PROP-account identity, read-only ve
 - Account kinds distinguish `NORMAL` from `PROP` without changing the established NORMAL path.
 - Execution modes remain explicit: `PAPER`, `EXTERNAL_SIMULATION`, and `LIVE` are separate states; no mode is promoted implicitly.
 - Durable registry contracts, account resolution, PROP context projection, read-only credential handling, signed GET boundaries, and redacted observations are implemented as isolated foundations.
-- The PROP UI remains a standalone preview. Fixed scenarios have no API path; the CC-4A input mode uses only its dedicated loopback synthetic evaluator. Neither mode uses WebSocket, browser storage, Production backend, or order submission.
+- The PROP UI retains its standalone preview. CC-4D also adds a separately flagged application route and authenticated same-origin synthetic API; both frontend and backend are strict default OFF. The application route stops the trading WebSocket and neither path uses browser storage, exchange/runtime wiring, or order submission.
 - Existing KuCoin/shared operational UI and runtime files are not part of this preservation commit.
 - A synthetic-only PROP rule engine evaluates static maximum loss, daily loss, and profit-target progress from explicit immutable inputs. Entry compatibility requires explicit non-target risk gates; target-only and empty policies fail closed.
 - Account-bound Rules Snapshot and Baseline Source v1 contracts provide strict immutable provenance, canonical change-detection digests, and DST fold resolution. Evaluation Evidence Link v1 is retained as legacy evidence and is not a complete result binding.
@@ -27,6 +27,25 @@ This work is not production integration ready. CC-3D result-binding and future-b
 No production deployment, live credential use, real venue request, or order action is authorized or performed by Work CC.
 
 CC-4A automated browser QA covers desktop, tablet, and mobile input-to-result operation. Manual screenshot rendering remains environment-blocked by the documented bwrap failure.
+
+## CC-4D default-OFF application integration
+
+CC-4D adds only an independent `PROP隔離デモ` route, a flag-gated navigation item
+and Account Status link, and three synthetic POST endpoints. The normal PAPER/REAL
+selector, Final Preparation, saved trading settings, execution account, and order
+authority are unchanged. The frontend uses the existing authenticated same-origin
+request helper. The backend reuses operator-session validation and explicit CSRF
+paths, rejects cross-origin and strict-input failures before evaluation, and returns
+no CORS grant.
+
+Synthetic accounts are separated by validated operator session in a bounded,
+process-local store (session expiry plus a 64-session LRU cap). This state exists
+only because the preserved UI creates and revises an account before evaluation; it
+has no durable registry or background cleanup process. All outcomes continue to set
+`executionAuthorityGranted`, `runtimeReady`, and `tradeReady` to false.
+
+This is an isolated implementation, not Production enablement, official HyroTrader
+profile activation, real account registration, or trading-runtime integration.
 
 ## CC-4A offline account workflow
 

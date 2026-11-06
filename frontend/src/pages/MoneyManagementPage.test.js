@@ -186,10 +186,10 @@ test("compact status bar and responsive layout retain console primitives", async
 test("App and primary navigation register the Money Management route", async () => {
     const [app, navigation] = await Promise.all([
         readSource("../App.jsx"),
-        readSource("../components/AppNavigation.jsx"),
+        readSource("../components/appNavigationRoutes.js"),
     ]);
     assert.match(app, /from "\.\/pages\/MoneyManagementPage"/);
     assert.match(app, /MONEY_MANAGEMENT_PATH = "\/money-management"/);
     assert.match(navigation, /MONEY MANAGEMENT/);
-    assert.match(navigation, /MONEY_MANAGEMENT_PATH/);
+    assert.match(navigation, /"\/money-management"/);
 });

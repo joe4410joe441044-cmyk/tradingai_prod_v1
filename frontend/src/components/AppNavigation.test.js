@@ -14,6 +14,8 @@ const loadModule = async () => {
     const temporary = await mkdtemp(join(directory, ".navigation-test-"));
     const output = join(temporary, "AppNavigation.mjs");
     const modelUrl = new URL("./appNavigationModel.js", import.meta.url).href;
+    const featureUrl = new URL("../features/prop-accounts/propIsolatedDemoFeature.js", import.meta.url).href;
+    const routesUrl = new URL("./appNavigationRoutes.js", import.meta.url).href;
     const reactStub = `data:text/javascript,${encodeURIComponent([
         "export const useEffect=(effect)=>effect();",
         "export const useRef=(value)=>({current:value});",
@@ -25,6 +27,8 @@ const loadModule = async () => {
     try {
         await writeFile(output, transformed.code
             .replace('from "../utils/appNavigation";', `from "${new URL("../utils/appNavigation.js", import.meta.url).href}";`)
+            .replace('from "../features/prop-accounts/propIsolatedDemoFeature.js";', `from "${featureUrl}";`)
+            .replace('from "./appNavigationRoutes.js";', `from "${routesUrl}";`)
             .replace('from "react";', `from "${reactStub}";`)
             .replace('from "./appNavigationModel";', `from "${modelUrl}";`));
         return await import(`${pathToFileURL(output).href}?test=navigation`);
@@ -162,6 +166,16 @@ test("navigation labels and paths remain unique and preserve existing items", as
     assert.equal(new Set(labels).has("ACCOUNT STATUS"), true);
     assert.equal(new Set(paths).has("/account-status"), true);
     assert.equal(paths.at(-1), "/trade-history");
+});
+
+test("PROP navigation is absent by default and appended only when enabled", async () => {
+    const { buildNavigationItems, resolveNavigationPath } = await import("./appNavigationRoutes.js");
+    assert.equal(buildNavigationItems(false).some(({ path }) => path === "/prop-isolated-demo"), false);
+    assert.equal(resolveNavigationPath("/prop-isolated-demo", false), "/");
+    const enabled = buildNavigationItems(true);
+    assert.equal(enabled.at(-1).label, "PROP隔離デモ");
+    assert.equal(enabled.at(-1).path, "/prop-isolated-demo");
+    assert.equal(resolveNavigationPath("/prop-isolated-demo", true), "/prop-isolated-demo");
 });
 
 test("tabs reorder left and right without changing identity or routes", async () => {

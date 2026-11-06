@@ -10,8 +10,14 @@ import MarketIntelligencePage from "./pages/MarketIntelligencePage";
 import MarketRecorderPage from "./pages/MarketRecorderPage";
 import MoneyManagementPage from "./pages/MoneyManagementPage";
 import ParameterSettingsPage from "./pages/ParameterSettingsPage";
+import PropIsolatedDemoPage from "./pages/PropIsolatedDemoPage";
 import SupervisorPage from "./pages/SupervisorPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
+import {
+    PROP_ISOLATED_DEMO_ENABLED,
+    PROP_ISOLATED_DEMO_PATH,
+} from "./features/prop-accounts/propIsolatedDemoFeature.js";
+import { resolveAppPath } from "./appRouteModel.js";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import {
     startWebSocketRuntime,
@@ -27,34 +33,6 @@ const ACCOUNT_STATUS_PATH = "/account-status";
 const PARAMETER_SETTINGS_PATH = "/parameter-settings";
 const TRADE_HISTORY_PATH = "/trade-history";
 
-const resolveAppPath = (pathname) => {
-    if (pathname === MARKET_INTELLIGENCE_PATH) {
-        return MARKET_INTELLIGENCE_PATH;
-    }
-    if (pathname === AI_ADVISOR_PATH) {
-        return AI_ADVISOR_PATH;
-    }
-    if (pathname === MONEY_MANAGEMENT_PATH) {
-        return MONEY_MANAGEMENT_PATH;
-    }
-    if (pathname === MARKET_RECORDER_PATH) {
-        return MARKET_RECORDER_PATH;
-    }
-    if (pathname === SUPERVISOR_PATH) {
-        return SUPERVISOR_PATH;
-    }
-    if (pathname === ACCOUNT_STATUS_PATH) {
-        return ACCOUNT_STATUS_PATH;
-    }
-    if (pathname === PARAMETER_SETTINGS_PATH) {
-        return PARAMETER_SETTINGS_PATH;
-    }
-    if (pathname === TRADE_HISTORY_PATH) {
-        return TRADE_HISTORY_PATH;
-    }
-    return "/";
-};
-
 /* =================================================
    APP
 ================================================= */
@@ -64,7 +42,9 @@ export default function App() {
         resolveAppPath(window.location.pathname)
     ));
 
-    const CurrentPage = currentPath === ACCOUNT_STATUS_PATH
+    const CurrentPage = currentPath === PROP_ISOLATED_DEMO_PATH
+        ? PropIsolatedDemoPage
+        : currentPath === ACCOUNT_STATUS_PATH
         ? AccountStatusPage
         : currentPath === MARKET_INTELLIGENCE_PATH
             ? MarketIntelligencePage
@@ -81,16 +61,17 @@ export default function App() {
                                 : currentPath === TRADE_HISTORY_PATH
                                     ? TradeHistoryPage
                                     : Dashboard;
-    const advisorActive = currentPath === AI_ADVISOR_PATH;
+    const runtimeSuppressed = currentPath === AI_ADVISOR_PATH
+        || currentPath === PROP_ISOLATED_DEMO_PATH;
 
     useEffect(() => {
-        if (advisorActive) {
+        if (runtimeSuppressed) {
             stopWebSocketRuntime();
             return;
         }
         startWebSocketRuntime();
         return () => stopWebSocketRuntime();
-    }, [advisorActive]);
+    }, [runtimeSuppressed]);
 
     return (
         <DashboardMarketContextProvider>
@@ -98,6 +79,7 @@ export default function App() {
                 <AppNavigation
                     currentPath={currentPath}
                     onPathChange={setCurrentPath}
+                    propDemoEnabled={PROP_ISOLATED_DEMO_ENABLED}
                 />
 
                 <CurrentPage />

@@ -74,6 +74,7 @@ from backend.auth.operator_auth import OperatorAuthenticator, hash_operator_cred
 from backend.auth.session_middleware import OperatorSessionMiddleware
 from backend.auth.csrf import OperatorCsrfProtection
 from backend.auth.api import create_operator_auth_router
+from backend.api.prop_synthetic_evaluation import create_prop_synthetic_router
 from backend.money_management.loss_application_registration import (
     get_money_management_config,
     start_money_management_cash_flow_runtime,
@@ -734,6 +735,9 @@ if _auth_configured:
         "/api/runtime/paper-auto/stop",
         "/api/runtime/paper-auto/observe",
         "/api/runtime/paper-auto/reselect",
+        "/api/prop-accounts/synthetic/accounts",
+        "/api/prop-accounts/synthetic/accounts/revise",
+        "/api/prop-accounts/synthetic/evaluate",
     })
     app.add_middleware(
         OperatorCsrfProtection,
@@ -824,6 +828,8 @@ app.include_router(
 app.include_router(
     create_recorder_proxy_router()
 )
+
+app.include_router(create_prop_synthetic_router())
 
 app.include_router(trading_trace_router)
 

@@ -2,6 +2,11 @@ import CurrentPositionCard from "../components/runtime/CurrentPositionCard.jsx";
 import LastPositionEventCard from "../components/runtime/LastPositionEventCard.jsx";
 import { useState } from "react";
 import usePolling from "../hooks/usePolling";
+import {
+    PROP_ISOLATED_DEMO_ENABLED,
+    PROP_ISOLATED_DEMO_PATH,
+} from "../features/prop-accounts/propIsolatedDemoFeature.js";
+import { navigateTo } from "../utils/appNavigation.js";
 import PaperCapitalControl from "../components/runtime/PaperCapitalControl";
 import StatusMetric from "../components/runtime/StatusMetric";
 import {
@@ -242,6 +247,8 @@ export function AccountStatusView({
     onDetailsToggle = () => {},
     accountView,
     onAccountViewChange,
+    propDemoEnabled = false,
+    onPropDemoOpen = () => {},
 }) {
     const props = buildAccountRuntimeProps(botStatus);
     const derived = deriveAccountRuntime(props);
@@ -333,6 +340,14 @@ export function AccountStatusView({
                 </div>
                 <span className="as-page-badge">READ ONLY</span>
             </header>
+
+            {propDemoEnabled && (
+                <aside className="semantic-card as-card clear" data-testid="prop-isolated-demo-link">
+                    <strong>PROP隔離デモ（架空データ専用）</strong>
+                    <p className="semantic-card-note">通常口座の表示切替には追加されません。runtime・注文・実口座から独立しています。</p>
+                    <button onClick={onPropDemoOpen} type="button">隔離デモを開く</button>
+                </aside>
+            )}
 
             {/* =================================================
                ACCOUNT VIEW — display-only selector
@@ -658,6 +673,8 @@ export default function AccountStatusPage() {
             onDetailsToggle={() => setDetailsExpanded((expanded) => !expanded)}
             accountView={manualAccountView}
             onAccountViewChange={setManualAccountView}
+            propDemoEnabled={PROP_ISOLATED_DEMO_ENABLED}
+            onPropDemoOpen={() => navigateTo(PROP_ISOLATED_DEMO_PATH)}
         />
     );
 }

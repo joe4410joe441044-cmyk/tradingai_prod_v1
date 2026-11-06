@@ -209,14 +209,13 @@ test("route and navigation register PARAMETER SETTINGS", async () => {
     const [app, navigation] = await Promise.all([
         readFile(new URL("../App.jsx", import.meta.url), "utf8"),
         readFile(
-            new URL("../components/AppNavigation.jsx", import.meta.url),
+            new URL("../components/appNavigationRoutes.js", import.meta.url),
             "utf8",
         ),
     ]);
     assert.match(app, /from "\.\/pages\/ParameterSettingsPage"/);
     assert.match(app, /PARAMETER_SETTINGS_PATH = "\/parameter-settings"/);
     assert.match(navigation, /PARAMETER SETTINGS/);
-    assert.match(navigation, /PARAMETER_SETTINGS_PATH/);
     assert.match(navigation, /"\/parameter-settings"/);
 });
 

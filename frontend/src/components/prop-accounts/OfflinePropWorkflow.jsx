@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { createOfflineAccount, evaluateOfflineAccount, reviseOfflineAccount } from "../../features/prop-accounts/offlinePropWorkflowClient.js";
+import * as offlinePropWorkflowClient from "../../features/prop-accounts/offlinePropWorkflowClient.js";
 import { DEFAULT_ACCOUNT_INPUT, DEFAULT_EVALUATION_INPUT, buildEvaluationRequest, requestIsCurrent, responseMatchesScope } from "../../features/prop-accounts/offlinePropWorkflow.js";
 import PropOutcomeCard from "./PropOutcomeCard.jsx";
 
@@ -95,7 +95,7 @@ export function OfflinePropWorkflowView({
     );
 }
 
-export default function OfflinePropWorkflow() {
+export default function OfflinePropWorkflow({ client = offlinePropWorkflowClient }) {
     const [accounts, setAccounts] = useState([]);
     const [selectedId, setSelectedId] = useState("");
     const [accountInput, setAccountInput] = useState({ ...DEFAULT_ACCOUNT_INPUT });
@@ -145,7 +145,7 @@ export default function OfflinePropWorkflow() {
     const create = async () => {
         invalidate();
         const requestId = `cc4a-${++sequence.current}`;
-        const response = await request((signal) => createOfflineAccount({ requestId, ...accountInput }, signal));
+        const response = await request((signal) => client.createOfflineAccount({ requestId, ...accountInput }, signal));
         if (!response || !mounted.current) return;
         setAccounts((current) => [...current, response.account]);
         setSelectedId(response.account.identity.account_id); setStatus("IDLE");
@@ -154,7 +154,7 @@ export default function OfflinePropWorkflow() {
         if (!selectedAccount) return;
         invalidate();
         const requestId = `cc4a-${++sequence.current}`;
-        const response = await request((signal) => reviseOfflineAccount({ requestId, accountId: selectedAccount.identity.account_id, identityRevision: selectedAccount.identity.revision, ...accountInput }, signal));
+        const response = await request((signal) => client.reviseOfflineAccount({ requestId, accountId: selectedAccount.identity.account_id, identityRevision: selectedAccount.identity.revision, ...accountInput }, signal));
         if (!response || !mounted.current) return;
         setAccounts((current) => current.map((item) => item.identity.account_id === response.account.identity.account_id ? response.account : item));
         setStatus("IDLE");
@@ -168,7 +168,7 @@ export default function OfflinePropWorkflow() {
         const expected = { requestId, accountId: selectedAccount.identity.account_id, identityRevision: selectedAccount.identity.revision, generation: submittedGeneration };
         const payload = buildEvaluationRequest({ requestId, account: selectedAccount, input });
         try {
-            const response = await request((signal) => evaluateOfflineAccount(payload, signal));
+            const response = await request((signal) => client.evaluateOfflineAccount(payload, signal));
             if (!response || !mounted.current || !responseMatchesScope(response, { ...expected, currentGeneration: generation.current })) return;
             setResult(response); setStatus("READY");
         } finally {

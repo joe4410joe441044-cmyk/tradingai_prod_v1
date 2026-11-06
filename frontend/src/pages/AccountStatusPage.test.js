@@ -15,6 +15,8 @@ const loadModule = async () => {
     const temporary = await mkdtemp(join(directory, ".account-status-test-"));
     const output = join(temporary, "AccountStatusPage.mjs");
     const modelUrl = new URL("../components/runtime/accountRuntimeModel.js", import.meta.url).href;
+    const featureUrl = new URL("../features/prop-accounts/propIsolatedDemoFeature.js", import.meta.url).href;
+    const navigationUrl = new URL("../utils/appNavigation.js", import.meta.url).href;
     const statusMetricStub = moduleUrl(
         "export default (props)=>({type:'div',props:{children:[{type:'span',props:{'data-testid':props.testId,children:props.value}},props.label]}});",
     );
@@ -30,6 +32,8 @@ const loadModule = async () => {
             .replace('"../components/runtime/CurrentPositionCard.jsx"', '"./CurrentPositionCard.mjs"')
             .replace('"../components/runtime/LastPositionEventCard.jsx"', '"./LastPositionEventCard.mjs"')
             .replace('from "../hooks/usePolling";', `from "${usePollingStub}";`)
+            .replace('from "../features/prop-accounts/propIsolatedDemoFeature.js";', `from "${featureUrl}";`)
+            .replace('from "../utils/appNavigation.js";', `from "${navigationUrl}";`)
             .replace('from "../components/runtime/PaperCapitalControl";', `from "${paperCapitalStub}";`)
             .replace('from "../components/runtime/StatusMetric";', `from "${statusMetricStub}";`)
             .replace('from "../components/runtime/accountRuntimeModel";', `from "${modelUrl}";`));
@@ -69,6 +73,22 @@ const readTestIdValue = (nodes, id) => {
 };
 
 const cardText = (nodes, id) => texts(walk(findByTestId(nodes, id))).join(" ").replace(/\s+/g, " ").trim();
+
+test("PROP isolated demo link is separate and default OFF", () => {
+    const hidden = walk(AccountStatusView({ botStatus: {} }));
+    assert.equal(findByTestId(hidden, "prop-isolated-demo-link"), undefined);
+    let opened = 0;
+    const visible = walk(AccountStatusView({
+        botStatus: {},
+        propDemoEnabled: true,
+        onPropDemoOpen: () => { opened += 1; },
+    }));
+    const link = findByTestId(visible, "prop-isolated-demo-link");
+    assert.ok(link);
+    const button = walk(link).find((node) => typeof node === "object" && node.type === "button");
+    button.props.onClick();
+    assert.equal(opened, 1);
+});
 
 /* =================================================
    Canonical fixtures.
