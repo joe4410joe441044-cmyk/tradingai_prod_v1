@@ -941,6 +941,36 @@ class BotManager:
         return "OPEN"
 
     @staticmethod
+    def _normalize_position_summary(value, positions=None):
+
+        # The execution engine keeps its internal NO_OPEN_POSITION vocabulary.
+        # Project it (and only it) to the canonical consumer vocabulary at the
+        # account-runtime boundary. Unknown or failed states are preserved so
+        # the UI fails closed instead of becoming a fabricated FLAT.
+        normalized = (
+            str(value).strip().upper()
+            if value is not None
+            else ""
+        )
+
+        if normalized == "NO_OPEN_POSITION":
+            # Only the engine's verified no-open state projects to FLAT. A
+            # contradictory position list stays UNKNOWN / fail-closed.
+            return (
+                "FLAT"
+                if isinstance(positions, list) and not positions
+                else "UNKNOWN"
+            )
+
+        if normalized in {"FLAT", "OPEN"}:
+            return normalized
+
+        if normalized:
+            return normalized
+
+        return BotManager._position_summary(positions)
+
+    @staticmethod
     def _legacy_real_position_value(positions):
 
         if isinstance(positions, list):
@@ -2182,10 +2212,24 @@ class BotManager:
                 "dailyPnlSource": canonical_account.get("dailyPnlSource"),
                 "dailyPnlObservedAt": canonical_account.get("dailyPnlObservedAt"),
                 "dailyPnlDayStart": canonical_account.get("dailyPnlDayStart"),
+                # Preserve the already-completed exchange observation from
+                # the canonical real-account snapshot. The engine readiness
+                # path must not drop the one truth the Dashboard uses to
+                # verify LIVE position authority.
+                "positionObservation": (
+                    deepcopy(
+                        canonical_account.get("positionObservation")
+                    )
+                    if isinstance(
+                        canonical_account.get("positionObservation"),
+                        dict,
+                    )
+                    else None
+                ),
                 "positions": readiness_positions,
-                "positionSummary": (
-                    readiness.get("realPositionState")
-                    or self._position_summary(readiness_positions)
+                "positionSummary": self._normalize_position_summary(
+                    readiness.get("realPositionState"),
+                    readiness_positions,
                 ),
                 "lastSync": readiness.get("realAccountLastSync"),
                 "lastAttempt": readiness.get("realAccountLastSync"),
