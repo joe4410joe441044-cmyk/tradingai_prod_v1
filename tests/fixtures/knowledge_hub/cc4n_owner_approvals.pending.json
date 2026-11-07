@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "tradingai-release-approvals/v1",
+  "baseSha": "70bd0e106704e62f9fa4089837651fe793d45427",
+  "candidateSha": "1274e8df5ce9ed40392ddd4d505685c3343eff71",
+  "diffManifestSha256": "d11be5eac403f7af46c94ffd9cd0051e0ef4e7516447ef449454330b74a24ac7",
+  "recordKind": "REAL_OWNER_RESPONSES",
+  "releaseApprovalStatus": "PENDING",
+  "decisions": [
+    {
+      "path": "backend/knowledge_hub/reader.py",
+      "decision": "PENDING",
+      "ownerRole": "BC / knowledge-hub owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "backend/main.py",
+      "decision": "PENDING",
+      "ownerRole": "CC + Production/AA + BC owners",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "docs/ai/CONTEXT_PACK_SPEC.md",
+      "decision": "PENDING",
+      "ownerRole": "BC / documentation owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/App.jsx",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/App.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/components/AppNavigation.jsx",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/components/AppNavigation.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/pages/AccountStatusPage.jsx",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/pages/AccountStatusPage.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/pages/MoneyManagementPage.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/pages/ParameterSettingsPage.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    },
+    {
+      "path": "frontend/src/pages/accountView.test.js",
+      "decision": "PENDING",
+      "ownerRole": "CC / frontend owner",
+      "evidence": "No explicit owner response recorded; CC technical review only proposed ACCEPT."
+    }
+  ]
+}

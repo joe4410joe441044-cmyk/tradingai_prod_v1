@@ -42,14 +42,13 @@ from backend.knowledge_hub.continuous_sync import (
     SyncLimits as ContinuousLimits,
 )
 from backend.knowledge_hub.integration import (
+    CanonicalReconciliation,
     NOT_READY,
     READY_FOR_APPROVAL,
-    CanonicalReconciliation,
     IntegrationConfig,
     assess_deployment_readiness,
     classify_hash_mismatch,
     evaluate_acceptance,
-    production_dirty_state,
     reconcile_with_canonical,
     render_handoff,
     run_isolated_integration,
@@ -71,6 +70,12 @@ from backend.knowledge_hub.provenance import build_provenance
 from backend.knowledge_hub.reader import ReaderFilters, RequestContext, open_reader
 from backend.knowledge_hub.source_collector import collect_source_file, collect_sources
 
+from knowledge_hub_release_acceptance import (
+    evaluate_release_acceptance,
+    load_json,
+    validate_approval_record,
+    verify_expected_diff,
+)
 
 INDEXED = "2026-11-01T01:00:00+00:00"
 OBSERVED = "2026-11-01T00:59:00+00:00"
@@ -80,16 +85,11 @@ OPERATOR = RequestContext(caller_scope="OPERATOR", caller_id="operator-session")
 PUBLIC = RequestContext(caller_scope="PUBLIC", caller_id="public-view")
 PACKAGE = Path(__file__).resolve().parents[1] / "backend" / "knowledge_hub" / "integration"
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CANONICAL = Path("/home/joe4410joe/tradingai_prod_v1")
-BC10C1_APPROVED_SHARED_PATHS = frozenset(
-    {
-        "backend/ai_advisor/advisor_service.py",
-        "backend/ai_advisor/browser_gateway.py",
-        "backend/ai_advisor/service_models.py",
-        "backend/api/supervisor_conversation.py",
-        "tests/test_knowledge_hub_integration.py",
-    }
-)
+CC4N_BASE_SHA = "70bd0e106704e62f9fa4089837651fe793d45427"
+CC4N_CANDIDATE_SHA = "1274e8df5ce9ed40392ddd4d505685c3343eff71"
+CC4N_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "knowledge_hub"
+CC4N_DIFF_MANIFEST = CC4N_FIXTURES / "cc4n_expected_diff_manifest.json"
+CC4N_PENDING_APPROVALS = CC4N_FIXTURES / "cc4n_owner_approvals.pending.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -1018,59 +1018,92 @@ def test_t46_advisor_hash_mismatch_classification():
 
 
 def test_t47_canonical_reconciliation(e2e):
-    if not CANONICAL.exists():
-        pytest.skip("canonical repository is not available in this environment")
-    env, _ = e2e
-    reconciliation = reconcile_with_canonical(CANONICAL, REPO_ROOT)
-    assert reconciliation.entries
-    unexpected = tuple(
-        entry
-        for entry in reconciliation.blocked
-        if entry.path not in BC10C1_APPROVED_SHARED_PATHS
+    _, integration = e2e
+    manifest = load_json(CC4N_DIFF_MANIFEST)
+    technical = verify_expected_diff(
+        REPO_ROOT,
+        manifest,
+        pinned_base_sha=CC4N_BASE_SHA,
+        pinned_candidate_sha=CC4N_CANDIDATE_SHA,
     )
-    assert unexpected == ()
-    shared = {
-        entry.path
-        for entry in reconciliation.entries
-        if entry.classification == "SHARED_PATH_REVIEW_REQUIRED"
-    }
-    assert shared == set(BC10C1_APPROVED_SHARED_PATHS)
-    assert "CONFLICTING" not in reconciliation.counts()
+    assert integration.passed
+    assert technical.matches, technical.errors
+    assert technical.entry_count == 110
+    assert technical.counts == {"A": 98, "M": 12}
+    assert len(technical.shared_paths) == 12
 
 
 def test_t48_deployment_readiness_classification(e2e):
-    env, result = e2e
-    if not CANONICAL.exists():
-        pytest.skip("canonical repository is not available in this environment")
-    reconciliation = reconcile_with_canonical(CANONICAL, REPO_ROOT)
+    _, integration = e2e
+    manifest_path = CC4N_DIFF_MANIFEST
+    manifest = load_json(manifest_path)
+    technical = verify_expected_diff(
+        REPO_ROOT,
+        manifest,
+        pinned_base_sha=CC4N_BASE_SHA,
+        pinned_candidate_sha=CC4N_CANDIDATE_SHA,
+    )
+    manifest_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    pending_record = validate_approval_record(
+        load_json(CC4N_PENDING_APPROVALS), manifest, manifest_hash
+    )
+    pending = evaluate_release_acceptance(
+        technical, pending_record, integration_passed=integration.passed
+    )
+    assert technical.matches, technical.errors
+    assert pending.technical_status == "MATCH"
+    assert pending.owner_response_status == "PENDING"
+    assert pending.release_approval_status == "PENDING"
+    assert pending.verdict == NOT_READY
+    assert len([item for item in pending.blockers if item.startswith("OWNER_PENDING:")]) == 12
+
+    reconciliation = reconcile_with_canonical(
+        REPO_ROOT,
+        REPO_ROOT,
+        canonical_head=CC4N_BASE_SHA,
+        worktree_head=CC4N_CANDIDATE_SHA,
+    )
     reviewed = CanonicalReconciliation(
         entries=tuple(
-            entry
-            for entry in reconciliation.entries
-            if entry.path not in BC10C1_APPROVED_SHARED_PATHS
+            entry for entry in reconciliation.entries if entry.path not in technical.shared_paths
         ),
         canonical_head=reconciliation.canonical_head,
         worktree_head=reconciliation.worktree_head,
     )
-    hashes = classify_hash_mismatch(production_knowledge_manifest(), repository_root=REPO_ROOT)
-    readiness = assess_deployment_readiness(
-        integration_passed=result.passed,
+    hashes = classify_hash_mismatch(
+        production_knowledge_manifest(), repository_root=REPO_ROOT
+    )
+    legacy_ready = assess_deployment_readiness(
+        integration_passed=integration.passed,
         reconciliation=reviewed,
         hash_classification=hashes,
-        canonical_dirty=production_dirty_state(CANONICAL),
+        canonical_dirty=(),
         bb_compatible=CONTEXT_SCHEMA == "tradingai-context/v1",
         production_unchanged=True,
     )
-    assert readiness.verdict == READY_FOR_APPROVAL, readiness.to_dict()
-    assert readiness.blockers == ()
-    assert any("ADVISOR_HASH_MISMATCH" in note for note in readiness.notes)
+    assert legacy_ready.verdict == READY_FOR_APPROVAL
+    assert legacy_ready.blockers == ()
+    assert any("ADVISOR_HASH_MISMATCH" in note for note in legacy_ready.notes)
 
-    not_ready = assess_deployment_readiness(
-        integration_passed=False,
-        reconciliation=reviewed,
-        hash_classification=hashes,
+    synthetic = json.loads(json.dumps(pending_record))
+    synthetic["recordKind"] = "SYNTHETIC_TEST_ONLY"
+    synthetic["releaseApprovalStatus"] = "APPROVED"
+    for decision in synthetic["decisions"]:
+        decision["decision"] = "ACCEPT"
+        decision["evidence"] = "Synthetic CC-4N positive test; not a real owner response."
+    synthetic = validate_approval_record(synthetic, manifest, manifest_hash)
+    ready = evaluate_release_acceptance(
+        technical, synthetic, integration_passed=integration.passed
+    )
+    assert ready.verdict == READY_FOR_APPROVAL
+    assert ready.owner_response_status == "ALL_ACCEPTED"
+    assert ready.blockers == ()
+
+    not_ready = evaluate_release_acceptance(
+        technical, synthetic, integration_passed=False
     )
     assert not_ready.verdict == NOT_READY
+    assert "ISOLATED_INTEGRATION_NOT_PASS" in not_ready.blockers
 
 
 # --------------------------------------------------------------------------- #
@@ -1187,12 +1220,13 @@ def test_t55_bb_schema_regression():
 # --------------------------------------------------------------------------- #
 def test_acceptance_and_handoff(e2e, tmp_path):
     env, result = e2e
-    if CANONICAL.exists():
-        reconciliation = reconcile_with_canonical(CANONICAL, REPO_ROOT)
-        dirty = production_dirty_state(CANONICAL)
-    else:
-        reconciliation = None
-        dirty = ()
+    reconciliation = reconcile_with_canonical(
+        REPO_ROOT,
+        REPO_ROOT,
+        canonical_head=CC4N_BASE_SHA,
+        worktree_head=CC4N_CANDIDATE_SHA,
+    )
+    dirty = ()
     hashes = classify_hash_mismatch(production_knowledge_manifest(), repository_root=REPO_ROOT)
     readiness = assess_deployment_readiness(
         integration_passed=result.passed,
