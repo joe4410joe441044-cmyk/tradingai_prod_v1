@@ -70,6 +70,26 @@ from backend.ai_advisor.service_models import (
 )
 
 
+def _with_canonical_block(provider_request, block: str | None):
+    """Append read-only context without replacing the validated prompt."""
+
+    if not isinstance(block, str) or not block.strip():
+        return provider_request
+    try:
+        rendered = provider_request.renderedPrompt + "\n\n" + block
+        if len(rendered) > 64_000:
+            rendered = (
+                provider_request.renderedPrompt
+                + "\n\nclassification=READ_ONLY_DATA\n"
+                + "availability=UNAVAILABLE\nreason=PROMPT_LIMIT"
+            )
+            if len(rendered) > 64_000:
+                return provider_request
+        return provider_request.model_copy(update={"renderedPrompt": rendered})
+    except Exception:
+        return provider_request
+
+
 def _failure(code: AdvisorServiceFailureCode) -> AdvisorServiceResult:
     return AdvisorServiceResult(
         status=AdvisorServiceStatus.FAILED,
@@ -184,6 +204,14 @@ class AdvisorService:
                 model_policy=self.modelPolicy,
                 capabilities=self.capabilities,
                 provider_request_id=service_input.providerRequestId,
+            )
+            provider_request = _with_canonical_block(
+                provider_request,
+                service_input.canonicalContextBlock,
+            )
+            provider_request = _with_canonical_block(
+                provider_request,
+                service_input.knowledgeContextBlock,
             )
         except Exception:
             return _failure(AdvisorServiceFailureCode.ADVISOR_PROVIDER_REQUEST_INVALID)

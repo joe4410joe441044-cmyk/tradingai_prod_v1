@@ -8,6 +8,10 @@ import json
 from fastapi import APIRouter, Request, Response
 from pydantic import ValidationError
 
+from backend.auth.dependencies import operator_session_identity
+from backend.knowledge_hub.advisor_supervisor_connection import (
+    attach_supervisor_knowledge,
+)
 from backend.supervisor.contracts import SupervisorAgentId
 from backend.supervisor.conversation_contracts import SupervisorConversationRequest
 from backend.supervisor.conversation_service import SupervisorConversationService
@@ -40,7 +44,30 @@ def create_supervisor_conversation_router(
             parsed = SupervisorConversationRequest.model_validate(raw)
             if parsed.agentId is not expected_agent:
                 return _invalid_response()
-            response = conversation_service.respond(request.app, parsed)
+            canonical_context = None
+            identity = operator_session_identity(request)
+            if identity is not None:
+                from backend.context.shared_answer_context import (
+                    load_shared_operator_context,
+                )
+
+                canonical_context = load_shared_operator_context(
+                    request.app,
+                    question=parsed.message,
+                )
+                canonical_context = attach_supervisor_knowledge(
+                    canonical_context,
+                    question=parsed.message,
+                    identity=identity,
+                )
+            if canonical_context is None:
+                response = conversation_service.respond(request.app, parsed)
+            else:
+                response = conversation_service.respond(
+                    request.app,
+                    parsed,
+                    canonical_context=canonical_context,
+                )
             return _json_response(response.stable_json())
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
             return _invalid_response()

@@ -544,6 +544,16 @@
     padding-right: 26px;
 }
 
+.market-intelligence .mm-configuration-boolean {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    color: var(--mi-text);
+    font: 700 11px/1.4 var(--mi-font-mono);
+    letter-spacing: 0.06em;
+}
+
 .market-intelligence .mm-configuration-field input[type="checkbox"] {
     width: 18px;
     height: 18px;

@@ -125,6 +125,12 @@ class AdvisorServiceInput(AdvisorServiceContractModel):
         StringConstraints(min_length=1, max_length=128),
     ]
     receivedAt: datetime
+    canonicalContextBlock: Optional[
+        Annotated[str, StringConstraints(min_length=1, max_length=16_000)]
+    ] = None
+    knowledgeContextBlock: Optional[
+        Annotated[str, StringConstraints(min_length=1, max_length=16_000)]
+    ] = None
 
     @field_validator("receivedAt")
     @classmethod

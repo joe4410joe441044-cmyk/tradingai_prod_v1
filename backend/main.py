@@ -1016,6 +1016,28 @@ app.include_router(
     prefix="/api"
 )
 
+# ------------------------------------------------------------
+# OBSERVATION OIDC
+# Registration is not activation.  The loader enables the feature
+# only when TRADINGAI_OBSERVATION_OIDC_ENABLED is exactly "true"
+# and the remaining settings validate.  Credentials alone do not
+# turn it on.  No secret file is read here.
+# ------------------------------------------------------------
+
+from backend.observation_auth.oidc_mount import mount_observation_oidc
+from backend.observation_auth.oidc_settings import load_observation_oidc_settings
+
+mount_observation_oidc(app, load_observation_oidc_settings().config)
+
+# ------------------------------------------------------------
+# AI CONTEXT
+# Read-only operator routes. Registration does not start runtime.
+# ------------------------------------------------------------
+
+from backend.context.api_router import context_router
+
+app.include_router(context_router)
+
 # ============================================================
 # ROOT
 # ============================================================

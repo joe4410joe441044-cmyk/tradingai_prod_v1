@@ -562,6 +562,7 @@ def evaluate_master_shadow(
     constitution: OperatorConstitution,
     *,
     timeout_seconds: float = MASTER_SHADOW_PROVIDER_TIMEOUT_SECONDS,
+    canonical_context: Mapping | None = None,
 ) -> MasterShadowRuntimeResult:
     """Generate an explanatory SHADOW decision without operational authority."""
     identity = constitution_identity(constitution)
@@ -622,6 +623,14 @@ def evaluate_master_shadow(
             requestedAt=evaluated_at,
         )
         provider_input = json.loads(request.stable_json())
+        if canonical_context is not None:
+            from backend.context.shared_answer_context import (
+                provider_payload_with_context,
+            )
+
+            provider_input = provider_payload_with_context(
+                provider_input, canonical_context
+            )
         result = provider.generate_structured_output(
             provider_input,
             MasterSupervisorDecision,

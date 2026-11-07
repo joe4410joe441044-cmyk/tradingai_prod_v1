@@ -931,3 +931,78 @@ test("PAPER position behavior is unchanged", () => {
     const legacy = { side: "LONG" };
     assert.equal(startPositionAuthorityValue({}, "PAPER", legacy, LIVE_POSITION_NOW), legacy);
 });
+
+// RB-25: RUNNING LIVE position projection contract. The backend normalizes the
+// engine's NO_OPEN_POSITION vocabulary to FLAT at the account-runtime boundary;
+// the resolver itself must still fail closed for missing/stale/legacy values.
+test("RB-25 running LIVE FLAT backend projection resolves FLAT", () => {
+    const status = livePositionStatus({
+        observation: { positions: [], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        account: { positions: [], positionSummary: "FLAT" },
+        position: { status: "FLAT", positions: [] },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "UNKNOWN", LIVE_POSITION_NOW,
+    ), "FLAT");
+});
+
+test("RB-25 legacy engine NO_OPEN_POSITION vocabulary still fails closed", () => {
+    const status = livePositionStatus({
+        account: { positionSummary: "NO_OPEN_POSITION" },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "FLAT", LIVE_POSITION_NOW,
+    ), "UNKNOWN");
+});
+
+test("RB-25 running LIVE verified LONG is OPEN, never FLAT", () => {
+    const open = rawLivePosition("XRPUSDTM", 1);
+    const status = livePositionStatus({
+        observation: { positions: [open], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "OPEN" },
+        account: {
+            positions: [{ symbol: "XRPUSDTM", qty: 1, side: "LONG" }],
+            positionSummary: "OPEN",
+        },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "FLAT", LIVE_POSITION_NOW,
+    ), "OPEN");
+});
+
+test("RB-25 running LIVE verified SHORT is OPEN, never FLAT", () => {
+    const open = rawLivePosition("XRPUSDTM", -2);
+    const status = livePositionStatus({
+        observation: { positions: [open], sourceUpdatedAt: LIVE_POSITION_UPDATED_AT },
+        position: { status: "OPEN" },
+        account: {
+            positions: [{ symbol: "XRPUSDTM", qty: 2, side: "SHORT" }],
+            positionSummary: "OPEN",
+        },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "FLAT", LIVE_POSITION_NOW,
+    ), "OPEN");
+});
+
+test("RB-25 running LIVE missing observation fails closed", () => {
+    const status = livePositionStatus({
+        observation: undefined,
+        account: { positions: [], positionSummary: "FLAT" },
+        position: { status: "FLAT", positions: [] },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "FLAT", LIVE_POSITION_NOW,
+    ), "UNKNOWN");
+});
+
+test("RB-25 running LIVE stale observation fails closed", () => {
+    const status = livePositionStatus({
+        observation: { positions: [], sourceUpdatedAt: LIVE_POSITION_NOW - 91 },
+        account: { positions: [], positionSummary: "FLAT" },
+        position: { status: "FLAT", positions: [] },
+    });
+    assert.equal(startPositionAuthorityValue(
+        status, "LIVE", "FLAT", LIVE_POSITION_NOW,
+    ), "UNKNOWN");
+});

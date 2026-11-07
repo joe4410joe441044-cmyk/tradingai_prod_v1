@@ -18,6 +18,7 @@ from .conversation_contracts import (
     SupervisorConversationResponse,
 )
 from .failure_codes import SupervisorFailureCode
+from .held_evaluation_cache import accept_completed, note_write_failure
 from .master_shadow_runtime import evaluate_master_shadow
 from .mm_shadow_runtime import evaluate_mm_shadow
 from .operator_constitution import TRADINGAI_OPERATOR_CONSTITUTION
@@ -41,6 +42,28 @@ _FORBIDDEN_CLAIMS = (
 )
 _SECRET_MARKERS = ("API_KEY", "APIKEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY")
 _UNSAFE_GUIDANCE = ("START BOT", "ENABLE AUTO TRADE", "ENABLE EXECUTION", "SWITCH TO LIVE", "PLACE AN ORDER", "SUBMIT AN ORDER", "CHANGE MONEY MANAGEMENT", "BOTを開始", "AUTO TRADEを有効", "EXECUTIONを有効", "LIVEに切り替", "注文を出", "注文を送信", "MONEY MANAGEMENTを変更")
+
+
+def _enum_text(value):
+    text = getattr(value, "value", value)
+    if isinstance(text, str):
+        return text
+    return None
+
+
+def _held_state(result, slot: str):
+    if slot == "mm":
+        assessment = getattr(result, "assessment", None)
+        return _enum_text(getattr(assessment, "assessmentState", None))
+    decision = getattr(result, "decision", None)
+    return _enum_text(getattr(decision, "overallPosture", None))
+
+
+def _held_recommendation(result, slot: str):
+    if slot != "master":
+        return None
+    decision = getattr(result, "decision", None)
+    return _enum_text(getattr(decision, "tradingRecommendation", None))
 
 
 def _compact_domain(domain) -> dict:
@@ -124,6 +147,42 @@ class SupervisorConversationService:
             except Exception: warnings.append("Supervisor conversation history could not be stored.")
         return response.model_copy(update={"warnings":tuple((*response.warnings,*warnings))}) if warnings else response
 
+    def _hold_completed_evaluation(self, result, *, slot: str) -> None:
+        """Retain a finished evaluation. A cache failure leaves the response unchanged."""
+
+        try:
+            status = getattr(result, "status", None)
+            status_text = getattr(status, "value", status)
+            if not isinstance(status_text, str):
+                status_text = None
+            failure = getattr(result, "failureCode", None)
+            completed_at = None
+            if status_text == "COMPLETED" and failure is None:
+                completed_at = self._completion_clock()
+            accept_completed(
+                slot=slot,
+                status=status_text,
+                failure_code=failure,
+                mode=_enum_text(getattr(result, "mode", None)),
+                state=_held_state(result, slot),
+                recommendation=_held_recommendation(result, slot),
+                evaluation_id=_enum_text(getattr(getattr(result, "auditEvent", None), "eventId", None)),
+                completed_at=completed_at,
+            )
+        except Exception as exc:
+            note_write_failure(exc)
+
+    def _completion_clock(self) -> datetime | None:
+        try:
+            value = self._clock()
+        except Exception:
+            return None
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            return None
+        return value
+
     def _now(self) -> datetime:
         value = self._clock()
         if value.tzinfo is None or value.utcoffset() is None:
@@ -171,16 +230,31 @@ class SupervisorConversationService:
         if any(claim in text and actual != claimed for claim, (actual, claimed) in authoritative.items()):
             raise ValueError("provider contradicted authoritative state")
 
-    def respond(self, app: object, request: SupervisorConversationRequest) -> SupervisorConversationResponse:
+    def respond(
+        self,
+        app: object,
+        request: SupervisorConversationRequest,
+        *,
+        canonical_context: Mapping | None = None,
+    ) -> SupervisorConversationResponse:
         validate_agent_capability(request.agentId, Capability.ANSWER_CONVERSATION, SupervisorMode.SHADOW)
         snapshot = self._snapshot_adapter.build(app)
         now = self._now()
-        mm_result = evaluate_mm_shadow(snapshot, self._provider, now)
+        mm_result = evaluate_mm_shadow(
+            snapshot, self._provider, now, canonical_context=canonical_context
+        )
+        self._hold_completed_evaluation(mm_result, slot="mm")
         master_result = None
         if request.agentId is SupervisorAgentId.MASTER_SUPERVISOR:
             master_result = evaluate_master_shadow(
-                snapshot, mm_result, self._provider, now, TRADINGAI_OPERATOR_CONSTITUTION
+                snapshot,
+                mm_result,
+                self._provider,
+                now,
+                TRADINGAI_OPERATOR_CONSTITUTION,
+                canonical_context=canonical_context,
             )
+            self._hold_completed_evaluation(master_result, slot="master")
             runtime_result = master_result
             identity = master_result.auditEvent.eventId
         else:
@@ -226,6 +300,12 @@ class SupervisorConversationService:
                 else None
             ),
         }
+        if canonical_context is not None:
+            from backend.context.shared_answer_context import (
+                provider_payload_with_context,
+            )
+
+            context = provider_payload_with_context(context, canonical_context)
         try:
             envelope = self._provider.generate_structured_output(
                 context, SupervisorConversationProviderOutput, CONVERSATION_TIMEOUT_SECONDS

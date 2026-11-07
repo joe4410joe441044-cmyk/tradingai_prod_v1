@@ -1,0 +1,121 @@
+schemaVersion: tradingai-project-truth/v1
+updatedAt: "2026-10-25T00:00:00Z"
+
+# A workstream is registered with status UNKNOWN unless a real document or Git
+# evidence confirms its state. Never upgrade a workstream to COMPLETE/DEPLOYED
+# without verification VERIFIED plus lastVerified and evidenceReferences.
+workstreams:
+  - workstreamId: A
+    name: "Workstream A"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: A1
+    name: "Workstream A1"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: A2
+    name: "Workstream A2"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: A-INTEGRATION
+    name: "Workstream A Integration"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: B
+    name: "Workstream B"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: C
+    name: "Workstream C"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: D
+    name: "Workstream D"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: F
+    name: "Workstream F"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: G
+    name: "Workstream G"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: H
+    name: "Workstream H"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: J
+    name: "Workstream J"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: AA
+    name: "Workstream AA"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: MM
+    name: "Workstream MM"
+    owner: UNKNOWN
+    status: UNKNOWN
+    verification: UNVERIFIED
+  - workstreamId: BB
+    name: "AI Advisor / Supervisor / AI Context Sharing"
+    owner: UNKNOWN
+    branch: feature/ai-context-sharing
+    worktree: /home/joe4410joe/tradingai_prod_v1.worktrees/ai-context-sharing
+    status: IN_PROGRESS
+    verification: PARTIAL
+    acceptedContracts:
+      - tradingai-context/v1
+    knownIssues: []
+    acceptedTests: []
+    decisionReferences: []
+    evidenceReferences:
+      - "git:branch:feature/ai-context-sharing"
+      - "git:branch:feature/ai-context-runtime"
+      - "git:branch:feature/ai-context-collector"
+      - "git:branch:feature/ai-context-api"
+      - "git:branch:feature/ai-context-router-integration"
+      - "git:branch:feature/ai-context-runtime-wiring"
+      - "git:branch:feature/ai-context-injection-boundary"
+      - "git:branch:feature/ai-context-snapshot-copy"
+      - "git:branch:feature/ai-context-owner-snapshot"
+      - "git:branch:feature/ai-context-owner-integration"
+      - "git:branch:feature/ai-advisor-supervisor-context"
+      - "git:branch:feature/ai-source-truth"
+      - "git:branch:feature/ai-project-truth"
+      - "git:branch:feature/ai-decision-truth"
+      - "git:branch:feature/ai-runtime-truth"
+      - "git:branch:feature/ai-knowledge-acceptance"
+      - "git:branch:feature/ai-runtime-producer"
+      - "git:branch:feature/ai-runtime-owner-wiring"
+      - "git:branch:feature/ai-runtime-coverage-acceptance"
+      - "git:branch:feature/ai-owner-cache-completion"
+      - "git:branch:feature/ai-runtime-reacceptance"
+      - "docs/ai/CONTEXT_PACK_SPEC.md"
+    lastVerified: null
+
+contracts:
+  - contractId: tradingai-context/v1
+    title: "Canonical AI Context Schema v1"
+    owner: BB
+    status: IN_PROGRESS
+    documentPath: docs/ai/CONTEXT_PACK_SPEC.md
+    verified: false
+    references:
+      - docs/ai/CONTEXT_PACK_SPEC.md
+
+knownIssues: []
+acceptedTests: []

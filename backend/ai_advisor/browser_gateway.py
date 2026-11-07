@@ -45,6 +45,10 @@ from backend.ai_advisor.conversation_models import (
     AuthenticationState,
     AuthorizationState,
 )
+from backend.context.shared_answer_context import (
+    load_shared_operator_context,
+    render_canonical_context_block,
+)
 from backend.ai_advisor.service_models import (
     AdvisorServiceContextInput,
     AdvisorServiceFailureCode,
@@ -67,6 +71,9 @@ from backend.ai_advisor.models import (
     Freshness,
 )
 from backend.ai_advisor.request_safety import evaluate_advisor_request
+from backend.knowledge_hub.advisor_supervisor_connection import (
+    attach_advisor_knowledge,
+)
 from backend.ai_advisor.response_models import (
     REJECTED_SUMMARY,
     AdvisorForbiddenClaim,
@@ -450,6 +457,43 @@ def _error(status: int, code: str, retryable: bool = False):
     return JSONResponse(status_code=status, content=value.model_dump(mode="json"))
 
 
+def _attach_canonical_context(
+    service_input: AdvisorServiceInput,
+    app: object,
+    question: str | None = None,
+):
+    """Add the shared context block. A failure keeps the existing input."""
+
+    try:
+        block = render_canonical_context_block(
+            load_shared_operator_context(app, question=question)
+        )
+        return service_input.model_copy(update={"canonicalContextBlock": block})
+    except Exception:
+        return service_input
+
+
+def _attach_knowledge_context(
+    service_input: AdvisorServiceInput,
+    identity: str | None,
+    question: str,
+):
+    """Attach the opt-in knowledge block beside the BB context.
+
+    This is default OFF and requires an authenticated identity. Any failure
+    returns the caller's existing input unchanged.
+    """
+
+    try:
+        return attach_advisor_knowledge(
+            service_input,
+            question=question,
+            identity=identity,
+        )
+    except Exception:
+        return service_input
+
+
 def _read_runtime_response(
     composition: AdvisorBrowserGatewayComposition,
     now: datetime,
@@ -693,6 +737,16 @@ def create_browser_gateway_router(
                 request_id=composition.requestIdFactory(),
                 approved_specifications=composition.approvedSpecifications,
                 runtime_response=runtime_response,
+            )
+            service_input = _attach_canonical_context(
+                service_input,
+                request.app,
+                browser_request.prompt,
+            )
+            service_input = _attach_knowledge_context(
+                service_input,
+                identity,
+                browser_request.prompt,
             )
             task = asyncio.create_task(
                 asyncio.to_thread(composition.service.generate_response, service_input)

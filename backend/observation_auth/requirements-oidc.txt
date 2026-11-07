@@ -1,0 +1,9 @@
+# OIDC runtime addition. Do not install this into the production venv
+# until APPROVE_AA_OIDC_BACKEND_RELEASE is granted.
+#
+# Verified with Python 3.12.3 against the already installed
+# cffi==2.0.0 and pycparser==3.0. Those two packages must stay at
+# the versions in the repository requirements.txt.
+# cryptography 50.0.2 requires cffi>=2.0.0 and does not require a
+# typing-extensions upgrade on Python 3.12.
+cryptography==50.0.2

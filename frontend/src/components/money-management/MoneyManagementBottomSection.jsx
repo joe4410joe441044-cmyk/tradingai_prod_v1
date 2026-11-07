@@ -16,6 +16,16 @@ export default function MoneyManagementBottomSection({
     moneyManagement,
     viewModel,
 }) {
+    const configured = moneyManagement.configuration?.smallAccountMinimumContractMode;
+    const configuredLabel = moneyManagement.isInitialLoading
+        ? "LOADING"
+        : moneyManagement.configurationError
+            ? "UNKNOWN"
+            : configured === true
+                ? "ON"
+                : configured === false
+                    ? "OFF"
+                    : "UNKNOWN";
     return (
         <div className="mm-lower-sections">
             <section
@@ -30,7 +40,7 @@ export default function MoneyManagementBottomSection({
                     <summary className="mm-disclosure__summary-row">
                         <span>Configuration（設定）</span>
                         <span className="mm-disclosure__meta">
-                            {interaction.configuration.draftStatus} · Revision {interaction.configuration.revision}
+                            SMALL ACCOUNT {configuredLabel} · {interaction.configuration.draftStatus} · Revision {interaction.configuration.revision}
                         </span>
                     </summary>
                     <div className="mm-disclosure__content">

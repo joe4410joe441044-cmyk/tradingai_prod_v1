@@ -74,6 +74,22 @@ def _serialize(value):
     return value
 
 
+MM_INVALIDATION_REASONS = frozenset({
+    "PAPER_INPUT_MUTATION",
+    "PAPER_MANUAL_ENTRY",
+    "PAPER_MANUAL_CLOSE",
+    "PAPER_EMERGENCY_FLATTEN",
+    "PAPER_CAPITAL_RESET",
+    "PAPER_RUNTIME_STOP",
+    "LIVE_MANUAL_CLOSE",
+    "LIVE_RUNTIME_STOP",
+    "LIVE_ACCOUNT_CACHE_MUTATION",
+    "LIVE_SOURCE_CHANGED",
+    "LIVE_AUTHENTICATION_CHANGED",
+    "LIVE_CACHE_STALE",
+})
+
+
 @dataclass(frozen=True)
 class AuthoritativeLossRuntimeMetrics:
     current_equity: Optional[Decimal]
@@ -107,6 +123,17 @@ class AuthoritativeLossRuntimeMetrics:
     accounting_authority_source: Optional[
         AccountingRebaseAuthoritySource
     ] = None
+    mm_observation_completed_at: Optional[datetime] = None
+    mm_observation_input_completeness: Optional[str] = None
+    mm_observation_input_scope: Optional[str] = None
+    mm_observation_evidence_revision: Optional[int] = None
+    mm_invalidation_reason: Optional[str] = None
+    live_balance_source: Optional[str] = None
+    live_position_source: Optional[str] = None
+    live_authenticated: Optional[bool] = None
+    live_stale: Optional[bool] = None
+    live_source_observed_at: Optional[datetime] = None
+    live_snapshot_generation: Optional[int] = None
 
     def __post_init__(self):
         for name in (
@@ -166,6 +193,80 @@ class AuthoritativeLossRuntimeMetrics:
             and self.trade_count_authority_session_id is not None
         ):
             raise ValueError("session trade count authority incomplete")
+        completed = self.mm_observation_completed_at
+        completeness = self.mm_observation_input_completeness
+        scope = self.mm_observation_input_scope
+        evidence_revision = self.mm_observation_evidence_revision
+        if completed is None:
+            if (
+                completeness is not None
+                or scope is not None
+                or evidence_revision is not None
+            ):
+                raise ValueError("observation completion evidence incomplete")
+        else:
+            object.__setattr__(
+                self,
+                "mm_observation_completed_at",
+                _utc("mm_observation_completed_at", completed),
+            )
+            if completeness != "COMPLETE":
+                raise ValueError("observation completion completeness invalid")
+            if scope not in ("PAPER_ENGINE_ACCOUNT", "LIVE_ACCOUNT_CACHE"):
+                raise ValueError("observation completion scope invalid")
+            _count(
+                "mm_observation_evidence_revision",
+                evidence_revision,
+            )
+        reason = self.mm_invalidation_reason
+        if reason is not None and reason not in MM_INVALIDATION_REASONS:
+            raise ValueError("invalidation reason invalid")
+        if (
+            completed is not None
+            and evidence_revision == self.revision
+            and reason is not None
+        ):
+            raise ValueError("invalidation reason on current completion")
+        for name in ("live_balance_source", "live_position_source"):
+            source = getattr(self, name)
+            if source is not None and (
+                not isinstance(source, str) or not source
+            ):
+                raise ValueError(f"{name} invalid")
+        if self.live_authenticated is not None and (
+            type(self.live_authenticated) is not bool
+        ):
+            raise ValueError("live_authenticated invalid")
+        if self.live_stale is not None and type(self.live_stale) is not bool:
+            raise ValueError("live_stale invalid")
+        if self.live_source_observed_at is not None:
+            object.__setattr__(
+                self,
+                "live_source_observed_at",
+                _utc("live_source_observed_at", self.live_source_observed_at),
+            )
+        _count(
+            "live_snapshot_generation",
+            self.live_snapshot_generation,
+            optional=True,
+        )
+        if (
+            completed is not None
+            and evidence_revision == self.revision
+            and scope == "PAPER_ENGINE_ACCOUNT"
+            and any(
+                getattr(self, name) is not None
+                for name in (
+                    "live_balance_source",
+                    "live_position_source",
+                    "live_authenticated",
+                    "live_stale",
+                    "live_source_observed_at",
+                    "live_snapshot_generation",
+                )
+            )
+        ):
+            raise ValueError("paper completion cannot carry live source evidence")
 
     def to_dict(self):
         return {
@@ -309,6 +410,12 @@ class AuthoritativeLossRuntimeMetricsState:
         self._trade_count_authority_session_id = None
         self._seen_close_events = set()
         self._period_authority = None
+        self._mm_observation_completed_at = None
+        self._mm_observation_input_completeness = None
+        self._mm_observation_input_scope = None
+        self._mm_observation_evidence_revision = None
+        self._mm_invalidation_reason = None
+        self._clear_live_source_evidence_locked()
 
     @property
     def runtime_instance_id(self):
@@ -355,6 +462,8 @@ class AuthoritativeLossRuntimeMetricsState:
                 self._rehydrate_missing_periods_locked(state, at)
             self._as_of = at
             self._revision += 1
+            self._mm_invalidation_reason = None
+            self._clear_live_source_evidence_locked()
             return self._snapshot_locked()
 
     def _rehydrate_missing_periods_locked(self, state, at):
@@ -699,6 +808,87 @@ class AuthoritativeLossRuntimeMetricsState:
             self._revision += 1
             return self._snapshot_locked()
 
+    def note_mm_observation_completed(
+        self,
+        *,
+        completed_at,
+        metrics_revision,
+        input_scope,
+        input_completeness,
+        live_balance_source=None,
+        live_position_source=None,
+        live_authenticated=None,
+        live_stale=None,
+        live_source_observed_at=None,
+        live_snapshot_generation=None,
+    ):
+        """Record a completion clock for the revision observe already stored.
+
+        This does not read an account, change equity, or move ``as_of`` or
+        ``revision``. A mismatched revision, an invalid observation, or a
+        partial input leaves the previous note untouched.
+        """
+
+        at = _utc("completed_at", completed_at)
+        if type(metrics_revision) is not int or metrics_revision < 0:
+            return self.snapshot()
+        if input_completeness != "COMPLETE":
+            return self.snapshot()
+        if input_scope not in ("PAPER_ENGINE_ACCOUNT", "LIVE_ACCOUNT_CACHE"):
+            return self.snapshot()
+        with self._lock:
+            if (
+                self._revision != metrics_revision
+                or self._observation_valid is not True
+            ):
+                return self._snapshot_locked()
+            self._mm_observation_completed_at = at
+            self._mm_observation_input_completeness = input_completeness
+            self._mm_observation_input_scope = input_scope
+            self._mm_observation_evidence_revision = metrics_revision
+            self._mm_invalidation_reason = None
+            if input_scope == "LIVE_ACCOUNT_CACHE":
+                self._assign_live_source_evidence_locked(
+                    live_balance_source,
+                    live_position_source,
+                    live_authenticated,
+                    live_stale,
+                    live_source_observed_at,
+                    live_snapshot_generation,
+                )
+            else:
+                self._clear_live_source_evidence_locked()
+            return self._snapshot_locked()
+
+    def invalidate_mm_observation_evidence(self, reason=None):
+        """Unpublish one completion clock by advancing revision a single time.
+
+        The timestamp, evidence revision, scope, completeness, ``as_of``,
+        and the equity fields stay unchanged. A second call, a missing
+        completion, or a revision that is already unpublished does nothing.
+        """
+
+        with self._lock:
+            evidence_revision = self._mm_observation_evidence_revision
+            if (
+                self._mm_observation_completed_at is None
+                or type(evidence_revision) is not int
+                or evidence_revision != self._revision
+                or self._observation_valid is not True
+                or self._mm_observation_input_completeness != "COMPLETE"
+                or self._mm_observation_input_scope not in (
+                    "PAPER_ENGINE_ACCOUNT",
+                    "LIVE_ACCOUNT_CACHE",
+                )
+            ):
+                return self._snapshot_locked()
+            if reason is not None and reason not in MM_INVALIDATION_REASONS:
+                reason = None
+            self._revision += 1
+            if reason is not None:
+                self._mm_invalidation_reason = reason
+            return self._snapshot_locked()
+
     def observe_stopped_paper_maintenance(
         self,
         *,
@@ -862,6 +1052,57 @@ class AuthoritativeLossRuntimeMetricsState:
             self._trade_count_authority_scope,
             self._trade_count_authority_session_id,
             self._accounting_authority_source,
+            self._mm_observation_completed_at,
+            self._mm_observation_input_completeness,
+            self._mm_observation_input_scope,
+            self._mm_observation_evidence_revision,
+            self._mm_invalidation_reason,
+            self._live_balance_source,
+            self._live_position_source,
+            self._live_authenticated,
+            self._live_stale,
+            self._live_source_observed_at,
+            self._live_snapshot_generation,
+        )
+
+    def _clear_live_source_evidence_locked(self):
+        self._live_balance_source = None
+        self._live_position_source = None
+        self._live_authenticated = None
+        self._live_stale = None
+        self._live_source_observed_at = None
+        self._live_snapshot_generation = None
+
+    def _assign_live_source_evidence_locked(
+        self,
+        balance_source,
+        position_source,
+        authenticated,
+        stale,
+        observed_at,
+        generation,
+    ):
+        """Store source fields the caller already read. Missing values stay missing."""
+
+        self._live_balance_source = (
+            balance_source
+            if isinstance(balance_source, str) and balance_source
+            else None
+        )
+        self._live_position_source = (
+            position_source
+            if isinstance(position_source, str) and position_source
+            else None
+        )
+        self._live_authenticated = (
+            authenticated if type(authenticated) is bool else None
+        )
+        self._live_stale = stale if type(stale) is bool else None
+        self._live_source_observed_at = (
+            observed_at if isinstance(observed_at, datetime) else None
+        )
+        self._live_snapshot_generation = (
+            generation if type(generation) is int and generation >= 0 else None
         )
 
     def snapshot(self):

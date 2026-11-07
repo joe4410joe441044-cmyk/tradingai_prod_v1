@@ -1111,6 +1111,65 @@ const readyProps = (overrides = {}) => ({
     ...overrides,
 });
 
+test("SMALL ACCOUNT status stays read-only outside the MANUAL panel", async () => {
+    const Component = await loadComponent();
+    const renderer = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        mmConfiguration: {
+            smallAccountMinimumContractMode: true,
+            smallAccountAllowedSymbol: "XRPUSDTM",
+            smallAccountMaxContracts: "1",
+            smallAccountMaxRiskPercent: "2.0",
+            smallAccountMaxAbsoluteRiskUsdt: "0.158",
+            smallAccountMaxLeverage: "3",
+        },
+    }));
+    const block = normalizedText(descendants(findTestId(renderer.root, "small-account-policy-display")));
+    assert.equal(block.includes("SMALL ACCOUNT CONFIGURED ON"), true);
+    assert.equal(block.includes("SMALL ACCOUNT EFFECTIVE UNKNOWN"), true);
+    assert.equal(block.includes("SMALL ACCOUNT RUNTIME UNKNOWN"), true);
+    assert.equal(block.includes("ACCOUNT MODE PAPER"), true);
+    assert.equal(block.includes("ALLOWED SYMBOL XRPUSDTM"), true);
+    assert.equal(block.includes("MAXIMUM RISK 2.0%"), true);
+    assert.equal(block.includes("ABSOLUTE RISK CAP 0.158 USDT"), true);
+    assert.equal(block.includes("MAXIMUM LEVERAGE 3x"), true);
+    assert.equal(block.includes("BLOCKING REASONS NOT REPORTED BY THIS VIEW"), true);
+    assert.equal(block.includes("READY CHECK REQUIRED"), false);
+    const manualPanel = findTestId(renderer.root, "manual-trading-panel");
+    assert.equal(
+        descendants(manualPanel).some((node) => node?.props?.["data-testid"] === "small-account-policy-display"),
+        false,
+    );
+    const note = normalizedText(findTestId(renderer.root, "small-account-control-note"));
+    assert.equal(note.includes("does not start the bot"), true);
+
+    const missing = createRenderer(Component, readyProps({ controlAuthority: "BOT" }));
+    const missingBlock = normalizedText(descendants(findTestId(missing.root, "small-account-policy-display")));
+    assert.equal(missingBlock.includes("SMALL ACCOUNT CONFIGURED UNKNOWN"), true);
+    assert.equal(missingBlock.includes("0.158"), false);
+    assert.equal(missingBlock.includes("2.0%"), false);
+
+    const loading = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        mmLoading: true,
+        mmConfiguration: { smallAccountMinimumContractMode: true },
+    }));
+    const loadingBlock = normalizedText(descendants(findTestId(loading.root, "small-account-policy-display")));
+    assert.equal(loadingBlock.includes("SMALL ACCOUNT CONFIGURED LOADING"), true);
+    assert.equal(loadingBlock.includes("SMALL ACCOUNT CONFIGURED ON"), false);
+    assert.equal(loadingBlock.includes("SMALL ACCOUNT EFFECTIVE UNKNOWN"), true);
+    assert.equal(loadingBlock.includes("SMALL ACCOUNT RUNTIME UNKNOWN"), true);
+
+    const failed = createRenderer(Component, readyProps({
+        controlAuthority: "BOT",
+        mmConfigurationError: { message: "unavailable" },
+        mmConfiguration: { smallAccountMinimumContractMode: true },
+    }));
+    const failedBlock = normalizedText(descendants(findTestId(failed.root, "small-account-policy-display")));
+    assert.equal(failedBlock.includes("SMALL ACCOUNT CONFIGURED UNKNOWN"), true);
+    assert.equal(failedBlock.includes("SMALL ACCOUNT CONFIGURED ON"), false);
+});
+
 test("OPERATION label is not rendered in the top band", async () => {
     const Component = await loadComponent();
     const renderer = createRenderer(Component, readyProps());

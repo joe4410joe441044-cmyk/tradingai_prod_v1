@@ -198,8 +198,21 @@ export default function OperationPreparation({
     // reading the DRAFT. When no saved revision is provided the draft is the
     // fallback so legacy callers are unchanged.
     const savedSettings = createOperationPreparationSettings(savedConfig ?? config);
-    const smallAccountMode = mmConfiguration?.smallAccountMinimumContractMode === true;
-    const smallAccountPolicyStatus = smallAccountMode ? "READY CHECK REQUIRED" : "OFF";
+    const smallAccountConfigured = mmConfiguration?.smallAccountMinimumContractMode;
+    const smallAccountConfiguredLabel = mmLoading
+        ? "LOADING"
+        : mmConfigurationError
+            ? "UNKNOWN"
+            : smallAccountConfigured === true
+                ? "ON"
+                : smallAccountConfigured === false
+                    ? "OFF"
+                    : "UNKNOWN";
+    const reportedSmallAccountValue = (value, suffix = "") => (
+        value === null || value === undefined || value === ""
+            ? "UNKNOWN"
+            : `${value}${suffix}`
+    );
     const [tradeSettingsOpen, setTradeSettingsOpen] = useState(false);
     const [safetyDetailsOpen, setSafetyDetailsOpen] = useState(false);
     // MANUAL TRADING execution confirmation preference. Presentation-only:
@@ -1016,6 +1029,21 @@ return (
                             <DerivedRow label={referenceCapitalLabel} source={capitalBasis !== undefined && capitalBasis !== null ? (isLiveCapitalMode ? "MM CONFIG" : "MM RUNTIME") : "NOT CONNECTED"} value={capitalBasis !== undefined && capitalBasis !== null ? String(capitalBasis) : "UNAVAILABLE"} />
                             <DerivedRow label="MAX EXPOSURE" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmExposureDisplay} />
                             <DerivedRow label="MAX DRAWDOWN" source={mmConfiguration ? "MM CONFIG" : "NOT CONNECTED"} value={mmDrawdownDisplay} />
+                            <div className="operation-prep-derived-list" data-testid="small-account-policy-display">
+                                <DerivedRow hideSource label="SMALL ACCOUNT CONFIGURED" source="MM CONFIG" value={smallAccountConfiguredLabel} />
+                                <DerivedRow hideSource label="SMALL ACCOUNT EFFECTIVE" source="NOT REPORTED" value="UNKNOWN" />
+                                <DerivedRow hideSource label="SMALL ACCOUNT RUNTIME" source="NOT REPORTED" value="UNKNOWN" />
+                                <DerivedRow hideSource label="ACCOUNT MODE" source="OPERATOR" value={summary.mode} />
+                                <DerivedRow hideSource label="SELECTED SYMBOL" source="OPERATOR" value={summary.symbol} />
+                                <DerivedRow hideSource label="ALLOWED SYMBOL" source="MM CONFIG" value={reportedSmallAccountValue(mmConfiguration?.smallAccountAllowedSymbol)} />
+                                <DerivedRow hideSource label="MAXIMUM RISK" source="MM CONFIG" value={reportedSmallAccountValue(mmConfiguration?.smallAccountMaxRiskPercent, "%")} />
+                                <DerivedRow hideSource label="ABSOLUTE RISK CAP" source="MM CONFIG" value={reportedSmallAccountValue(mmConfiguration?.smallAccountMaxAbsoluteRiskUsdt, " USDT")} />
+                                <DerivedRow hideSource label="MAXIMUM LEVERAGE" source="MM CONFIG" value={reportedSmallAccountValue(mmConfiguration?.smallAccountMaxLeverage, "x")} />
+                                <DerivedRow hideSource label="BLOCKING REASONS" source="NOT REPORTED" value="NOT REPORTED BY THIS VIEW" />
+                            </div>
+                            <p className="operation-prep-note" data-testid="small-account-control-note">
+                                ON/OFF is saved in Money Management configuration. This display does not start the bot, arm LIVE, or authorize an order.
+                            </p>
                             <DerivedRow label={riskBudgetLabel} source={riskBudgetSource} value={riskBudget !== undefined && riskBudget !== null ? String(riskBudget) : "UNAVAILABLE"} />
                             <DerivedRow label="SIZING READINESS" source={mmReadinessSource} value={mmEntryReadiness.label} />
                             <DerivedRow label="MM RUNTIME" source={lifecycleState || mmRuntime || "NOT CONNECTED"} status value={lifecycleState || mmRuntime || "UNKNOWN"} />
@@ -1206,14 +1234,6 @@ return (
                                     <DerivedRow hideSource label="ACTIVE SYMBOL" source="RUNTIME" value={manualActiveSymbol} />
                                     <DerivedRow hideSource label="DESTINATION" source="RUNTIME" value={manualDestination} />
                                     <DerivedRow hideSource label="MANUAL POSITION" source="RUNTIME" value={manualPendingState ? "PENDING" : manualPositionState} />
-                                </div>
-                                <div className="operation-prep-derived-list" data-testid="small-account-policy-display">
-                                    <DerivedRow hideSource label="SMALL ACCOUNT MODE" source="MM" value={smallAccountMode ? "ON" : "OFF"} />
-                                    <DerivedRow hideSource label="MAX CONTRACTS" source="MM" value={mmConfiguration?.smallAccountMaxContracts ?? "1"} />
-                                    <DerivedRow hideSource label="TARGET SYMBOL" source="MM" value={mmConfiguration?.smallAccountAllowedSymbol ?? "UNAVAILABLE"} />
-                                    <DerivedRow hideSource label="RISK CAP" source="MM" value={`${mmConfiguration?.smallAccountMaxRiskPercent ?? "2.0"}% / ${mmConfiguration?.smallAccountMaxAbsoluteRiskUsdt ?? "0.158"} USDT`} />
-                                    <DerivedRow hideSource label="LEVERAGE CAP" source="MM" value={`${mmConfiguration?.smallAccountMaxLeverage ?? "3"}x`} />
-                                    <DerivedRow hideSource label="POLICY STATUS" source="MM" value={smallAccountPolicyStatus} />
                                 </div>
                                 <div className="operation-prep-order-confirm" data-testid="manual-order-confirm">
                                     <span className="operation-prep-label">ORDER CONFIRM（注文確認）</span>
