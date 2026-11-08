@@ -13690,14 +13690,8 @@ class BotManager:
                     failure_reason = "ENGINE_REGISTRY_STILL_ATTACHED"
 
             if failure_reason is None and proposed_success:
-                if (
-                    isinstance(self.account_snapshot, dict)
-                    and self.account_snapshot.get("stateUnknown") is True
-                ):
-                    failure_reason = "FINAL_STATE_UNKNOWN"
-
                 path = response.get("execution_path") or response.get("path")
-                if failure_reason is None and path == "paper":
+                if path == "paper":
                     final_authority = (
                         self._stopped_paper_shutdown_evidence_state(
                             self.account_snapshot
@@ -13708,12 +13702,33 @@ class BotManager:
                             final_authority.get("reason")
                             or "FINAL_SNAPSHOT_INVALID"
                         )
-                    elif (
-                        final_authority.get("position_state") != "flat"
-                        or final_authority.get("pending_order_state") != "flat"
-                        or final_authority.get("open_order_state") != "flat"
-                    ):
-                        failure_reason = "FINAL_SNAPSHOT_NOT_FLAT"
+                    else:
+                        final_states = (
+                            (
+                                final_authority.get("position_state"),
+                                "POSITION_REMAINING",
+                            ),
+                            (
+                                final_authority.get("pending_order_state"),
+                                "PENDING_ORDER_REMAINING",
+                            ),
+                            (
+                                final_authority.get("open_order_state"),
+                                "OPEN_ORDER_REMAINING",
+                            ),
+                        )
+                        for final_state, remaining_reason in final_states:
+                            if final_state == "remaining":
+                                failure_reason = remaining_reason
+                                break
+                            if final_state != "flat":
+                                failure_reason = "FINAL_SNAPSHOT_NOT_FLAT"
+                                break
+                elif (
+                    isinstance(self.account_snapshot, dict)
+                    and self.account_snapshot.get("stateUnknown") is True
+                ):
+                    failure_reason = "FINAL_STATE_UNKNOWN"
 
             if failure_reason is not None:
                 response = self._emergency_response(
