@@ -18,7 +18,11 @@ from backend.money_management.loss_execution_integration import (
 )
 
 from backend.execution.live_order_intent import apply_durable_readiness
-from backend.runtime.runtime_state_contract import project_permission_contract
+from backend.runtime.runtime_state_contract import (
+    PERMISSION_REASON_UNVERIFIED,
+    evaluate_trading_permission_authority,
+    project_permission_contract,
+)
 from backend.money_management.order_sizing import OrderSizingAuthority, SizingRejected, number
 from backend.money_management.models import MoneyManagementConfig
 
@@ -228,6 +232,14 @@ class ExecutionEngine:
     def start(self):
 
         add_log("🚀 ENGINE START CALLED")
+
+        # A fresh START never inherits REAL order-entry authority from a
+        # previous process/session or a restored config snapshot.  ARM must be
+        # earned again by an operator action after readiness (including
+        # verified trading permission) is re-established.
+        self.config["liveOrderEntryAllowed"] = False
+        self.config["realOrderAllowed"] = False
+        self.config["executionEntryAllowed"] = False
 
         selected_mode = str(
             self.config.get("mode", "paper")
@@ -731,7 +743,7 @@ class ExecutionEngine:
             and getattr(self.exchange, "passphrase", None)
         )
 
-    def build_live_readiness(self, *, entry_authority=None):
+    def build_live_readiness(self, *, entry_authority=None, now=None):
         # Status uses the backend-owned control mirror. Actual submission passes
         # the authority returned by the manager guard, never the signal label.
         if entry_authority is None:
@@ -836,21 +848,10 @@ class ExecutionEngine:
             if isinstance(gates, dict):
                 apply_durable_readiness(checks, block_reasons, gates)
 
-        real_order_allowed = not block_reasons
         account_snapshot = dict(self.real_account_snapshot or {})
         account_type = account_snapshot.get(
             "accountType",
             "KUCOIN_FUTURES" if exchange_auth_ready else "UNKNOWN",
-        )
-        exchange_connection = (
-            "CONNECTED"
-            if exchange_client_ready
-            else "NOT_CONNECTED"
-        )
-        api_key_status = (
-            "VERIFIED"
-            if exchange_auth_ready
-            else "MISSING"
         )
         permission_contract = project_permission_contract(
             claimed_permission=(
@@ -869,6 +870,110 @@ class ExecutionEngine:
                 "credentialFingerprint"
             ),
             authenticated=exchange_auth_ready,
+            venue=account_snapshot.get("permissionVenue"),
+            account_id=account_snapshot.get("permissionAccountId"),
+            expires_at=account_snapshot.get("permissionExpiresAt"),
+        )
+
+        # The exchange client may hold permission evidence that is newer than
+        # (or absent from) the legacy account snapshot shape.  Reuse it only as
+        # authoritative evidence — never synthesize a verified value.
+        exchange_contract = getattr(
+            self.exchange, "permission_contract", None
+        )
+        snapshot_has_evidence = bool(
+            account_snapshot.get("permissionVerifiedPermission")
+            or account_snapshot.get("permissionVerificationSource")
+        )
+        if (
+            not snapshot_has_evidence
+            and isinstance(exchange_contract, dict)
+            and exchange_contract
+        ):
+            exchange_verified_permission = exchange_contract.get(
+                "verifiedPermission"
+            )
+            if (
+                not exchange_verified_permission
+                and str(
+                    exchange_contract.get("permissionStatus") or ""
+                ).strip().upper()
+                == "DENIED"
+            ):
+                exchange_verified_permission = "DENIED"
+            permission_contract = project_permission_contract(
+                claimed_permission=(
+                    exchange_contract.get("claimedPermission")
+                    or exchange_contract.get("permission")
+                    or ("READ_ONLY" if exchange_auth_ready else None)
+                ),
+                verified_permission=exchange_verified_permission,
+                verification_source=exchange_contract.get(
+                    "verificationSource"
+                ),
+                verified_at=exchange_contract.get("verifiedAt"),
+                credential_fingerprint=exchange_contract.get(
+                    "credentialFingerprint"
+                ),
+                authenticated=(
+                    exchange_auth_ready
+                    or exchange_contract.get("privateReadReady") is True
+                ),
+                venue=exchange_contract.get("venue"),
+                account_id=exchange_contract.get("accountId"),
+                expires_at=exchange_contract.get("expiresAt"),
+            )
+
+        # A REAL order may only be allowed when the exchange trading permission
+        # is proven, current, and bound to this venue/account/credential.  A
+        # bare "VERIFIED" string is not evidence.  This gate is evaluated here
+        # so both ARM and every entry submission (which calls this projection)
+        # fail closed on missing, stale, expired, or mismatched evidence.
+        expected_fingerprint = None
+        fingerprint_reader = getattr(
+            self.exchange, "current_credential_fingerprint", None
+        )
+        if callable(fingerprint_reader):
+            try:
+                expected_fingerprint = fingerprint_reader()
+            except Exception:
+                expected_fingerprint = None
+        expected_account_id = account_snapshot.get("accountId")
+        permission_authority = evaluate_trading_permission_authority(
+            permission_contract,
+            expected_venue=(
+                account_type
+                if exchange_auth_ready
+                and str(account_type).strip().upper() != "UNKNOWN"
+                else ("KUCOIN_FUTURES" if exchange_auth_ready else None)
+            ),
+            expected_account_id=expected_account_id,
+            expected_credential_fingerprint=expected_fingerprint,
+            now=now,
+        )
+        if selected_mode == "LIVE":
+            checks["tradingPermissionVerified"] = bool(
+                permission_authority["allowed"]
+            )
+            checks["permissionVerified"] = bool(
+                permission_contract["permissionStatus"] == "VERIFIED"
+            )
+            if not permission_authority["allowed"]:
+                block_reasons.append(
+                    permission_authority.get("reason")
+                    or PERMISSION_REASON_UNVERIFIED
+                )
+
+        real_order_allowed = not block_reasons
+        exchange_connection = (
+            "CONNECTED"
+            if exchange_client_ready
+            else "NOT_CONNECTED"
+        )
+        api_key_status = (
+            "VERIFIED"
+            if exchange_auth_ready
+            else "MISSING"
         )
         permission = (
             account_snapshot.get("permission")
@@ -954,10 +1059,17 @@ class ExecutionEngine:
                 "verificationSource"
             ],
             "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "permissionExpiresAt": permission_contract.get("expiresAt"),
+            "permissionVenue": permission_contract.get("venue"),
+            "permissionAccountId": permission_contract.get("accountId"),
             "credentialFingerprint": permission_contract[
                 "credentialFingerprint"
             ],
             "permissionContract": permission_contract,
+            "permissionAuthority": permission_authority,
+            "tradingPermissionVerified": bool(
+                permission_authority["allowed"]
+            ),
             "accountType": account_type,
             "exchangeAuthReason": auth_reason,
             "exchangeConnectionReason": connection_reason,
@@ -1531,10 +1643,9 @@ class ExecutionEngine:
             reasons.append("LIVE_POSITION_MULTIPLIER_UNAVAILABLE")
 
         exchange_protection = position.get("exchange_protection_state")
-        exchange_confirmed = (
-            exchange_protection is None
-            or exchange_protection == "PROTECTION_CONFIRMED"
-        )
+        exchange_confirmed = exchange_protection == "PROTECTION_CONFIRMED"
+        if not exchange_confirmed and "LIVE_POSITION_EXCHANGE_PROTECTION_UNKNOWN" not in reasons:
+            reasons.append("LIVE_POSITION_EXCHANGE_PROTECTION_UNKNOWN")
         protected = (
             position.get("protection_state") != "UNAVAILABLE"
             and exchange_confirmed
@@ -2596,6 +2707,7 @@ class ExecutionEngine:
             store = exchange._order_intent_store()
             if store is not None:
                 store.mark(parent, "FILLED")
+        rules = self._sizing_contract_rules() or {}
         result = exchange.place_exchange_protective_stop(
             symbol=position.get("symbol") or self.actual_position.get("symbol"),
             position_side=position.get("side"),
@@ -2603,6 +2715,7 @@ class ExecutionEngine:
             stop_price=self.actual_position.get("sl"),
             margin_mode=position.get("marginMode") or "ISOLATED",
             parent_intent_id=parent,
+            tick_size=rules.get("tick_size"),
         )
         state = None if not isinstance(result, dict) else result.get("commitState")
         intent_id = None if not isinstance(result, dict) else result.get("intentId")
@@ -4007,6 +4120,17 @@ class ExecutionEngine:
         leverage = number(self.config.get("effective_leverage") if live else self.config.get("leverage"))
         if leverage > min(policy.maximum_leverage, number(rules.get("max_leverage"))):
             raise SizingRejected("SIZING_LEVERAGE_EXCEEDS_AUTHORITY")
+        raw_tick = rules.get("tick_size")
+        try:
+            tick_size = (
+                number(raw_tick, zero=True)
+                if raw_tick is not None
+                else Decimal("0")
+            )
+        except SizingRejected:
+            raise SizingRejected("SIZING_TICK_SIZE_UNAVAILABLE") from None
+        if live and tick_size <= 0:
+            raise SizingRejected("SIZING_TICK_SIZE_UNAVAILABLE")
         context = authority_context if isinstance(authority_context, dict) else getattr(self, "_manual_sizing_authority_context", None)
         context = context if isinstance(context, dict) else {}
         return OrderSizingAuthority(
@@ -4020,6 +4144,8 @@ class ExecutionEngine:
             multiplier=rules.get("multiplier"), minimum=rules.get("min_size"),
             step=rules.get("qty_step"), maximum=rules.get("max_size"),
             cost_percent=number(rules.get("taker_fee_rate"), zero=True) * 200,
+            slippage_reserve_percent=policy.slippage_reserve_percent,
+            tick_size=tick_size,
             small_account_mode=policy.small_account_minimum_contract_mode,
             small_account_allowed_symbol=policy.small_account_allowed_symbol,
             small_account_max_contracts=policy.small_account_max_contracts,

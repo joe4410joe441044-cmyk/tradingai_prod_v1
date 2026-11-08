@@ -29,6 +29,7 @@ from backend.runtime.runtime_health_snapshot import (
 from backend.runtime.runtime_state_contract import (
     SNAPSHOT_INCONSISTENT as CONTRACT_SNAPSHOT_INCONSISTENT,
     classify_stopped_snapshot,
+    evaluate_trading_permission_authority,
     project_exchange_client_readiness,
     project_lifecycle_consistency,
     project_margin_mode_contract,
@@ -2498,6 +2499,22 @@ class BotManager:
                 "credentialFingerprint"
             ),
             authenticated=real_account.get("authenticated"),
+            venue=real_account.get("permissionVenue"),
+            account_id=real_account.get("permissionAccountId"),
+            expires_at=real_account.get("permissionExpiresAt"),
+        )
+        permission_authority = evaluate_trading_permission_authority(
+            permission_contract,
+            expected_venue=(
+                real_account.get("accountType")
+                or readiness.get("accountType")
+            ),
+            expected_account_id=real_account.get("accountId"),
+            expected_credential_fingerprint=(
+                real_account.get("credentialFingerprint")
+                if real_account.get("authenticated")
+                else None
+            ),
         )
         exchange_client_readiness = project_exchange_client_readiness(
             client_constructed=bool(
@@ -2546,9 +2563,16 @@ class BotManager:
                 permission_contract["verificationSource"]
             ),
             "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "permissionExpiresAt": permission_contract.get("expiresAt"),
+            "permissionVenue": permission_contract.get("venue"),
+            "permissionAccountId": permission_contract.get("accountId"),
             "credentialFingerprint": permission_contract[
                 "credentialFingerprint"
             ],
+            "permissionAuthority": permission_authority,
+            "tradingPermissionVerified": bool(
+                permission_authority["allowed"]
+            ),
         })
 
         checks = dict(readiness.get("checks") or {})
@@ -2556,6 +2580,13 @@ class BotManager:
             checks["marginModeCompatible"] = margin_contract["compatible"]
         if lifecycle_contract["state"] == "INCONSISTENT":
             checks["runtimeLifecycleConsistent"] = False
+        selected_mode_upper = str(selected_mode or "").strip().upper()
+        if selected_mode_upper == "LIVE":
+            # Never let a downstream reason rebuild resurrect REAL-order
+            # authority when trading permission evidence is not valid.
+            checks["tradingPermissionVerified"] = bool(
+                permission_authority["allowed"]
+            )
         checks.update({
             "exchangeAuthReady": readiness.get(
                 "exchangeAuthReady",
@@ -4887,6 +4918,49 @@ class BotManager:
                 "blockReasons": arming.get("blockReasons") or [],
             })
 
+        # ARM is a REAL-order authority transition, so the exchange trading
+        # permission must be proven and current NOW.  The engine readiness gate
+        # already enforces this; this independent manager check prevents an
+        # older/alternate engine from arming on missing or stale evidence.
+        permission_allowed = True
+        permission_reason = None
+        if hasattr(self.engine, "build_live_readiness"):
+            try:
+                arm_readiness = self.engine.build_live_readiness()
+            except Exception:
+                arm_readiness = {}
+            if not isinstance(arm_readiness, dict):
+                arm_readiness = {}
+            permission_authority = arm_readiness.get("permissionAuthority")
+            if isinstance(permission_authority, dict):
+                permission_allowed = (
+                    permission_authority.get("allowed") is True
+                )
+                permission_reason = permission_authority.get("reason")
+            else:
+                permission_allowed = (
+                    arm_readiness.get("tradingPermissionVerified") is True
+                )
+                permission_reason = arm_readiness.get("permissionBlockReason")
+        if not permission_allowed:
+            try:
+                self.engine.set_live_order_entry_authority(False)
+            except Exception:
+                logger.warning(
+                    "LIVE order-entry rollback after permission denial failed"
+                )
+            return self._remember_execution_authority({
+                "success": False,
+                "armed": False,
+                "liveOrderEntryAllowed": False,
+                "realOrderAllowed": False,
+                "executionEntryAllowed": False,
+                "reason": permission_reason or "TRADING_PERMISSION_UNVERIFIED",
+                "blockReasons": [
+                    permission_reason or "TRADING_PERMISSION_UNVERIFIED"
+                ],
+            })
+
         # Propagate for status / observability (manager copy).
         self.config["liveOrderEntryAllowed"] = True
         self.config["realOrderAllowed"] = True
@@ -6652,6 +6726,38 @@ class BotManager:
                         "success": False,
                         "completed": False,
                         "stateUnknown": False,
+                    }
+
+                # A LIVE START is armed order-capable infrastructure. Do not
+                # proceed while the existing lifecycle/loop authority is
+                # unknown or a genuine contradiction. A legitimate
+                # "bot attached / loop stopped" state stays CONSISTENT and is
+                # not rewritten to STOPPED.
+                runtime_reconciliation = project_lifecycle_consistency(
+                    bot_lifecycle_state=getattr(
+                        self, "lifecycle_state", None
+                    ),
+                    loop_state=getattr(self, "loop_state", None),
+                    engine_available=self.engine is not None,
+                    execution_authority=(
+                        "ENABLED"
+                        if governance_state.get("execution_enabled") is True
+                        else "DISABLED"
+                    ),
+                )
+                if runtime_reconciliation["state"] != "CONSISTENT":
+                    return {
+                        "status": "error",
+                        "reason": (
+                            "LIVE_RUNTIME_AUTHORITY_UNKNOWN"
+                            if runtime_reconciliation["state"] == "UNKNOWN"
+                            else "LIVE_RUNTIME_AUTHORITY_INCONSISTENT"
+                        ),
+                        "success": False,
+                        "completed": False,
+                        "stateUnknown": (
+                            runtime_reconciliation["state"] == "UNKNOWN"
+                        ),
                     }
 
                 live_start_authority = self.get_authoritative_pending_order_state(

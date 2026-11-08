@@ -255,6 +255,7 @@ def test_c_resync_keeps_multiplier_when_contract_read_fails():
     pos = engine.actual_position
     assert pos["multiplier"] == 10.0
     assert pos["sl"] == pytest.approx(ENTRY * 0.99) and pos["tp"] == pytest.approx(ENTRY * 1.01)
+    pos["exchange_protection_state"] = "PROTECTION_CONFIRMED"
     assert engine.live_position_protection_status()["state"] == "ACTIVE"
 
 
@@ -407,6 +408,7 @@ def test_e_unprotected_live_position_blocks_entry_and_arm_visibly():
 
 def test_e_protected_live_position_has_no_protection_block_reason():
     engine, _, _ = _start_synced("BUY")
+    engine.actual_position["exchange_protection_state"] = "PROTECTION_CONFIRMED"
     readiness = engine.build_live_readiness(entry_authority="BOT")
     assert LIVE_POSITION_PROTECTION_UNAVAILABLE not in readiness["blockReasons"]
     assert readiness["livePositionProtection"]["state"] == "ACTIVE"
@@ -702,6 +704,7 @@ def test_status_projection_keeps_pnl_accounting_unavailable_reason():
 
 def test_status_projection_protected_or_flat_has_no_new_reason():
     engine, _, _ = _start_synced("BUY")
+    engine.actual_position["exchange_protection_state"] = "PROTECTION_CONFIRMED"
     projected = derive_live_readiness(engine.build_live_readiness(), _ACCOUNT)
     assert LIVE_POSITION_PROTECTION_UNAVAILABLE not in projected["blockReasons"]
     assert LIVE_PNL_ACCOUNTING_UNAVAILABLE not in projected["blockReasons"]
@@ -712,3 +715,13 @@ def test_status_projection_protected_or_flat_has_no_new_reason():
     assert flat_projected["livePositionProtection"]["state"] == "NO_POSITION"
     assert flat_projected["livePnlAccounting"]["state"] == "AVAILABLE"
     assert LIVE_POSITION_PROTECTION_UNAVAILABLE not in flat_projected["blockReasons"]
+
+
+def test_start_synced_position_without_exchange_stop_fails_closed():
+    engine, _, _ = _start_synced("BUY")
+    status = engine.live_position_protection_status()
+    assert status["state"] == "UNAVAILABLE"
+    assert status["protected"] is False
+    assert "LIVE_POSITION_EXCHANGE_PROTECTION_UNKNOWN" in status["reasons"]
+    projected = derive_live_readiness(engine.build_live_readiness(), _ACCOUNT)
+    assert LIVE_POSITION_PROTECTION_UNAVAILABLE in projected["blockReasons"]

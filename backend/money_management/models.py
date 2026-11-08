@@ -59,6 +59,7 @@ class MoneyManagementConfig:
     small_account_require_flat_before_entry: bool=True
     small_account_require_no_pending: bool=True
     small_account_require_manual_selection: bool=True
+    slippage_reserve_percent: Decimal=Decimal("0.05")
     def __post_init__(self):
         object.__setattr__(self,"profile",_enum(MoneyManagementProfile,self.profile)); object.__setattr__(self,"mode",_enum(TradingMode,self.mode))
         if type(self.multi_bot_enabled) is not bool: raise TypeError("multi_bot_enabled must be bool")
@@ -81,6 +82,8 @@ class MoneyManagementConfig:
         else:
             _dec("small_account_max_absolute_risk_usdt",self.small_account_max_absolute_risk_usdt,positive=True)
         _dec("small_account_max_leverage",self.small_account_max_leverage,positive=True)
+        _dec("slippage_reserve_percent",self.slippage_reserve_percent,nonnegative=True)
+        if self.slippage_reserve_percent>Decimal("1"): raise ValueError("slippage_reserve_percent must be <= 1 per side")
         if self.small_account_max_contracts>Decimal("1"): raise ValueError("small_account_max_contracts must be <= 1")
         if self.small_account_max_leverage>self.maximum_leverage: raise ValueError("small-account leverage exceeds normal maximum")
         if self.maximum_leverage>Decimal("5"): raise ValueError("maximum_leverage must be <= 5")

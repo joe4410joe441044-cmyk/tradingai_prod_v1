@@ -296,6 +296,7 @@ class MoneyManagementConfigurationResponse:
     small_account_require_flat_before_entry: bool = True
     small_account_require_no_pending: bool = True
     small_account_require_manual_selection: bool = True
+    slippage_reserve_percent: Optional[Decimal] = None
 
     def to_dict(self):
         return {
@@ -334,6 +335,7 @@ class MoneyManagementConfigurationResponse:
             "smallAccountRequireFlatBeforeEntry": self.small_account_require_flat_before_entry,
             "smallAccountRequireNoPending": self.small_account_require_no_pending,
             "smallAccountRequireManualSelection": self.small_account_require_manual_selection,
+            "slippageReservePercent": _serialize(self.slippage_reserve_percent),
             "revision": self.revision,
             "source": self.source,
             "updatedAt": _serialize(self.updated_at),
@@ -535,6 +537,7 @@ _BASE_CONFIG_FIELDS = {
     "singleSymbolExposurePercent": "single_symbol_exposure_pct",
     "maximumDrawdownPercent": "maximum_drawdown_pct",
     "compoundingEnabled": "compounding_enabled",
+    "slippageReservePercent": "slippage_reserve_percent",
 }
 _SMALL_ACCOUNT_FIELDS = {
     "smallAccountMinimumContractMode": "small_account_minimum_contract_mode",
@@ -875,6 +878,7 @@ class MoneyManagementHttpBoundary:
             small_account_require_flat_before_entry=base_config.small_account_require_flat_before_entry if base_config is not None else True,
             small_account_require_no_pending=base_config.small_account_require_no_pending if base_config is not None else True,
             small_account_require_manual_selection=base_config.small_account_require_manual_selection if base_config is not None else True,
+            slippage_reserve_percent=base_config.slippage_reserve_percent if base_config is not None else None,
         )
 
     def get_configuration(self):
@@ -2047,6 +2051,16 @@ class MoneyManagementHttpBoundary:
                         if type(payload[external]) is not bool:
                             raise ValueError("compoundingEnabled invalid")
                         base_update[internal] = payload[external]
+                        continue
+                    if external == "slippageReservePercent":
+                        value = _strict_nonnegative_percentage(
+                            external, payload[external]
+                        )
+                        if value > Decimal("1"):
+                            raise ValueError(
+                                "slippageReservePercent exceeds 1 percent per side"
+                            )
+                        base_update[internal] = value
                         continue
                     parser = (
                         _strict_positive_decimal

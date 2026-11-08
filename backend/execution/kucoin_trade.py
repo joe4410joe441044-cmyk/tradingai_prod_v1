@@ -26,6 +26,7 @@ from backend.utils.log_buffer import logger, runtime_debug
 from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
 from backend.runtime.runtime_state_contract import (
     PERMISSION_READ_ONLY,
+    evaluate_trading_permission_authority,
     project_permission_contract,
 )
 from backend.execution.live_order_intent import (
@@ -49,6 +50,7 @@ from backend.execution.live_order_intent import (
     format_stop_price,
     liquidation_risk_boundary,
     protective_stop_sides,
+    quantize_stop_price,
 )
 
 
@@ -345,6 +347,10 @@ class KucoinTradeClient(BaseClient):
         self.live_block_reasons = [
             "LIVE_NOT_READY"
         ]
+
+        # Latest exchange trading-permission evidence.  Missing/empty evidence
+        # is never treated as verification.
+        self.permission_contract = {}
 
         runtime_debug(
             "KuCoin credentials configured key=%s secret=%s passphrase=%s",
@@ -777,6 +783,23 @@ class KucoinTradeClient(BaseClient):
             }
             return result
 
+    def current_credential_fingerprint(self):
+        """Non-reversible fingerprint of the credential in use right now."""
+
+        return _credential_fingerprint(self.api_key)
+
+    def trading_permission_authority(self, *, now=None):
+        """Re-evaluate the latest trading-permission evidence fail-closed."""
+
+        return evaluate_trading_permission_authority(
+            self.permission_contract,
+            expected_venue="KUCOIN_FUTURES",
+            expected_credential_fingerprint=(
+                self.current_credential_fingerprint()
+            ),
+            now=now,
+        )
+
     def set_live_order_gate(
         self,
         allowed,
@@ -1000,7 +1023,13 @@ class KucoinTradeClient(BaseClient):
             ),
             credential_fingerprint=_credential_fingerprint(self.api_key),
             authenticated=True,
+            venue="KUCOIN_FUTURES",
+            account_id=d.get("accountId") or d.get("uid"),
         )
+        # Retain the latest evidence on the client so every submission
+        # boundary can re-check permission freshness/binding, even when a
+        # caller bypasses the engine readiness projection.
+        self.permission_contract = dict(permission_contract)
 
         overview = {
             "source": "KUCOIN_FUTURES_READ_ONLY",
@@ -1080,6 +1109,9 @@ class KucoinTradeClient(BaseClient):
                 permission_contract["verificationSource"]
             ),
             "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "permissionExpiresAt": permission_contract.get("expiresAt"),
+            "permissionVenue": permission_contract.get("venue"),
+            "permissionAccountId": permission_contract.get("accountId"),
             "credentialFingerprint": (
                 permission_contract["credentialFingerprint"]
             ),
@@ -2649,6 +2681,19 @@ class KucoinTradeClient(BaseClient):
                     "intentId": blocked.get("intentId"),
                     "clientOid": blocked.get("clientOid"),
                 }
+            # A new ENTRY must prove current, bound trading permission at the
+            # exchange submission boundary too.  Protective stops and
+            # reduce-only EXIT remain governed by their own paths so an open
+            # position can still be protected / closed safely.
+            permission = self.trading_permission_authority()
+            if permission.get("allowed") is not True:
+                return {
+                    "submit": False,
+                    "commitState": "REJECTED",
+                    "reason": permission.get("reason")
+                    or "TRADING_PERMISSION_UNVERIFIED",
+                    "blockReasons": list(permission.get("reasons") or []),
+                }
         record = store.begin(
             purpose=purpose,
             symbol=symbol,
@@ -2915,11 +2960,15 @@ class KucoinTradeClient(BaseClient):
         parent_intent_id,
         account_symbol=None,
         timeout=10,
+        tick_size=None,
     ):
         """Submit a reduce-only KuCoin stop and leave it unconfirmed until lookup."""
 
         close_side, direction = protective_stop_sides(position_side)
-        price_text = format_stop_price(stop_price)
+        if tick_size is not None:
+            price_text = quantize_stop_price(stop_price, tick_size, close_side)
+        else:
+            price_text = format_stop_price(stop_price)
         if close_side is None or price_text is None or not margin_mode:
             return {"submit": False, "commitState": UNPROTECTED, "reason": "STOP_CONTRACT_UNAVAILABLE"}
         result = self.submit_bounded_order(
@@ -2996,6 +3045,24 @@ class KucoinTradeClient(BaseClient):
 
             runtime_debug("KuCoin order blocked result=%s", result)
 
+            return result
+
+        permission = self.trading_permission_authority()
+        if permission.get("allowed") is not True:
+            result = {
+                "success": False,
+                "exchange": "kucoin",
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "blockedReason": permission.get("reason")
+                or "TRADING_PERMISSION_UNVERIFIED",
+                "liveBlockReasons": list(permission.get("reasons") or []),
+                "error": permission.get("reason")
+                or "TRADING_PERMISSION_UNVERIFIED",
+                "timestamp": time.time(),
+            }
+            runtime_debug("KuCoin order blocked result=%s", result)
             return result
 
         runtime_debug(

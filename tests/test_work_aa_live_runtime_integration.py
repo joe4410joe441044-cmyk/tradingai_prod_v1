@@ -4,6 +4,7 @@
 import fcntl
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -56,11 +57,24 @@ class FakeSession:
         return Response({"code": "200000", "data": {}})
 
 
+def bind_verified_permission(trade):
+    trade.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": trade.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
+    return trade
+
+
 def trade_client(tmp_path, name="intents.json"):
     trade = KucoinTradeClient(api_key="key", api_secret="secret", passphrase="pass")
     trade.session = FakeSession()
     trade.live_order_allowed = True
     trade.runtime_submission_allowed = True
+    bind_verified_permission(trade)
     path = str(Path(tmp_path) / name)
     configured = trade.configure_live_runtime_intent_store(path)
     assert configured["ready"] is True
@@ -116,6 +130,7 @@ def test_corrupt_store_and_permission_and_interrupted_write_fail_closed(tmp_path
     trade.session = FakeSession()
     trade.live_order_allowed = True
     trade.runtime_submission_allowed = True
+    bind_verified_permission(trade)
     assert trade.configure_live_runtime_intent_store(str(corrupt))["reason"] == "STORE_CORRUPT"
     assert entry(trade)["reason"] == "STORE_CORRUPT"
     assert trade.session.posts == []
@@ -128,6 +143,7 @@ def test_corrupt_store_and_permission_and_interrupted_write_fail_closed(tmp_path
         denied.live_order_allowed = True
         denied.runtime_submission_allowed = True
         denied.session = FakeSession()
+        bind_verified_permission(denied)
         assert denied.configure_live_runtime_intent_store(str(blocked / "intents.json"))["ready"] is False
         assert entry(denied)["submit"] is False
         assert denied.session.posts == []
@@ -307,6 +323,7 @@ def test_authority_gates_reject_writes(tmp_path):
     trade.live_order_allowed = False
     assert entry(trade)["commitState"] == "DISARMED"
     trade.live_order_allowed = True
+    bind_verified_permission(trade)
     trade.runtime_submission_allowed = False
     assert entry(trade)["commitState"] == "STOPPED"
     trade.runtime_submission_allowed = True

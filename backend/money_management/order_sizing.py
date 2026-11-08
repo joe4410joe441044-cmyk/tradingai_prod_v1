@@ -66,6 +66,8 @@ class OrderSizingAuthority:
     step: Decimal
     maximum: Decimal
     cost_percent: Decimal = Decimal("0")
+    slippage_reserve_percent: Decimal = Decimal("0")
+    tick_size: Decimal = Decimal("0")
     small_account_mode: bool = False
     small_account_allowed_symbol: str = ""
     small_account_max_contracts: Decimal = Decimal("1")
@@ -88,20 +90,96 @@ class OrderSizingAuthority:
         if not isinstance(self.symbol, str) or not self.symbol:
             raise SizingRejected("SIZING_SYMBOL_UNAVAILABLE")
         for name in self.__dataclass_fields__:
-            if name in {"price","equity","available","risk_percent","sl_percent","leverage","fixed_notional","position_cap","symbol_capacity","total_capacity","multiplier","minimum","step","maximum","cost_percent","small_account_max_contracts","small_account_max_risk_percent","small_account_max_absolute_risk_usdt","small_account_max_leverage"}:
+            if name in {"price","equity","available","risk_percent","sl_percent","leverage","fixed_notional","position_cap","symbol_capacity","total_capacity","multiplier","minimum","step","maximum","cost_percent","slippage_reserve_percent","tick_size","small_account_max_contracts","small_account_max_risk_percent","small_account_max_absolute_risk_usdt","small_account_max_leverage"}:
                 object.__setattr__(self, name, number(getattr(self, name), zero=name in {
-                    "available", "fixed_notional", "symbol_capacity", "total_capacity", "cost_percent", "small_account_max_absolute_risk_usdt"
+                    "available", "fixed_notional", "symbol_capacity", "total_capacity", "cost_percent", "slippage_reserve_percent", "tick_size", "small_account_max_absolute_risk_usdt"
                 }))
         if self.sl_percent > 100 or self.risk_percent > 100:
             raise SizingRejected("SIZING_AUTHORITY_INVALID")
+        if self.slippage_reserve_percent > 1:
+            raise SizingRejected("SIZING_SLIPPAGE_RESERVE_INVALID")
 
     @property
     def risk_budget(self):
         return self.equity * self.risk_percent / 100
 
     @property
+    def fee_percent(self):
+        return self.cost_percent
+
+    @property
+    def slippage_percent(self):
+        # Entry and exit are both market orders, so the reserve applies twice.
+        return self.slippage_reserve_percent * 2
+
+    @property
     def risk_fraction(self):
-        return (self.sl_percent + self.cost_percent) / 100
+        return (
+            self.sl_percent
+            + self.fee_percent
+            + self.slippage_percent
+        ) / 100
+
+    def _tick_rounding_risk(self, notional):
+        if self.tick_size <= 0 or self.price <= 0:
+            return Decimal("0")
+        return number(notional, zero=True) / self.price * self.tick_size
+
+    def _risk_breakdown(self, notional):
+        entry_fee = notional * self.fee_percent / 200
+        exit_fee = entry_fee
+        fee = entry_fee + exit_fee
+        slippage = notional * self.slippage_percent / 100
+        tick = self._tick_rounding_risk(notional)
+        stop_loss = notional * self.sl_percent / 100
+        return {
+            "feePercent": float(self.fee_percent),
+            "slippageReservePercent": float(self.slippage_reserve_percent),
+            "slippagePercent": float(self.slippage_percent),
+            "tickSize": float(self.tick_size),
+            "entryFeeUsdt": float(entry_fee),
+            "exitFeeUsdt": float(exit_fee),
+            "feeCostUsdt": float(fee),
+            "stopLossUsdt": float(stop_loss),
+            "slippageReserveUsdt": float(slippage),
+            "tickRoundingRiskUsdt": float(tick),
+            "totalEstimatedLossUsdt": float(stop_loss + fee + slippage + tick),
+        }
+
+    def _normal_budget_disclosure(self, total):
+        """Make a 0.5%-style normal-budget overrun explicit, never silent."""
+        budget = self.risk_budget
+        excess = total - budget
+        return {
+            "normalRiskBudgetUsdt": float(budget),
+            "normalRiskBudgetExceeded": total > budget,
+            "normalRiskBudgetExcessUsdt": float(
+                excess if excess > 0 else Decimal("0")
+            ),
+            "normalRiskBudgetMultiple": (
+                float(total / budget) if budget > 0 else None
+            ),
+        }
+
+    def _small_cap_disclosure(self, total):
+        percentage_cap = (
+            self.equity * self.small_account_max_risk_percent / 100
+        )
+        absolute_cap = self.small_account_max_absolute_risk_usdt
+        effective_cap = (
+            min(percentage_cap, absolute_cap)
+            if absolute_cap > 0
+            else percentage_cap
+        )
+        headroom = effective_cap - total
+        return {
+            "smallAccountPercentCapUsdt": float(percentage_cap),
+            "smallAccountAbsoluteCapUsdt": float(absolute_cap),
+            "smallAccountEffectiveCapUsdt": float(effective_cap),
+            "smallAccountCapHeadroomUsdt": float(
+                headroom if headroom > 0 else Decimal("0")
+            ),
+        }
 
     @property
     def notional_limit(self):
@@ -122,7 +200,7 @@ class OrderSizingAuthority:
         if sizing_policy_mode == "SMALL_ACCOUNT_MINIMUM_CONTRACT":
             self._validate_small_account_candidate(contracts, notional)
             return base, notional
-        if notional * self.risk_fraction > self.risk_budget:
+        if notional * self.risk_fraction + self._tick_rounding_risk(notional) > self.risk_budget:
             raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
         if notional > min(self.position_cap, self.symbol_capacity, self.total_capacity):
             raise SizingRejected("NO_VALID_QUANTITY_FOR_MM_EXPOSURE")
@@ -138,7 +216,7 @@ class OrderSizingAuthority:
         if self.fixed_notional and requested / self.price / self.multiplier > self.maximum:
             raise SizingRejected("NO_VALID_QUANTITY_FOR_EXCHANGE_CONSTRAINTS")
         if self.fixed_notional and requested > self.notional_limit:
-            if requested * self.risk_fraction > self.risk_budget:
+            if requested * self.risk_fraction + self._tick_rounding_risk(requested) > self.risk_budget:
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
             if requested > min(self.position_cap, self.symbol_capacity, self.total_capacity):
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_MM_EXPOSURE")
@@ -146,7 +224,7 @@ class OrderSizingAuthority:
         contracts = floor_contracts(min(requested / self.price / self.multiplier, self.maximum), self.step)
         if contracts < self.minimum:
             minimum_notional = self.minimum * self.multiplier * self.price
-            if minimum_notional * self.risk_fraction > self.risk_budget:
+            if minimum_notional * self.risk_fraction + self._tick_rounding_risk(minimum_notional) > self.risk_budget:
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_RISK_POLICY")
             if minimum_notional > min(self.position_cap, self.symbol_capacity, self.total_capacity):
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_MM_EXPOSURE")
@@ -154,10 +232,14 @@ class OrderSizingAuthority:
                 raise SizingRejected("NO_VALID_QUANTITY_FOR_AVAILABLE_MARGIN")
             raise SizingRejected("NO_VALID_QUANTITY_FOR_EXCHANGE_CONSTRAINTS")
         base, notional = self.validate(contracts)
+        risk = notional * self.risk_fraction + self._tick_rounding_risk(notional)
         return {"valid": True, "qty": float(base), "contracts": str(contracts),
                 "position_size": float(notional), "required_margin": float(notional / self.leverage),
                 "configured_position_size": float(self.fixed_notional),
                 "risk_budget": float(self.risk_budget), "sl_risk": float(notional * self.sl_percent / 100),
+                "totalEstimatedLoss": float(risk), "riskBudgetUsdt": float(self.risk_budget),
+                **self._risk_breakdown(notional),
+                **self._normal_budget_disclosure(risk),
                 "sizing_mode": "fixed_position_size" if self.fixed_notional else "risk_percent",
                 "sizingPolicyMode": "NORMAL_MM", "smallAccountExceptionApplied": False,
                 "normalExposureGateResult": "PASS", "smallAccountFloorDecision": "NOT_EVALUATED"}
@@ -180,7 +262,7 @@ class OrderSizingAuthority:
         for allowed, reason in checks:
             if not allowed:
                 raise SizingRejected(reason)
-        risk = notional * self.risk_fraction
+        risk = notional * self.risk_fraction + self._tick_rounding_risk(notional)
         if risk > self.equity * self.small_account_max_risk_percent / 100:
             raise SizingRejected("SMALL_ACCOUNT_RISK_PERCENT_EXCEEDED")
         if self.small_account_max_absolute_risk_usdt <= 0 or risk > self.small_account_max_absolute_risk_usdt:
@@ -199,11 +281,16 @@ class OrderSizingAuthority:
         notional = contracts * self.multiplier * self.price
         self._validate_small_account_candidate(contracts, notional)
         base = contracts * self.multiplier
-        risk = notional * self.risk_fraction
+        risk = notional * self.risk_fraction + self._tick_rounding_risk(notional)
         return {"valid": True, "qty": float(base), "contracts": str(contracts),
                 "position_size": float(notional), "required_margin": float(notional / self.leverage),
                 "configured_position_size": float(self.fixed_notional), "risk_budget": float(self.risk_budget),
-                "sl_risk": float(notional * self.sl_percent / 100), "sizing_mode": "minimum_contract_floor",
+                "sl_risk": float(notional * self.sl_percent / 100),
+                "totalEstimatedLoss": float(risk), "riskBudgetUsdt": float(self.risk_budget),
+                **self._risk_breakdown(notional),
+                **self._normal_budget_disclosure(risk),
+                **self._small_cap_disclosure(risk),
+                "sizing_mode": "minimum_contract_floor",
                 "sizingPolicyMode": "SMALL_ACCOUNT_MINIMUM_CONTRACT", "smallAccountExceptionApplied": True,
                 "smallAccountReason": "NORMAL_MM_BELOW_EXCHANGE_MINIMUM", "normalSizingResult": normal_reason,
                 "normalExposureGateResult": normal_reason, "smallAccountFloorDecision": "ALLOW",

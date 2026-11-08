@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,14 @@ def make_client():
     trade.session = FakeSession()
     trade.live_order_allowed = True
     trade.runtime_submission_allowed = True
+    trade.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": trade.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
     return trade
 
 

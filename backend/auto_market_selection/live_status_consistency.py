@@ -21,6 +21,8 @@ REASON_ORDER = (
     ("pendingOrdersClear", "PENDING_ORDERS_EXIST"),
     ("mmFresh", "MM_STALE"),
     ("executionEnabled", "EXECUTION_DISABLED"),
+    # REAL order entry requires proven, current, bound trading permission.
+    ("tradingPermissionVerified", "TRADING_PERMISSION_UNVERIFIED"),
     ("liveOrderEntryAllowed", "LIVE_ORDER_ENTRY_DISARMED"),
     ("emergencyStopClear", "EMERGENCY_STOP_ACTIVE"),
     ("governanceAllow", "GOVERNANCE_BLOCK"),

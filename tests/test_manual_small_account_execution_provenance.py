@@ -60,6 +60,14 @@ def _small_account_manager():
         passphrase="fake",
     )
     client.set_live_order_gate(True, [])
+    client.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": client.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
     client.get_price = lambda symbol: float(PRICE)
     client.get_balance = lambda: float(EQUITY)
     client.get_positions = lambda symbol: {
@@ -235,7 +243,7 @@ def test_engine_final_revalidation_rejects_two_small_account_contracts():
 
 def test_engine_final_revalidation_rejects_risk_over_small_account_cap():
     _manager, engine, _client, _captured, _recorder = _small_account_manager()
-    authority = _engine_authority(engine, price=D("1.5836"))
+    authority = _engine_authority(engine, price=D("1.437"))
     with pytest.raises(
         SizingRejected, match="SMALL_ACCOUNT_ABSOLUTE_RISK_EXCEEDED"
     ):
@@ -305,7 +313,7 @@ def test_small_account_engine_authority_fails_closed(case, reason):
             small_account_max_risk_percent=D("1"),
         )
     elif case == "absolute_risk":
-        price = D("1.5836")
+        price = D("1.437")
 
     authority = engine._order_sizing_authority(
         price=price,

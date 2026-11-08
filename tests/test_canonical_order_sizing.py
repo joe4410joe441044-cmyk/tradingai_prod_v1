@@ -130,6 +130,14 @@ def test_final_quantity_rechecks_fresh_capital_policy_and_mm():
 def test_adapter_exact_wire_quantity_and_missing_validator():
     client=KucoinTradeClient(api_key='fake',api_secret='fake',passphrase='fake')
     client.set_live_order_gate(True,[])
+    client.permission_contract={
+        "permissionStatus":"VERIFIED",
+        "verifiedPermission":"TRADE",
+        "verificationSource":"KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt":time.time(),
+        "credentialFingerprint":client.current_credential_fingerprint(),
+        "venue":"KUCOIN_FUTURES",
+    }
     client.get_symbol_rules=lambda symbol:contract_rules(symbol,10)
     client.get_price=lambda symbol:1.5205
     client.session.post=Mock(return_value=SimpleNamespace(json=lambda:{'code':'200000','data':{'orderId':'mock'}}))
@@ -181,6 +189,14 @@ def test_actual_manual_engine_to_adapter_revalidates_wire_quantity(monkeypatch):
     from backend.runtime.governance_runtime import governance_state, EMERGENCY_READY
     from unittest.mock import patch
     client=KucoinTradeClient(api_key='fake',api_secret='fake',passphrase='fake')
+    client.permission_contract={
+        "permissionStatus":"VERIFIED",
+        "verifiedPermission":"TRADE",
+        "verificationSource":"KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt":time.time(),
+        "credentialFingerprint":client.current_credential_fingerprint(),
+        "venue":"KUCOIN_FUTURES",
+    }
     client.get_price=lambda symbol:100
     client.get_balance=lambda:1000
     client.get_positions=lambda symbol:dict(symbol='XRPUSDTM',qty=1000,side='BUY',entry_price=100)
@@ -208,7 +224,8 @@ def test_current_capital_elevated_execution_preview_with_costs():
     engine = engine_for('live', 7.91836966)
     default = build_default_money_management_config()
     elevated = replace(default, risk_per_trade_pct=D('2.1'),
-                       single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'))
+                       single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'),
+                       slippage_reserve_percent=D('0'))
     engine.sizing_policy_provider = lambda: elevated
     engine.config['risk_percent'] = 2.1
     rules = {**contract_rules('XRPUSDTM', 10), 'taker_fee_rate': '0.0006'}
@@ -236,7 +253,8 @@ def test_current_capital_elevated_execution_preview_with_costs():
 def test_explicit_trade_risk_and_mm_keep_smaller_authority(trade_risk, mm_risk, effective):
     engine = engine_for('live', 7.91836966)
     policy = replace(build_default_money_management_config(), risk_per_trade_pct=D(mm_risk),
-                     single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'))
+                     single_symbol_exposure_pct=D('180'), total_exposure_pct=D('180'),
+                     slippage_reserve_percent=D('0'))
     engine.sizing_policy_provider = lambda: policy
     engine.config['risk_percent'] = trade_risk
     sizing = engine._order_sizing_authority(price=D('1.39938'))
@@ -320,3 +338,49 @@ def test_small_account_absolute_cap_is_profile_explicit_not_generic_default():
     assert build_default_money_management_config().small_account_max_absolute_risk_usdt == D("0.158")
     with pytest.raises(ValueError, match="absolute_risk_usdt required"):
         replace(generic, small_account_minimum_contract_mode=True)
+
+
+@pytest.mark.parametrize("tick", [None, "0", "-0.00001"])
+def test_live_sizing_requires_known_positive_tick_size(tick):
+    engine = engine_for('live', 7.91836966)
+    install_sizing(engine)
+    rules = contract_rules('XRPUSDTM', 10)
+    if tick is None:
+        rules.pop('tick_size')
+    else:
+        rules['tick_size'] = tick
+    with pytest.raises(SizingRejected, match='SIZING_TICK_SIZE_UNAVAILABLE'):
+        engine._order_sizing_authority(price=D('1.18069'), rules=rules)
+
+
+def test_live_sizing_carries_policy_slippage_and_tick_into_risk():
+    engine = engine_for('live', 7.90409697)
+    install_sizing(engine)
+    engine.exchange.get_account_overview.return_value = account(7.90409697)
+    live_rules = {**contract_rules('XRPUSDTM', 10), 'taker_fee_rate': '0.0006'}
+    engine.exchange.get_symbol_rules.return_value = live_rules
+    engine._sizing_contract_cache = None
+    engine.config['leverage'] = 3
+    engine.config['effective_leverage'] = 3
+    policy = replace(build_default_money_management_config(), risk_per_trade_pct=D('0.5'),
+                     small_account_minimum_contract_mode=True,
+                     small_account_allowed_symbol='XRPUSDTM',
+                     small_account_max_absolute_risk_usdt=D('0.158'))
+    engine.sizing_policy_provider = lambda: policy
+    engine._manual_sizing_authority_context = {
+        'entryAuthority': 'MANUAL', 'configuredSymbol': 'XRPUSDTM',
+        'loopEnabled': False, 'positionFlat': True, 'pendingKnown': True,
+        'pending': False, 'marginModeKnown': True, 'actualMarginMode': 'ISOLATED',
+        'marginModeCompatible': True,
+    }
+    try:
+        sizing = engine._order_sizing_authority(price=D('1.18069'), fresh=True)
+        assert sizing.slippage_reserve_percent == D('0.05')
+        assert sizing.tick_size == D('0.00001')
+        preview = sizing.size()
+        assert preview['sizingPolicyMode'] == 'SMALL_ACCOUNT_MINIMUM_CONTRACT'
+        assert preview['slippageReserveUsdt'] == pytest.approx(0.0118069)
+        assert preview['tickRoundingRiskUsdt'] == pytest.approx(0.0001)
+        assert preview['candidateRiskUsdt'] == pytest.approx(0.14414418)
+    finally:
+        engine._manual_sizing_authority_context = None

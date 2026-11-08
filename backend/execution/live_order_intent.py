@@ -13,7 +13,7 @@ import json
 import os
 import threading
 import uuid
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_UP
 
 INTENT_RECORDED = "INTENT_RECORDED"
 UNKNOWN_COMMIT = "UNKNOWN_COMMIT"
@@ -186,6 +186,37 @@ def format_stop_price(value):
     if not price.is_finite() or price <= 0:
         return None
     return format(price, "f")
+
+
+def quantize_stop_price(value, tick_size, close_side):
+    """Return a tick-conformant stop price, never less protective.
+
+    The close side decides the safe rounding direction: a long is sold when
+    mark falls, so its stop is rounded UP (closer to entry); a short is bought
+    when mark rises, so its stop is rounded DOWN (closer to entry). Invalid
+    inputs return ``None`` so the caller fails closed.
+    """
+
+    price_text = format_stop_price(value)
+    tick_text = format_stop_price(tick_size)
+    if price_text is None or tick_text is None:
+        return None
+    side = str(close_side or "").strip().lower()
+    if side == "sell":
+        rounding = ROUND_UP
+    elif side == "buy":
+        rounding = ROUND_DOWN
+    else:
+        return None
+    try:
+        price = Decimal(price_text)
+        tick = Decimal(tick_text)
+        quantized = (price / tick).to_integral_value(rounding=rounding) * tick
+    except (InvalidOperation, ValueError):
+        return None
+    if not quantized.is_finite() or quantized <= 0:
+        return None
+    return format(quantized, "f")
 
 
 def protective_stop_sides(position_side):

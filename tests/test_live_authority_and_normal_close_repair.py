@@ -54,11 +54,30 @@ TEST_CREDENTIAL_HASH = hash_operator_credential(TEST_CREDENTIAL)
 # ExecutionEngine helpers
 # =========================
 
+TEST_CREDENTIAL_FINGERPRINT = "sha256:live-authority-test"
+
+
+def _verified_permission_snapshot(**overrides):
+    snapshot = {
+        "accountType": "KUCOIN_FUTURES",
+        "permission": "READ_ONLY",
+        "permissionClaimed": "READ_ONLY",
+        "permissionVerifiedPermission": "TRADE",
+        "permissionVerificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "permissionVerifiedAt": time.time(),
+        "permissionVenue": "KUCOIN_FUTURES",
+        "credentialFingerprint": TEST_CREDENTIAL_FINGERPRINT,
+    }
+    snapshot.update(overrides)
+    return snapshot
+
+
 def _exchange(flatten_result=None):
     exchange = Mock()
     exchange.api_key = "k"
     exchange.api_secret = "s"
     exchange.passphrase = "p"
+    exchange.current_credential_fingerprint = lambda: TEST_CREDENTIAL_FINGERPRINT
     exchange.place_order.return_value = {"success": True}
     exchange.get_open_orders.return_value = {
         "success": True, "count": 0, "orders": [], "timestamp": time.time(),
@@ -90,7 +109,7 @@ def _ready_engine(exchange=None):
     engine.real_available_balance = 1000
     engine.real_position = None
     engine.real_position_state = "FLAT"
-    engine.real_account_snapshot = {}
+    engine.real_account_snapshot = _verified_permission_snapshot()
     engine.real_account_last_sync = time.time()
     engine.get_price = lambda: 100
     engine.update_drawdown_state = lambda *args: {"riskTradingDisabled": False}
@@ -155,9 +174,18 @@ class FakeEngine:
         self.armed_calls = []
 
     def build_live_readiness(self):
+        permission_allowed = not self.block_reasons
         return {
             "realOrderAllowed": False,
             "blockReasons": list(self.block_reasons),
+            "permissionAuthority": {
+                "allowed": permission_allowed,
+                "reason": (
+                    None if permission_allowed
+                    else self.block_reasons[0]
+                ),
+            },
+            "tradingPermissionVerified": permission_allowed,
         }
 
     def set_live_order_entry_authority(self, armed):

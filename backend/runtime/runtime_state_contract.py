@@ -305,11 +305,30 @@ PERMISSION_READ_ONLY = "READ_ONLY"
 PERMISSION_TRADE = "TRADE"
 PERMISSION_WITHDRAW = "WITHDRAW"
 PERMISSION_TRADE_AND_WITHDRAW = "TRADE_AND_WITHDRAW"
+PERMISSION_DENIED = "DENIED"
 PERMISSION_UNKNOWN = "UNKNOWN"
 
 PERMISSION_STATUS_VERIFIED = "VERIFIED"
 PERMISSION_STATUS_UNVERIFIED = "UNVERIFIED"
+PERMISSION_STATUS_DENIED = "DENIED"
 PERMISSION_STATUS_UNKNOWN = "UNKNOWN"
+
+PERMISSION_AUTHORITY_VERIFIED = "TRADING_PERMISSION_VERIFIED"
+PERMISSION_REASON_UNVERIFIED = "TRADING_PERMISSION_UNVERIFIED"
+PERMISSION_REASON_UNKNOWN = "TRADING_PERMISSION_UNKNOWN"
+PERMISSION_REASON_DENIED = "TRADING_PERMISSION_DENIED"
+PERMISSION_REASON_INSUFFICIENT = "TRADING_PERMISSION_INSUFFICIENT"
+PERMISSION_REASON_EVIDENCE_MISSING = "TRADING_PERMISSION_EVIDENCE_MISSING"
+PERMISSION_REASON_EVIDENCE_INCONSISTENT = "TRADING_PERMISSION_EVIDENCE_INCONSISTENT"
+PERMISSION_REASON_SOURCE_UNTRUSTED = "TRADING_PERMISSION_SOURCE_UNTRUSTED"
+PERMISSION_REASON_TIMESTAMP_MISSING = "TRADING_PERMISSION_TIMESTAMP_MISSING"
+PERMISSION_REASON_STALE = "TRADING_PERMISSION_EVIDENCE_STALE"
+PERMISSION_REASON_EXPIRED = "TRADING_PERMISSION_EVIDENCE_EXPIRED"
+PERMISSION_REASON_ACCOUNT_MISMATCH = "TRADING_PERMISSION_ACCOUNT_MISMATCH"
+PERMISSION_REASON_VENUE_MISMATCH = "TRADING_PERMISSION_VENUE_MISMATCH"
+PERMISSION_REASON_CREDENTIAL_MISMATCH = "TRADING_PERMISSION_CREDENTIAL_MISMATCH"
+
+DEFAULT_TRADING_PERMISSION_MAX_AGE_SECONDS = 300.0
 
 _VERIFIED_PERMISSIONS = frozenset({
     PERMISSION_READ_ONLY,
@@ -323,6 +342,14 @@ _TRADING_PERMISSIONS = frozenset({
     PERMISSION_TRADE_AND_WITHDRAW,
 })
 
+_UNTRUSTED_SOURCES = frozenset({
+    "",
+    "NOT_VERIFIED",
+    "UNVERIFIED",
+    "NONE",
+    "UNKNOWN",
+})
+
 
 def _normalize_permission(value):
     normalized = str(value or "").strip().upper()
@@ -330,7 +357,39 @@ def _normalize_permission(value):
         return normalized
     if normalized in {"READONLY", "READ-ONLY", "READ_ONLY_KEY"}:
         return PERMISSION_READ_ONLY
+    if normalized in {"DENIED", "DENY"}:
+        return PERMISSION_DENIED
     return PERMISSION_UNKNOWN
+
+
+def _epoch_seconds(value):
+    """Normalize epoch seconds / milliseconds / ISO text / datetime input."""
+
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if number > 1e12:
+            number /= 1000.0
+        return number
+    if hasattr(value, "timestamp"):
+        try:
+            return float(value.timestamp())
+        except Exception:
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
 
 
 def project_permission_contract(
@@ -341,37 +400,37 @@ def project_permission_contract(
     verified_at=None,
     credential_fingerprint=None,
     authenticated=None,
+    venue=None,
+    account_id=None,
+    expires_at=None,
 ):
     """Separate a claimed key permission from a proven one.
 
     A hard-coded or self-declared ``READ_ONLY`` value is a claim, not proof.
     Only a non-empty authoritative ``verification_source`` plus a recognized
-    ``verified_permission`` may set ``permissionStatus=VERIFIED``.
+    ``verified_permission`` may set ``permissionStatus=VERIFIED``.  Venue,
+    account and expiry are carried so a caller can refuse to reuse evidence
+    that is not bound to the current runtime.
     """
 
     claimed = _normalize_permission(claimed_permission)
     verified_value = _normalize_permission(verified_permission)
     source = str(verification_source or "").strip()
-    source_is_authoritative = bool(source) and source.upper() not in {
-        "NOT_VERIFIED",
-        "UNVERIFIED",
-        "NONE",
-        "UNKNOWN",
-    }
+    source_is_authoritative = source.upper() not in _UNTRUSTED_SOURCES
     verified = (
-        verified_value != PERMISSION_UNKNOWN
+        verified_value in _VERIFIED_PERMISSIONS
         and source_is_authoritative
     )
 
-    status = (
-        PERMISSION_STATUS_VERIFIED
-        if verified
-        else (
-            PERMISSION_STATUS_UNVERIFIED
-            if authenticated is True
-            else PERMISSION_STATUS_UNKNOWN
-        )
-    )
+    if verified:
+        status = PERMISSION_STATUS_VERIFIED
+    elif verified_value == PERMISSION_DENIED:
+        status = PERMISSION_STATUS_DENIED
+    elif authenticated is True:
+        status = PERMISSION_STATUS_UNVERIFIED
+    else:
+        status = PERMISSION_STATUS_UNKNOWN
+
     private_read_ready = bool(authenticated is True and verified)
     trading_permission = (
         verified_value
@@ -390,11 +449,166 @@ def project_permission_contract(
         "permissionStatus": status,
         "verificationSource": source or "NOT_VERIFIED",
         "verifiedAt": verified_at,
+        "expiresAt": expires_at,
+        "venue": (str(venue).strip() or None) if venue is not None else None,
+        "accountId": (
+            str(account_id).strip() or None
+        ) if account_id is not None else None,
         "credentialFingerprint": credential_fingerprint,
         "secretDisclosed": False,
         "privateReadReady": private_read_ready,
         "tradingPermission": trading_permission,
         "readSuccessImpliesNoTradingPermission": False,
+    }
+
+
+def evaluate_trading_permission_authority(
+    contract,
+    *,
+    expected_venue=None,
+    expected_account_id=None,
+    expected_credential_fingerprint=None,
+    now=None,
+    max_age_seconds=DEFAULT_TRADING_PERMISSION_MAX_AGE_SECONDS,
+):
+    """Fail-closed trading-permission gate for REAL order entry.
+
+    A ``VERIFIED`` string alone is never enough.  Evidence must carry a
+    recognized TRADE permission, an authoritative source, a timestamp that is
+    neither stale nor expired, and bindings that match the current venue /
+    account / credential when those expectations are supplied.
+    """
+
+    import time as _time
+
+    if not isinstance(contract, Mapping) or not contract:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "allowed": False,
+            "reason": PERMISSION_REASON_EVIDENCE_MISSING,
+            "reasons": [PERMISSION_REASON_EVIDENCE_MISSING],
+            "permissionStatus": PERMISSION_STATUS_UNKNOWN,
+            "tradingPermission": PERMISSION_UNKNOWN,
+            "evaluatedAt": _time.time(),
+            "checks": {},
+            "contract": {},
+        }
+
+    normalized = dict(contract)
+    checks = {}
+    reasons = []
+
+    status = str(
+        normalized.get("permissionStatus") or ""
+    ).strip().upper()
+    verified_permission = _normalize_permission(
+        normalized.get("verifiedPermission")
+    )
+    source = str(normalized.get("verificationSource") or "").strip()
+    source_authoritative = source.upper() not in _UNTRUSTED_SOURCES
+
+    checks["statusVerified"] = status == PERMISSION_STATUS_VERIFIED
+    if status == PERMISSION_STATUS_DENIED:
+        reasons.append(PERMISSION_REASON_DENIED)
+    elif status == PERMISSION_STATUS_UNKNOWN or not status:
+        reasons.append(PERMISSION_REASON_UNKNOWN)
+    elif status != PERMISSION_STATUS_VERIFIED:
+        reasons.append(PERMISSION_REASON_UNVERIFIED)
+
+    checks["tradingPermission"] = (
+        verified_permission in _TRADING_PERMISSIONS
+    )
+    if not checks["tradingPermission"]:
+        if status == PERMISSION_STATUS_VERIFIED:
+            reasons.append(PERMISSION_REASON_EVIDENCE_INCONSISTENT)
+        else:
+            reasons.append(PERMISSION_REASON_INSUFFICIENT)
+
+    checks["sourceAuthoritative"] = source_authoritative
+    if not source_authoritative:
+        reasons.append(PERMISSION_REASON_SOURCE_UNTRUSTED)
+
+    checked_at = _epoch_seconds(now)
+    if checked_at is None:
+        checked_at = _time.time()
+    verified_at = _epoch_seconds(normalized.get("verifiedAt"))
+    expires_at = _epoch_seconds(normalized.get("expiresAt"))
+
+    checks["verifiedAtPresent"] = verified_at is not None
+    if verified_at is None:
+        reasons.append(PERMISSION_REASON_TIMESTAMP_MISSING)
+    else:
+        age = checked_at - verified_at
+        if age < -60:
+            reasons.append(PERMISSION_REASON_EVIDENCE_INCONSISTENT)
+            checks["notFuture"] = False
+        else:
+            checks["notFuture"] = True
+            if (
+                max_age_seconds is not None
+                and age > float(max_age_seconds)
+            ):
+                reasons.append(PERMISSION_REASON_STALE)
+
+    checks["notExpired"] = True
+    if expires_at is not None and checked_at >= expires_at:
+        checks["notExpired"] = False
+        reasons.append(PERMISSION_REASON_EXPIRED)
+
+    evidence_fingerprint = normalized.get("credentialFingerprint")
+    checks["credentialBound"] = True
+    if expected_credential_fingerprint is not None:
+        checks["credentialBound"] = bool(
+            evidence_fingerprint
+            and str(evidence_fingerprint)
+            == str(expected_credential_fingerprint)
+        )
+        if not checks["credentialBound"]:
+            reasons.append(PERMISSION_REASON_CREDENTIAL_MISMATCH)
+    elif not evidence_fingerprint:
+        checks["credentialBound"] = False
+        reasons.append(PERMISSION_REASON_CREDENTIAL_MISMATCH)
+
+    evidence_venue = normalized.get("venue")
+    checks["venueBound"] = True
+    if expected_venue is not None:
+        checks["venueBound"] = bool(
+            evidence_venue
+            and str(evidence_venue).strip().upper()
+            == str(expected_venue).strip().upper()
+        )
+        if not checks["venueBound"]:
+            reasons.append(PERMISSION_REASON_VENUE_MISMATCH)
+
+    evidence_account = normalized.get("accountId")
+    checks["accountBound"] = True
+    if expected_account_id is not None:
+        checks["accountBound"] = bool(
+            evidence_account
+            and str(evidence_account) == str(expected_account_id)
+        )
+        if not checks["accountBound"]:
+            reasons.append(PERMISSION_REASON_ACCOUNT_MISMATCH)
+
+    reasons = list(dict.fromkeys(reasons))
+    allowed = not reasons
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "allowed": allowed,
+        "reason": (
+            PERMISSION_AUTHORITY_VERIFIED if allowed else reasons[0]
+        ),
+        "reasons": reasons,
+        "permissionStatus": status or PERMISSION_STATUS_UNKNOWN,
+        "tradingPermission": (
+            verified_permission
+            if verified_permission in _TRADING_PERMISSIONS
+            else normalized.get("tradingPermission") or PERMISSION_UNKNOWN
+        ),
+        "evaluatedAt": checked_at,
+        "checks": checks,
+        "contract": normalized,
     }
 
 

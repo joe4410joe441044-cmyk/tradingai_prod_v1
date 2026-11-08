@@ -2,6 +2,7 @@
 """Offline fake-transport coverage for exchange stops and durable order intents."""
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from backend.execution.live_order_intent import (
     UNPROTECTED,
     client_oid_for,
     liquidation_risk_boundary,
+    quantize_stop_price,
 )
 
 
@@ -63,6 +65,14 @@ def client(tmp_path):
     trade = KucoinTradeClient(api_key="key", api_secret="secret", passphrase="pass")
     trade.live_order_allowed = True
     trade.runtime_submission_allowed = True
+    trade.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": trade.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
     trade.order_intent_path = str(Path(tmp_path) / "intents.json")
     trade.session = FakeSession()
     return trade
@@ -242,6 +252,42 @@ def test_partial_fill_protection_uses_filled_quantity(tmp_path):
     body = trade.session.posts[-1]
     assert body["size"] == "1"
     assert body["reduceOnly"] is True
+    assert placed["commitState"] == PROTECTION_PENDING
+
+
+@pytest.mark.parametrize("position_side,stop_price,expected", [
+    ("buy", "1.1688831", "1.16889"),
+    ("sell", "1.1924969", "1.19249"),
+])
+def test_stop_price_is_quantized_to_tick(position_side, stop_price, expected):
+    close_side = "sell" if position_side == "buy" else "buy"
+    assert quantize_stop_price(stop_price, "0.00001", close_side) == expected
+
+
+def test_stop_price_not_tick_conformant_without_quantization():
+    from decimal import Decimal
+
+    assert Decimal("1.1688831") % Decimal("0.00001") != 0
+
+
+def test_protective_stop_body_uses_tick_conformant_price(tmp_path):
+    trade = client(tmp_path)
+    opened = entry(trade)
+    trade._order_intent_store().mark(opened["intentId"], "FILLED")
+    placed = trade.place_exchange_protective_stop(
+        symbol="XRPUSDTM",
+        position_side="buy",
+        filled_qty=1,
+        stop_price="1.1688831",
+        margin_mode="ISOLATED",
+        parent_intent_id=opened["intentId"],
+        tick_size="0.00001",
+    )
+    body = trade.session.posts[-1]
+    from decimal import Decimal
+
+    assert Decimal(body["stopPrice"]) % Decimal("0.00001") == 0
+    assert Decimal(body["stopPrice"]) == Decimal("1.16889")
     assert placed["commitState"] == PROTECTION_PENDING
 
 
@@ -530,3 +576,43 @@ def test_persisted_intent_is_not_sent_when_restart_is_disarmed(tmp_path):
     )
     assert result["commitState"] == "DISARMED"
     assert restarted.session.posts == []
+
+
+def test_stop_invalid_tick_fails_closed_before_post(tmp_path):
+    trade = client(tmp_path)
+    opened = entry(trade)
+    trade._order_intent_store().mark(opened["intentId"], "FILLED")
+    posts_before = len(trade.session.posts)
+    placed = trade.place_exchange_protective_stop(
+        symbol="XRPUSDTM",
+        position_side="buy",
+        filled_qty=1,
+        stop_price="1.1688831",
+        margin_mode="ISOLATED",
+        parent_intent_id=opened["intentId"],
+        tick_size="not-a-tick",
+    )
+    assert placed["commitState"] == UNPROTECTED
+    assert placed["reason"] == "STOP_CONTRACT_UNAVAILABLE"
+    assert len(trade.session.posts) == posts_before
+
+
+@pytest.mark.parametrize("stop_price", ["1.23000", "1.23001"])
+def test_stop_tick_boundary_is_conformant(tmp_path, stop_price):
+    from decimal import Decimal
+
+    trade = client(tmp_path)
+    opened = entry(trade)
+    trade._order_intent_store().mark(opened["intentId"], "FILLED")
+    placed = trade.place_exchange_protective_stop(
+        symbol="XRPUSDTM",
+        position_side="buy",
+        filled_qty=1,
+        stop_price=stop_price,
+        margin_mode="ISOLATED",
+        parent_intent_id=opened["intentId"],
+        tick_size="0.00001",
+    )
+    body = trade.session.posts[-1]
+    assert Decimal(body["stopPrice"]) % Decimal("0.00001") == 0
+    assert placed["commitState"] == PROTECTION_PENDING

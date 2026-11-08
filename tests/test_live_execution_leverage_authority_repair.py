@@ -58,6 +58,14 @@ def _live_client():
         passphrase="passphrase",
     )
     client.set_live_order_gate(True, [])
+    client.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": client.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
     client.get_symbol_rules = lambda symbol: {
         "min_size": 1,
         "multiplier": 1.0,
@@ -439,6 +447,14 @@ def _engine_with_real_kucoin(
         "multiplier": 1.0,
     }
     client.get_price = lambda symbol: 100.0
+    client.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": client.current_credential_fingerprint(),
+        "venue": "KUCOIN_FUTURES",
+    }
     client.get_positions = lambda symbol: {
         "state": "OPEN",
         "side": "BUY",

@@ -8,7 +8,7 @@ from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
 def contract_rules(symbol, multiplier=0.001):
     return {"symbol": to_kucoin_futures_symbol(symbol), "status": "Open", "isInverse": False,
             "settle_currency": "USDT", "quote_currency": "USDT", "multiplier": multiplier, "min_size": 1, "qty_step": 1,
-            "max_size": 1000000, "max_leverage": 75, "taker_fee_rate": 0}
+            "max_size": 1000000, "max_leverage": 75, "taker_fee_rate": 0, "tick_size": "0.00001"}
 
 
 def account(equity=1000):

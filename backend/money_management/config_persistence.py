@@ -66,6 +66,11 @@ _REQUIRED_DECIMAL_FIELDS = frozenset(
     )
 )
 _OPTIONAL_DECIMAL_FIELDS = frozenset(("small_account_max_absolute_risk_usdt",))
+# Fields added after schema v1: older persisted envelopes omit them and must
+# load with the approved conservative default rather than fail closed.
+_DEFAULTED_DECIMAL_FIELDS = {
+    "slippage_reserve_percent": Decimal("0.05"),
+}
 _BOOLEAN_FIELDS = frozenset(
     (
         "multi_bot_enabled",
@@ -89,6 +94,7 @@ _ALL_CONFIG_FIELDS = frozenset(
         *_BOOLEAN_FIELDS,
         *_REQUIRED_DECIMAL_FIELDS,
         *_OPTIONAL_DECIMAL_FIELDS,
+        *_DEFAULTED_DECIMAL_FIELDS,
         *_STRING_FIELDS,
     )
 )
@@ -253,7 +259,7 @@ def _config_from_mapping(mapping):
     unknown = keys - _ALL_CONFIG_FIELDS
     if unknown:
         raise MoneyManagementConfigCorruptError("persisted config contains unknown fields")
-    missing = _ALL_CONFIG_FIELDS - keys
+    missing = (_ALL_CONFIG_FIELDS - set(_DEFAULTED_DECIMAL_FIELDS)) - keys
     if missing:
         raise MoneyManagementConfigCorruptError("persisted config is missing required fields")
     values = {}
@@ -265,6 +271,12 @@ def _config_from_mapping(mapping):
         values[name] = _parse_decimal(name, mapping[name])
     for name in _OPTIONAL_DECIMAL_FIELDS:
         values[name] = _parse_optional_decimal(name, mapping[name])
+    for name, default in _DEFAULTED_DECIMAL_FIELDS.items():
+        values[name] = (
+            _parse_decimal(name, mapping[name])
+            if name in mapping
+            else default
+        )
     for name in _STRING_FIELDS:
         values[name] = _parse_symbol(name, mapping[name])
     try:

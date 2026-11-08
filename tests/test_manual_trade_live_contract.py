@@ -111,6 +111,15 @@ def _fake_exchange():
     exchange.api_key = "k"
     exchange.api_secret = "s"
     exchange.passphrase = "p"
+    exchange.current_credential_fingerprint = lambda: "sha256:manual-live-test"
+    exchange.permission_contract = {
+        "permissionStatus": "VERIFIED",
+        "verifiedPermission": "TRADE",
+        "verificationSource": "KUCOIN_ACCOUNT_RESPONSE:permission",
+        "verifiedAt": time.time(),
+        "credentialFingerprint": "sha256:manual-live-test",
+        "venue": "KUCOIN_FUTURES",
+    }
     exchange.get_symbol_rules.return_value = {
         "multiplier": 0.001,
         "min_size": 1,

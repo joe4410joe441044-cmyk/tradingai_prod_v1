@@ -253,4 +253,5 @@ def get_order_contract_rules(symbol, *, session=None):
         "qty_step": data.get("lotSize"), "multiplier": data.get("multiplier"),
         "max_size": data.get("marketMaxOrderQty"), "max_leverage": data.get("maxLeverage"),
         "taker_fee_rate": data.get("takerFeeRate"),
+        "tick_size": data.get("tickSize"),
     }
