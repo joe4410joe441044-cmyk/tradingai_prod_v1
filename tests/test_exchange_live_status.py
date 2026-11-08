@@ -49,6 +49,7 @@ from backend.runtime.governance_runtime import (
     emergency_unlock_block_reason,
     governance_state,
 )
+from backend.runtime.ExecutionRuntime import ExecutionRuntime
 from Bot.engine.execution_engine import ExecutionEngine
 
 
@@ -339,7 +340,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_on_rejected_when_loop_off(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = False
         bot.lifecycle_state = "STOPPED"
 
@@ -366,7 +367,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_on_allowed_when_loop_running(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = True
         bot.lifecycle_state = "RUNNING"
         bot.loop_state = "RUNNING"
@@ -390,7 +391,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_off_allowed_when_loop_off(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = False
         bot.lifecycle_state = "STOPPED"
 
@@ -418,7 +419,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_on_rejected_when_emergency_locked(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = True
         bot.lifecycle_state = "RUNNING"
 
@@ -457,7 +458,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_off_allowed_when_emergency_locked(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = False
         bot.lifecycle_state = "STOPPED"
 
@@ -486,7 +487,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_on_emergency_lock_takes_priority_over_loop_guard(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = False
         bot.lifecycle_state = "STOPPED"
 
@@ -514,7 +515,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
 
     def test_auto_trade_on_rejection_does_not_mutate_governance_state(self):
         state_before = dict(governance_state)
-        bot = Mock()
+        bot = BotManager()
         bot._running = False
         bot.lifecycle_state = "STOPPED"
 
@@ -805,7 +806,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "symbol": "XRPUSDT",
             "exchange": "kucoin",
             "mode": "paper",
-            "risk_percent": 1,
+            "risk_percent": 0.5,
             "position_size": 100,
             "max_drawdown_pct": 5,
             "sl_percent": 0.5,
@@ -4590,11 +4591,14 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             self._restore_governance(state_before)
 
     def test_restart_durable_authority_invalid_evidence_fails_closed(self):
+        # This fixture deliberately configures the canonical LIVE read-only
+        # chain; stale durable evidence therefore yields the reason from that
+        # consulted source.
         cases = (
             (
                 "missing",
                 lambda payload: "missing",
-                "SNAPSHOT_NOT_SYNCED",
+                "LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE",
             ),
             (
                 "corrupt",
@@ -4619,7 +4623,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     "capturedAt": 1,
                     "timestampEpoch": 1,
                 }),
-                "DURABLE_SNAPSHOT_STALE",
+                "LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE",
             ),
             (
                 "open-order-unknown",
@@ -5216,7 +5220,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                     else:
                         self.assertEqual(
                             authority["reason"],
-                            "DURABLE_SNAPSHOT_STALE",
+                            "LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE",
                         )
                         self.assertFalse(result["success"])
                         self.assertFalse(result["completed"])
@@ -5302,7 +5306,10 @@ class ExchangeLiveStatusTest(unittest.TestCase):
                 expired = restarted.get_authoritative_pending_order_state()
 
             self.assertFalse(expired["safe"])
-            self.assertEqual(expired["reason"], "DURABLE_SNAPSHOT_STALE")
+            self.assertEqual(
+                expired["reason"],
+                "LIVE_PENDING_ORDER_AUTHORITY_UNAVAILABLE",
+            )
             governance_state["emergency_stop"] = True
             governance_state["emergency_state"] = EMERGENCY_ACTION_REQUIRED
             with patch(
@@ -6131,7 +6138,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "symbol": "XRPUSDT",
             "exchange": "kucoin",
             "mode": "paper",
-            "risk_percent": 1,
+            "risk_percent": 0.5,
             "position_size": 100,
             "max_drawdown_pct": 5,
             "sl_percent": 0.5,
@@ -10571,7 +10578,7 @@ class ExchangeLiveStatusTest(unittest.TestCase):
             "exchange": "kucoin",
             "mode": "paper",
             "dry_run": True,
-            "risk_percent": 1,
+            "risk_percent": 0.5,
             "position_size": 100,
             "max_drawdown_pct": 5,
             "sl_percent": 0.5,
@@ -10582,6 +10589,19 @@ class ExchangeLiveStatusTest(unittest.TestCase):
         }
 
     def _bootstrap_bot(self):
+        from backend.runtime import runtime_registry
+
+        if runtime_registry.trading_runtime is None:
+            original_runtime = runtime_registry.trading_runtime
+            runtime_registry.trading_runtime = SimpleNamespace(
+                execution_runtime=ExecutionRuntime(),
+            )
+            self.addCleanup(
+                setattr,
+                runtime_registry,
+                "trading_runtime",
+                original_runtime,
+            )
         bot = BotManager()
         bot.configure_production_ams_read_model(
             build_default_money_management_config

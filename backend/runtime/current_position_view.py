@@ -81,7 +81,11 @@ def current_position(account, mode, *, now, symbol=None, current_price=None,
     observed = isinstance(observation, dict) and not paper
     updated = timestamp(observation.get("sourceUpdatedAt") if observed else
                         account.get("lastUpdate" if paper else "lastSync"))
+    maximum_age = numeric(maximum_age, positive=True)
     view["sourceUpdatedAt"] = updated
+    if maximum_age is None:
+        view["reason"] = "FRESHNESS_THRESHOLD_INVALID"
+        return view
     if account.get("stale") is True or (updated is not None and now - updated > maximum_age):
         view.update(freshness="STALE", reason="STALE_SOURCE")
         return view

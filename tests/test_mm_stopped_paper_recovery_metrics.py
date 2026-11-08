@@ -99,13 +99,16 @@ class StoppedPaperRecoveryMetricsTests(unittest.TestCase):
             "test", self.now, timedelta(seconds=age)
         ))
 
-    def test_fresh_stopped_paper_is_available_complete_and_current_identity(self):
+    def test_flat_stopped_paper_without_position_observation_fails_closed(self):
         metrics = self.initialize()
         result = self.read()
-        self.assertTrue(metrics.is_complete)
-        self.assertEqual(result.status, LossRuntimeMetricsReadStatus.AVAILABLE)
-        self.assertEqual(result.metrics.runtime_instance_id,
-                         self.manager.runtime_instance_id)
+        self.assertFalse(metrics.is_complete)
+        self.assertEqual(
+            result.status, LossRuntimeMetricsReadStatus.INCONSISTENT
+        )
+        self.assertEqual(
+            metrics.runtime_instance_id, self.manager.runtime_instance_id
+        )
         self.assertFalse(governance_state["execution_enabled"])
 
     def test_restored_period_values_are_preserved(self):
@@ -138,12 +141,14 @@ class StoppedPaperRecoveryMetricsTests(unittest.TestCase):
                     LossRuntimeMetricsReadStatus.INCONSISTENT,
                 })
 
-    def test_stale_store_reports_stale(self):
+    def test_stale_flat_store_remains_inconsistent_without_complete_observation(self):
         self.manager.paper_account_state["updatedAt"] = (
             self.now - timedelta(seconds=91)
         ).timestamp()
         self.initialize()
-        self.assertEqual(self.read().status, LossRuntimeMetricsReadStatus.STALE)
+        self.assertEqual(
+            self.read().status, LossRuntimeMetricsReadStatus.INCONSISTENT
+        )
 
     def test_unknown_pnl_and_trade_counts_are_not_coerced(self):
         state = persisted(self.now)

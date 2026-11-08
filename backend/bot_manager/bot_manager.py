@@ -12219,7 +12219,9 @@ class BotManager:
             "snapshot_refresh_state": None,
             "snapshot_operation_state": None,
             "mode_resolution": None,
-            "position_state": "FLAT",
+            # Unknown until snapshot authority proves a concrete state.
+            # Fail-closed timestamp/mode/source paths must not inherit FLAT.
+            "position_state": None,
             "pending_order_state": None,
             "open_order_state": None,
             "open_order_count": None,
@@ -13126,19 +13128,44 @@ class BotManager:
 
         if stopped_state.get("position_state") is None:
             mode_reason = stopped_state.get("reason")
-            return self._stopped_paper_unknown_response(
+            if mode_reason == "BOT_NOT_STOPPED":
+                retained = self._stopped_paper_snapshot_authority_state(
+                    current_snapshot
+                )
+                retained_states = (
+                    retained.get("position_state"),
+                    retained.get("pending_order_state"),
+                    retained.get("open_order_state"),
+                )
+                if (
+                    retained.get("valid") is True
+                    and "remaining" in retained_states
+                ):
+                    stopped_state = dict(stopped_state)
+                    stopped_state["position_state"] = retained_states[0]
+                    stopped_state["pending_order_state"] = retained_states[1]
+                    stopped_state["open_order_state"] = retained_states[2]
+                    stopped_state["reason"] = (
+                        "POSITION_REMAINING"
+                        if retained_states[0] == "remaining"
+                        else "PENDING_ORDER_REMAINING"
+                        if retained_states[1] == "remaining"
+                        else "OPEN_ORDER_REMAINING"
+                    )
+            if stopped_state.get("position_state") is None:
+                return self._stopped_paper_unknown_response(
                 symbol,
-                mode_reason or "STATE_UNKNOWN",
-                execution_path=(
-                    None
-                    if mode_reason in {
+                    mode_reason or "STATE_UNKNOWN",
+                    execution_path=(
+                        None
+                        if mode_reason in {
                         "MODE_UNKNOWN",
                         "MODE_CONFLICT",
                         "LIVE_MODE",
                     }
-                    else "paper"
-                ),
-            )
+                        else "paper"
+                    ),
+                )
 
         position_state = stopped_state.get("position_state")
         pending_order_state = stopped_state.get("pending_order_state")
