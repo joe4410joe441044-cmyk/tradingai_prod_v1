@@ -242,6 +242,28 @@ class StatusResponse(BaseModel):
 
     permission: str = "NOT_VERIFIED"
 
+    permissionClaimed: Optional[str] = None
+
+    permissionVerified: bool = False
+
+    permissionStatus: str = "UNVERIFIED"
+
+    permissionVerificationSource: Optional[str] = None
+
+    permissionVerifiedAt: Optional[float] = None
+
+    credentialFingerprint: Optional[str] = None
+
+    permissionContract: dict = Field(default_factory=dict)
+
+    runtimeStateContract: dict = Field(default_factory=dict)
+
+    stoppedPaperSnapshotContract: dict = Field(default_factory=dict)
+
+    exchangeClientReadiness: dict = Field(default_factory=dict)
+
+    marginModeContract: dict = Field(default_factory=dict)
+
     accountType: str = "UNKNOWN"
 
     exchangeAuthReason: Optional[str] = None

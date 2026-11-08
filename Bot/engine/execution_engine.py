@@ -17,6 +17,8 @@ from backend.money_management.loss_execution_integration import (
     LossExecutionIntent,
 )
 
+from backend.execution.live_order_intent import apply_durable_readiness
+from backend.runtime.runtime_state_contract import project_permission_contract
 from backend.money_management.order_sizing import OrderSizingAuthority, SizingRejected, number
 from backend.money_management.models import MoneyManagementConfig
 
@@ -210,6 +212,7 @@ class ExecutionEngine:
         # intentionally distinct from emergency flatten state.
         self.live_close_state = None
         self.live_close_in_flight = False
+        self.live_order_recovery = None
 
         # Paper execution audit trail.  Paper orders fill immediately, but we
         # retain the order and fill as separate lifecycle records so the
@@ -348,6 +351,20 @@ class ExecutionEngine:
                 self.real_position_state = "SYNC_FAILED"
 
                 self.logger.exception("POSITION SYNC ERROR")
+
+        if selected_mode == "LIVE" and self.exchange is not None:
+            recover = getattr(self.exchange, "recover_unresolved_intents", None)
+            if callable(recover):
+                try:
+                    self.live_order_recovery = recover()
+                except Exception:
+                    self.live_order_recovery = {
+                        "complete": False,
+                        "reason": "RECOVERY_FAILED",
+                        "postAttempts": 0,
+                    }
+            else:
+                self.live_order_recovery = None
 
         # =====================================
         # RUNNING
@@ -808,6 +825,16 @@ class ExecutionEngine:
             # PnL could not be computed: new entries fail closed until an
             # authoritative exchange resync (close paths skip readiness).
             block_reasons.append(LIVE_PNL_ACCOUNTING_UNAVAILABLE)
+        if self.exchange is not None:
+            reader = getattr(self.exchange, "runtime_order_gates", None)
+            gates = None
+            if callable(reader):
+                try:
+                    gates = reader()
+                except Exception:
+                    gates = {}
+            if isinstance(gates, dict):
+                apply_durable_readiness(checks, block_reasons, gates)
 
         real_order_allowed = not block_reasons
         account_snapshot = dict(self.real_account_snapshot or {})
@@ -824,6 +851,24 @@ class ExecutionEngine:
             "VERIFIED"
             if exchange_auth_ready
             else "MISSING"
+        )
+        permission_contract = project_permission_contract(
+            claimed_permission=(
+                account_snapshot.get("permissionClaimed")
+                or account_snapshot.get("permission")
+                or ("READ_ONLY" if exchange_auth_ready else None)
+            ),
+            verified_permission=account_snapshot.get(
+                "permissionVerifiedPermission"
+            ),
+            verification_source=account_snapshot.get(
+                "permissionVerificationSource"
+            ),
+            verified_at=account_snapshot.get("permissionVerifiedAt"),
+            credential_fingerprint=account_snapshot.get(
+                "credentialFingerprint"
+            ),
+            authenticated=exchange_auth_ready,
         )
         permission = (
             account_snapshot.get("permission")
@@ -897,6 +942,22 @@ class ExecutionEngine:
             "exchangeConnection": exchange_connection,
             "apiKeyStatus": api_key_status,
             "permission": permission,
+            "permissionClaimed": permission_contract["claimedPermission"],
+            "permissionVerified": (
+                permission_contract["permissionStatus"] == "VERIFIED"
+            ),
+            "permissionStatus": permission_contract["permissionStatus"],
+            "permissionVerifiedPermission": permission_contract[
+                "verifiedPermission"
+            ],
+            "permissionVerificationSource": permission_contract[
+                "verificationSource"
+            ],
+            "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "credentialFingerprint": permission_contract[
+                "credentialFingerprint"
+            ],
+            "permissionContract": permission_contract,
             "accountType": account_type,
             "exchangeAuthReason": auth_reason,
             "exchangeConnectionReason": connection_reason,
@@ -1469,8 +1530,14 @@ class ExecutionEngine:
         if multiplier is None and "LIVE_POSITION_MULTIPLIER_UNAVAILABLE" not in reasons:
             reasons.append("LIVE_POSITION_MULTIPLIER_UNAVAILABLE")
 
+        exchange_protection = position.get("exchange_protection_state")
+        exchange_confirmed = (
+            exchange_protection is None
+            or exchange_protection == "PROTECTION_CONFIRMED"
+        )
         protected = (
             position.get("protection_state") != "UNAVAILABLE"
+            and exchange_confirmed
             and stop_loss is not None
             and take_profit is not None
             and multiplier is not None
@@ -2511,6 +2578,42 @@ class ExecutionEngine:
     # ENTRY
     # =====================================
 
+    def _confirm_exchange_protective_stop(self, position, execution_result):
+        """Place one reduce-only stop after a live fill and require lookup.
+
+        Local SL levels stay on the position for display. They do not count as
+        exchange protection. A failed or unconfirmed stop leaves the position
+        unavailable for new entries and does not send another order.
+        """
+
+        exchange = self.exchange
+        if getattr(exchange, "require_durable_intent_store", False) is not True:
+            return
+        if not isinstance(position, dict) or not isinstance(self.actual_position, dict):
+            return
+        parent = None if not isinstance(execution_result, dict) else execution_result.get("intentId")
+        if parent:
+            store = exchange._order_intent_store()
+            if store is not None:
+                store.mark(parent, "FILLED")
+        result = exchange.place_exchange_protective_stop(
+            symbol=position.get("symbol") or self.actual_position.get("symbol"),
+            position_side=position.get("side"),
+            filled_qty=position.get("qty"),
+            stop_price=self.actual_position.get("sl"),
+            margin_mode=position.get("marginMode") or "ISOLATED",
+            parent_intent_id=parent,
+        )
+        state = None if not isinstance(result, dict) else result.get("commitState")
+        intent_id = None if not isinstance(result, dict) else result.get("intentId")
+        if state == "PROTECTION_PENDING" and intent_id:
+            confirmed = exchange.reconcile_intent(intent_id)
+            state = confirmed.get("commitState")
+        self.actual_position["exchange_protection_state"] = state or "PROTECTION_UNKNOWN"
+        if state != "PROTECTION_CONFIRMED":
+            self.actual_position["protection_state"] = "UNAVAILABLE"
+            self.actual_position["protection_reason"] = [state or "UNPROTECTED"]
+
     def try_entry(self, signal):
 
         with self.execution_entry_admission_lock:
@@ -3141,6 +3244,7 @@ class ExecutionEngine:
                         # lifecycle; do not carry the previous close marker.
                         self.live_close_state = None
                         self.live_close_in_flight = False
+                        self._confirm_exchange_protective_stop(pos, raw_res)
 
                     add_log("📦 LIVE POSITION OPENED")
 

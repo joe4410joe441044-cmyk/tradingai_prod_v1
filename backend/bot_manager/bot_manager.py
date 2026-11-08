@@ -26,6 +26,14 @@ from backend.runtime.runtime_health_snapshot import (
     build_runtime_health_snapshot,
     build_trading_decision_snapshot,
 )
+from backend.runtime.runtime_state_contract import (
+    SNAPSHOT_INCONSISTENT as CONTRACT_SNAPSHOT_INCONSISTENT,
+    classify_stopped_snapshot,
+    project_exchange_client_readiness,
+    project_lifecycle_consistency,
+    project_margin_mode_contract,
+    project_permission_contract,
+)
 from backend.runtime.cycle_diagnostics import (
     build_trading_cycle_diagnostics,
 )
@@ -1390,6 +1398,24 @@ class BotManager:
             else last_error
             or auth_reason
         )
+        permission_contract = project_permission_contract(
+            claimed_permission=(
+                overview.get("permissionClaimed")
+                or overview.get("permission")
+                or ("READ_ONLY" if authenticated else None)
+            ),
+            verified_permission=overview.get(
+                "permissionVerifiedPermission"
+            ),
+            verification_source=overview.get(
+                "permissionVerificationSource"
+            ),
+            verified_at=overview.get("permissionVerifiedAt"),
+            credential_fingerprint=overview.get(
+                "credentialFingerprint"
+            ),
+            authenticated=authenticated,
+        )
 
         refreshed = {
             "exchange": exchange,
@@ -1404,6 +1430,24 @@ class BotManager:
                 overview.get("permission")
                 or ("READ_ONLY" if authenticated else "NOT_VERIFIED")
             ),
+            "permissionClaimed": (
+                permission_contract["claimedPermission"]
+            ),
+            "permissionVerified": (
+                permission_contract["permissionStatus"] == "VERIFIED"
+            ),
+            "permissionStatus": permission_contract["permissionStatus"],
+            "permissionVerifiedPermission": (
+                permission_contract["verifiedPermission"]
+            ),
+            "permissionVerificationSource": (
+                permission_contract["verificationSource"]
+            ),
+            "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "credentialFingerprint": (
+                permission_contract["credentialFingerprint"]
+            ),
+            "permissionContract": permission_contract,
             "balance": balance,
             "equity": equity,
             "availableBalance": available_balance,
@@ -1805,6 +1849,26 @@ class BotManager:
                     "permission",
                     "NOT_VERIFIED",
                 ),
+                "permissionClaimed": real_account.get(
+                    "permissionClaimed",
+                    real_account.get("permission", "UNKNOWN"),
+                ),
+                "permissionVerified": (
+                    real_account.get("permissionVerified") is True
+                ),
+                "permissionStatus": real_account.get(
+                    "permissionStatus",
+                    "UNVERIFIED",
+                ),
+                "permissionVerificationSource": real_account.get(
+                    "permissionVerificationSource"
+                ),
+                "permissionVerifiedAt": real_account.get(
+                    "permissionVerifiedAt"
+                ),
+                "credentialFingerprint": real_account.get(
+                    "credentialFingerprint"
+                ),
                 "accountType": real_account.get(
                     "accountType",
                     "UNKNOWN",
@@ -1946,6 +2010,26 @@ class BotManager:
             "permission": real_account.get(
                 "permission",
                 "NOT_VERIFIED",
+            ),
+            "permissionClaimed": real_account.get(
+                "permissionClaimed",
+                real_account.get("permission", "UNKNOWN"),
+            ),
+            "permissionVerified": (
+                real_account.get("permissionVerified") is True
+            ),
+            "permissionStatus": real_account.get(
+                "permissionStatus",
+                "UNVERIFIED",
+            ),
+            "permissionVerificationSource": real_account.get(
+                "permissionVerificationSource"
+            ),
+            "permissionVerifiedAt": real_account.get(
+                "permissionVerifiedAt"
+            ),
+            "credentialFingerprint": real_account.get(
+                "credentialFingerprint"
             ),
             "accountType": real_account.get(
                 "accountType",
@@ -2197,6 +2281,28 @@ class BotManager:
                     if readiness_authenticated
                     else "NOT_VERIFIED",
                 ),
+                "permissionClaimed": readiness.get(
+                    "permissionClaimed"
+                ),
+                "permissionVerified": (
+                    readiness.get("permissionVerified") is True
+                ),
+                "permissionStatus": readiness.get(
+                    "permissionStatus",
+                    "UNVERIFIED",
+                ),
+                "permissionVerifiedPermission": readiness.get(
+                    "permissionVerifiedPermission"
+                ),
+                "permissionVerificationSource": readiness.get(
+                    "permissionVerificationSource"
+                ),
+                "permissionVerifiedAt": readiness.get(
+                    "permissionVerifiedAt"
+                ),
+                "credentialFingerprint": readiness.get(
+                    "credentialFingerprint"
+                ),
                 "balance": readiness.get("realBalance"),
                 "equity": readiness.get("realEquity"),
                 "availableBalance": readiness.get(
@@ -2361,7 +2467,95 @@ class BotManager:
             "positionReason": real_account.get("positionReason"),
         })
 
+        margin_contract = project_margin_mode_contract(
+            required_mode=(
+                real_account.get("requiredMarginMode")
+                or MARGIN_MODE_REQUIRED
+            ),
+            configured_mode=(
+                self.config.get("marginMode")
+                or self.config.get("margin_mode")
+            ),
+            effective_mode=real_account.get("marginMode"),
+            observed_mode=real_account.get("actualMarginMode"),
+            known=real_account.get("marginModeKnown"),
+            source=real_account.get("marginModeSource"),
+            updated_at=real_account.get("marginModeUpdatedAt"),
+        )
+        permission_contract = project_permission_contract(
+            claimed_permission=(
+                real_account.get("permissionClaimed")
+                or real_account.get("permission")
+            ),
+            verified_permission=real_account.get(
+                "permissionVerifiedPermission"
+            ),
+            verification_source=real_account.get(
+                "permissionVerificationSource"
+            ),
+            verified_at=real_account.get("permissionVerifiedAt"),
+            credential_fingerprint=real_account.get(
+                "credentialFingerprint"
+            ),
+            authenticated=real_account.get("authenticated"),
+        )
+        exchange_client_readiness = project_exchange_client_readiness(
+            client_constructed=bool(
+                readiness.get("exchangeClientReady")
+            ),
+            credentials_present=bool(
+                real_account.get("apiKeyPresent")
+                or readiness.get("exchangeAuthReady")
+            ),
+            public_read_ok=bool(
+                read_balance_ok
+                or read_position_ok
+                or readiness.get("balanceCheckOk")
+                or readiness.get("positionCheckOk")
+            ),
+            authenticated=bool(
+                real_account.get("authenticated")
+                or readiness.get("exchangeAuthReady")
+            ),
+            permission_contract=permission_contract,
+            real_order_allowed=bool(
+                readiness.get("realOrderAllowed")
+            ),
+        )
+        lifecycle_contract = project_lifecycle_consistency(
+            bot_lifecycle_state=self.lifecycle_state,
+            loop_state=self.loop_state,
+            engine_available=self.engine is not None,
+            execution_authority=(
+                "ENABLED"
+                if governance_state.get("execution_enabled") is True
+                else "DISABLED"
+            ),
+        )
+        readiness.update({
+            "marginModeContract": margin_contract,
+            "permissionContract": permission_contract,
+            "exchangeClientReadiness": exchange_client_readiness,
+            "runtimeStateContract": lifecycle_contract,
+            "permissionClaimed": permission_contract["claimedPermission"],
+            "permissionVerified": (
+                permission_contract["permissionStatus"] == "VERIFIED"
+            ),
+            "permissionStatus": permission_contract["permissionStatus"],
+            "permissionVerificationSource": (
+                permission_contract["verificationSource"]
+            ),
+            "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "credentialFingerprint": permission_contract[
+                "credentialFingerprint"
+            ],
+        })
+
         checks = dict(readiness.get("checks") or {})
+        if margin_contract["compatible"] is not None:
+            checks["marginModeCompatible"] = margin_contract["compatible"]
+        if lifecycle_contract["state"] == "INCONSISTENT":
+            checks["runtimeLifecycleConsistent"] = False
         checks.update({
             "exchangeAuthReady": readiness.get(
                 "exchangeAuthReady",
@@ -6742,6 +6936,7 @@ class BotManager:
                     try:
 
                         exchange = KucoinTradeClient()
+                        exchange.configure_live_runtime_intent_store()
 
                         self.exchange_client_ready = True
 
@@ -10318,7 +10513,7 @@ class BotManager:
             and backend_config.ALLOW_LIVE is False
         )
 
-        return {
+        status = {
             "valid": inspection.get("valid") is True,
             "reason": inspection.get("reason"),
             "durableExists": inspection.get("durableExists") is True,
@@ -10335,6 +10530,16 @@ class BotManager:
             "snapshotType": inspection.get("snapshotType"),
             "evidenceGeneration": inspection.get("evidenceGeneration"),
         }
+        snapshot_contract = classify_stopped_snapshot(status)
+        status.update({
+            "snapshotState": snapshot_contract["state"],
+            "usableAsStoppedEvidence": snapshot_contract[
+                "usableAsStoppedEvidence"
+            ],
+            "missingIsStoppedEvidence": False,
+            "staleIsStoppedEvidence": False,
+        })
+        return status
 
     @staticmethod
     def _stopped_paper_recoverable_reasons():
@@ -14751,6 +14956,29 @@ class BotManager:
             live_auto_runtime=self.live_auto_selection_runtime.get_status(),
         )
 
+        try:
+            stopped_snapshot_status = self.get_stopped_paper_snapshot_status()
+        except Exception:
+            stopped_snapshot_status = {
+                "valid": False,
+                "reason": "SNAPSHOT_STATUS_UNAVAILABLE",
+                "durableExists": False,
+            }
+        stopped_snapshot_contract = classify_stopped_snapshot(
+            stopped_snapshot_status
+        )
+        runtime_state_contract = project_lifecycle_consistency(
+            bot_lifecycle_state=self.lifecycle_state,
+            loop_state=self.loop_state,
+            engine_available=self.engine is not None,
+            execution_authority=(
+                "ENABLED"
+                if governance_state.get("execution_enabled") is True
+                else "DISABLED"
+            ),
+            durable_snapshot_state=stopped_snapshot_contract["state"],
+        )
+
         status_payload = {
 
             "timestamp": time.time(),
@@ -15282,6 +15510,50 @@ class BotManager:
                     if not market_stale
                     else "STALE"
                 )
+            ),
+
+            "runtimeStateContract": runtime_state_contract,
+
+            "stoppedPaperSnapshotContract": stopped_snapshot_contract,
+
+            "exchangeClientReadiness": live_readiness.get(
+                "exchangeClientReadiness",
+                {},
+            ),
+
+            "marginModeContract": live_readiness.get(
+                "marginModeContract",
+                {},
+            ),
+
+            "permissionContract": live_readiness.get(
+                "permissionContract",
+                {},
+            ),
+
+            "permissionClaimed": live_readiness.get(
+                "permissionClaimed"
+            ),
+
+            "permissionVerified": (
+                live_readiness.get("permissionVerified") is True
+            ),
+
+            "permissionStatus": live_readiness.get(
+                "permissionStatus",
+                "UNVERIFIED",
+            ),
+
+            "permissionVerificationSource": live_readiness.get(
+                "permissionVerificationSource"
+            ),
+
+            "permissionVerifiedAt": live_readiness.get(
+                "permissionVerifiedAt"
+            ),
+
+            "credentialFingerprint": live_readiness.get(
+                "credentialFingerprint"
             ),
 
             "leverageAuthority": self._leverage_authority_projection(),

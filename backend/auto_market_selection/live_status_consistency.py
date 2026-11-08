@@ -12,6 +12,11 @@ REASON_ORDER = (
     ("exchangeClientReady", "EXCHANGE_CLIENT_NOT_READY"),
     ("balanceCheckOk", "BALANCE_CHECK_FAILED"),
     ("positionCheckOk", "POSITION_CHECK_FAILED"),
+    # Only present when the exchange margin-mode authority is known.  A known
+    # CROSS vs the required ISOLATED fails closed; UNKNOWN stays UNKNOWN and is
+    # reported through marginModeContract rather than silently coerced.
+    ("marginModeCompatible", "MARGIN_MODE_MISMATCH"),
+    ("runtimeLifecycleConsistent", "RUNTIME_LIFECYCLE_INCONSISTENT"),
     ("pendingOrdersKnown", "PENDING_ORDERS_UNKNOWN"),
     ("pendingOrdersClear", "PENDING_ORDERS_EXIST"),
     ("mmFresh", "MM_STALE"),
@@ -23,6 +28,14 @@ REASON_ORDER = (
     # for new entries; only present when the engine reports the check).
     ("livePositionProtectionAvailable", "LIVE_POSITION_PROTECTION_UNAVAILABLE"),
     ("livePnlAccountingAvailable", "LIVE_PNL_ACCOUNTING_UNAVAILABLE"),
+    ("durableOrderIntentStoreReady", "LIVE_ORDER_INTENT_STORE_UNAVAILABLE"),
+    ("orderRecoveryComplete", "LIVE_ORDER_RECOVERY_INCOMPLETE"),
+    ("unknownCommitClear", "LIVE_ORDER_UNKNOWN_COMMIT"),
+    ("unprotectedClear", "LIVE_POSITION_UNPROTECTED"),
+    ("protectionPendingClear", "LIVE_PROTECTION_PENDING"),
+    ("protectionKnown", "LIVE_PROTECTION_UNKNOWN"),
+    ("exitReconciliationClear", "LIVE_EXIT_RECONCILIATION_REQUIRED"),
+    ("exchangeStateFresh", "LIVE_EXCHANGE_STATE_UNKNOWN"),
 )
 
 # While STOPPED, readiness reasons that are explicitly about the NEXT START

@@ -22,6 +22,7 @@ against isolated storage.  Tests that construct ``ParameterPerformanceStore``
 with ``tmp_path`` remain independently isolated.
 """
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -65,6 +66,50 @@ _TEST_MM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 _TEST_MM_CONFIG_PATH = _TEST_MM_CONFIG_DIR / "money_management_config.json"
 
 os.environ["TRADINGAI_MONEY_MANAGEMENT_CONFIG_PATH"] = str(_TEST_MM_CONFIG_PATH)
+
+
+# WORK AA: isolate the durable live-order intent store so a test can never
+# resolve the Production store through the environment. ``backend.execution.
+# kucoin_trade`` calls ``load_dotenv()`` at import time; because that happens
+# after this conftest, the variable is BLANKED (not unset) so dotenv cannot
+# re-inject the Production value. Blank also keeps the documented fail-closed
+# contract: no configured path means ``STORE_PATH_MISSING``.
+_TEST_INTENT_DIR = Path(tempfile.gettempdir()) / "tradingai-live-order-intent-test"
+_TEST_INTENT_DIR.mkdir(parents=True, exist_ok=True)
+_TEST_INTENT_PATH = _TEST_INTENT_DIR / "live_order_intents.json"
+
+_PROTECTED_INTENT_PATHS = []
+
+
+def _register_protected_intent_path(value):
+    if not value:
+        return
+    try:
+        text = os.fspath(value)
+    except TypeError:
+        return
+    if text and text not in _PROTECTED_INTENT_PATHS:
+        _PROTECTED_INTENT_PATHS.append(text)
+
+
+# Capture any inherited path and the value that ``load_dotenv()`` would later
+# load, so the store guard can reject those exact paths (and their aliases).
+_register_protected_intent_path(os.environ.get("TRADINGAI_LIVE_ORDER_INTENT_PATH"))
+try:
+    from dotenv import dotenv_values, find_dotenv
+
+    _dotenv_path = find_dotenv()
+    if _dotenv_path:
+        _register_protected_intent_path(
+            dotenv_values(_dotenv_path).get("TRADINGAI_LIVE_ORDER_INTENT_PATH")
+        )
+except Exception:
+    pass
+
+os.environ["TRADINGAI_LIVE_ORDER_INTENT_PROTECTED_PATHS"] = json.dumps(
+    _PROTECTED_INTENT_PATHS
+)
+os.environ["TRADINGAI_LIVE_ORDER_INTENT_PATH"] = ""
 
 
 def _test_store_path() -> Path:
@@ -160,3 +205,28 @@ def _isolated_money_management_configuration():
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def _remove_live_order_intent_files():
+    for suffix in ("", ".lock", ".tmp"):
+        try:
+            Path(str(_TEST_INTENT_PATH) + suffix).unlink()
+        except FileNotFoundError:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _isolated_live_order_intent_store():
+    """Fail closed when the live-order intent store is not test-isolated.
+
+    The session-level conftest blanks the inherited Production path, so any
+    non-empty value here means a test (or a leaked environment) re-enabled an
+    unisolated destination. Refuse to run rather than risk a Production write.
+    """
+
+    current = os.environ.get("TRADINGAI_LIVE_ORDER_INTENT_PATH", "")
+    if current:
+        raise RuntimeError("LIVE_ORDER_INTENT_STORE_NOT_ISOLATED")
+    _remove_live_order_intent_files()
+    yield _TEST_INTENT_PATH
+    _remove_live_order_intent_files()

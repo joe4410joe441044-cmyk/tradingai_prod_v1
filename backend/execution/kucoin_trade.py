@@ -8,6 +8,8 @@ from requests.adapters import HTTPAdapter
 import socket
 import urllib3.util.connection as _urllib3_conn
 import time
+import tempfile
+import uuid
 import base64
 import hmac
 import hashlib
@@ -22,6 +24,32 @@ from urllib.parse import quote, urlencode
 from dotenv import load_dotenv
 from backend.utils.log_buffer import logger, runtime_debug
 from backend.market.kucoin_futures_public import to_kucoin_futures_symbol
+from backend.runtime.runtime_state_contract import (
+    PERMISSION_READ_ONLY,
+    project_permission_contract,
+)
+from backend.execution.live_order_intent import (
+    ACCEPTED,
+    EXIT_PENDING,
+    FILLED,
+    FLAT_CONFIRMED,
+    INTENT_RECORDED,
+    IntentStore,
+    NOT_FOUND_INCONCLUSIVE,
+    PROTECTION_CONFIRMED,
+    PROTECTION_PENDING,
+    PROTECTION_UNKNOWN,
+    PURPOSE_ENTRY,
+    PURPOSE_EXIT,
+    PURPOSE_PROTECTION,
+    RECONCILIATION_REQUIRED,
+    REJECTED,
+    UNKNOWN_COMMIT,
+    UNPROTECTED,
+    format_stop_price,
+    liquidation_risk_boundary,
+    protective_stop_sides,
+)
 
 
 DAILY_PNL_CACHE_TTL_SECONDS = 60
@@ -193,6 +221,51 @@ def normalize_kucoin_realized_pnl_today(items, *, start_ms, end_ms):
     return float(total)
 
 
+def _credential_fingerprint(api_key):
+    """Non-reversible credential identity; the raw secret is never exposed."""
+
+    if not api_key:
+        return None
+    digest = hashlib.sha256(str(api_key).encode("utf-8")).hexdigest()
+    return "sha256:" + digest[:16]
+
+
+def _response_permission_authority(data):
+    """Extract an authoritative permission field if the response carries one.
+
+    KuCoin Classic Futures ``account-overview`` does not publish the API key
+    permission set.  This helper only returns a value when an explicit,
+    response-owned field exists; a client-side or synthesized default never
+    becomes authoritative.
+    """
+
+    if not isinstance(data, dict):
+        return None, None
+    for key in (
+        "permission",
+        "apiKeyPermission",
+        "apiKeyPermissions",
+        "permissions",
+    ):
+        if key not in data:
+            continue
+        value = data.get(key)
+        if isinstance(value, (list, tuple, set)):
+            values = {str(item).strip().upper() for item in value}
+            if "TRADE" in values and "WITHDRAW" in values:
+                return "TRADE_AND_WITHDRAW", key
+            if "TRADE" in values:
+                return "TRADE", key
+            if "WITHDRAW" in values:
+                return "WITHDRAW", key
+            if "READ_ONLY" in values:
+                return "READ_ONLY", key
+            return None, key
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper(), key
+    return None, None
+
+
 # =====================================
 # LOAD ENV
 # =====================================
@@ -297,6 +370,12 @@ class KucoinTradeClient(BaseClient):
         self.session = requests.Session()
         self.session.mount("https://", ForceIPv4Adapter())
         self.session.mount("http://", ForceIPv4Adapter())
+        self.runtime_submission_allowed = True
+        self.order_intent_path = None
+        self._live_order_intent_store = None
+        self.require_durable_intent_store = False
+        self._order_recovery_complete = False
+        self.exchange_state_fresh = True
         self._daily_pnl_cache = None
         self._daily_pnl_cache_lock = threading.Lock()
 
@@ -905,6 +984,24 @@ class KucoinTradeClient(BaseClient):
             )
         )
 
+        verified_permission, permission_source_key = (
+            _response_permission_authority(d)
+        )
+        permission_contract = project_permission_contract(
+            claimed_permission=PERMISSION_READ_ONLY,
+            verified_permission=verified_permission,
+            verification_source=(
+                "KUCOIN_ACCOUNT_RESPONSE:" + permission_source_key
+                if verified_permission and permission_source_key
+                else "NOT_VERIFIED"
+            ),
+            verified_at=(
+                time.time() if verified_permission else None
+            ),
+            credential_fingerprint=_credential_fingerprint(self.api_key),
+            authenticated=True,
+        )
+
         overview = {
             "source": "KUCOIN_FUTURES_READ_ONLY",
             "accountType": "KUCOIN_FUTURES",
@@ -968,7 +1065,25 @@ class KucoinTradeClient(BaseClient):
             "exchangeAuth": "VERIFIED",
             "exchangeConnection": "CONNECTED",
             "apiKeyStatus": "VERIFIED",
-            "permission": "READ_ONLY",
+            # Backward-compatible claimed value.  ``permissionVerified`` below
+            # is the only proof field; the claim must not be read as proof.
+            "permission": PERMISSION_READ_ONLY,
+            "permissionClaimed": permission_contract["claimedPermission"],
+            "permissionVerified": (
+                permission_contract["permissionStatus"] == "VERIFIED"
+            ),
+            "permissionStatus": permission_contract["permissionStatus"],
+            "permissionVerifiedPermission": (
+                permission_contract["verifiedPermission"]
+            ),
+            "permissionVerificationSource": (
+                permission_contract["verificationSource"]
+            ),
+            "permissionVerifiedAt": permission_contract["verifiedAt"],
+            "credentialFingerprint": (
+                permission_contract["credentialFingerprint"]
+            ),
+            "permissionContract": permission_contract,
             "lastSync": time.time(),
         }
 
@@ -1581,158 +1696,34 @@ class KucoinTradeClient(BaseClient):
         # fields are clientOid/symbol/side.  A reduceOnly close applies the
         # existing position leverage, so hard-coding 10 here was both
         # unnecessary and an unauthorized leverage authority.
-        body_dict = {
-            "clientOid": str(
-                int(time.time() * 1000)
-            ),
-            "symbol": normalized_symbol,
-            "side": close_side,
-            "type": "market",
-            "size": str(size),
-            "reduceOnly": True,
-            "marginMode": close_margin_mode,
-        }
-        body = json.dumps(body_dict)
-
-        try:
-            headers = self._headers(
-                "POST",
-                endpoint,
-                body,
-            )
-
-            res = self.session.post(
-                self.base_url + endpoint,
-                headers=headers,
-                data=body,
-                timeout=timeout,
-            )
-        except requests.exceptions.Timeout as e:
-            return response(
-                False,
-                error_code="TIMEOUT",
-                error=str(e),
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-            )
-        except requests.exceptions.RequestException as e:
-            return response(
-                False,
-                error_code="API_ERROR",
-                error=str(e),
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-            )
-        except Exception as e:
-            return response(
-                False,
-                error_code="API_ERROR",
-                error=str(e),
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-            )
-
-        status_code = getattr(
-            res,
-            "status_code",
-            None,
+        submission = self.submit_bounded_order(
+            purpose=PURPOSE_EXIT,
+            symbol=normalized_symbol,
+            side=close_side,
+            size=size,
+            timeout=timeout,
+            body_fields={
+                "symbol": normalized_symbol,
+                "side": close_side,
+                "type": "market",
+                "size": str(size),
+                "reduceOnly": True,
+                "marginMode": close_margin_mode,
+            },
         )
-
-        try:
-            status_code = (
-                int(status_code)
-                if status_code is not None
-                else None
-            )
-        except (TypeError, ValueError):
-            status_code = None
-
-        if status_code in [401, 403]:
+        if submission.get("submit") is not True:
             return response(
                 False,
-                error_code="AUTH_ERROR",
-                error=f"HTTP {status_code}",
+                error_code=self._live_close_error_code(submission),
+                error=submission.get("reason"),
                 normalized_symbol=normalized_symbol,
                 side=close_side,
                 size=size,
                 initial_position=initial,
+                raw_order=submission.get("raw"),
             )
-
-        if status_code is not None and status_code >= 400:
-            return response(
-                False,
-                error_code="API_ERROR",
-                error=f"HTTP {status_code}",
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-            )
-
-        try:
-            raw_order = res.json()
-        except Exception as e:
-            return response(
-                False,
-                error_code="MALFORMED_RESPONSE",
-                error=str(e),
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-            )
-
-        if not isinstance(raw_order, dict):
-            return response(
-                False,
-                error_code="MALFORMED_RESPONSE",
-                error="order response is not a dict",
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-                raw_order=raw_order,
-            )
-
-        if raw_order.get("code") != "200000":
-            return response(
-                False,
-                error_code="API_ERROR",
-                error=str(raw_order),
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-                raw_order=raw_order,
-            )
-
-        order_data = raw_order.get("data")
-
-        if not isinstance(order_data, dict):
-            return response(
-                False,
-                error_code="MALFORMED_RESPONSE",
-                error="missing order data",
-                normalized_symbol=normalized_symbol,
-                side=close_side,
-                size=size,
-                initial_position=initial,
-                raw_order=raw_order,
-            )
-
-        order_id = order_data.get("orderId")
-        order_id = (
-            str(order_id).strip()
-            if order_id is not None
-            else ""
-        )
-
+        raw_order = submission.get("raw")
+        order_id = submission.get("orderId") or ""
         if not order_id:
             return response(
                 False,
@@ -1744,19 +1735,17 @@ class KucoinTradeClient(BaseClient):
                 initial_position=initial,
                 raw_order=raw_order,
             )
-
         final = self.get_current_position(
             normalized_symbol,
             timeout=timeout,
         )
-
         if not isinstance(final, dict) or not final.get("success"):
+            self.confirm_exchange_flat(submission.get("intentId"), None)
             post_error_code = (
                 final.get("error_code")
                 if isinstance(final, dict)
                 else "FAILED"
             )
-
             return response(
                 False,
                 accepted=True,
@@ -1775,8 +1764,8 @@ class KucoinTradeClient(BaseClient):
                 final_position=final,
                 raw_order=raw_order,
             )
-
         if final.get("found"):
+            self.confirm_exchange_flat(submission.get("intentId"), True)
             return response(
                 False,
                 accepted=True,
@@ -1791,7 +1780,7 @@ class KucoinTradeClient(BaseClient):
                 final_position=final,
                 raw_order=raw_order,
             )
-
+        self.confirm_exchange_flat(submission.get("intentId"), False)
         return response(
             True,
             accepted=True,
@@ -2444,6 +2433,540 @@ class KucoinTradeClient(BaseClient):
             return None
         return format(value.normalize(), "f")
 
+    def _order_intent_store(self):
+        store = self._live_order_intent_store
+        if store is not None:
+            return store
+        if self.require_durable_intent_store:
+            return None
+        path = self.order_intent_path or os.environ.get("TRADINGAI_LIVE_ORDER_INTENT_PATH")
+        if not path:
+            path = os.path.join(
+                tempfile.gettempdir(),
+                f"tradingai-live-order-intents-{uuid.uuid4().hex}.json",
+            )
+        store = IntentStore(path)
+        self._live_order_intent_store = store
+        return store
+
+    def configure_live_runtime_intent_store(self, path=None):
+        """Require a durable intent file before any formal LIVE write.
+
+        Does not create a production directory or read an exchange. A missing
+        path, unreadable directory, corrupt file, or failed load stays closed.
+        """
+
+        self.require_durable_intent_store = True
+        self._order_recovery_complete = False
+        self._live_order_intent_store = None
+        chosen = path or os.environ.get("TRADINGAI_LIVE_ORDER_INTENT_PATH")
+        self.order_intent_path = chosen or None
+        if not chosen:
+            return {"ready": False, "reason": "STORE_PATH_MISSING"}
+        directory = os.path.dirname(os.path.abspath(chosen))
+        if not os.path.isdir(directory) or not os.access(directory, os.R_OK | os.W_OK):
+            return {"ready": False, "reason": "STORE_PATH_MISSING"}
+        try:
+            store = IntentStore(chosen)
+        except OSError:
+            return {"ready": False, "reason": "STORE_READ_FAILED"}
+        if store.load_error:
+            self._live_order_intent_store = store
+            return {"ready": False, "reason": store.load_error}
+        self._live_order_intent_store = store
+        return {"ready": True, "reason": None}
+
+    def _closed_order_gates(self, reason):
+        return {
+            "storeReady": False,
+            "recoveryComplete": False,
+            "unknownCommitClear": False,
+            "unprotectedClear": False,
+            "protectionPendingClear": False,
+            "protectionKnown": False,
+            "exitReconciliationClear": False,
+            "exchangeStateFresh": False,
+            "reason": reason,
+            "intents": [],
+        }
+
+    def runtime_order_gates(self):
+        """Existing readiness facts for the formal LIVE path.
+
+        Isolated client tests leave ``require_durable_intent_store`` false and
+        receive no extra gates.
+        """
+
+        if self.require_durable_intent_store is not True:
+            return None
+        store = self._live_order_intent_store
+        if store is None:
+            return self._closed_order_gates("STORE_PATH_MISSING")
+        if store.load_error:
+            return self._closed_order_gates(store.load_error)
+        records = store.records()
+        states = {record.get("state") for record in records}
+        filled_ids = {
+            record.get("intentId")
+            for record in records
+            if record.get("purpose") == PURPOSE_ENTRY and record.get("state") == FILLED
+        }
+        confirmed_parents = {
+            record.get("parentId")
+            for record in records
+            if record.get("purpose") == PURPOSE_PROTECTION
+            and record.get("state") == PROTECTION_CONFIRMED
+        }
+        unprotected = UNPROTECTED in states or any(
+            intent_id not in confirmed_parents for intent_id in filled_ids
+        )
+        fresh = self.exchange_state_fresh is True
+        return {
+            "storeReady": True,
+            "recoveryComplete": self._order_recovery_complete is True and fresh,
+            "unknownCommitClear": UNKNOWN_COMMIT not in states and NOT_FOUND_INCONCLUSIVE not in states,
+            "unprotectedClear": not unprotected,
+            "protectionPendingClear": PROTECTION_PENDING not in states,
+            "protectionKnown": PROTECTION_UNKNOWN not in states,
+            "exitReconciliationClear": EXIT_PENDING not in states and RECONCILIATION_REQUIRED not in states,
+            "exchangeStateFresh": fresh,
+            "reason": None,
+            "intents": records,
+        }
+
+    def recover_unresolved_intents(self):
+        """Read-only restart recovery. Never posts, deletes, or marks FLAT."""
+
+        if self.require_durable_intent_store is not True:
+            return {"complete": True, "skipped": True, "postAttempts": 0, "intents": []}
+        store = self._live_order_intent_store
+        if store is None or store.load_error:
+            self._order_recovery_complete = False
+            reason = "STORE_PATH_MISSING" if store is None else store.load_error
+            return {"complete": False, "reason": reason, "postAttempts": 0, "intents": []}
+        for record in list(store.records()):
+            if record.get("state") in {
+                UNKNOWN_COMMIT,
+                ACCEPTED,
+                PROTECTION_PENDING,
+                PROTECTION_UNKNOWN,
+                EXIT_PENDING,
+                NOT_FOUND_INCONCLUSIVE,
+                INTENT_RECORDED,
+            }:
+                self.reconcile_intent(record.get("intentId"))
+        remaining = [
+            record for record in store.records()
+            if record.get("state") not in {REJECTED, FLAT_CONFIRMED, PROTECTION_CONFIRMED}
+        ]
+        self._order_recovery_complete = not remaining
+        return {
+            "complete": self._order_recovery_complete,
+            "reason": None if self._order_recovery_complete else "UNRESOLVED_INTENTS",
+            "postAttempts": 0,
+            "intents": remaining,
+        }
+
+    def liquidation_risk_status(self):
+        return liquidation_risk_boundary()
+
+    def _submission_gate(self, symbol, account_symbol=None, purpose=None):
+        # Entry and protective-stop writes require live order authority. A
+        # reduce-only EXIT does not: emergency flatten must remain available
+        # after DISARM/STOP, exactly as the documented emergency-exit
+        # capability requires. Exit is still constrained by the durable store
+        # and by the position/account identity checks.
+        if purpose != PURPOSE_EXIT:
+            if not self.live_order_allowed:
+                return {"submit": False, "commitState": "DISARMED", "reason": "REAL_ORDER_DISARMED"}
+            if self.runtime_submission_allowed is not True:
+                return {"submit": False, "commitState": "STOPPED", "reason": "RUNTIME_STOPPED"}
+        if account_symbol and str(account_symbol).strip() != str(symbol).strip():
+            return {"submit": False, "commitState": "REJECTED", "reason": "ACCOUNT_SYMBOL_MISMATCH"}
+        return None
+
+    def _live_close_error_code(self, submission):
+        """Translate durable-submission facts to the flatten error contract."""
+
+        reason = submission.get("reason")
+        if reason == "Timeout":
+            return "TIMEOUT"
+        if reason in {"ConnectionError", "TRANSPORT"}:
+            return "API_ERROR"
+        if reason == "AUTH_ERROR":
+            return "AUTH_ERROR"
+        if reason == "MALFORMED_RESPONSE":
+            return "MALFORMED_RESPONSE"
+        if reason == "EXCHANGE_REJECTED":
+            return "API_ERROR"
+        if isinstance(reason, str) and reason.startswith("HTTP_"):
+            return "API_ERROR"
+        return submission.get("commitState") or reason
+
+    def submit_bounded_order(
+        self,
+        *,
+        purpose,
+        symbol,
+        side,
+        size,
+        body_fields,
+        intent_id=None,
+        parent_id=None,
+        stop_price=None,
+        account_symbol=None,
+        timeout=10,
+    ):
+        """Persist the intent, then POST at most once for that logical order."""
+
+        gate = self._submission_gate(symbol, account_symbol, purpose=purpose)
+        if gate is not None:
+            return gate
+        store = self._order_intent_store()
+        if store is None or getattr(store, "load_error", None):
+            reason = "STORE_PATH_MISSING" if store is None else store.load_error
+            return {"submit": False, "commitState": "REJECTED", "reason": reason}
+        if intent_id is None:
+            existing = store.unresolved(purpose, symbol)
+            if existing is not None and existing.get("state") != INTENT_RECORDED:
+                return {
+                    "submit": False,
+                    "commitState": existing.get("state"),
+                    "reason": "INTENT_ALREADY_RECORDED",
+                    "intentId": existing.get("intentId"),
+                    "clientOid": existing.get("clientOid"),
+                    "intent": existing,
+                }
+            if existing is not None:
+                intent_id = existing.get("intentId")
+        if purpose == PURPOSE_ENTRY:
+            blocked = store.entry_blocked(symbol)
+            if blocked is not None and blocked.get("intentId") != intent_id:
+                return {
+                    "submit": False,
+                    "commitState": blocked.get("state"),
+                    "reason": "ENTRY_BLOCKED",
+                    "intentId": blocked.get("intentId"),
+                    "clientOid": blocked.get("clientOid"),
+                }
+        record = store.begin(
+            purpose=purpose,
+            symbol=symbol,
+            side=side,
+            size=size,
+            intent_id=intent_id,
+            parent_id=parent_id,
+            stop_price=stop_price,
+        )
+        if record.get("ok") is not True:
+            return {"submit": False, "commitState": "REJECTED", "reason": record.get("reason"), "intent": record}
+        if record.get("created") is not True and record.get("state") == INTENT_RECORDED:
+            stored = store.mark(record["intentId"], UNKNOWN_COMMIT, reason="PERSISTED_BEFORE_ACK")
+            return {
+                "submit": False,
+                "commitState": UNKNOWN_COMMIT,
+                "reason": "PERSISTED_BEFORE_ACK",
+                "intentId": record.get("intentId"),
+                "clientOid": record.get("clientOid"),
+                "intent": stored or record,
+            }
+        if record.get("duplicate") or record.get("state") != INTENT_RECORDED:
+            return {
+                "submit": False,
+                "commitState": record.get("state"),
+                "reason": "INTENT_ALREADY_RECORDED",
+                "intentId": record.get("intentId"),
+                "clientOid": record.get("clientOid"),
+                "intent": record,
+            }
+        body_dict = dict(body_fields)
+        body_dict["clientOid"] = record["clientOid"]
+        endpoint = "/api/v1/orders"
+        body = json.dumps(body_dict)
+        try:
+            headers = self._headers("POST", endpoint, body)
+            response = self.session.post(
+                self.base_url + endpoint,
+                headers=headers,
+                data=body,
+                timeout=timeout,
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason=type(exc).__name__)
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": type(exc).__name__,
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        except requests.exceptions.RequestException as exc:
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason="TRANSPORT")
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": str(exc.__class__.__name__),
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        status_code = getattr(response, "status_code", None)
+        try:
+            status_code = int(status_code) if status_code is not None else None
+        except (TypeError, ValueError):
+            status_code = None
+        if status_code is not None and status_code >= 500:
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason=f"HTTP_{status_code}")
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": f"HTTP_{status_code}",
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        if status_code is not None and status_code in (401, 403):
+            stored = store.mark(record["intentId"], REJECTED, reason="AUTH_ERROR")
+            return {
+                "submit": False,
+                "commitState": REJECTED,
+                "reason": "AUTH_ERROR",
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        if status_code is not None and status_code >= 400:
+            stored = store.mark(record["intentId"], REJECTED, reason=f"HTTP_{status_code}")
+            return {
+                "submit": False,
+                "commitState": REJECTED,
+                "reason": f"HTTP_{status_code}",
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        try:
+            payload = response.json()
+        except Exception:
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason="MALFORMED_RESPONSE")
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": "MALFORMED_RESPONSE",
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        if not isinstance(payload, dict):
+            # A non-object body cannot prove the exchange rejected the order.
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason="MALFORMED_RESPONSE")
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": "MALFORMED_RESPONSE",
+                "raw": payload,
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        if payload.get("code") != "200000":
+            stored = store.mark(record["intentId"], REJECTED, reason="EXCHANGE_REJECTED", rawCode=payload.get("code"))
+            return {
+                "submit": False,
+                "commitState": REJECTED,
+                "reason": "EXCHANGE_REJECTED",
+                "raw": payload,
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        order_id = None
+        data = payload.get("data")
+        if isinstance(data, dict) and data.get("orderId"):
+            order_id = str(data.get("orderId"))
+        if not order_id:
+            # Accepted without an exchange order id is not confirmation.
+            unknown_state = PROTECTION_UNKNOWN if purpose == PURPOSE_PROTECTION else UNKNOWN_COMMIT
+            stored = store.mark(record["intentId"], unknown_state, reason="MALFORMED_RESPONSE")
+            return {
+                "submit": False,
+                "commitState": unknown_state,
+                "reason": "MALFORMED_RESPONSE",
+                "raw": payload,
+                "intentId": record["intentId"],
+                "clientOid": record["clientOid"],
+                "intent": stored,
+            }
+        next_state = PROTECTION_PENDING if purpose == PURPOSE_PROTECTION else ACCEPTED
+        if purpose == PURPOSE_EXIT:
+            next_state = EXIT_PENDING
+        stored = store.mark(record["intentId"], next_state, orderId=order_id)
+        return {
+            "submit": True,
+            "commitState": next_state,
+            "orderId": order_id,
+            "raw": payload,
+            "body": body_dict,
+            "intentId": record["intentId"],
+            "clientOid": record["clientOid"],
+            "intent": stored,
+        }
+
+    def lookup_order_by_client_oid(self, client_oid, *, symbol=None, stop=False, timeout=10):
+        """Read-only lookup. One NOT_FOUND result is not proof of absence."""
+
+        if stop:
+            endpoint = "/api/v1/stopOrders"
+            if symbol:
+                endpoint += "?symbol=" + quote(str(symbol), safe="")
+        else:
+            endpoint = "/api/v1/orders/byClientOid?clientOid=" + quote(str(client_oid), safe="")
+        try:
+            headers = self._headers("GET", endpoint, "")
+            response = self.session.get(
+                self.base_url + endpoint,
+                headers=headers,
+                timeout=timeout,
+            )
+            payload = response.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException):
+            return {"classification": "UNKNOWN"}
+        except Exception:
+            return {"classification": "UNKNOWN"}
+        if not isinstance(payload, dict):
+            return {"classification": "UNKNOWN"}
+        if payload.get("code") != "200000":
+            message = str(payload.get("msg") or payload.get("code") or "").lower()
+            if "not exist" in message or "not found" in message or str(payload.get("code")) in {"100001", "200004"}:
+                return {"classification": "NOT_FOUND", "raw": payload}
+            return {"classification": "UNKNOWN", "raw": payload}
+        data = payload.get("data")
+        items = []
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            items = data.get("items")
+        elif isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = [data]
+        for item in items:
+            if isinstance(item, dict) and str(item.get("clientOid") or "") == str(client_oid):
+                return {"classification": "FOUND", "order": item}
+        if stop:
+            return {"classification": "NOT_FOUND", "raw": payload}
+        if isinstance(data, dict) and str(data.get("clientOid") or "") == str(client_oid):
+            return {"classification": "FOUND", "order": data}
+        return {"classification": "NOT_FOUND", "raw": payload}
+
+    def reconcile_intent(self, intent_id, *, timeout=10):
+        store = self._order_intent_store()
+        record = store.get(intent_id)
+        if record is None:
+            return {"commitState": "UNKNOWN", "reason": "INTENT_MISSING"}
+        stop = record.get("purpose") == PURPOSE_PROTECTION
+        looked = self.lookup_order_by_client_oid(
+            record.get("clientOid"),
+            symbol=record.get("symbol"),
+            stop=stop,
+            timeout=timeout,
+        )
+        if looked.get("classification") == "UNKNOWN":
+            stored = store.mark(intent_id, UNKNOWN_COMMIT if not stop else PROTECTION_UNKNOWN, reason="LOOKUP_UNKNOWN")
+            return {"commitState": stored.get("state"), "intent": stored}
+        if looked.get("classification") == "NOT_FOUND":
+            stored = store.note_not_found(intent_id)
+            return {"commitState": stored.get("state"), "reason": stored.get("reason"), "intent": stored}
+        order = looked.get("order") or {}
+        if str(order.get("symbol") or record.get("symbol")) != record.get("symbol"):
+            stored = store.mark(intent_id, RECONCILIATION_REQUIRED, reason="ACCOUNT_SYMBOL_MISMATCH")
+            return {"commitState": stored.get("state"), "intent": stored}
+        if stop:
+            evidence_ok = (
+                str(order.get("side") or "").lower() == record.get("side")
+                and str(order.get("size") or order.get("qty") or "") == str(record.get("size"))
+                and str(order.get("stopPrice") or "") == str(record.get("stopPrice") or "")
+                and order.get("reduceOnly") is True
+            )
+            if not evidence_ok:
+                stored = store.mark(intent_id, PROTECTION_UNKNOWN, reason="PROTECTION_EVIDENCE_MISMATCH")
+                return {"commitState": stored.get("state"), "intent": stored}
+            stored = store.mark(intent_id, PROTECTION_CONFIRMED, orderId=order.get("id") or order.get("orderId"))
+            return {"commitState": PROTECTION_CONFIRMED, "intent": stored}
+        status = str(order.get("status") or "").lower()
+        if status in {"done", "filled", "finished"}:
+            stored = store.mark(intent_id, FILLED, orderId=order.get("id") or order.get("orderId"))
+            return {"commitState": FILLED, "intent": stored}
+        stored = store.mark(intent_id, ACCEPTED, orderId=order.get("id") or order.get("orderId"))
+        return {"commitState": ACCEPTED, "intent": stored}
+
+    def place_exchange_protective_stop(
+        self,
+        *,
+        symbol,
+        position_side,
+        filled_qty,
+        stop_price,
+        margin_mode,
+        parent_intent_id,
+        account_symbol=None,
+        timeout=10,
+    ):
+        """Submit a reduce-only KuCoin stop and leave it unconfirmed until lookup."""
+
+        close_side, direction = protective_stop_sides(position_side)
+        price_text = format_stop_price(stop_price)
+        if close_side is None or price_text is None or not margin_mode:
+            return {"submit": False, "commitState": UNPROTECTED, "reason": "STOP_CONTRACT_UNAVAILABLE"}
+        result = self.submit_bounded_order(
+            purpose=PURPOSE_PROTECTION,
+            symbol=symbol,
+            side=close_side,
+            size=filled_qty,
+            parent_id=parent_intent_id,
+            stop_price=price_text,
+            account_symbol=account_symbol,
+            timeout=timeout,
+            body_fields={
+                "symbol": symbol,
+                "side": close_side,
+                "type": "market",
+                "size": str(filled_qty),
+                "stop": direction,
+                "stopPriceType": "MP",
+                "stopPrice": price_text,
+                "reduceOnly": True,
+                "marginMode": margin_mode,
+            },
+        )
+        if result.get("commitState") == REJECTED:
+            intent_id = result.get("intentId")
+            if intent_id:
+                self._order_intent_store().mark(intent_id, UNPROTECTED, reason="STOP_REJECTED")
+                result["commitState"] = UNPROTECTED
+        return result
+
+    def confirm_exchange_flat(self, exit_intent_id, position_found):
+        """FLAT requires a position read, not only an exit acknowledgement."""
+
+        store = self._order_intent_store()
+        if position_found is True:
+            stored = store.mark(exit_intent_id, EXIT_PENDING, reason="POSITION_REMAINS")
+            return {"commitState": EXIT_PENDING, "intent": stored}
+        if position_found is not False:
+            stored = store.mark(exit_intent_id, RECONCILIATION_REQUIRED, reason="FLAT_UNKNOWN")
+            return {"commitState": RECONCILIATION_REQUIRED, "intent": stored}
+        stored = store.mark(exit_intent_id, FLAT_CONFIRMED, reason="EXCHANGE_FLAT")
+        record = store.get(exit_intent_id)
+        parent = record.get("parentId") if record else None
+        if parent:
+            store.mark(parent, FLAT_CONFIRMED, reason="EXCHANGE_FLAT")
+        return {"commitState": FLAT_CONFIRMED, "intent": stored}
+
     def create_order(
         self,
         symbol,
@@ -2583,53 +3106,39 @@ class KucoinTradeClient(BaseClient):
                                 rules=rules, leverage=leverage) is not True:
                 raise SizingRejected("FINAL_NORMALIZED_QUANTITY_REJECTED")
 
-            endpoint = "/api/v1/orders"
-
-            body_dict = {
-                "clientOid": str(
-                    int(time.time() * 1000)
-                ),
-                "symbol": symbol,
-                "side": side.lower(),
-                "type": "market",
-                "size": str(qty),
-                "leverage": order_leverage,
-                "marginMode": REQUESTED_MARGIN_MODE
-            }
-
-            body = json.dumps(body_dict)
-
-            headers = self._headers(
-                "POST",
-                endpoint,
-                body
+            submission = self.submit_bounded_order(
+                purpose=PURPOSE_ENTRY,
+                symbol=symbol,
+                side=side.lower(),
+                size=qty,
+                body_fields={
+                    "symbol": symbol,
+                    "side": side.lower(),
+                    "type": "market",
+                    "size": str(qty),
+                    "leverage": order_leverage,
+                    "marginMode": REQUESTED_MARGIN_MODE,
+                },
             )
 
-            res = self.session.post(
-                self.base_url + endpoint,
-                headers=headers,
-                data=body
-            )
-
-            data = res.json()
-
-            if data.get("code") != "200000":
-
+            if submission.get("submit") is not True:
                 result = {
                     "success": False,
                     "exchange": "kucoin",
                     "symbol": symbol,
                     "side": side,
                     "qty": qty,
-                    "error": str(data),
-                    "raw": data,
+                    "error": submission.get("reason"),
+                    "commitState": submission.get("commitState"),
+                    "clientOid": submission.get("clientOid"),
+                    "intentId": submission.get("intentId"),
+                    "raw": submission.get("raw"),
                     "timestamp": time.time(),
                 }
-
                 runtime_debug("KuCoin normalized result=%s", result)
-
                 return result
 
+            data = submission.get("raw") or {}
             self.logger.info("ORDER SENT: KuCoin response=%s", data)
 
             result = {
@@ -2638,10 +3147,10 @@ class KucoinTradeClient(BaseClient):
                 "symbol": symbol,
                 "side": side,
                 "qty": qty,
-                "order_id": (
-                    data.get("data", {})
-                    .get("orderId")
-                ),
+                "order_id": submission.get("orderId"),
+                "commitState": submission.get("commitState"),
+                "clientOid": submission.get("clientOid"),
+                "intentId": submission.get("intentId"),
                 "raw": data,
                 "timestamp": time.time(),
             }
