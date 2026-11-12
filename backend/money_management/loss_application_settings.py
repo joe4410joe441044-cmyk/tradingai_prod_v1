@@ -71,12 +71,26 @@ def resolve_loss_limit_application_configuration(
     path = Path(raw_path)
     if not path.is_absolute():
         raise LossLimitApplicationSettingsError("persistence path must be absolute")
-    root = (
-        Path(repository_root)
-        if repository_root is not None
-        else Path(__file__).resolve().parents[2]
-    )
-    allowed_root = (root / "logs" / "runtime").resolve()
+    raw_runtime_root = _value(source, "MONEY_MANAGEMENT_RUNTIME_ROOT")
+    if raw_runtime_root is None:
+        root = (
+            Path(repository_root)
+            if repository_root is not None
+            else Path(__file__).resolve().parents[2]
+        )
+        allowed_root = (root / "logs" / "runtime").resolve()
+    else:
+        if not isinstance(raw_runtime_root, str) or not raw_runtime_root.strip():
+            raise LossLimitApplicationSettingsError("runtime root configuration invalid")
+        configured_root = Path(raw_runtime_root)
+        if not configured_root.is_absolute():
+            raise LossLimitApplicationSettingsError("runtime root must be absolute")
+        try:
+            allowed_root = configured_root.resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise LossLimitApplicationSettingsError("runtime root unavailable") from None
+        if not allowed_root.is_dir() or allowed_root == Path(allowed_root.anchor):
+            raise LossLimitApplicationSettingsError("runtime root configuration invalid")
     try:
         resolved = path.resolve()
         resolved.relative_to(allowed_root)
