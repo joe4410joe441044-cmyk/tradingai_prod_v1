@@ -2,7 +2,7 @@ import ast
 import threading
 import unittest
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -468,6 +468,262 @@ class BotRuntimeHookBoundaryTests(unittest.TestCase):
         self.assertNotIn(
             "dispatch_money_management_execution_entry_guard",
             main_source,
+        )
+
+
+class AuthorityRefreshObservationTests(unittest.TestCase):
+    NON_AUTHORITATIVE_STATUSES = (
+        LossRuntimeDispatchStatus.DISABLED,
+        LossRuntimeDispatchStatus.REJECTED,
+        LossRuntimeDispatchStatus.STALE,
+        LossRuntimeDispatchStatus.CONFLICT,
+        LossRuntimeDispatchStatus.UNAVAILABLE,
+        LossRuntimeDispatchStatus.RECOVERY_REQUIRED,
+        LossRuntimeDispatchStatus.FAILED,
+    )
+
+    @staticmethod
+    def observed_result(status, reasons=()):
+        return LossRuntimeDispatchResult(
+            status,
+            None,
+            None,
+            2,
+            3,
+            False,
+            tuple(reasons),
+            status is LossRuntimeDispatchStatus.APPLIED,
+            False,
+        )
+
+    @staticmethod
+    def log_text(logger):
+        return "\n".join(
+            str(call) for call in logger.warning.call_args_list
+        )
+
+    def hook(self, app=None, logger=None, clock=None):
+        clock = clock or [NOW]
+        return MoneyManagementRuntimeHook(
+            app or application(),
+            dispatcher(),
+            timestamp_source=lambda: clock[0],
+            logger=logger,
+        )
+
+    def test_applied_refresh_has_no_rejection_event(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        projected = SimpleNamespace(
+            public_snapshot=SimpleNamespace(to_dict=lambda: {"ok": True})
+        )
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            return_value=self.observed_result(
+                LossRuntimeDispatchStatus.APPLIED
+            ),
+        ), patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_governance_projection",
+            return_value=projected,
+        ), patch(
+            "backend.money_management.loss_runtime_hook."
+            "get_money_management_governance_projection",
+            return_value=projected.public_snapshot,
+        ):
+            self.assertTrue(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.APPLIED
+        )
+        self.assertIsNone(hook.last_dispatch_reason)
+        self.assertEqual(hook.last_dispatch_at, NOW)
+        self.assertNotIn(
+            "MM_AUTHORITY_REFRESH_REJECTED", self.log_text(logger)
+        )
+
+    def test_idempotent_refresh_has_no_rejection_event(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            return_value=self.observed_result(
+                LossRuntimeDispatchStatus.IDEMPOTENT
+            ),
+        ):
+            self.assertTrue(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.IDEMPOTENT
+        )
+        self.assertEqual(hook.last_dispatch_at, NOW)
+        self.assertNotIn(
+            "MM_AUTHORITY_REFRESH_REJECTED", self.log_text(logger)
+        )
+
+    def test_non_authoritative_status_reason_is_observable_and_logged(self):
+        for status in self.NON_AUTHORITATIVE_STATUSES:
+            with self.subTest(status=status):
+                logger = Mock()
+                hook = self.hook(logger=logger)
+                reason = "safe %s reason" % status.value.lower()
+                with patch(
+                    "backend.money_management.loss_runtime_hook."
+                    "dispatch_money_management_runtime_update",
+                    return_value=self.observed_result(status, (reason,)),
+                ):
+                    self.assertFalse(hook.refresh_authority())
+
+                self.assertIs(hook.last_dispatch_status, status)
+                self.assertEqual(hook.last_dispatch_reason, reason)
+                self.assertEqual(
+                    hook.last_dispatch_safe_reasons, (reason,)
+                )
+                self.assertEqual(hook.last_dispatch_at, NOW)
+                text = self.log_text(logger)
+                self.assertIn("Authority Refresh Rejected", text)
+                self.assertIn(
+                    "event=MM_AUTHORITY_REFRESH_REJECTED", text
+                )
+                self.assertIn(
+                    "dispatchStatus=%s" % status.value, text
+                )
+                self.assertIn("safeReason=%s" % reason, text)
+                self.assertIn("authorityAccepted=false", text)
+                self.assertIn("dispatchAttempted=true", text)
+                self.assertIn("source=loss_runtime_hook", text)
+
+    def test_record_dispatch_failure_exposes_failed_reason(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            side_effect=RuntimeError("api_key=SECRET /private/path"),
+        ):
+            self.assertFalse(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.FAILED
+        )
+        self.assertEqual(
+            hook.last_dispatch_reason, "authority refresh failed"
+        )
+        text = self.log_text(logger)
+        self.assertIn("Authority Refresh Failed", text)
+        self.assertIn("dispatchStatus=FAILED", text)
+        self.assertIn("safeReason=authority refresh failed", text)
+        self.assertIn("authorityAccepted=false", text)
+        self.assertNotIn("SECRET", text)
+        self.assertNotIn("/private", text)
+
+    def test_invalid_dispatch_result_exposes_failed_reason(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            return_value=object(),
+        ):
+            self.assertFalse(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.FAILED
+        )
+        self.assertEqual(
+            hook.last_dispatch_reason, "authority refresh result invalid"
+        )
+        text = self.log_text(logger)
+        self.assertIn("dispatchStatus=FAILED", text)
+        self.assertIn(
+            "safeReason=authority refresh result invalid", text
+        )
+
+    def test_projection_publication_failure_exposes_failed_reason(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            return_value=self.observed_result(
+                LossRuntimeDispatchStatus.APPLIED
+            ),
+        ), patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_governance_projection",
+            side_effect=RuntimeError("projection unavailable"),
+        ):
+            self.assertFalse(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.FAILED
+        )
+        self.assertEqual(
+            hook.last_dispatch_reason,
+            "governance projection publication failed",
+        )
+        self.assertEqual(hook.last_dispatch_at, NOW)
+        text = self.log_text(logger)
+        self.assertIn("Projection Refresh Failed", text)
+        self.assertIn("dispatchStatus=FAILED", text)
+        self.assertIn(
+            "safeReason=governance projection publication failed", text
+        )
+        self.assertNotIn("projection unavailable", text)
+
+    def test_pre_dispatch_return_does_not_fabricate_dispatch_status(self):
+        logger = Mock()
+        hook = self.hook(logger=logger)
+        hook.set_active(False)
+        self.assertFalse(hook.refresh_authority())
+
+        self.assertIsNone(hook.last_dispatch_status)
+        text = self.log_text(logger)
+        self.assertIn("dispatchStatus=NONE", text)
+        self.assertIn("dispatchAttempted=false", text)
+        self.assertIn("authorityAccepted=false", text)
+
+    def test_repeated_refresh_updates_observation_deterministically(self):
+        logger = Mock()
+        clock = [NOW]
+        hook = self.hook(logger=logger, clock=clock)
+        with patch(
+            "backend.money_management.loss_runtime_hook."
+            "dispatch_money_management_runtime_update",
+            side_effect=[
+                self.observed_result(
+                    LossRuntimeDispatchStatus.UNAVAILABLE,
+                    ("metrics unavailable",),
+                ),
+                self.observed_result(
+                    LossRuntimeDispatchStatus.STALE, ("metrics stale",)
+                ),
+            ],
+        ):
+            self.assertFalse(hook.refresh_authority())
+            self.assertIs(
+                hook.last_dispatch_status,
+                LossRuntimeDispatchStatus.UNAVAILABLE,
+            )
+            self.assertEqual(
+                hook.last_dispatch_reason, "metrics unavailable"
+            )
+            self.assertEqual(hook.last_dispatch_at, NOW)
+
+            clock[0] = NOW + timedelta(seconds=5)
+            self.assertFalse(hook.refresh_authority())
+
+        self.assertIs(
+            hook.last_dispatch_status, LossRuntimeDispatchStatus.STALE
+        )
+        self.assertEqual(hook.last_dispatch_reason, "metrics stale")
+        self.assertEqual(
+            hook.last_dispatch_safe_reasons, ("metrics stale",)
+        )
+        self.assertEqual(
+            hook.last_dispatch_at, NOW + timedelta(seconds=5)
         )
 
 

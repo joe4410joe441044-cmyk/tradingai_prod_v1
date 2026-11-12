@@ -112,6 +112,18 @@ def _safe_log(logger, level, event):
         method("Money Management runtime hook: %s", event)
 
 
+_MAX_SAFE_REASON_LENGTH = 200
+
+
+def _sanitize_safe_reason(value):
+    if value is None:
+        return "NONE"
+    text = " ".join(str(value).split())
+    if not text:
+        return "NONE"
+    return text[:_MAX_SAFE_REASON_LENGTH]
+
+
 class MoneyManagementRuntimeHook:
     """Serializes and safely dispatches one application's runtime events."""
 
@@ -143,6 +155,8 @@ class MoneyManagementRuntimeHook:
         self._last_event_key = None
         self._last_dispatch_status = None
         self._last_dispatch_safe_reasons = ()
+        self._last_dispatch_reason = None
+        self._last_dispatch_at = None
         self._timeline_recorder = None
         self._timeline_configuration_version_source = None
         self._lock = RLock()
@@ -163,13 +177,63 @@ class MoneyManagementRuntimeHook:
             return self._last_dispatch_safe_reasons
 
     @property
+    def last_dispatch_reason(self):
+        with self._lock:
+            return self._last_dispatch_reason
+
+    @property
+    def last_dispatch_at(self):
+        with self._lock:
+            return self._last_dispatch_at
+
+    @property
     def dispatcher(self):
         return self._dispatcher
+
+    def _observation_now(self):
+        try:
+            value = self._timestamp_source()
+            if (
+                isinstance(value, datetime)
+                and value.tzinfo is not None
+                and value.utcoffset() is not None
+            ):
+                return value.astimezone(timezone.utc)
+        except Exception:
+            return None
+        return None
+
+    def _log_authority_refresh_observation(
+        self,
+        label,
+        dispatch_status,
+        safe_reason,
+        dispatch_attempted,
+    ):
+        if isinstance(dispatch_status, LossRuntimeDispatchStatus):
+            status_value = dispatch_status.value
+        else:
+            status_value = "NONE"
+        _safe_log(
+            self._logger,
+            "warning",
+            "%s event=MM_AUTHORITY_REFRESH_REJECTED "
+            "dispatchStatus=%s safeReason=%s authorityAccepted=false "
+            "dispatchAttempted=%s source=loss_runtime_hook"
+            % (
+                label,
+                status_value,
+                _sanitize_safe_reason(safe_reason),
+                "true" if dispatch_attempted else "false",
+            ),
+        )
 
     def invalidate_evaluation(self):
         with self._lock:
             self._last_dispatch_status = None
             self._last_dispatch_safe_reasons = ()
+            self._last_dispatch_reason = None
+            self._last_dispatch_at = None
 
     def record_evaluation_status(self, status):
         if not isinstance(status, LossRuntimeDispatchStatus):
@@ -177,6 +241,8 @@ class MoneyManagementRuntimeHook:
         with self._lock:
             self._last_dispatch_status = status
             self._last_dispatch_safe_reasons = ()
+            self._last_dispatch_reason = None
+            self._last_dispatch_at = self._observation_now()
 
     def record_evaluation_result(self, result):
         if not isinstance(result, LossRuntimeDispatchResult):
@@ -187,6 +253,12 @@ class MoneyManagementRuntimeHook:
     def _record_dispatch_result(self, result):
         self._last_dispatch_status = result.status
         self._last_dispatch_safe_reasons = tuple(result.safe_reasons)
+        self._last_dispatch_reason = (
+            self._last_dispatch_safe_reasons[0]
+            if self._last_dispatch_safe_reasons
+            else None
+        )
+        self._last_dispatch_at = self._observation_now()
         if result.status not in (
             LossRuntimeDispatchStatus.APPLIED,
             LossRuntimeDispatchStatus.IDEMPOTENT,
@@ -220,6 +292,8 @@ class MoneyManagementRuntimeHook:
         self._last_dispatch_safe_reasons = (
             "governance projection publication failed",
         )
+        self._last_dispatch_reason = "governance projection publication failed"
+        self._last_dispatch_at = self._observation_now()
         try:
             self._projection_dispatcher.invalidate_runtime_authority(
                 self._app,
@@ -305,6 +379,15 @@ class MoneyManagementRuntimeHook:
                 or not registration.safe_status.runtime_available
             ):
                 self._last_dispatch_status = None
+                self._last_dispatch_safe_reasons = ("authority refresh unavailable",)
+                self._last_dispatch_reason = "authority refresh unavailable"
+                self._last_dispatch_at = self._observation_now()
+                self._log_authority_refresh_observation(
+                    "Authority Refresh Unavailable",
+                    None,
+                    "authority refresh unavailable",
+                    False,
+                )
                 return False
             try:
                 now = self._timestamp_source()
@@ -314,6 +397,19 @@ class MoneyManagementRuntimeHook:
                     or now.utcoffset() is None
                 ):
                     self._last_dispatch_status = None
+                    self._last_dispatch_safe_reasons = (
+                        "authority refresh timestamp invalid",
+                    )
+                    self._last_dispatch_reason = (
+                        "authority refresh timestamp invalid"
+                    )
+                    self._last_dispatch_at = None
+                    self._log_authority_refresh_observation(
+                        "Authority Refresh Unavailable",
+                        None,
+                        "authority refresh timestamp invalid",
+                        False,
+                    )
                     return False
                 request = LossRuntimeMetricsReadRequest(
                     "bot-manager",
@@ -328,21 +424,42 @@ class MoneyManagementRuntimeHook:
                 )
             except Exception:
                 self._record_dispatch_failure("authority refresh failed")
-                _safe_log(self._logger, "warning", "Authority Refresh Failed")
+                self._log_authority_refresh_observation(
+                    "Authority Refresh Failed",
+                    self._last_dispatch_status,
+                    self._last_dispatch_reason,
+                    True,
+                )
                 return False
             if not isinstance(result, LossRuntimeDispatchResult):
                 self._record_dispatch_failure("authority refresh result invalid")
+                self._log_authority_refresh_observation(
+                    "Authority Refresh Failed",
+                    self._last_dispatch_status,
+                    self._last_dispatch_reason,
+                    True,
+                )
                 return False
             self._record_dispatch_result(result)
             if not self._publish_applied_authority(result):
-                _safe_log(self._logger, "warning", "Projection Refresh Failed")
+                self._log_authority_refresh_observation(
+                    "Projection Refresh Failed",
+                    self._last_dispatch_status,
+                    self._last_dispatch_reason,
+                    True,
+                )
                 return False
             authoritative = result.status in (
                 LossRuntimeDispatchStatus.APPLIED,
                 LossRuntimeDispatchStatus.IDEMPOTENT,
             )
             if not authoritative:
-                _safe_log(self._logger, "warning", "Authority Refresh Rejected")
+                self._log_authority_refresh_observation(
+                    "Authority Refresh Rejected",
+                    result.status,
+                    self._last_dispatch_reason,
+                    True,
+                )
             return authoritative
 
     def handle(self, event_type, event_key):
