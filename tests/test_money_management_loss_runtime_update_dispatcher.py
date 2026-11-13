@@ -5,6 +5,9 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from backend.money_management.enums import RiskState
+from backend.money_management.loss_authoritative_runtime_metrics import (
+    AuthoritativeLossRuntimeMetricsState,
+)
 from backend.money_management.loss_application_models import (
     ApplicationLifecycleState,
     CompositionReadinessStatus,
@@ -32,7 +35,10 @@ from backend.money_management.loss_reason_models import (
 from backend.money_management.loss_runtime_evaluation_bridge import (
     LossRuntimeEvaluationBridge,
 )
-from backend.money_management.loss_runtime_event_models import LossRuntimeEventType
+from backend.money_management.loss_runtime_event_models import (
+    LossRuntimeEventAdapterStatus,
+    LossRuntimeEventType,
+)
 from backend.money_management.loss_runtime_integration_models import (
     GovernanceProjection,
     LossLimitRecoveryRequirement,
@@ -47,6 +53,7 @@ from backend.money_management.loss_runtime_metrics_models import (
     LossRuntimeMetricsReadStatus,
 )
 from backend.money_management.loss_runtime_metrics_source import (
+    BotManagerLossRuntimeMetricsSource,
     LossRuntimeMetricsSource,
 )
 from backend.money_management.loss_runtime_store_models import (
@@ -59,6 +66,11 @@ from backend.money_management.loss_runtime_update_dispatcher import (
 )
 from backend.money_management.period_aggregation import period_for
 from backend.money_management.period_models import PeriodType
+from tests.test_money_management_loss_authoritative_runtime_metrics import (
+    Reader as AuthoritativeMetricsReader,
+    observe as observe_authoritative_metrics,
+    persisted as persisted_loss_state,
+)
 
 
 D = Decimal
@@ -470,6 +482,263 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(result_b.status, LossRuntimeDispatchStatus.APPLIED)
         self.assertEqual(lifecycle_a.snapshot.sequence, 2)
         self.assertEqual(lifecycle_b.snapshot.sequence, 2)
+
+
+def authoritative_metrics_state(at=NOW):
+    state = AuthoritativeLossRuntimeMetricsState("runtime-1")
+    state.restore(
+        persisted_loss_state(at=at), StateSource.INITIAL_STATE, at
+    )
+    return state
+
+
+class SnapshotSequenceSource(LossRuntimeMetricsSource):
+    def __init__(self, snapshots, clock):
+        self.snapshots = tuple(snapshots)
+        self.clock = clock
+        self.calls = 0
+
+    def read_metrics(self, request):
+        snapshot = self.snapshots[
+            min(self.calls, len(self.snapshots) - 1)
+        ]
+        self.calls += 1
+        return BotManagerLossRuntimeMetricsSource(
+            AuthoritativeMetricsReader(snapshot),
+            timestamp_source=lambda: self.clock[0],
+        ).read_metrics(request)
+
+
+class LiveAuthoritativeSource(LossRuntimeMetricsSource):
+    def __init__(self, state, clock):
+        self.state = state
+        self.clock = clock
+
+    def read_metrics(self, request):
+        return BotManagerLossRuntimeMetricsSource(
+            AuthoritativeMetricsReader(self.state.snapshot()),
+            timestamp_source=lambda: self.clock[0],
+        ).read_metrics(request)
+
+
+class RuntimeIdempotencyIdentityTests(unittest.TestCase):
+    def test_a_exact_duplicate_is_idempotent(self):
+        value = metrics()
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(Source([value, value]))
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        second = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(second.status, LossRuntimeDispatchStatus.IDEMPOTENT)
+        self.assertEqual(lifecycle.apply_calls, 1)
+
+    def test_b_same_timestamp_new_revision_is_stale(self):
+        timestamp = NOW + timedelta(seconds=1)
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(
+            Source(
+                [
+                    metrics("8", timestamp),
+                    metrics("9", timestamp),
+                ]
+            )
+        )
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        second = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(second.status, LossRuntimeDispatchStatus.STALE)
+        self.assertEqual(second.safe_reasons, ("runtime metrics stale",))
+        self.assertEqual(lifecycle.apply_calls, 1)
+
+    def test_c_same_timestamp_invalidated_evidence_is_stale(self):
+        clock = [NOW + timedelta(seconds=10)]
+        observed_at = NOW + timedelta(seconds=1)
+        state = authoritative_metrics_state()
+        completed = observe_authoritative_metrics(state, at=observed_at)
+        noted = state.note_mm_observation_completed(
+            completed_at=observed_at + timedelta(microseconds=1),
+            metrics_revision=completed.revision,
+            input_scope="PAPER_ENGINE_ACCOUNT",
+            input_completeness="COMPLETE",
+        )
+        invalidated = state.invalidate_mm_observation_evidence(
+            "PAPER_INPUT_MUTATION"
+        )
+        self.assertEqual(invalidated.as_of, completed.as_of)
+        self.assertEqual(invalidated.revision, completed.revision + 1)
+        self.assertTrue(invalidated.observation_valid)
+        self.assertEqual(
+            invalidated.mm_observation_evidence_revision,
+            completed.revision,
+        )
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(
+            SnapshotSequenceSource([noted, invalidated], clock)
+        )
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        second = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(second.status, LossRuntimeDispatchStatus.STALE)
+        self.assertEqual(lifecycle.apply_calls, 1)
+
+    def test_d_same_timestamp_different_event_type_is_idempotent(self):
+        value = metrics()
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(Source([value, value]))
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.POSITION_UPDATE
+        )
+        second = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(second.status, LossRuntimeDispatchStatus.IDEMPOTENT)
+        self.assertEqual(
+            second.event_status,
+            LossRuntimeEventAdapterStatus.IDEMPOTENT.value,
+        )
+        self.assertEqual(lifecycle.apply_calls, 1)
+
+    def test_e_same_timestamp_different_content_fails_closed(self):
+        first_value = metrics()
+        changed_value = metrics(
+            at=first_value.captured_at,
+            equity=D("999"),
+            balance=D("999"),
+            peak_equity=D("1000"),
+            drawdown=D("0.1"),
+        )
+        same_event_lifecycle = Lifecycle()
+        same_event_dispatcher = LossRuntimeUpdateDispatcher(
+            Source([first_value, changed_value])
+        )
+        same_event_app = app_with(same_event_lifecycle)
+        same_event_dispatcher.dispatch(
+            same_event_app,
+            request(),
+            LossRuntimeEventType.BALANCE_UPDATE,
+        )
+        same_event = same_event_dispatcher.dispatch(
+            same_event_app,
+            request(),
+            LossRuntimeEventType.BALANCE_UPDATE,
+        )
+        self.assertIs(same_event.status, LossRuntimeDispatchStatus.CONFLICT)
+        self.assertEqual(same_event_lifecycle.apply_calls, 1)
+
+        other_event_lifecycle = Lifecycle()
+        other_event_dispatcher = LossRuntimeUpdateDispatcher(
+            Source([first_value, changed_value])
+        )
+        other_event_app = app_with(other_event_lifecycle)
+        other_event_dispatcher.dispatch(
+            other_event_app,
+            request(),
+            LossRuntimeEventType.BALANCE_UPDATE,
+        )
+        other_event = other_event_dispatcher.dispatch(
+            other_event_app,
+            request(),
+            LossRuntimeEventType.POSITION_UPDATE,
+        )
+        self.assertIs(other_event.status, LossRuntimeDispatchStatus.STALE)
+        self.assertEqual(other_event_lifecycle.apply_calls, 1)
+
+    def test_f_genuinely_older_timestamp_is_stale(self):
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(
+            Source(
+                [
+                    metrics("8", NOW + timedelta(seconds=2)),
+                    metrics("9", NOW + timedelta(seconds=1)),
+                ]
+            )
+        )
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        older = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(older.status, LossRuntimeDispatchStatus.STALE)
+        self.assertEqual(lifecycle.apply_calls, 1)
+
+    def test_g_next_genuine_observation_recovers(self):
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(
+            Source(
+                [
+                    metrics("8", NOW + timedelta(seconds=1)),
+                    metrics("9", NOW + timedelta(seconds=2)),
+                ]
+            )
+        )
+        first = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        next_observation = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(first.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(
+            next_observation.status, LossRuntimeDispatchStatus.APPLIED
+        )
+        self.assertEqual(lifecycle.apply_calls, 2)
+        self.assertEqual(lifecycle.snapshot.sequence, 3)
+
+    def test_task34_applied_stale_recovery_is_reproduced_and_bounded(self):
+        clock = [NOW + timedelta(seconds=10)]
+        state = authoritative_metrics_state()
+        observe_authoritative_metrics(state, at=NOW + timedelta(seconds=1))
+        lifecycle = Lifecycle()
+        app = app_with(lifecycle)
+        dispatcher = LossRuntimeUpdateDispatcher(
+            LiveAuthoritativeSource(state, clock)
+        )
+        applied = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.POSITION_UPDATE
+        )
+        same_observation_refresh = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        observe_authoritative_metrics(state, at=NOW + timedelta(seconds=2))
+        recovered = dispatcher.dispatch(
+            app, request(), LossRuntimeEventType.BALANCE_UPDATE
+        )
+        self.assertIs(applied.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertIs(
+            same_observation_refresh.status,
+            LossRuntimeDispatchStatus.IDEMPOTENT,
+        )
+        self.assertIs(recovered.status, LossRuntimeDispatchStatus.APPLIED)
+        self.assertNotIn(
+            LossRuntimeDispatchStatus.STALE,
+            (
+                applied.status,
+                same_observation_refresh.status,
+                recovered.status,
+            ),
+        )
+        self.assertEqual(lifecycle.apply_calls, 2)
 
 
 if __name__ == "__main__":

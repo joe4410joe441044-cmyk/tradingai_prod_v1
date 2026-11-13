@@ -400,6 +400,18 @@ class LossRuntimeUpdateDispatcher:
                         snapshot=runtime_snapshot,
                     )
                 if (
+                    reevaluation_token is None
+                    and self._last_snapshot is not None
+                    and signature == self._last_metrics_signature
+                    and metrics.captured_at == self._last_snapshot.updated_at
+                ):
+                    return _result(
+                        LossRuntimeDispatchStatus.IDEMPOTENT,
+                        (),
+                        event_status=LossRuntimeEventAdapterStatus.IDEMPOTENT.value,
+                        snapshot=self._last_snapshot,
+                    )
+                if (
                     self._last_snapshot is not None
                     and metrics.captured_at <= self._last_snapshot.updated_at
                     and reevaluation_token is None
