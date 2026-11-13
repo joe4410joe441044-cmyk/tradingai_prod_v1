@@ -20,7 +20,10 @@ from backend.api.supervisor_monitoring_control import (
 )
 from backend.supervisor.monitoring_read_service import MonitoringReadService
 from backend.supervisor.supervisor_control_plane import get_control_plane
-from backend.supervisor.audit_store import SupervisorAuditStore
+from backend.supervisor.audit_store import (
+    SupervisorAuditStore,
+    resolve_supervisor_audit_path,
+)
 from backend.supervisor.conversation_service import SupervisorConversationService
 from backend.supervisor.ollama_provider import OllamaLocalProvider
 from backend.supervisor.openai_provider import OpenAIStructuredProvider
@@ -97,7 +100,7 @@ def create_supervisor_router(
         create_supervisor_monitoring_control_router(control_plane=control_plane)
     )
 
-    audit_store = SupervisorAuditStore()
+    audit_store = SupervisorAuditStore(resolve_supervisor_audit_path())
     if provider_configuration is None:
         provider_configuration = load_supervisor_provider_configuration()
     if provider_configuration.mode is SupervisorProviderMode.OPENAI:

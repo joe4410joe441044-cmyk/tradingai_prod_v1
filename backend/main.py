@@ -81,6 +81,9 @@ from backend.money_management.loss_application_registration import (
     shutdown_money_management_application,
     startup_money_management_application,
 )
+from backend.money_management.loss_application_settings import (
+    resolve_money_management_timeline_directory,
+)
 from backend.money_management.loss_runtime_hook import (
     register_money_management_runtime_hook,
     unregister_money_management_runtime_hook,
@@ -567,6 +570,7 @@ async def startup_event():
     )
     register_money_management_http_boundary(
         app,
+        timeline_directory=resolve_money_management_timeline_directory(),
         capital_authority_provider=(
             lambda: get_bot_manager().get_official_mm_capital_authority()
         ),

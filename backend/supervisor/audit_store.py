@@ -1,6 +1,6 @@
 """Bounded append-only SQLite store for sanitized Supervisor events."""
 from __future__ import annotations
-import base64, json, sqlite3, threading
+import base64, json, os, sqlite3, threading
 from pathlib import Path
 from .failure_codes import SupervisorBoundaryError, SupervisorFailureCode
 from .history_contracts import SupervisorHistoryEvent, SupervisorHistoryPage
@@ -8,7 +8,41 @@ from .history_contracts import SupervisorHistoryEvent, SupervisorHistoryPage
 SUPERVISOR_AUDIT_MAX_EVENTS=5000
 SUPERVISOR_AUDIT_MAX_LIMIT=100
 DEFAULT_SUPERVISOR_AUDIT_PATH=Path("logs/runtime/supervisor_audit.sqlite3")
+SUPERVISOR_AUDIT_PATH_ENVIRONMENT_VARIABLE="AI_SUPERVISOR_AUDIT_PATH"
 _SECRET_MARKERS=("API_KEY","APIKEY","SECRET","TOKEN","PASSWORD","PRIVATE_KEY")
+
+
+def resolve_supervisor_audit_path(environ=None):
+    source = os.environ if environ is None else environ
+    configured = source.get(SUPERVISOR_AUDIT_PATH_ENVIRONMENT_VARIABLE)
+    if configured is None:
+        return DEFAULT_SUPERVISOR_AUDIT_PATH
+    if not isinstance(configured, str) or not configured.strip():
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.STORE_UNAVAILABLE, "audit store unavailable"
+        )
+    path = Path(configured)
+    if not path.is_absolute():
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.STORE_UNAVAILABLE, "audit store unavailable"
+        )
+    try:
+        parent = path.parent.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.STORE_UNAVAILABLE, "audit store unavailable"
+        ) from None
+    if parent != path.parent or not parent.is_dir() or path.is_symlink():
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.STORE_UNAVAILABLE, "audit store unavailable"
+        )
+    if path.exists() and not path.is_file():
+        raise SupervisorBoundaryError(
+            SupervisorFailureCode.STORE_UNAVAILABLE, "audit store unavailable"
+        )
+    return path
+
+
 def _safe_question(value):
     text=str(value).strip()
     return "[REDACTED]" if any(marker in text.upper() for marker in _SECRET_MARKERS) else text

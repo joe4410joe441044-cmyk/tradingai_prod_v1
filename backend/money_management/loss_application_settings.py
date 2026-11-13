@@ -101,3 +101,15 @@ def resolve_loss_limit_application_configuration(
         persistence_enabled=True,
         persistence_path=resolved,
     )
+
+
+def resolve_money_management_timeline_directory(
+    settings=None, environ=None, repository_root=None
+):
+    """Use the validated MM persistence directory for timeline evidence."""
+    configuration = resolve_loss_limit_application_configuration(
+        settings=settings,
+        environ=environ,
+        repository_root=repository_root,
+    )
+    return configuration.persistence_path if configuration.enabled else None

@@ -4,6 +4,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 from collections import deque
 from logging.handlers import RotatingFileHandler
@@ -38,7 +39,30 @@ BASE_DIR = os.path.dirname(
     )
 )
 
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+LOG_DIRECTORY_ENVIRONMENT_VARIABLE = "TRADINGAI_LOG_DIR"
+
+
+def resolve_log_directory(environ=None, base_dir=None):
+    source = os.environ if environ is None else environ
+    default_base = Path(BASE_DIR if base_dir is None else base_dir)
+    configured = source.get(LOG_DIRECTORY_ENVIRONMENT_VARIABLE)
+    if configured is None:
+        return default_base / "logs"
+    if not isinstance(configured, str) or not configured.strip():
+        raise RuntimeError("configured log directory is invalid")
+    path = Path(configured)
+    if not path.is_absolute():
+        raise RuntimeError("configured log directory must be absolute")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise RuntimeError("configured log directory is unavailable") from None
+    if path.is_symlink() or not resolved.is_dir() or resolved != path:
+        raise RuntimeError("configured log directory is unsafe")
+    return resolved
+
+
+LOG_DIR = os.fspath(resolve_log_directory())
 
 ISOLATED_STDIO_ONLY = _env_flag(
     "TRADINGAI_ISOLATED_STDIO_ONLY"
