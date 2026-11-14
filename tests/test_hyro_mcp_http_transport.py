@@ -365,3 +365,122 @@ def test_diagnostic_rejects_every_tool_except_list_challenges_before_network():
     with pytest.raises(PermissionError, match="MCP_DIAGNOSTIC_TOOL_NOT_ALLOWED"):
         subject.call_tool_diagnostic("fixture.place_order", {})
     assert session.calls == []
+
+
+def observed_list_payload(data=None):
+    return {
+        "data": [] if data is None else data,
+        "page": 1,
+        "pageSize": 100,
+        "total": 0,
+        "totalPages": 0,
+    }
+
+
+def test_list_challenges_parses_cc6e_text_envelope_but_keeps_semantics_unknown():
+    payload = observed_list_payload([
+        {"identifier": "account-identifier-must-not-escape", "token": DUMMY_TOKEN},
+    ])
+    subject, session = diagnostic_transport({
+        "content": [{"type": "text", "text": json.dumps(payload)}],
+        "isError": False,
+    })
+
+    result = subject.call_list_challenges({"page": 1, "pageSize": 100})
+
+    assert result.data == tuple(payload["data"])
+    assert result.result_format == "CONTENT_TEXT_JSON_OBJECT"
+    assert result.list_completeness == "UNKNOWN"
+    assert result.account_match == "UNKNOWN"
+    assert [call[1]["json"]["method"] for call in session.calls].count("tools/call") == 1
+    assert "account-identifier-must-not-escape" not in repr(result)
+    assert DUMMY_TOKEN not in repr(result)
+
+
+def test_list_challenges_preserves_structured_content_and_equivalent_dual_formats():
+    payload = observed_list_payload()
+    structured, _ = diagnostic_transport({"structuredContent": payload, "isError": False})
+    structured_result = structured.call_list_challenges({})
+    assert structured_result.result_format == "STRUCTURED_CONTENT"
+    assert structured_result.list_completeness == "UNKNOWN"
+
+    dual, _ = diagnostic_transport({
+        "structuredContent": payload,
+        "content": [{"type": "text", "text": json.dumps(payload)}],
+        "isError": False,
+    })
+    dual_result = dual.call_list_challenges({})
+    assert dual_result.result_format == "STRUCTURED_AND_TEXT_EQUIVALENT"
+    assert dual_result.list_completeness == "UNKNOWN"
+
+
+def test_list_challenges_rejects_conflicting_dual_formats():
+    structured = observed_list_payload()
+    content = {**structured, "total": 1}
+    subject, _ = diagnostic_transport({
+        "structuredContent": structured,
+        "content": [{"type": "text", "text": json.dumps(content)}],
+        "isError": False,
+    })
+
+    with pytest.raises(HyroMcpHttpError, match="HYRO_MCP_TOOL_RESULT_FORMAT_CONFLICT"):
+        subject.call_list_challenges({})
+
+
+@pytest.mark.parametrize(
+    ("tool_result", "safe_code"),
+    [
+        ({"isError": True, "content": [{"type": "text", "text": "{}"}]},
+         "HYRO_MCP_TOOL_REPORTED_ERROR"),
+        ({"content": []}, "HYRO_MCP_TOOL_CONTENT_BLOCKS_INVALID"),
+        ({"content": [{"type": "text", "text": "{}"}, {"type": "text", "text": "{}"}]},
+         "HYRO_MCP_TOOL_CONTENT_BLOCKS_INVALID"),
+        ({"content": [{"type": "text", "text": "not-json"}]},
+         "HYRO_MCP_TOOL_CONTENT_TEXT_JSON_INVALID"),
+        ({"content": [{"type": "text", "text": '{"page": 1, "page": 2}'}]},
+         "HYRO_MCP_TOOL_CONTENT_TEXT_JSON_INVALID"),
+        ({"content": [{"type": "text", "text": "[]"}]},
+         "HYRO_MCP_TOOL_CONTENT_TEXT_JSON_NOT_OBJECT"),
+        ({"content": [{"type": "text", "text": "{}", "unknown": "private"}]},
+         "HYRO_MCP_TOOL_CONTENT_BLOCK_INVALID"),
+        ({"content": [{"type": "text", "text": "{}"}], "unknown": "private"},
+         "HYRO_MCP_TOOL_RESULT_FIELDS_UNCONFIRMED"),
+    ],
+)
+def test_list_challenges_rejects_invalid_or_ambiguous_result_envelopes(tool_result, safe_code):
+    subject, _ = diagnostic_transport(tool_result)
+    with pytest.raises(HyroMcpHttpError, match=safe_code) as captured:
+        subject.call_list_challenges({})
+    assert "private" not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {**observed_list_payload(), "fixtureOnly": []},
+        {**observed_list_payload(), "data": {}},
+        {**observed_list_payload(), "page": True},
+        {**observed_list_payload(), "pageSize": "100"},
+        {**observed_list_payload(), "total": None},
+        {**observed_list_payload(), "totalPages": 1.0},
+    ],
+)
+def test_list_challenges_accepts_only_observed_top_level_fields_and_types(payload):
+    subject, _ = diagnostic_transport({
+        "content": [{"type": "text", "text": json.dumps(payload)}],
+        "isError": False,
+    })
+    with pytest.raises(HyroMcpHttpError, match="HYRO_MCP_LIST_CHALLENGES_"):
+        subject.call_list_challenges({})
+
+
+def test_list_challenges_empty_first_page_is_not_treated_as_complete_or_account_match():
+    subject, _ = diagnostic_transport({
+        "content": [{"type": "text", "text": json.dumps(observed_list_payload())}],
+        "isError": False,
+    })
+    result = subject.call_list_challenges({})
+    assert result.data == ()
+    assert result.list_completeness == "UNKNOWN"
+    assert result.account_match == "UNKNOWN"

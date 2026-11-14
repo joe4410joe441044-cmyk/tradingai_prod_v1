@@ -28,6 +28,9 @@ _SAFE_TOOL_NAME = re.compile(r"^[^\x00-\x20\x7f]{1,256}$")
 _MAX_TOKEN_LENGTH = 16_384
 _MAX_DIAGNOSTIC_TEXT_BYTES = 250_000
 _DIAGNOSTIC_TOOL_NAME = "list_challenges"
+_LIST_CHALLENGES_PAYLOAD_FIELDS = frozenset(
+    {"data", "page", "pageSize", "total", "totalPages"}
+)
 _FIXED_RESULT_FIELDS = frozenset({"structuredContent", "content", "isError"})
 _FIXED_CONTENT_BLOCK_FIELDS = frozenset({"type", "text"})
 _FIXED_PAYLOAD_FIELDS = frozenset(
@@ -130,6 +133,33 @@ class HyroMcpToolResultDiagnostics:
     text_json_parsed: bool
     payload_field_types: tuple[tuple[str, str], ...]
     unknown_payload_field_count: int
+
+
+@dataclass(frozen=True, repr=False)
+class HyroListChallengesResult:
+    """Parsed envelope with still-unconfirmed list semantics.
+
+    Challenge values are intentionally omitted from ``repr``. The observed
+    envelope establishes only field names and types; it does not establish
+    item meaning, account identity, or the terminal-page contract.
+    """
+
+    data: tuple[Any, ...] = field(repr=False)
+    page: int = field(repr=False)
+    page_size: int = field(repr=False)
+    total: int = field(repr=False)
+    total_pages: int = field(repr=False)
+    result_format: str
+    list_completeness: str = "UNKNOWN"
+    account_match: str = "UNKNOWN"
+
+    def __repr__(self) -> str:
+        return (
+            "HyroListChallengesResult(<values-redacted>, "
+            f"result_format={self.result_format!r}, "
+            f"list_completeness={self.list_completeness!r}, "
+            f"account_match={self.account_match!r})"
+        )
 
 
 class HyroMcpHttpTransport(HyroMcpReadTransport):
@@ -421,6 +451,16 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
             raise PermissionError("MCP_DIAGNOSTIC_TOOL_NOT_ALLOWED")
         return self._diagnose_tool_result(self._call_allowed_tool(tool_name, arguments))
 
+    def call_list_challenges(
+        self,
+        arguments: Mapping[str, Any],
+    ) -> HyroListChallengesResult:
+        """Call only ``list_challenges`` and validate its observed envelope."""
+
+        result = self._call_allowed_tool(_DIAGNOSTIC_TOOL_NAME, arguments)
+        payload, result_format = self._list_challenges_payload_object(result)
+        return self._validate_list_challenges_payload(payload, result_format)
+
     def _call_allowed_tool(
         self,
         tool_name: str,
@@ -516,29 +556,10 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
             return HyroMcpToolResultDiagnostics(
                 classification="CONTENT_TEXT_TYPE_INVALID", **content_base
             )
-        try:
-            encoded = text.encode("utf-8")
-        except UnicodeEncodeError:
+        parse_classification, parsed = cls._strict_text_json_object(text)
+        if parsed is None:
             return HyroMcpToolResultDiagnostics(
-                classification="CONTENT_TEXT_ENCODING_INVALID", **content_base
-            )
-        if len(encoded) > _MAX_DIAGNOSTIC_TEXT_BYTES:
-            return HyroMcpToolResultDiagnostics(
-                classification="CONTENT_TEXT_SIZE_EXCEEDED", **content_base
-            )
-        try:
-            parsed = json.loads(
-                text,
-                object_pairs_hook=cls._strict_json_object,
-                parse_constant=cls._reject_json_constant,
-            )
-        except (UnicodeError, ValueError, json.JSONDecodeError):
-            return HyroMcpToolResultDiagnostics(
-                classification="CONTENT_TEXT_JSON_INVALID", **content_base
-            )
-        if not isinstance(parsed, Mapping):
-            return HyroMcpToolResultDiagnostics(
-                classification="CONTENT_TEXT_JSON_NOT_OBJECT", **content_base
+                classification=parse_classification, **content_base
             )
         return HyroMcpToolResultDiagnostics(
             classification="CONTENT_TEXT_JSON_OBJECT",
@@ -554,6 +575,97 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
                 ),
             },
         )
+
+    @classmethod
+    def _list_challenges_payload_object(
+        cls,
+        result: Mapping[str, Any],
+    ) -> tuple[Mapping[str, Any], str]:
+        if cls._unknown_field_count(result, _FIXED_RESULT_FIELDS):
+            raise HyroMcpHttpError("HYRO_MCP_TOOL_RESULT_FIELDS_UNCONFIRMED")
+        is_error = result.get("isError", False)
+        if not isinstance(is_error, bool):
+            raise HyroMcpHttpError("HYRO_MCP_TOOL_IS_ERROR_INVALID")
+        if is_error:
+            raise HyroMcpHttpError("HYRO_MCP_TOOL_REPORTED_ERROR")
+
+        has_structured = "structuredContent" in result
+        has_content = "content" in result
+        structured = result.get("structuredContent")
+        if has_structured and not isinstance(structured, Mapping):
+            raise HyroMcpHttpError("HYRO_MCP_TOOL_STRUCTURED_CONTENT_INVALID")
+
+        content_payload: Mapping[str, Any] | None = None
+        if has_content:
+            content = result.get("content")
+            if not isinstance(content, list) or len(content) != 1:
+                raise HyroMcpHttpError("HYRO_MCP_TOOL_CONTENT_BLOCKS_INVALID")
+            block = content[0]
+            if (
+                not isinstance(block, Mapping)
+                or cls._unknown_field_count(block, _FIXED_CONTENT_BLOCK_FIELDS)
+                or block.get("type") != "text"
+                or not isinstance(block.get("text"), str)
+            ):
+                raise HyroMcpHttpError("HYRO_MCP_TOOL_CONTENT_BLOCK_INVALID")
+            classification, content_payload = cls._strict_text_json_object(block["text"])
+            if content_payload is None:
+                raise HyroMcpHttpError(f"HYRO_MCP_TOOL_{classification}")
+
+        if has_structured and has_content:
+            if dict(structured) != dict(content_payload or {}):
+                raise HyroMcpHttpError("HYRO_MCP_TOOL_RESULT_FORMAT_CONFLICT")
+            return structured, "STRUCTURED_AND_TEXT_EQUIVALENT"
+        if has_structured:
+            return structured, "STRUCTURED_CONTENT"
+        if content_payload is not None:
+            return content_payload, "CONTENT_TEXT_JSON_OBJECT"
+        raise HyroMcpHttpError("HYRO_MCP_TOOL_SCHEMA_UNCONFIRMED")
+
+    @classmethod
+    def _validate_list_challenges_payload(
+        cls,
+        payload: Mapping[str, Any],
+        result_format: str,
+    ) -> HyroListChallengesResult:
+        if frozenset(payload) != _LIST_CHALLENGES_PAYLOAD_FIELDS:
+            raise HyroMcpHttpError("HYRO_MCP_LIST_CHALLENGES_FIELDS_UNCONFIRMED")
+        if not isinstance(payload.get("data"), list):
+            raise HyroMcpHttpError("HYRO_MCP_LIST_CHALLENGES_TYPES_INVALID")
+        for name in ("page", "pageSize", "total", "totalPages"):
+            if type(payload.get(name)) is not int:
+                raise HyroMcpHttpError("HYRO_MCP_LIST_CHALLENGES_TYPES_INVALID")
+        return HyroListChallengesResult(
+            data=tuple(payload["data"]),
+            page=payload["page"],
+            page_size=payload["pageSize"],
+            total=payload["total"],
+            total_pages=payload["totalPages"],
+            result_format=result_format,
+        )
+
+    @classmethod
+    def _strict_text_json_object(
+        cls,
+        text: str,
+    ) -> tuple[str, Mapping[str, Any] | None]:
+        try:
+            encoded = text.encode("utf-8")
+        except UnicodeEncodeError:
+            return "CONTENT_TEXT_ENCODING_INVALID", None
+        if len(encoded) > _MAX_DIAGNOSTIC_TEXT_BYTES:
+            return "CONTENT_TEXT_SIZE_EXCEEDED", None
+        try:
+            parsed = json.loads(
+                text,
+                object_pairs_hook=cls._strict_json_object,
+                parse_constant=cls._reject_json_constant,
+            )
+        except (UnicodeError, ValueError, json.JSONDecodeError):
+            return "CONTENT_TEXT_JSON_INVALID", None
+        if not isinstance(parsed, Mapping):
+            return "CONTENT_TEXT_JSON_NOT_OBJECT", None
+        return "CONTENT_TEXT_JSON_OBJECT", parsed
 
     @staticmethod
     def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
