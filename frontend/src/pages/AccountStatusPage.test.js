@@ -26,12 +26,18 @@ const loadModule = async () => {
     const usePollingStub = moduleUrl(
         "export default()=>({data:{data:null},loading:false,error:false});",
     );
+    const hyroStatusStub = moduleUrl("export default()=>null;");
+    const hyroFeatureStub = moduleUrl("export const HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW=false;");
+    const hyroContextStub = moduleUrl("export const useHyroTrialOperator=()=>({enabled:false,accountMode:'KUCOIN'});");
     try {
         await compilePositionModules(temporary);
         await writeFile(output, transformed.code
             .replace('"../components/runtime/CurrentPositionCard.jsx"', '"./CurrentPositionCard.mjs"')
             .replace('"../components/runtime/LastPositionEventCard.jsx"', '"./LastPositionEventCard.mjs"')
             .replace('from "../hooks/usePolling";', `from "${usePollingStub}";`)
+            .replace('from "../components/prop-accounts/HyroTrialAccountStatus.jsx";', `from "${hyroStatusStub}";`)
+            .replace('from "../features/prop-accounts/hyroTrialOperatorFeature.js";', `from "${hyroFeatureStub}";`)
+            .replace('from "../state/hyro-trial/HyroTrialOperatorContext.jsx";', `from "${hyroContextStub}";`)
             .replace('from "../features/prop-accounts/propIsolatedDemoFeature.js";', `from "${featureUrl}";`)
             .replace('from "../utils/appNavigation.js";', `from "${navigationUrl}";`)
             .replace('from "../components/runtime/PaperCapitalControl";', `from "${paperCapitalStub}";`)

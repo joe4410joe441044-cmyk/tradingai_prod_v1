@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useHyroTrialOperator } from "../../state/hyro-trial/HyroTrialOperatorContext.jsx";
+import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "../../features/prop-accounts/hyroTrialOperatorFeature.js";
 import "./prop-accounts.css";
 
 const shown = (value) => value || "未確認";
@@ -177,7 +178,7 @@ function HyroTrialPanel() {
     const operator = useHyroTrialOperator();
     return (
         <div className="terminal-panel operation-console hyro-trial-console" data-testid="hyro-trial-operator-panel">
-            <header className="hyro-trial-hero"><span>DEFAULT OFF · ISOLATED OPERATOR PREVIEW</span><h2>HyroTrader 無料トライアル発行前シミュレーション</h2><p>この画面は架空データ専用です。実口座、公式ルール、MCP再照会、取引権限へ接続しません。</p></header>
+            <header className="hyro-trial-hero"><span>FEATURE-GATED · SAMPLE SIMULATION ONLY</span><h2>HyroTrader 無料トライアル発行前シミュレーション</h2><p>この画面は架空データ専用です。実口座、公式ルール、MCP再照会、取引権限へ接続しません。</p></header>
             <div className="hyro-trial-grid">
                 <ChallengeSelection operator={operator} />
                 <Settings operator={operator} />
@@ -190,8 +191,18 @@ function HyroTrialPanel() {
 export default function HyroTrialOperationSurface({ children }) {
     const operator = useHyroTrialOperator();
     if (!operator.enabled) return children;
+    const kucoinControls = HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW ? (
+        <fieldset
+            className="operation-auth-gate operation-auth-gate--preview-disabled"
+            data-testid="preview-disabled-kucoin-controls"
+            disabled
+        >
+            <legend>KuCoin既存PAPER / LIVE操作（隔離プレビューでは操作無効）</legend>
+            {children}
+        </fieldset>
+    ) : children;
     return <>
         <AccountSwitch />
-        {operator.accountMode === "HYRO" ? <HyroTrialPanel /> : children}
+        {operator.accountMode === "HYRO" ? <HyroTrialPanel /> : kucoinControls}
     </>;
 }

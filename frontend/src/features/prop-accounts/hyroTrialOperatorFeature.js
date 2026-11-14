@@ -1,10 +1,17 @@
-export const HYRO_TRIAL_OPERATOR_FLAG = "VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED";
+export const HYRO_TRIAL_OPERATOR_FLAG = "VITE_HYRO_TRIAL_OPERATOR_ENABLED";
+export const HYRO_TRIAL_OPERATOR_PREVIEW_FLAG = "VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED";
 
 export const isHyroTrialOperatorEnabled = (environment = import.meta.env || {}) => (
     environment[HYRO_TRIAL_OPERATOR_FLAG] === "true"
+    || environment[HYRO_TRIAL_OPERATOR_PREVIEW_FLAG] === "true"
+);
+
+export const isHyroTrialOperatorIsolatedPreview = (environment = import.meta.env || {}) => (
+    environment[HYRO_TRIAL_OPERATOR_PREVIEW_FLAG] === "true"
 );
 
 export const HYRO_TRIAL_OPERATOR_ENABLED = isHyroTrialOperatorEnabled();
+export const HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW = isHyroTrialOperatorIsolatedPreview();
 
 export const HYRO_SAMPLE_CHALLENGES = Object.freeze([
     Object.freeze({

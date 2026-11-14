@@ -19,7 +19,7 @@ import {
 } from "./features/prop-accounts/propIsolatedDemoFeature.js";
 import { resolveAppPath } from "./appRouteModel.js";
 import { HyroTrialOperatorProvider } from "./state/hyro-trial/HyroTrialOperatorContext.jsx";
-import { HYRO_TRIAL_OPERATOR_ENABLED } from "./features/prop-accounts/hyroTrialOperatorFeature.js";
+import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "./features/prop-accounts/hyroTrialOperatorFeature.js";
 import { DashboardMarketContextProvider } from "./state/dashboard-market/DashboardMarketContext";
 import {
     startWebSocketRuntime,
@@ -63,7 +63,7 @@ export default function App() {
                                 : currentPath === TRADE_HISTORY_PATH
                                     ? TradeHistoryPage
                                     : Dashboard;
-    const runtimeSuppressed = HYRO_TRIAL_OPERATOR_ENABLED
+    const runtimeSuppressed = HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW
         || currentPath === AI_ADVISOR_PATH
         || currentPath === PROP_ISOLATED_DEMO_PATH;
 

@@ -6,7 +6,7 @@ import {
     subscribeOperatorAuthStatus,
 } from "../../features/auth/operatorAuth";
 import OperatorLogin from "./OperatorLogin";
-import { HYRO_TRIAL_OPERATOR_ENABLED } from "../../features/prop-accounts/hyroTrialOperatorFeature.js";
+import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "../../features/prop-accounts/hyroTrialOperatorFeature.js";
 
 export default function OperationAuthGate({
     authClient = null,
@@ -20,18 +20,7 @@ export default function OperationAuthGate({
         subscribeOperatorAuthStatus((next) => setStatus(next))
     ), []);
 
-    if (HYRO_TRIAL_OPERATOR_ENABLED) {
-        return (
-            <fieldset
-                className="operation-auth-gate operation-auth-gate--preview-disabled"
-                data-testid="preview-disabled-kucoin-controls"
-                disabled
-            >
-                <legend>KuCoin既存PAPER / LIVE操作（隔離プレビューでは操作無効）</legend>
-                {children}
-            </fieldset>
-        );
-    }
+    if (HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW) return children;
 
     const authenticated = status === OPERATOR_AUTH_STATE.AUTHENTICATED;
 

@@ -6,6 +6,7 @@ import {
     HYRO_SAMPLE_CHALLENGES,
     deriveHyroTrialReadiness,
     isHyroTrialOperatorEnabled,
+    isHyroTrialOperatorIsolatedPreview,
     syntheticHyroTrialClient,
     validateHyroTrialSettings,
 } from "./hyroTrialOperatorFeature.js";
@@ -17,11 +18,16 @@ const validSettings = Object.freeze({
     maximumLossPercent: "10",
 });
 
-test("Hyro trial operator preview is strict default OFF", () => {
+test("Hyro trial operator flags are strict default OFF and separate production from preview", () => {
     assert.equal(isHyroTrialOperatorEnabled({}), false);
+    assert.equal(isHyroTrialOperatorIsolatedPreview({}), false);
+    assert.equal(isHyroTrialOperatorEnabled({ VITE_HYRO_TRIAL_OPERATOR_ENABLED: "true" }), true);
+    assert.equal(isHyroTrialOperatorIsolatedPreview({ VITE_HYRO_TRIAL_OPERATOR_ENABLED: "true" }), false);
     assert.equal(isHyroTrialOperatorEnabled({ VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED: "true" }), true);
+    assert.equal(isHyroTrialOperatorIsolatedPreview({ VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED: "true" }), true);
     for (const value of ["TRUE", "1", "yes", " true ", ""]) {
-        assert.equal(isHyroTrialOperatorEnabled({ VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED: value }), false);
+        assert.equal(isHyroTrialOperatorEnabled({ VITE_HYRO_TRIAL_OPERATOR_ENABLED: value }), false);
+        assert.equal(isHyroTrialOperatorIsolatedPreview({ VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED: value }), false);
     }
 });
 
@@ -60,9 +66,11 @@ test("normal app integration is feature-gated and Hyro branch excludes productio
     assert.match(app, /HyroTrialOperatorProvider/);
     assert.match(dashboard, /HyroTrialOperationSurface/);
     const authGate = await readFile(new URL("../../components/auth/OperationAuthGate.jsx", import.meta.url), "utf8");
-    assert.match(authGate, /preview-disabled-kucoin-controls/);
-    assert.match(authGate, /<fieldset/);
-    assert.match(authGate, /disabled/);
+    assert.match(authGate, /HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW/);
+    assert.doesNotMatch(authGate, /preview-disabled-kucoin-controls/);
+    assert.ok(dashboard.indexOf("<OperationAuthGate>") < dashboard.indexOf("<HyroTrialOperationSurface>"));
+    assert.match(surface, /preview-disabled-kucoin-controls/);
+    assert.match(surface, /HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW/);
     assert.match(surface, /通常口座 — KuCoin/);
     assert.match(surface, /PROP口座 — HyroTrader/);
     assert.match(surface, /注文を送らないシミュレーション/);

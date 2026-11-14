@@ -22,7 +22,7 @@ import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMa
 import BotControl from "../components/BotControl";
 import OperationAuthGate from "../components/auth/OperationAuthGate";
 import HyroTrialOperationSurface from "../components/prop-accounts/HyroTrialOperationSurface.jsx";
-import { HYRO_TRIAL_OPERATOR_ENABLED } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
+import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
 import {
     deriveLiveCapitalAuthority,
     pendingOrderAuthorityValue,
@@ -48,7 +48,7 @@ const PREVIEW_BOT_STATUS = Object.freeze({
 });
 
 const fetchBotStatus = async () => {
-    if (HYRO_TRIAL_OPERATOR_ENABLED) {
+    if (HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW) {
         return { data: PREVIEW_BOT_STATUS, receivedAt: Date.now() };
     }
     const response = await fetch(API.botStatus());
@@ -386,8 +386,8 @@ useEffect(() => {
 
                     <div className="operations-top-section operations-bot-control">
 
-                        <HyroTrialOperationSurface>
-                            <OperationAuthGate>
+                        <OperationAuthGate>
+                            <HyroTrialOperationSurface>
 
                             <BotControl
 
@@ -486,7 +486,7 @@ useEffect(() => {
                                 setExecutionEnabled
                             }
 
-                            moneyManagementEnabled={!HYRO_TRIAL_OPERATOR_ENABLED}
+                            moneyManagementEnabled={!HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW}
 
                             onLegacyConfigChange={(update) => setTradeSettings((previous) => ({
                                 ...previous,
@@ -495,8 +495,8 @@ useEffect(() => {
 
                             />
 
-                            </OperationAuthGate>
-                        </HyroTrialOperationSurface>
+                            </HyroTrialOperationSurface>
+                        </OperationAuthGate>
 
                     </div>
 

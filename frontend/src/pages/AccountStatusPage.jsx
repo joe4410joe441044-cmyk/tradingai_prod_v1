@@ -7,7 +7,7 @@ import {
     PROP_ISOLATED_DEMO_PATH,
 } from "../features/prop-accounts/propIsolatedDemoFeature.js";
 import HyroTrialAccountStatus from "../components/prop-accounts/HyroTrialAccountStatus.jsx";
-import { HYRO_TRIAL_OPERATOR_ENABLED } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
+import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
 import { useHyroTrialOperator } from "../state/hyro-trial/HyroTrialOperatorContext.jsx";
 import { navigateTo } from "../utils/appNavigation.js";
 import PaperCapitalControl from "../components/runtime/PaperCapitalControl";
@@ -59,7 +59,7 @@ const PREVIEW_ACCOUNT_STATUS = Object.freeze({
     executionEnabled: false,
 });
 
-const fetchAccountStatus = HYRO_TRIAL_OPERATOR_ENABLED
+const fetchAccountStatus = HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW
     ? async () => ({ data: PREVIEW_ACCOUNT_STATUS, receivedAt: Date.now() })
     : fetchBotStatus;
 
