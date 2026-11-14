@@ -15,8 +15,8 @@ import {
     createPropAccountsFixture,
 } from "./propAccountsFixtures.js";
 
-test("ten required scenarios normalize with independent axes and disabled execution", () => {
-    assert.equal(PROP_FIXTURE_SCENARIOS.length, 10);
+test("required scenarios plus Hyro MCP mock normalize with disabled execution", () => {
+    assert.equal(PROP_FIXTURE_SCENARIOS.length, 11);
     for (const scenario of PROP_FIXTURE_SCENARIOS) {
         const view = normalizePropAccountsView(createPropAccountsFixture({ scenarioId: scenario.id }));
         assert.equal(view.status, "READY", scenario.id);
@@ -26,7 +26,7 @@ test("ten required scenarios normalize with independent axes and disabled execut
         assert.equal(account.executionCapability.authorityState, "DISABLED");
         assert.deepEqual(
             [account.accountSummary.accountId, account.accountSummary.identityRevision, account.accountSummary.environment, account.accountSummary.platform, account.accountSummary.program, account.accountSummary.planId, account.accountSummary.phase, account.accountSummary.currency],
-            [PROP_ACCOUNT_ID, 3, "EXTERNAL_SIMULATION", "BYBIT_DEMO", "HYROTRADER", "SYNTHETIC-NOT-OFFICIAL", scenario.id === "not_configured" ? "UNKNOWN" : "CHALLENGE", "USDT"],
+            [PROP_ACCOUNT_ID, 3, "EXTERNAL_SIMULATION", scenario.id === "hyro_mcp_mock_read" ? "HYRO_MCP_MOCK_NOT_OFFICIAL" : "BYBIT_DEMO", "HYROTRADER", scenario.id === "hyro_mcp_mock_read" ? "ONE-STEP-MOCK-NOT-OFFICIAL" : "SYNTHETIC-NOT-OFFICIAL", scenario.id === "not_configured" ? "UNKNOWN" : "CHALLENGE", "USDT"],
         );
         assert.equal(account.executionCapability.grantsExecutionAuthority, false);
         assert.equal(account.aiContext.status, "NOT_INTEGRATED");
@@ -100,6 +100,16 @@ test("empty successful collections differ from failed collections", () => {
     assert.deepEqual([failed.positions.quality, failed.positions.items.length], ["FAILED", 0]);
 });
 
+
+test("Hyro MCP mock displays conditional reads but official rules stay unknown", () => {
+    const account = selectedAccount(normalizePropAccountsView(createPropAccountsFixture({ scenarioId: "hyro_mcp_mock_read" })));
+    assert.equal(account.accountSummary.platform, "HYRO_MCP_MOCK_NOT_OFFICIAL");
+    assert.equal(account.connection.state, "CONNECTED_READ_ONLY");
+    assert.equal(account.conditionalOrders.quality, "COMPLETE");
+    assert.equal(account.conditionalOrders.items.length, 1);
+    assert.equal(account.propRules.readiness, "RULES_UNKNOWN");
+    assert.equal(account.executionCapability.grantsExecutionAuthority, false);
+});
 test("invalid envelope and missing viewed account fail closed without fallback", () => {
     const fixture = createPropAccountsFixture();
     const invalidEnvelope = normalizePropAccountsView({ ...fixture, fixture: { enabled: false } });

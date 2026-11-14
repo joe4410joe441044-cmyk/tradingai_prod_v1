@@ -36,6 +36,7 @@ const normalAccount = Object.freeze({
     },
     positions: { quality: "COMPLETE", items: [], missingFields: [] },
     openOrders: { quality: "COMPLETE", items: [], missingFields: [] },
+    conditionalOrders: { quality: "COMPLETE", items: [], missingFields: [] },
     propRules: { readiness: "NOT_APPLICABLE", limits: [], unknownFields: [] },
     executionCapability: { reasons: ["NORMAL_FIXTURE_VIEW_ONLY"] },
     aiContext: { freshness: "UNKNOWN", missingFields: ["canonicalContextBinding"] },
@@ -75,6 +76,7 @@ const propBase = Object.freeze({
     },
     positions: { quality: "UNKNOWN", items: [], missingFields: ["positions"] },
     openOrders: { quality: "UNKNOWN", items: [], missingFields: ["openOrders"] },
+    conditionalOrders: { quality: "UNKNOWN", items: [], missingFields: ["conditionalOrders"] },
     propRules: {
         readiness: "RULES_UNKNOWN",
         ruleSetId: null,
@@ -135,6 +137,18 @@ const connectedOrders = {
     }],
 };
 
+const connectedConditionalOrders = {
+    quality: "COMPLETE",
+    missingFields: [],
+    items: [{
+        symbol: "BTCUSDT", side: "SELL",
+        quantity: "0.000000010000000001", quantityUnit: "BTC",
+        price: money("59000.00000001", "USDT"),
+        status: "UNTRIGGERED",
+    }],
+};
+
+
 const sampleRules = {
     readiness: "READY",
     ruleSetId: "fixture-rule-set",
@@ -158,6 +172,7 @@ const mergeProp = (overrides = {}) => ({
     observation: { ...propBase.observation, ...(overrides.observation ?? {}) },
     positions: { ...propBase.positions, ...(overrides.positions ?? {}) },
     openOrders: { ...propBase.openOrders, ...(overrides.openOrders ?? {}) },
+    conditionalOrders: { ...propBase.conditionalOrders, ...(overrides.conditionalOrders ?? {}) },
     propRules: { ...propBase.propRules, ...(overrides.propRules ?? {}) },
     executionCapability: {
         ...propBase.executionCapability,
@@ -213,7 +228,20 @@ export const PROP_FIXTURE_SCENARIOS = Object.freeze([
             observation: connectedObservation,
             positions: connectedPositions,
             openOrders: connectedOrders,
+            conditionalOrders: connectedConditionalOrders,
             propRules: sampleRules,
+        }),
+    },
+    {
+        id: "hyro_mcp_mock_read",
+        label: "6. Hyro MCP模擬read（非公式）",
+        account: mergeProp({
+            accountSummary: { label: "Hyro Platform One-Step 模擬口座", platform: "HYRO_MCP_MOCK_NOT_OFFICIAL", planId: "ONE-STEP-MOCK-NOT-OFFICIAL" },
+            connection: { state: "CONNECTED_READ_ONLY", keyEligibility: "OFFICIAL_SPEC_UNCONFIRMED", safeReasonCode: "MOCK_MCP_READ_ONLY" },
+            observation: { ...connectedObservation, source: "HYRO_MCP_MOCK_NOT_OFFICIAL" },
+            positions: connectedPositions,
+            openOrders: { quality: "COMPLETE", items: [], missingFields: [] },
+            conditionalOrders: connectedConditionalOrders,
         }),
     },
     {

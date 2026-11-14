@@ -27,9 +27,11 @@ class ReadDataQuality(str, Enum):
 
 
 class ReadEndpoint(str, Enum):
+    ACCOUNT_IDENTITY = "ACCOUNT_IDENTITY"
     ACCOUNT_SUMMARY = "ACCOUNT_SUMMARY"
     POSITIONS = "POSITIONS"
     OPEN_ORDERS = "OPEN_ORDERS"
+    CONDITIONAL_ORDERS = "CONDITIONAL_ORDERS"
 
 
 class ReadErrorCode(str, Enum):

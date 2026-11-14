@@ -232,6 +232,7 @@ export function normalizeAccount(value) {
         }),
         positions: normalizeCollection(source.positions, normalizePosition),
         openOrders: normalizeCollection(source.openOrders, normalizeOrder),
+        conditionalOrders: normalizeCollection(source.conditionalOrders, normalizeOrder),
         propRules: Object.freeze({
             readiness: ruleReadiness,
             ruleSetId: text(rulesSource?.ruleSetId),

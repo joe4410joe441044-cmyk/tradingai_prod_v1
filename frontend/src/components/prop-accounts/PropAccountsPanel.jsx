@@ -231,6 +231,7 @@ function DetailsPanel({ account, onClose }) {
                 <div><dt>Missing fields</dt><dd>{account.observation.missingFields.join(" / ") || "なし"}</dd></div>
                 <div><dt>Position quality</dt><dd>{account.positions.quality}</dd></div>
                 <div><dt>Open-order quality</dt><dd>{account.openOrders.quality}</dd></div>
+                <div><dt>Conditional-order quality</dt><dd>{account.conditionalOrders.quality}</dd></div>
             </dl>
         </aside>
     );
@@ -367,6 +368,11 @@ export function PropAccountsView({
                     <header className="cc-prop-accounts__card-header"><div><span>OPEN ORDERS</span><h2>オープン注文</h2></div><b>{account.openOrders.quality}</b></header>
                     <OrderTable collection={account.openOrders} />
                     {account.openOrders.quality === "PARTIAL" && <p className="cc-prop-accounts__missing">部分取得: {account.openOrders.missingFields.join(" / ")}</p>}
+                </section>
+                <section className="cc-prop-accounts__card" data-testid="conditional-orders-card">
+                    <header className="cc-prop-accounts__card-header"><div><span>CONDITIONAL ORDERS</span><h2>条件注文（模擬read）</h2></div><b>{account.conditionalOrders.quality}</b></header>
+                    <OrderTable collection={account.conditionalOrders} />
+                    {account.conditionalOrders.quality === "PARTIAL" && <p className="cc-prop-accounts__missing">部分取得: {account.conditionalOrders.missingFields.join(" / ")}</p>}
                 </section>
             </div>
 

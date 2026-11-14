@@ -225,3 +225,12 @@ test("pre-evaluation rejection has no fabricated outcome and normal account hide
     const normal = render("connected_read_only", NORMAL_ACCOUNT_ID);
     assert.equal(byTestId(normal, "outcome-card"), undefined);
 });
+
+test("Hyro mock scenario visibly remains sample-only and shows conditional orders", () => {
+    const node = render("hyro_mcp_mock_read");
+    assert.match(textOf(byTestId(node, "selected-account-identity")), /Hyro Platform One-Step 模擬口座/);
+    assert.match(textOf(byTestId(node, "metric-source")), /HYRO_MCP_MOCK_NOT_OFFICIAL/);
+    assert.match(textOf(byTestId(node, "conditional-orders-card")), /BTCUSDT.*UNTRIGGERED/);
+    assert.match(textOf(byTestId(node, "rules-readiness-state")), /RULES_UNKNOWN/);
+    assert.match(textOf(byTestId(node, "execution-state")), /DISABLED/);
+});

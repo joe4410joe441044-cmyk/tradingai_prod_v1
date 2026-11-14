@@ -50,6 +50,7 @@ class EndpointProfile(str, Enum):
     BYBIT_DEMO_V5 = "BYBIT_DEMO_V5"
     BLOFIN_DEMO_V1 = "BLOFIN_DEMO_V1"
     INTERNAL_PAPER_V1 = "INTERNAL_PAPER_V1"
+    HYRO_MCP_TEST_V1 = "HYRO_MCP_TEST_V1"
 
 
 class ReadBindingCurrentness(str, Enum):
@@ -166,6 +167,7 @@ _ENDPOINT_CAPABILITY = {
     (ExecutionMode.EXTERNAL_SIMULATION, ExecutionVenue.BYBIT_DEMO): EndpointProfile.BYBIT_DEMO_V5,
     (ExecutionMode.EXTERNAL_SIMULATION, ExecutionVenue.BLOFIN_DEMO): EndpointProfile.BLOFIN_DEMO_V1,
     (ExecutionMode.PAPER, ExecutionVenue.INTERNAL_PAPER): EndpointProfile.INTERNAL_PAPER_V1,
+    (ExecutionMode.EXTERNAL_SIMULATION, ExecutionVenue.HYRO_MCP): EndpointProfile.HYRO_MCP_TEST_V1,
 }
 
 
