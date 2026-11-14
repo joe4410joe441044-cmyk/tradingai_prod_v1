@@ -211,3 +211,157 @@ def test_factory_accepts_only_pinned_official_connection_settings():
     )
     with pytest.raises(HyroMcpHttpError, match="OFFICIAL_CONFIG_MISMATCH"):
         factory(wrong)
+
+
+def diagnostic_transport(result):
+    session = Session([
+        initialize_response(),
+        Response(status_code=202),
+        Response(payload=rpc(2, {"tools": [{"name": "list_challenges", "inputSchema": {"type": "object"}}]})),
+        Response(payload=rpc(3, result)),
+    ])
+    return transport(session, allowed=("list_challenges",)), session
+
+
+def test_cc6c_failure_reproduces_when_structured_content_is_missing():
+    subject, session = diagnostic_transport({
+        "content": [{"type": "text", "text": '{"challenges": []}'}],
+        "isError": False,
+    })
+
+    with pytest.raises(HyroMcpHttpError, match="HYRO_MCP_TOOL_SCHEMA_UNCONFIRMED"):
+        subject.call_tool("list_challenges", {})
+
+    assert [call[1]["json"]["method"] for call in session.calls].count("tools/call") == 1
+
+
+def test_diagnostic_preserves_structured_content_path_without_values():
+    subject, _ = diagnostic_transport({
+        "structuredContent": {
+            "challenges": [{"publicId": "identifier-must-not-escape"}],
+            "pagination": {"total": 1},
+            "privateUnknownName": "secret-must-not-escape",
+        },
+        "isError": False,
+    })
+
+    result = subject.call_tool_diagnostic("list_challenges", {})
+
+    assert result.classification == "STRUCTURED_CONTENT_OBJECT"
+    assert result.payload_object_available is True
+    assert result.text_json_parsed is False
+    assert result.payload_field_types == (("challenges", "array"), ("pagination", "object"))
+    assert result.unknown_payload_field_count == 1
+    rendered = repr(result)
+    assert "identifier-must-not-escape" not in rendered
+    assert "secret-must-not-escape" not in rendered
+    assert "privateUnknownName" not in rendered
+
+
+def test_diagnostic_accepts_only_single_strict_text_json_object_without_values():
+    subject, _ = diagnostic_transport({
+        "content": [{
+            "type": "text",
+            "text": json.dumps({
+                "challenges": [{"publicId": "identifier-must-not-escape"}],
+                "pagination": {"page": 1, "total": 1},
+                "privateUnknownName": "secret-must-not-escape",
+            }),
+            "privateBlockField": "secret-block-value",
+        }],
+        "isError": False,
+        "privateResultField": "secret-result-value",
+    })
+
+    result = subject.call_tool_diagnostic("list_challenges", {})
+
+    assert result.classification == "CONTENT_TEXT_JSON_OBJECT"
+    assert result.result_field_types == (("content", "array"), ("isError", "boolean"))
+    assert result.unknown_result_field_count == 1
+    assert result.content_block_count == 1
+    assert result.content_block_types == ("text",)
+    assert result.unknown_content_block_field_count == 1
+    assert result.payload_object_available is True
+    assert result.text_json_parsed is True
+    assert result.payload_field_types == (("challenges", "array"), ("pagination", "object"))
+    assert result.unknown_payload_field_count == 1
+    rendered = repr(result)
+    for forbidden in (
+        "identifier-must-not-escape",
+        "secret-must-not-escape",
+        "privateUnknownName",
+        "privateBlockField",
+        "secret-block-value",
+        "privateResultField",
+        "secret-result-value",
+    ):
+        assert forbidden not in rendered
+
+
+@pytest.mark.parametrize(
+    ("tool_result", "classification"),
+    [
+        ({"content": "not-a-list"}, "CONTENT_TYPE_INVALID"),
+        ({"content": []}, "CONTENT_BLOCK_COUNT_INVALID"),
+        ({"content": [{"type": "text", "text": "{}"}, {"type": "text", "text": "{}"}]}, "CONTENT_BLOCK_COUNT_INVALID"),
+        ({"content": [{"type": "image", "data": "secret"}]}, "CONTENT_BLOCK_TYPE_UNSUPPORTED"),
+        ({"content": [{"type": "text", "text": 7}]}, "CONTENT_TEXT_TYPE_INVALID"),
+        ({"content": [{"type": "text", "text": "not-json"}]}, "CONTENT_TEXT_JSON_INVALID"),
+        ({"content": [{"type": "text", "text": '{"page": 1, "page": 2}'}]}, "CONTENT_TEXT_JSON_INVALID"),
+        ({"content": [{"type": "text", "text": "[]"}]}, "CONTENT_TEXT_JSON_NOT_OBJECT"),
+        ({"structuredContent": [], "content": [{"type": "text", "text": "{}"}]}, "STRUCTURED_CONTENT_TYPE_INVALID"),
+        ({"isError": "false", "content": [{"type": "text", "text": "{}"}]}, "IS_ERROR_TYPE_INVALID"),
+    ],
+)
+def test_diagnostic_rejects_ambiguous_or_invalid_envelopes(tool_result, classification):
+    subject, _ = diagnostic_transport(tool_result)
+    result = subject.call_tool_diagnostic("list_challenges", {})
+    assert result.classification == classification
+    assert result.payload_object_available is False
+
+
+def test_diagnostic_does_not_parse_tool_reported_error_content():
+    subject, _ = diagnostic_transport({
+        "isError": True,
+        "content": [{"type": "text", "text": '{"secret": "must-not-escape"}'}],
+    })
+
+    result = subject.call_tool_diagnostic("list_challenges", {})
+
+    assert result.classification == "TOOL_REPORTED_ERROR"
+    assert result.content_block_count is None
+    assert result.payload_object_available is False
+    assert "must-not-escape" not in repr(result)
+
+
+def test_diagnostic_keeps_json_rpc_remote_error_fail_closed_and_safe():
+    session = Session([
+        initialize_response(),
+        Response(status_code=202),
+        Response(payload=rpc(2, {"tools": [{"name": "list_challenges", "inputSchema": {"type": "object"}}]})),
+        Response(payload={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "error": {"code": -32000, "message": "secret-remote-message"},
+        }),
+    ])
+    subject = transport(session, allowed=("list_challenges",))
+
+    with pytest.raises(HyroMcpHttpError, match="HYRO_MCP_REMOTE_ERROR") as captured:
+        subject.call_tool_diagnostic("list_challenges", {})
+    assert "secret-remote-message" not in str(captured.value)
+
+
+def test_diagnostic_rejects_oversized_text_before_json_parsing():
+    result = HyroMcpHttpTransport._diagnose_tool_result({
+        "content": [{"type": "text", "text": "x" * 250_001}],
+    })
+    assert result.classification == "CONTENT_TEXT_SIZE_EXCEEDED"
+    assert result.payload_object_available is False
+
+
+def test_diagnostic_rejects_every_tool_except_list_challenges_before_network():
+    subject, session = diagnostic_transport({"structuredContent": {}})
+    with pytest.raises(PermissionError, match="MCP_DIAGNOSTIC_TOOL_NOT_ALLOWED"):
+        subject.call_tool_diagnostic("fixture.place_order", {})
+    assert session.calls == []

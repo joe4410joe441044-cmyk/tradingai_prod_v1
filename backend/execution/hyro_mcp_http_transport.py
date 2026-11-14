@@ -26,6 +26,21 @@ MCP_HANDSHAKE_PROTOCOL_VERSION = "2025-11-25"
 _SAFE_REFERENCE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SAFE_TOOL_NAME = re.compile(r"^[^\x00-\x20\x7f]{1,256}$")
 _MAX_TOKEN_LENGTH = 16_384
+_MAX_DIAGNOSTIC_TEXT_BYTES = 250_000
+_DIAGNOSTIC_TOOL_NAME = "list_challenges"
+_FIXED_RESULT_FIELDS = frozenset({"structuredContent", "content", "isError"})
+_FIXED_CONTENT_BLOCK_FIELDS = frozenset({"type", "text"})
+_FIXED_PAYLOAD_FIELDS = frozenset(
+    {
+        "challenges", "items", "rows", "results", "data", "pagination",
+        "page", "pageSize", "total", "totalCount", "totalItems",
+        "totalPages", "hasNext", "hasNextPage", "nextPage", "nextCursor",
+    }
+)
+
+
+class _DuplicateJsonKey(ValueError):
+    pass
 
 
 class HyroMcpCredentialResolver(Protocol):
@@ -99,6 +114,22 @@ class HyroMcpDiscoveryResult:
     server_name: str | None
     server_version: str | None
     tools: tuple[HyroMcpToolDescriptor, ...]
+
+
+@dataclass(frozen=True)
+class HyroMcpToolResultDiagnostics:
+    """Value-free metadata for a single MCP tool result envelope."""
+
+    classification: str
+    result_field_types: tuple[tuple[str, str], ...]
+    unknown_result_field_count: int
+    content_block_count: int | None
+    content_block_types: tuple[str, ...]
+    unknown_content_block_field_count: int
+    payload_object_available: bool
+    text_json_parsed: bool
+    payload_field_types: tuple[tuple[str, str], ...]
+    unknown_payload_field_count: int
 
 
 class HyroMcpHttpTransport(HyroMcpReadTransport):
@@ -373,6 +404,28 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
         return tuple(tool.name for tool in self.initialize_and_list_tools().tools)
 
     def call_tool(self, tool_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        result = self._call_allowed_tool(tool_name, arguments)
+        structured = result.get("structuredContent")
+        if not isinstance(structured, Mapping):
+            raise HyroMcpHttpError("HYRO_MCP_TOOL_SCHEMA_UNCONFIRMED")
+        return dict(structured)
+
+    def call_tool_diagnostic(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> HyroMcpToolResultDiagnostics:
+        """Inspect one allowed result without exposing keys or payload values."""
+
+        if tool_name != _DIAGNOSTIC_TOOL_NAME:
+            raise PermissionError("MCP_DIAGNOSTIC_TOOL_NOT_ALLOWED")
+        return self._diagnose_tool_result(self._call_allowed_tool(tool_name, arguments))
+
+    def _call_allowed_tool(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
         if tool_name not in self._allowed_tool_names:
             raise PermissionError("MCP_TOOL_NOT_IN_READ_ALLOWLIST")
         inventory = frozenset(self.list_tools())
@@ -381,10 +434,185 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
         result = self._post("tools/call", {"name": tool_name, "arguments": dict(arguments)})
         if not isinstance(result, Mapping):
             raise HyroMcpHttpError("HYRO_MCP_TOOL_RESULT_INVALID")
-        structured = result.get("structuredContent")
-        if not isinstance(structured, Mapping):
-            raise HyroMcpHttpError("HYRO_MCP_TOOL_SCHEMA_UNCONFIRMED")
-        return dict(structured)
+        return result
+
+    @classmethod
+    def _diagnose_tool_result(
+        cls,
+        result: Mapping[str, Any],
+    ) -> HyroMcpToolResultDiagnostics:
+        result_types = cls._fixed_field_types(result, _FIXED_RESULT_FIELDS)
+        unknown_result_count = cls._unknown_field_count(result, _FIXED_RESULT_FIELDS)
+        base = {
+            "result_field_types": result_types,
+            "unknown_result_field_count": unknown_result_count,
+            "content_block_count": None,
+            "content_block_types": (),
+            "unknown_content_block_field_count": 0,
+            "payload_object_available": False,
+            "text_json_parsed": False,
+            "payload_field_types": (),
+            "unknown_payload_field_count": 0,
+        }
+        is_error = result.get("isError", False)
+        if not isinstance(is_error, bool):
+            return HyroMcpToolResultDiagnostics(
+                classification="IS_ERROR_TYPE_INVALID", **base
+            )
+        if is_error:
+            return HyroMcpToolResultDiagnostics(
+                classification="TOOL_REPORTED_ERROR", **base
+            )
+
+        if "structuredContent" in result:
+            structured = result.get("structuredContent")
+            if not isinstance(structured, Mapping):
+                return HyroMcpToolResultDiagnostics(
+                    classification="STRUCTURED_CONTENT_TYPE_INVALID", **base
+                )
+            return HyroMcpToolResultDiagnostics(
+                classification="STRUCTURED_CONTENT_OBJECT",
+                **{
+                    **base,
+                    "payload_object_available": True,
+                    "payload_field_types": cls._fixed_field_types(
+                        structured, _FIXED_PAYLOAD_FIELDS
+                    ),
+                    "unknown_payload_field_count": cls._unknown_field_count(
+                        structured, _FIXED_PAYLOAD_FIELDS
+                    ),
+                },
+            )
+
+        content = result.get("content")
+        if not isinstance(content, list):
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TYPE_INVALID", **base
+            )
+        block_types = tuple(cls._content_block_type(block) for block in content)
+        block_unknown_count = sum(
+            cls._unknown_field_count(block, _FIXED_CONTENT_BLOCK_FIELDS)
+            if isinstance(block, Mapping)
+            else 0
+            for block in content
+        )
+        content_base = {
+            **base,
+            "content_block_count": len(content),
+            "content_block_types": block_types,
+            "unknown_content_block_field_count": block_unknown_count,
+        }
+        if len(content) != 1:
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_BLOCK_COUNT_INVALID", **content_base
+            )
+        block = content[0]
+        if not isinstance(block, Mapping) or block.get("type") != "text":
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_BLOCK_TYPE_UNSUPPORTED", **content_base
+            )
+        text = block.get("text")
+        if not isinstance(text, str):
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TEXT_TYPE_INVALID", **content_base
+            )
+        try:
+            encoded = text.encode("utf-8")
+        except UnicodeEncodeError:
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TEXT_ENCODING_INVALID", **content_base
+            )
+        if len(encoded) > _MAX_DIAGNOSTIC_TEXT_BYTES:
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TEXT_SIZE_EXCEEDED", **content_base
+            )
+        try:
+            parsed = json.loads(
+                text,
+                object_pairs_hook=cls._strict_json_object,
+                parse_constant=cls._reject_json_constant,
+            )
+        except (UnicodeError, ValueError, json.JSONDecodeError):
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TEXT_JSON_INVALID", **content_base
+            )
+        if not isinstance(parsed, Mapping):
+            return HyroMcpToolResultDiagnostics(
+                classification="CONTENT_TEXT_JSON_NOT_OBJECT", **content_base
+            )
+        return HyroMcpToolResultDiagnostics(
+            classification="CONTENT_TEXT_JSON_OBJECT",
+            **{
+                **content_base,
+                "payload_object_available": True,
+                "text_json_parsed": True,
+                "payload_field_types": cls._fixed_field_types(
+                    parsed, _FIXED_PAYLOAD_FIELDS
+                ),
+                "unknown_payload_field_count": cls._unknown_field_count(
+                    parsed, _FIXED_PAYLOAD_FIELDS
+                ),
+            },
+        )
+
+    @staticmethod
+    def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise _DuplicateJsonKey
+            result[key] = value
+        return result
+
+    @staticmethod
+    def _reject_json_constant(value: str) -> None:
+        raise ValueError("non-standard JSON constant")
+
+    @staticmethod
+    def _value_type(value: object) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, int):
+            return "integer"
+        if isinstance(value, float):
+            return "number"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, Mapping):
+            return "object"
+        if isinstance(value, list):
+            return "array"
+        return "unknown"
+
+    @classmethod
+    def _fixed_field_types(
+        cls,
+        value: Mapping[str, Any],
+        allowed: frozenset[str],
+    ) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (name, cls._value_type(value[name]))
+            for name in sorted(allowed)
+            if name in value
+        )
+
+    @staticmethod
+    def _unknown_field_count(
+        value: Mapping[str, Any],
+        allowed: frozenset[str],
+    ) -> int:
+        return sum(1 for key in value if key not in allowed)
+
+    @staticmethod
+    def _content_block_type(block: object) -> str:
+        if not isinstance(block, Mapping):
+            return "invalid"
+        block_type = block.get("type")
+        if block_type in {"text", "image", "audio", "resource"}:
+            return str(block_type)
+        return "unknown"
 
 
 class HyroOfficialMcpHttpTransportFactory:
