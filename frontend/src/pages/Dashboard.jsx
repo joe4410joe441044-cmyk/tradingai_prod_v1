@@ -21,6 +21,8 @@ import { useDashboardMarketContext } from "../state/dashboard-market/DashboardMa
 
 import BotControl from "../components/BotControl";
 import OperationAuthGate from "../components/auth/OperationAuthGate";
+import HyroTrialOperationSurface from "../components/prop-accounts/HyroTrialOperationSurface.jsx";
+import { HYRO_TRIAL_OPERATOR_ENABLED } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
 import {
     deriveLiveCapitalAuthority,
     pendingOrderAuthorityValue,
@@ -31,7 +33,24 @@ import { performSaveSettings } from "../features/trade-settings/saveSettings";
 import { authenticatedControlRequest } from "../features/auth/operatorAuth";
 
 
+const PREVIEW_BOT_STATUS = Object.freeze({
+    botState: "STOPPED",
+    loopState: "STOPPED",
+    executionMode: "PAPER",
+    runtimeMode: "PAPER",
+    realOrderAllowed: false,
+    executionEntryAllowed: false,
+    liveOrderEntryAllowed: false,
+    executionEnabled: false,
+    pendingOrder: false,
+    emergencyLocked: false,
+    controlAuthority: "PREVIEW_READ_ONLY",
+});
+
 const fetchBotStatus = async () => {
+    if (HYRO_TRIAL_OPERATOR_ENABLED) {
+        return { data: PREVIEW_BOT_STATUS, receivedAt: Date.now() };
+    }
     const response = await fetch(API.botStatus());
 
     if (!response.ok) {
@@ -367,7 +386,8 @@ useEffect(() => {
 
                     <div className="operations-top-section operations-bot-control">
 
-                        <OperationAuthGate>
+                        <HyroTrialOperationSurface>
+                            <OperationAuthGate>
 
                             <BotControl
 
@@ -466,6 +486,8 @@ useEffect(() => {
                                 setExecutionEnabled
                             }
 
+                            moneyManagementEnabled={!HYRO_TRIAL_OPERATOR_ENABLED}
+
                             onLegacyConfigChange={(update) => setTradeSettings((previous) => ({
                                 ...previous,
                                 ...update,
@@ -473,7 +495,8 @@ useEffect(() => {
 
                             />
 
-                        </OperationAuthGate>
+                            </OperationAuthGate>
+                        </HyroTrialOperationSurface>
 
                     </div>
 

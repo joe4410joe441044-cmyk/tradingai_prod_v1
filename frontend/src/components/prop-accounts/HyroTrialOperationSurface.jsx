@@ -1,0 +1,197 @@
+import { useState } from "react";
+
+import { useHyroTrialOperator } from "../../state/hyro-trial/HyroTrialOperatorContext.jsx";
+import "./prop-accounts.css";
+
+const shown = (value) => value || "未確認";
+
+const connectionLabel = (state) => ({
+    NOT_CHECKED: "未確認",
+    CHECKING: "確認中…",
+    CONNECTED_SAMPLE: "サンプル接続確認済み",
+    FAILED: "確認失敗",
+}[state] || "未確認");
+
+const listLabel = (state) => ({
+    IDLE: "未取得",
+    LOADING: "取得中…",
+    READY: "選択してください",
+    EMPTY: "対象なし（完全なサンプル一覧）",
+    INCOMPLETE: "取得不完全 — 対象なしとは判定しません",
+    FAILED: "取得失敗 — 対象なしとは判定しません",
+}[state] || "未確認");
+
+function AccountSwitch() {
+    const operator = useHyroTrialOperator();
+    return (
+        <section className="hyro-trial-switch" data-testid="trading-account-switch">
+            <div>
+                <span>取引口座 / TRADING ACCOUNT</span>
+                <small>画面の表示対象だけを切り替えます。稼働先・注文権限は変更しません。</small>
+            </div>
+            <div aria-label="取引口座" className="hyro-trial-switch__buttons" role="group">
+                <button
+                    aria-pressed={operator.accountMode === "KUCOIN"}
+                    className={operator.accountMode === "KUCOIN" ? "is-selected" : ""}
+                    onClick={() => operator.selectAccountMode("KUCOIN")}
+                    type="button"
+                >通常口座 — KuCoin</button>
+                <button
+                    aria-pressed={operator.accountMode === "HYRO"}
+                    className={operator.accountMode === "HYRO" ? "is-selected" : ""}
+                    onClick={() => operator.selectAccountMode("HYRO")}
+                    type="button"
+                >PROP口座 — HyroTrader</button>
+            </div>
+            {operator.simulation.state !== "STOPPED" && (
+                <p className="hyro-trial-running-banner" data-testid="cross-account-running-banner">
+                    稼働中サンプル: {shown(operator.simulation.accountName)} / {operator.simulation.state} — 画面切替では停止しません
+                </p>
+            )}
+        </section>
+    );
+}
+
+function ChallengeSelection({ operator }) {
+    const listBusy = operator.challengeList.state === "LOADING";
+    return (
+        <section className="hyro-trial-section" data-testid="hyro-connection-challenge-section">
+            <header><span>1</span><h3>接続確認 / チャレンジ選択</h3></header>
+            <p className="hyro-trial-warning">サンプル / シミュレーション / 実Hyro未接続 / 外部通信なし</p>
+            <div className="hyro-trial-actions">
+                <button
+                    disabled={operator.connection.state === "CHECKING"}
+                    onClick={operator.checkConnection}
+                    type="button"
+                >{operator.connection.state === "CHECKING" ? "接続確認中…" : "接続を確認"}</button>
+                <button disabled={listBusy} onClick={operator.loadChallenges} type="button">
+                    {listBusy ? "一覧取得中…" : "チャレンジ選択（一覧取得）"}
+                </button>
+            </div>
+            <dl className="hyro-trial-definition-grid">
+                <div><dt>Connection</dt><dd data-testid="hyro-connection-state">{connectionLabel(operator.connection.state)}</dd></div>
+                <div><dt>Challenge list</dt><dd data-testid="hyro-challenge-list-state">{listLabel(operator.challengeList.state)}</dd></div>
+                <div><dt>Source</dt><dd>IN-MEMORY SAMPLE</dd></div>
+                <div><dt>Trading</dt><dd>OFF / 注文不可</dd></div>
+            </dl>
+            {operator.connection.error && <p className="hyro-trial-error" role="alert">{operator.connection.error}</p>}
+            {operator.challengeList.error && <p className="hyro-trial-error" role="alert">{operator.challengeList.error}</p>}
+            {operator.challengeList.state === "READY" && (
+                <label className="hyro-trial-field">
+                    <span>サンプル無料トライアル</span>
+                    <select
+                        data-testid="hyro-challenge-select"
+                        onChange={(event) => operator.selectChallenge(event.target.value)}
+                        value={operator.selectedChallengeId}
+                    >
+                        <option value="">選択してください</option>
+                        {operator.challengeList.items.map((challenge) => (
+                            <option key={challenge.id} value={challenge.id}>{challenge.accountName}</option>
+                        ))}
+                    </select>
+                </label>
+            )}
+            {operator.selectedChallenge && (
+                <dl className="hyro-trial-definition-grid" data-testid="hyro-selected-challenge">
+                    <div><dt>口座名</dt><dd>{operator.selectedChallenge.accountName}</dd></div>
+                    <div><dt>プラン</dt><dd>{operator.selectedChallenge.plan}</dd></div>
+                    <div><dt>段階</dt><dd>{operator.selectedChallenge.stage}</dd></div>
+                    <div><dt>期間</dt><dd>{operator.selectedChallenge.period}</dd></div>
+                    <div><dt>最終更新</dt><dd>{operator.selectedChallenge.updatedAt}</dd></div>
+                    <div><dt>表示区分</dt><dd>SAMPLE / SIMULATION</dd></div>
+                </dl>
+            )}
+        </section>
+    );
+}
+
+function Settings({ operator }) {
+    const dirty = Boolean(operator.selectedChallenge) && JSON.stringify(operator.selectedDraft) !== JSON.stringify(operator.selectedSavedSettings);
+    return (
+        <section className="hyro-trial-section" data-testid="hyro-strategy-risk-section">
+            <header><span>2</span><h3>戦略・リスク設定</h3></header>
+            <div className="hyro-trial-form-grid">
+                <label className="hyro-trial-field"><span>戦略</span><select disabled={!operator.selectedChallenge} onChange={(event) => operator.updateDraft("strategy", event.target.value)} value={operator.selectedDraft.strategy}><option value="">選択してください</option><option value="TREND_FOLLOW_SAMPLE">Trend Follow（サンプル）</option><option value="MEAN_REVERSION_SAMPLE">Mean Reversion（サンプル）</option></select></label>
+                <label className="hyro-trial-field"><span>1取引リスク (%)</span><input disabled={!operator.selectedChallenge} inputMode="decimal" onChange={(event) => operator.updateDraft("riskPerTradePercent", event.target.value)} value={operator.selectedDraft.riskPerTradePercent} /></label>
+                <label className="hyro-trial-field"><span>日次損失上限 (%)</span><input disabled={!operator.selectedChallenge} inputMode="decimal" onChange={(event) => operator.updateDraft("dailyLossLimitPercent", event.target.value)} value={operator.selectedDraft.dailyLossLimitPercent} /></label>
+                <label className="hyro-trial-field"><span>最大損失上限 (%)</span><input disabled={!operator.selectedChallenge} inputMode="decimal" onChange={(event) => operator.updateDraft("maximumLossPercent", event.target.value)} value={operator.selectedDraft.maximumLossPercent} /></label>
+            </div>
+            <div className="hyro-trial-actions">
+                <button disabled={!operator.selectedChallenge} onClick={operator.saveSelectedSettings} type="button">設定を保存</button>
+                <strong data-testid="hyro-settings-state">{operator.selectedSavedSettings ? dirty ? "UNSAVED CHANGES" : "SAVED FOR THIS ACCOUNT" : "NOT SAVED"}</strong>
+            </div>
+            <small>設定は選択中のサンプルだけに保存され、KuCoinや別チャレンジへ自動適用しません。</small>
+        </section>
+    );
+}
+
+function FinalPreparation({ operator }) {
+    const [confirmation, setConfirmation] = useState(null);
+    const running = operator.simulation.state === "RUNNING";
+    const pending = ["STARTING", "STOPPING"].includes(operator.simulation.state);
+    const confirm = async () => {
+        const action = confirmation;
+        setConfirmation(null);
+        if (action === "START") await operator.startSimulation();
+        if (action === "STOP") await operator.stopSimulation();
+    };
+    return (
+        <section className="hyro-trial-section hyro-trial-final" data-testid="hyro-final-preparation">
+            <header><span>3</span><h3>FINAL PREPARATION / START / READINESS</h3></header>
+            <dl className="hyro-trial-definition-grid">
+                <div><dt>対象口座</dt><dd>{shown(operator.selectedChallenge?.accountName)}</dd></div>
+                <div><dt>適用戦略</dt><dd>{shown(operator.selectedSavedSettings?.strategy)}</dd></div>
+                <div><dt>1取引リスク</dt><dd>{operator.selectedSavedSettings ? `${operator.selectedSavedSettings.riskPerTradePercent}%` : "未確認"}</dd></div>
+                <div><dt>実行方式</dt><dd>注文を送らないシミュレーション</dd></div>
+                <div><dt>READINESS</dt><dd data-testid="hyro-readiness">{operator.readiness.state}</dd></div>
+                <div><dt>実Hyro START</dt><dd>DISABLED — 権限・停止契約未確認</dd></div>
+            </dl>
+            {operator.readiness.reasons.length > 0 && <ul className="hyro-trial-block-reasons" data-testid="hyro-readiness-reasons">{operator.readiness.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+            <div className="hyro-trial-runtime" data-testid="hyro-simulation-runtime">
+                <strong>SIMULATION {operator.simulation.state}</strong>
+                <span>稼働対象: {shown(operator.simulation.accountName)}</span>
+                <span>注文・取消・決済: 0</span>
+            </div>
+            <div className="hyro-trial-actions">
+                {!running && <button disabled={pending || operator.readiness.state !== "READY"} onClick={() => setConfirmation("START")} type="button">{operator.simulation.state === "STARTING" ? "STARTING…" : "シミュレーション START"}</button>}
+                {running && <button disabled={pending} onClick={() => setConfirmation("STOP")} type="button">シミュレーション STOP</button>}
+                <button disabled type="button">実Hyro START（未確認のため無効）</button>
+            </div>
+            {operator.actionError && <p className="hyro-trial-error" role="alert">{operator.actionError}</p>}
+            {confirmation && (
+                <div className="hyro-trial-confirm" role="dialog" aria-modal="true" aria-label={`${confirmation} simulation confirmation`}>
+                    <div>
+                        <h4>{confirmation === "START" ? "シミュレーションを開始しますか" : "シミュレーションを停止しますか"}</h4>
+                        <p>対象: {confirmation === "STOP" ? operator.simulation.accountName : operator.selectedChallenge?.accountName}</p>
+                        <p>{confirmation === "START" ? "注文を送らず、共有状態だけをRUNNINGへ変更します。" : "シミュレーション状態だけを停止します。注文取消・建玉決済は実行しません。"}</p>
+                        <button onClick={confirm} type="button">確認して{confirmation}</button>
+                        <button onClick={() => setConfirmation(null)} type="button">キャンセル</button>
+                    </div>
+                </div>
+            )}
+        </section>
+    );
+}
+
+function HyroTrialPanel() {
+    const operator = useHyroTrialOperator();
+    return (
+        <div className="terminal-panel operation-console hyro-trial-console" data-testid="hyro-trial-operator-panel">
+            <header className="hyro-trial-hero"><span>DEFAULT OFF · ISOLATED OPERATOR PREVIEW</span><h2>HyroTrader 無料トライアル発行前シミュレーション</h2><p>この画面は架空データ専用です。実口座、公式ルール、MCP再照会、取引権限へ接続しません。</p></header>
+            <div className="hyro-trial-grid">
+                <ChallengeSelection operator={operator} />
+                <Settings operator={operator} />
+                <FinalPreparation operator={operator} />
+            </div>
+        </div>
+    );
+}
+
+export default function HyroTrialOperationSurface({ children }) {
+    const operator = useHyroTrialOperator();
+    if (!operator.enabled) return children;
+    return <>
+        <AccountSwitch />
+        {operator.accountMode === "HYRO" ? <HyroTrialPanel /> : children}
+    </>;
+}

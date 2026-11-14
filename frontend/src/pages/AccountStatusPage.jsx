@@ -6,6 +6,9 @@ import {
     PROP_ISOLATED_DEMO_ENABLED,
     PROP_ISOLATED_DEMO_PATH,
 } from "../features/prop-accounts/propIsolatedDemoFeature.js";
+import HyroTrialAccountStatus from "../components/prop-accounts/HyroTrialAccountStatus.jsx";
+import { HYRO_TRIAL_OPERATOR_ENABLED } from "../features/prop-accounts/hyroTrialOperatorFeature.js";
+import { useHyroTrialOperator } from "../state/hyro-trial/HyroTrialOperatorContext.jsx";
 import { navigateTo } from "../utils/appNavigation.js";
 import PaperCapitalControl from "../components/runtime/PaperCapitalControl";
 import StatusMetric from "../components/runtime/StatusMetric";
@@ -44,6 +47,21 @@ import {
    authority or orders, and it never calls a write endpoint.
    Canonical source is GET /api/bot/status.
 ================================================ */
+
+const PREVIEW_ACCOUNT_STATUS = Object.freeze({
+    botState: "STOPPED",
+    loopState: "STOPPED",
+    executionMode: "PAPER",
+    runtimeMode: "PAPER",
+    realOrderAllowed: false,
+    executionEntryAllowed: false,
+    liveOrderEntryAllowed: false,
+    executionEnabled: false,
+});
+
+const fetchAccountStatus = HYRO_TRIAL_OPERATOR_ENABLED
+    ? async () => ({ data: PREVIEW_ACCOUNT_STATUS, receivedAt: Date.now() })
+    : fetchBotStatus;
 
 const displaySyncState = (value) => {
     if (value === true) return "PENDING";
@@ -655,13 +673,18 @@ export function AccountStatusView({
 }
 
 export default function AccountStatusPage() {
-    const { data } = usePolling(fetchBotStatus, 5000);
+    const hyroTrial = useHyroTrialOperator();
+    const { data } = usePolling(fetchAccountStatus, 5000);
     const botStatus = data?.data;
     const [detailsExpanded, setDetailsExpanded] = useState(false);
     const [manualAccountView, setManualAccountView] = useState(null);
 
+    if (hyroTrial.enabled && hyroTrial.accountMode === "HYRO") {
+        return <HyroTrialAccountStatus />;
+    }
+
     const refreshBotStatus = async () => {
-        const snapshot = await fetchBotStatus();
+        const snapshot = await fetchAccountStatus();
         return snapshot.data;
     };
 

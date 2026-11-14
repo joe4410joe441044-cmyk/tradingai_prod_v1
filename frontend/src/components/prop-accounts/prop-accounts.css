@@ -171,3 +171,83 @@
     .cc-prop-offline__header, .cc-prop-accounts__mode-divider { align-items: stretch; flex-direction: column; }
     .cc-prop-offline__fields { grid-template-columns: 1fr; }
 }
+
+/* CC-6H: default-OFF Hyro trial operator preview inside the normal app shell. */
+.operation-auth-gate--preview-disabled { border: 0; margin: 0; min-width: 0; padding: 0; }
+.operation-auth-gate--preview-disabled > legend { color: #ffd58b; font-size: 12px; font-weight: 800; margin-bottom: 8px; padding: 0; }
+.hyro-trial-switch {
+    background: linear-gradient(135deg, rgba(8, 20, 34, .98), rgba(14, 35, 55, .98));
+    border: 1px solid rgba(98, 185, 255, .45);
+    border-radius: 12px;
+    color: #e8f5ff;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 16px;
+}
+.hyro-trial-switch > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.hyro-trial-switch > div:first-child > span { color: #7fd4ff; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+.hyro-trial-switch small { color: #a9bfd0; }
+.hyro-trial-switch__buttons { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hyro-trial-switch button,
+.hyro-trial-actions button {
+    background: rgba(10, 27, 44, .95);
+    border: 1px solid rgba(130, 188, 230, .45);
+    border-radius: 8px;
+    color: #dcedf8;
+    cursor: pointer;
+    min-height: 42px;
+    padding: 9px 12px;
+}
+.hyro-trial-switch button.is-selected { background: #136a91; border-color: #74d7ff; color: #fff; box-shadow: 0 0 0 2px rgba(116, 215, 255, .15); }
+.hyro-trial-switch button:disabled,
+.hyro-trial-actions button:disabled { cursor: not-allowed; opacity: .48; }
+.hyro-trial-running-banner { background: rgba(246, 174, 54, .12); border-left: 3px solid #f6ae36; color: #ffd58b; margin: 0; padding: 9px 12px; }
+.hyro-trial-console { color: #eaf6ff; padding: 18px; }
+.hyro-trial-hero { border-bottom: 1px solid rgba(117, 180, 220, .28); margin-bottom: 16px; padding-bottom: 14px; }
+.hyro-trial-hero span { color: #f4bd62; font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+.hyro-trial-hero h2 { margin: 6px 0; }
+.hyro-trial-hero p { color: #b8cad7; margin: 0; }
+.hyro-trial-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hyro-trial-section { background: rgba(7, 20, 34, .82); border: 1px solid rgba(117, 180, 220, .3); border-radius: 10px; padding: 14px; }
+.hyro-trial-section > header { align-items: center; display: flex; gap: 9px; margin-bottom: 12px; }
+.hyro-trial-section > header > span { align-items: center; background: #176f98; border-radius: 50%; display: inline-flex; height: 26px; justify-content: center; width: 26px; }
+.hyro-trial-section h3 { font-size: 15px; margin: 0; }
+.hyro-trial-final { grid-column: 1 / -1; }
+.hyro-trial-warning { background: rgba(246, 174, 54, .1); border: 1px solid rgba(246, 174, 54, .35); color: #ffd68b; padding: 10px; }
+.hyro-trial-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.hyro-trial-actions strong { color: #90d8ff; font-size: 12px; }
+.hyro-trial-definition-grid,
+.hyro-trial-status-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hyro-trial-definition-grid > div,
+.hyro-trial-status-grid > div { background: rgba(255, 255, 255, .035); border: 1px solid rgba(135, 178, 205, .16); padding: 9px; }
+.hyro-trial-definition-grid dt,
+.hyro-trial-status-grid span { color: #8eaabc; display: block; font-size: 11px; margin-bottom: 3px; }
+.hyro-trial-definition-grid dd { color: #e7f5ff; margin: 0; overflow-wrap: anywhere; }
+.hyro-trial-form-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hyro-trial-field { display: flex; flex-direction: column; gap: 5px; }
+.hyro-trial-field span { color: #a9c3d4; font-size: 12px; }
+.hyro-trial-field input,
+.hyro-trial-field select { background: #071827; border: 1px solid #355875; border-radius: 6px; color: #eef8ff; min-height: 40px; padding: 7px; }
+.hyro-trial-block-reasons { color: #ffc77a; }
+.hyro-trial-runtime { align-items: center; background: rgba(35, 111, 148, .13); border: 1px solid rgba(102, 205, 255, .3); display: flex; flex-wrap: wrap; gap: 16px; padding: 12px; }
+.hyro-trial-runtime strong { color: #78d8ff; }
+.hyro-trial-error { color: #ff9f9f; }
+.hyro-trial-confirm { align-items: center; background: rgba(0, 8, 16, .8); display: flex; inset: 0; justify-content: center; position: fixed; z-index: 9999; }
+.hyro-trial-confirm > div { background: #0a1e30; border: 1px solid #69c6f5; border-radius: 12px; max-width: 520px; padding: 22px; width: calc(100% - 32px); }
+.hyro-trial-account-status { padding: 18px; }
+.hyro-trial-status-grid { margin: 16px 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hyro-trial-rules,
+.hyro-trial-runtime-summary { background: rgba(16, 40, 59, .45); border: 1px solid rgba(117, 180, 220, .28); margin-top: 14px; padding: 14px; }
+
+@media (max-width: 760px) {
+    .hyro-trial-switch__buttons,
+    .hyro-trial-grid,
+    .hyro-trial-definition-grid,
+    .hyro-trial-form-grid,
+    .hyro-trial-status-grid { grid-template-columns: 1fr; }
+    .hyro-trial-final { grid-column: auto; }
+    .hyro-trial-actions { align-items: stretch; flex-direction: column; }
+    .hyro-trial-actions button { width: 100%; }
+    .hyro-trial-runtime { align-items: flex-start; flex-direction: column; }
+}

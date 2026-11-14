@@ -375,6 +375,8 @@ export default function BotControl({
 
     onLegacyConfigChange,
 
+    moneyManagementEnabled = true,
+
     startDiagnosticRecorder = recordStartChainDiagnostic,
 
 }){
@@ -473,7 +475,7 @@ export default function BotControl({
         updateConfigurationDraft,
         saveConfiguration,
         resetConfigurationDraft,
-    } = useMoneyManagement();
+    } = useMoneyManagement({ enabled: moneyManagementEnabled });
     const lifecycleState = mmStatus?.lifecycleState;
     const capitalAuthorityStatus = mmStatus?.capitalAuthorityStatus;
     const executionEntryAllowed = mmStatus?.executionEntryAllowed;
