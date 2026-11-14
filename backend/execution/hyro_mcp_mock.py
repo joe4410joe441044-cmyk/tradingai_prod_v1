@@ -4,6 +4,14 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 from backend.execution.hyro_mcp_read_adapter import HyroMcpToolProfile
 
+MOCK_HYRO_TOOL_PROFILE = HyroMcpToolProfile(
+    account_identity="mock.hyro.read_account_identity",
+    account_summary="mock.hyro.read_account_summary",
+    positions="mock.hyro.read_positions",
+    open_orders="mock.hyro.read_open_orders",
+    conditional_orders="mock.hyro.read_conditional_orders",
+)
+
 @dataclass
 class MockHyroMcpServer:
     responses: dict[tuple[str, str | None], Mapping[str, Any]]
@@ -12,7 +20,7 @@ class MockHyroMcpServer:
 
     @classmethod
     def with_responses(cls, responses, *, include_write_tool=True):
-        tools = set(HyroMcpToolProfile().by_operation().values())
+        tools = set(MOCK_HYRO_TOOL_PROFILE.by_operation().values())
         if include_write_tool: tools.add("mock.hyro.submit_order")
         return cls(dict(responses), tools)
 

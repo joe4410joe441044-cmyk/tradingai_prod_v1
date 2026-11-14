@@ -26,11 +26,11 @@ class HyroMcpReadOperation(str, Enum):
 
 @dataclass(frozen=True)
 class HyroMcpToolProfile:
-    account_identity: str = "mock.hyro.read_account_identity"
-    account_summary: str = "mock.hyro.read_account_summary"
-    positions: str = "mock.hyro.read_positions"
-    open_orders: str = "mock.hyro.read_open_orders"
-    conditional_orders: str = "mock.hyro.read_conditional_orders"
+    account_identity: str
+    account_summary: str
+    positions: str
+    open_orders: str
+    conditional_orders: str
 
     def by_operation(self) -> dict[HyroMcpReadOperation, str]:
         return dict(zip(HyroMcpReadOperation, (
@@ -94,9 +94,11 @@ class HyroMcpObservation:
         return ReadDataQuality.STALE
 
 class HyroMcpReadAdapter:
-    def __init__(self, transport: HyroMcpReadTransport, *, tools: HyroMcpToolProfile | None = None,
+    def __init__(self, transport: HyroMcpReadTransport, *, tools: HyroMcpToolProfile,
                  maximum_age: timedelta = timedelta(minutes=5), maximum_pages: int = 100) -> None:
-        self.transport, self.tools = transport, tools or HyroMcpToolProfile()
+        if not isinstance(tools, HyroMcpToolProfile):
+            raise TypeError("tools must be HyroMcpToolProfile")
+        self.transport, self.tools = transport, tools
         if maximum_age <= timedelta(0) or maximum_pages < 1: raise ValueError("invalid read bounds")
         self.maximum_age, self.maximum_pages = maximum_age, maximum_pages
 

@@ -4,9 +4,11 @@ from decimal import Decimal
 import pytest
 
 from backend.accounts.models import AccountId
-from backend.execution.hyro_mcp_mock import DummyTokenMockTransport, MockHyroMcpServer
+from backend.execution.hyro_mcp_mock import (
+    DummyTokenMockTransport, MOCK_HYRO_TOOL_PROFILE, MockHyroMcpServer,
+)
 from backend.execution.hyro_mcp_read_adapter import (
-    HyroMcpAccountScope, HyroMcpReadAdapter, HyroMcpReadOperation, HyroMcpToolProfile,
+    HyroMcpAccountScope, HyroMcpReadAdapter,
 )
 from backend.execution.read_only_observations import ReadDataQuality, ReadErrorCode
 
@@ -14,7 +16,7 @@ NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
 STAMP = "2026-11-14T03:00:00Z"
 ACCOUNT = AccountId("acc_20000000000040008000000000000002")
 SCOPE = HyroMcpAccountScope(ACCOUNT, "hyro-challenge-ref-001")
-TOOLS = HyroMcpToolProfile()
+TOOLS = MOCK_HYRO_TOOL_PROFILE
 
 def envelope(**extra):
     return {"account_ref": SCOPE.external_account_ref, "platform": SCOPE.platform,
@@ -39,7 +41,7 @@ def base_responses():
 
 def adapter(responses=None, token="dummy-token-not-a-secret"):
     server = MockHyroMcpServer.with_responses(responses or base_responses())
-    return HyroMcpReadAdapter(DummyTokenMockTransport(server, token)), server
+    return HyroMcpReadAdapter(DummyTokenMockTransport(server, token), tools=TOOLS), server
 
 def test_normalizes_all_five_reads_and_only_complete_empty_is_zero():
     subject, server = adapter()

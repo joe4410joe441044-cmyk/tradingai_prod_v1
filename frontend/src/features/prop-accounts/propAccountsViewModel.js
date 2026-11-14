@@ -11,6 +11,7 @@ const CONNECTION_STATES = new Set([
     "AUTH_FAILED",
     "SCOPE_MISMATCH",
 ]);
+const CONFIG_VALIDATION_STATES = new Set(["NOT_APPLICABLE", "BLOCKED_MISSING", "BLOCKED_UNSAFE", "MOCK_READY"]);
 const QUALITY_STATES = new Set(["COMPLETE", "PARTIAL", "STALE", "FAILED", "UNKNOWN"]);
 const RULE_STATES = new Set(["READY", "BLOCKED", "RULES_UNKNOWN", "NOT_APPLICABLE"]);
 const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
@@ -216,6 +217,8 @@ export function normalizeAccount(value) {
             readOnly: connectionSource?.readOnly === true,
             keyEligibility: text(connectionSource?.keyEligibility) ?? "UNKNOWN",
             safeReasonCode: text(connectionSource?.safeReasonCode) ?? "NOT_AVAILABLE",
+            configValidation: enumValue(connectionSource?.configValidation, CONFIG_VALIDATION_STATES) ?? "BLOCKED_MISSING",
+            missingConfigFields: Object.freeze(stringList(connectionSource?.missingConfigFields)),
         }),
         observation: Object.freeze({
             quality: dataQuality,

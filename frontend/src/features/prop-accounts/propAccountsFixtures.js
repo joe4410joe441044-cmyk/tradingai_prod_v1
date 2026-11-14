@@ -20,6 +20,8 @@ const normalAccount = Object.freeze({
         readOnly: true,
         keyEligibility: "NOT_APPLICABLE",
         safeReasonCode: "FIXTURE_NORMAL_ACCOUNT",
+        configValidation: "NOT_APPLICABLE",
+        missingConfigFields: [],
     },
     observation: {
         quality: "COMPLETE",
@@ -60,6 +62,8 @@ const propBase = Object.freeze({
         readOnly: true,
         keyEligibility: "SUPPORT_CONFIRMATION_REQUIRED",
         safeReasonCode: "DIAGNOSTIC_NOT_RUN",
+        configValidation: "BLOCKED_MISSING",
+        missingConfigFields: ["serverUrl", "transport", "authScheme", "credentialReference", "accountIdentifier", "readTools", "responseSchema"],
     },
     observation: {
         quality: "UNKNOWN",
@@ -237,7 +241,13 @@ export const PROP_FIXTURE_SCENARIOS = Object.freeze([
         label: "6. Hyro MCP模擬read（非公式）",
         account: mergeProp({
             accountSummary: { label: "Hyro Platform One-Step 模擬口座", platform: "HYRO_MCP_MOCK_NOT_OFFICIAL", planId: "ONE-STEP-MOCK-NOT-OFFICIAL" },
-            connection: { state: "CONNECTED_READ_ONLY", keyEligibility: "OFFICIAL_SPEC_UNCONFIRMED", safeReasonCode: "MOCK_MCP_READ_ONLY" },
+            connection: {
+                state: "CONNECTED_READ_ONLY",
+                keyEligibility: "OFFICIAL_SPEC_UNCONFIRMED",
+                safeReasonCode: "MOCK_MCP_READ_ONLY",
+                configValidation: "MOCK_READY",
+                missingConfigFields: [],
+            },
             observation: { ...connectedObservation, source: "HYRO_MCP_MOCK_NOT_OFFICIAL" },
             positions: connectedPositions,
             openOrders: { quality: "COMPLETE", items: [], missingFields: [] },

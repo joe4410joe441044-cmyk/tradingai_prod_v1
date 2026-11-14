@@ -225,6 +225,8 @@ function DetailsPanel({ account, onClose }) {
             <dl>
                 <div><dt>Account ID</dt><dd>{account.accountSummary.accountId}</dd></div>
                 <div><dt>Safe reason</dt><dd>{account.connection.safeReasonCode}</dd></div>
+                <div><dt>Connection config</dt><dd>{account.connection.configValidation}</dd></div>
+                <div><dt>Missing config</dt><dd>{account.connection.missingConfigFields.join(" / ") || "なし"}</dd></div>
                 <div><dt>Observation source</dt><dd>{account.observation.source}</dd></div>
                 <div><dt>Oldest source</dt><dd>{displayTimestamp(account.observation.oldestSourceAt)}</dd></div>
                 <div><dt>Newest source</dt><dd>{displayTimestamp(account.observation.newestSourceAt)}</dd></div>
@@ -391,6 +393,7 @@ export function PropAccountsView({
 
             <section className="cc-prop-accounts__authority" data-testid="readiness-authority-card">
                 <div><span>Observer connection</span><strong>{connection.state}</strong><small>サンプル上の接続状態</small></div>
+                <div><span>Connection config</span><strong>{connection.configValidation}</strong><small>{connection.missingConfigFields.join(" / ") || "fixture内で設定済み"}</small></div>
                 <div><span>Key eligibility</span><strong>{connection.keyEligibility}</strong><small>外部確認が必要</small></div>
                 <div><span>PROP rules</span><strong>{account.propRules.readiness}</strong><small>UNKNOWNは取引可能にしません</small></div>
                 <div><span>Execution authority</span><strong className="is-disabled">DISABLED</strong><small>{account.executionCapability.reasons.join(" / ")}</small></div>

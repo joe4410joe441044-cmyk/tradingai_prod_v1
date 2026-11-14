@@ -105,6 +105,8 @@ test("Hyro MCP mock displays conditional reads but official rules stay unknown",
     const account = selectedAccount(normalizePropAccountsView(createPropAccountsFixture({ scenarioId: "hyro_mcp_mock_read" })));
     assert.equal(account.accountSummary.platform, "HYRO_MCP_MOCK_NOT_OFFICIAL");
     assert.equal(account.connection.state, "CONNECTED_READ_ONLY");
+    assert.equal(account.connection.configValidation, "MOCK_READY");
+    assert.deepEqual(account.connection.missingConfigFields, []);
     assert.equal(account.conditionalOrders.quality, "COMPLETE");
     assert.equal(account.conditionalOrders.items.length, 1);
     assert.equal(account.propRules.readiness, "RULES_UNKNOWN");
