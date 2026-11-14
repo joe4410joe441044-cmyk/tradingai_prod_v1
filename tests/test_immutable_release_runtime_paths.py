@@ -1,10 +1,23 @@
+import json
 import os
+from dataclasses import replace
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
 
+from backend.money_management import config_persistence
+from backend.money_management.config_persistence import (
+    CONFIG_PATH_ENVIRONMENT_VARIABLE,
+    MoneyManagementConfigStore,
+    build_envelope,
+)
+from backend.money_management.loss_application_registration import (
+    build_default_money_management_config,
+)
 from backend.money_management.loss_application_settings import (
     LossLimitApplicationSettingsError,
     resolve_money_management_timeline_directory,
@@ -120,3 +133,93 @@ def test_main_wires_validated_timeline_directory():
     source = (REPOSITORY_ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 
     assert "timeline_directory=resolve_money_management_timeline_directory()" in source
+
+
+def _approved_small_account_config():
+    return replace(
+        build_default_money_management_config(),
+        small_account_minimum_contract_mode=True,
+        small_account_allowed_symbol="XRPUSDTM",
+        small_account_max_contracts=Decimal("1"),
+        small_account_max_risk_percent=Decimal("2.0"),
+        small_account_max_absolute_risk_usdt=Decimal("0.158"),
+        small_account_max_leverage=Decimal("3"),
+        small_account_require_isolated=True,
+        small_account_require_flat_before_entry=True,
+        small_account_require_no_pending=True,
+        small_account_require_manual_selection=True,
+    )
+
+
+def test_mm_config_store_prefers_explicit_external_path_over_release_location(
+    tmp_path, monkeypatch
+):
+    external = tmp_path / "external" / "money_management_config.json"
+    external.parent.mkdir()
+    release_app = tmp_path / "releases" / "abc123" / "app"
+    (release_app / "backend" / "money_management").mkdir(parents=True)
+
+    monkeypatch.delenv(CONFIG_PATH_ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.setattr(
+        config_persistence,
+        "__file__",
+        str(release_app / "backend" / "money_management" / "config_persistence.py"),
+    )
+
+    release_default = release_app / "logs" / "runtime" / "money_management_config.json"
+    assert config_persistence.resolve_default_config_path() == release_default
+
+    monkeypatch.setenv(CONFIG_PATH_ENVIRONMENT_VARIABLE, str(external))
+
+    store = MoneyManagementConfigStore()
+    assert store.path == external
+    assert store.path != release_default
+
+    assert not release_default.parent.exists()
+    assert store.save(_approved_small_account_config(), 2) == external
+    assert external.is_file()
+    assert not release_default.parent.exists()
+
+
+def test_external_persisted_config_preserves_revision_and_approved_profile(
+    tmp_path, monkeypatch
+):
+    external = tmp_path / "external" / "money_management_config.json"
+    external.parent.mkdir()
+    updated_at = datetime(2026, 10, 16, 19, 33, 45, 286865, tzinfo=timezone.utc)
+    external.write_text(
+        json.dumps(build_envelope(_approved_small_account_config(), 2, updated_at)),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(CONFIG_PATH_ENVIRONMENT_VARIABLE, str(external))
+
+    state = MoneyManagementConfigStore().load()
+
+    assert state is not None
+    assert state.config_revision == 2
+    config = state.config
+    assert config.small_account_minimum_contract_mode is True
+    assert config.small_account_allowed_symbol == "XRPUSDTM"
+    assert config.small_account_max_contracts == Decimal("1")
+    assert config.small_account_max_risk_percent == Decimal("2.0")
+    assert config.small_account_max_absolute_risk_usdt == Decimal("0.158")
+    assert config.small_account_max_leverage == Decimal("3")
+    assert config.small_account_require_isolated is True
+
+
+def test_tracked_systemd_contract_externalizes_mm_config_path():
+    lines = (
+        REPOSITORY_ROOT / "systemd" / "tradingbot.service.d" / "money-management.conf"
+    ).read_text(encoding="utf-8").splitlines()
+
+    assert "[Service]" in lines
+    assert "Environment=MONEY_MANAGEMENT_ENABLED=true" in lines
+    assert "Environment=MONEY_MANAGEMENT_PERSISTENCE_ENABLED=true" in lines
+    assert (
+        "Environment=MONEY_MANAGEMENT_PERSISTENCE_PATH="
+        "/home/joe4410joe/tradingai_prod_v1/logs/runtime"
+    ) in lines
+    assert (
+        "Environment=TRADINGAI_MONEY_MANAGEMENT_CONFIG_PATH="
+        "/home/joe4410joe/tradingai_prod_v1/logs/runtime/money_management_config.json"
+    ) in lines
