@@ -34,6 +34,25 @@ from .loss_runtime_metrics_source import LossRuntimeMetricsSource
 from .loss_runtime_store_models import LossLimitRuntimeSnapshot
 
 
+_REVISION_ONLY_FIELDS = frozenset(("source_revision", "metrics_revision"))
+
+
+def _semantic_identity(metrics):
+    """Authoritative observation identity without incidental revision churn."""
+
+    payload = metrics.to_dict()
+    return json.dumps(
+        {
+            name: value
+            for name, value in payload.items()
+            if name not in _REVISION_ONLY_FIELDS
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
 class LossRuntimeDispatchStatus(str, Enum):
     DISABLED = "DISABLED"
     APPLIED = "APPLIED"
@@ -194,6 +213,7 @@ class LossRuntimeUpdateDispatcher:
         self._lock = RLock()
         self._last_event_id = None
         self._last_metrics_signature = None
+        self._last_semantic_identity = None
         self._last_snapshot = None
         self._last_metrics_result = None
 
@@ -386,6 +406,7 @@ class LossRuntimeUpdateDispatcher:
                     separators=(",", ":"),
                     ensure_ascii=True,
                 )
+                semantic_identity = _semantic_identity(metrics)
                 if event_id == self._last_event_id:
                     if signature == self._last_metrics_signature:
                         return _result(
@@ -402,7 +423,8 @@ class LossRuntimeUpdateDispatcher:
                 if (
                     reevaluation_token is None
                     and self._last_snapshot is not None
-                    and signature == self._last_metrics_signature
+                    and self._last_semantic_identity is not None
+                    and semantic_identity == self._last_semantic_identity
                     and metrics.captured_at == self._last_snapshot.updated_at
                 ):
                     return _result(
@@ -470,6 +492,7 @@ class LossRuntimeUpdateDispatcher:
                     )
                 self._last_event_id = event_id
                 self._last_metrics_signature = signature
+                self._last_semantic_identity = semantic_identity
                 self._last_snapshot = runtime_snapshot
                 if adapted.status is LossRuntimeEventAdapterStatus.IDEMPOTENT:
                     return _result(
