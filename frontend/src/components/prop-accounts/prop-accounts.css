@@ -239,6 +239,12 @@
 .hyro-trial-status-grid { margin: 16px 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .hyro-trial-rules,
 .hyro-trial-runtime-summary { background: rgba(16, 40, 59, .45); border: 1px solid rgba(117, 180, 220, .28); margin-top: 14px; padding: 14px; }
+.hyro-trial-terminal-link { background: rgba(53, 156, 203, .1); border: 1px solid rgba(116, 215, 255, .35); display: grid; gap: 6px; margin-top: 12px; padding: 12px; }
+.hyro-trial-terminal-link a,
+.hyro-core-reference a,
+.hyro-trial-runtime-summary a { color: #77d9ff; font-weight: 800; }
+.hyro-trial-terminal-link small { color: #b8cad7; }
+.hyro-core-reference { border-color: rgba(116, 215, 255, .48); }
 
 @media (max-width: 760px) {
     .hyro-trial-switch__buttons,

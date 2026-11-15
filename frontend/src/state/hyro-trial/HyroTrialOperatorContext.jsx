@@ -11,7 +11,8 @@ import {
 import {
     EMPTY_HYRO_SETTINGS,
     HYRO_TRIAL_OPERATOR_ENABLED,
-    SAMPLE_ACCOUNT_STATUS,
+    deriveHyroCoreReference,
+    deriveHyroTrialAccountStatus,
     deriveHyroTrialReadiness,
     syntheticHyroTrialClient,
     validateHyroTrialSettings,
@@ -227,7 +228,8 @@ export function HyroTrialOperatorProvider({
         stopSimulation,
         actionError,
         counts,
-        accountStatus: SAMPLE_ACCOUNT_STATUS,
+        accountStatus: deriveHyroTrialAccountStatus(selectedChallenge),
+        coreReference: deriveHyroCoreReference(selectedChallenge),
         realHyroExecutionEnabled: false,
     }), [
         accountMode, actionError, challengeList, checkConnection, connection, counts,

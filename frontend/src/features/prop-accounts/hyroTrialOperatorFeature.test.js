@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+    HYRO_OPERATOR_CHALLENGES,
     HYRO_SAMPLE_CHALLENGES,
     deriveHyroTrialReadiness,
     isHyroTrialOperatorEnabled,
@@ -10,6 +11,7 @@ import {
     syntheticHyroTrialClient,
     validateHyroTrialSettings,
 } from "./hyroTrialOperatorFeature.js";
+import { ISSUED_HYRO_TRIAL_EVIDENCE } from "./hyroTrialReadModel.js";
 
 const validSettings = Object.freeze({
     strategy: "TREND_FOLLOW_SAMPLE",
@@ -42,7 +44,9 @@ test("sample connector stays in memory and reports zero external/order calls", a
     assert.equal(listing.orderCalls, 0);
     assert.equal(started.orderCalls, 0);
     assert.equal(stopped.orderCalls, 0);
-    assert.equal(listing.challenges, HYRO_SAMPLE_CHALLENGES);
+    assert.equal(listing.challenges, HYRO_OPERATOR_CHALLENGES);
+    assert.equal(listing.challenges[0].readKind, "ISSUED_READ_ONLY");
+    assert.equal(listing.challenges[0].readOnly, true);
 });
 
 test("readiness requires selected account and account-scoped valid saved settings", () => {
@@ -54,6 +58,9 @@ test("readiness requires selected account and account-scoped valid saved setting
     assert.equal(ready.executionMode, "SIMULATION_ONLY_NO_ORDERS");
     assert.equal(ready.realHyroStartEnabled, false);
     assert.equal(deriveHyroTrialReadiness({ selectedChallenge: HYRO_SAMPLE_CHALLENGES[0], savedSettings: validSettings, simulation: { state: "RUNNING" } }).state, "BLOCKED");
+    const issued = deriveHyroTrialReadiness({ selectedChallenge: ISSUED_HYRO_TRIAL_EVIDENCE, savedSettings: validSettings, simulation: { state: "STOPPED" } });
+    assert.equal(issued.state, "BLOCKED");
+    assert.match(issued.reasons.join(" "), /読み取り専用/);
 });
 
 test("normal app integration is feature-gated and Hyro branch excludes production lifecycle handlers", async () => {
@@ -75,6 +82,12 @@ test("normal app integration is feature-gated and Hyro branch excludes productio
     assert.match(surface, /PROP口座 — HyroTrader/);
     assert.match(surface, /注文を送らないシミュレーション/);
     assert.match(surface, /実Hyro START（未確認のため無効）/);
+    assert.match(surface, /発行済みTrial（読み取り専用）/);
+    assert.match(surface, /Hyro Terminalを開く/);
+    assert.match(surface, /Hyro Core 25K 参考評価/);
+    assert.match(surface, /Trialのdrawdown値をCoreの日次損失へ流用しません/);
     assert.doesNotMatch(surface, /authenticatedControlRequest|requestBotStop|live-order-entry|\/api\//);
     assert.match(accountStatus, /未確認値を0として表示しません/);
+    assert.match(accountStatus, /ISSUED TRIAL \/ READ ONLY/);
+    assert.match(accountStatus, /実Hyro STARTは無効/);
 });

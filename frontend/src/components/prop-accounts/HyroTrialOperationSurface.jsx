@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useHyroTrialOperator } from "../../state/hyro-trial/HyroTrialOperatorContext.jsx";
 import { HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW } from "../../features/prop-accounts/hyroTrialOperatorFeature.js";
+import { HYRO_DASHBOARD_URL } from "../../features/prop-accounts/hyroTrialReadModel.js";
 import "./prop-accounts.css";
 
 const shown = (value) => value || "未確認";
@@ -9,7 +10,7 @@ const shown = (value) => value || "未確認";
 const connectionLabel = (state) => ({
     NOT_CHECKED: "未確認",
     CHECKING: "確認中…",
-    CONNECTED_SAMPLE: "サンプル接続確認済み",
+    CONNECTED_SAMPLE: "隔離カタログ確認済み（実更新なし）",
     FAILED: "確認失敗",
 }[state] || "未確認");
 
@@ -58,7 +59,7 @@ function ChallengeSelection({ operator }) {
     return (
         <section className="hyro-trial-section" data-testid="hyro-connection-challenge-section">
             <header><span>1</span><h3>接続確認 / チャレンジ選択</h3></header>
-            <p className="hyro-trial-warning">サンプル / シミュレーション / 実Hyro未接続 / 外部通信なし</p>
+            <p className="hyro-trial-warning">発行済みTrialはCC-6Qの前回MCP証跡、サンプルはメモリ内fixtureです。この操作自体は外部通信しません。</p>
             <div className="hyro-trial-actions">
                 <button
                     disabled={operator.connection.state === "CHECKING"}
@@ -72,14 +73,14 @@ function ChallengeSelection({ operator }) {
             <dl className="hyro-trial-definition-grid">
                 <div><dt>Connection</dt><dd data-testid="hyro-connection-state">{connectionLabel(operator.connection.state)}</dd></div>
                 <div><dt>Challenge list</dt><dd data-testid="hyro-challenge-list-state">{listLabel(operator.challengeList.state)}</dd></div>
-                <div><dt>Source</dt><dd>IN-MEMORY SAMPLE</dd></div>
+                <div><dt>Source</dt><dd>CC-6Q REDACTED EVIDENCE / IN-MEMORY SAMPLE</dd></div>
                 <div><dt>Trading</dt><dd>OFF / 注文不可</dd></div>
             </dl>
             {operator.connection.error && <p className="hyro-trial-error" role="alert">{operator.connection.error}</p>}
             {operator.challengeList.error && <p className="hyro-trial-error" role="alert">{operator.challengeList.error}</p>}
             {operator.challengeList.state === "READY" && (
                 <label className="hyro-trial-field">
-                    <span>サンプル無料トライアル</span>
+                    <span>発行済みTrial（読み取り専用）/ サンプル</span>
                     <select
                         data-testid="hyro-challenge-select"
                         onChange={(event) => operator.selectChallenge(event.target.value)}
@@ -99,9 +100,49 @@ function ChallengeSelection({ operator }) {
                     <div><dt>段階</dt><dd>{operator.selectedChallenge.stage}</dd></div>
                     <div><dt>期間</dt><dd>{operator.selectedChallenge.period}</dd></div>
                     <div><dt>最終更新</dt><dd>{operator.selectedChallenge.updatedAt}</dd></div>
-                    <div><dt>表示区分</dt><dd>SAMPLE / SIMULATION</dd></div>
+                    <div><dt>取得元</dt><dd>{shown(operator.selectedChallenge.source)}</dd></div>
+                    <div><dt>取得品質</dt><dd>{shown(operator.selectedChallenge.dataQuality)}</dd></div>
+                    <div><dt>チャレンジ状態</dt><dd>{shown(operator.selectedChallenge.status)}</dd></div>
+                    <div><dt>表示区分</dt><dd>{operator.selectedChallenge.readKind === "ISSUED_READ_ONLY" ? "ISSUED TRIAL / READ ONLY / 注文不可" : "SAMPLE / SIMULATION"}</dd></div>
                 </dl>
             )}
+            {operator.selectedChallenge?.readKind === "ISSUED_READ_ONLY" && (
+                <div className="hyro-trial-terminal-link" data-testid="hyro-terminal-link">
+                    <a href={HYRO_DASHBOARD_URL} target="_blank" rel="noreferrer noopener">Hyro Terminalを開く</a>
+                    <small>HyroTraderのマイチャレンジを開き、25,000 USDT / swing の無料Trialを選択してください。個別URLは未確認です。</small>
+                </div>
+            )}
+        </section>
+    );
+}
+
+const referenceText = (result) => {
+    if (!result || result.state === "UNKNOWN") return `判定不能 — ${result?.reason || "必要データ未取得"}`;
+    if (Object.hasOwn(result, "used")) return `${result.state} — ${result.used.toLocaleString()} / ${result.limit.toLocaleString()} USDT`;
+    if (Object.hasOwn(result, "actual")) return `${result.state} — ${result.actual} / ${result.required}日`;
+    if (Object.hasOwn(result, "countedProfit")) return `${result.state} — ${result.countedProfit.toLocaleString()} / ${result.target.toLocaleString()} USDT`;
+    return result.state;
+};
+
+function CoreReferencePanel({ operator }) {
+    const reference = operator.coreReference;
+    if (!reference) return null;
+    return (
+        <section className="hyro-trial-section hyro-core-reference" data-testid="hyro-core-reference">
+            <header><span>R</span><h3>Hyro Core 25K 参考評価</h3></header>
+            <p className="hyro-trial-warning">無料Trialの公式判定とは別の参考計算です。Trialのdrawdown値をCoreの日次損失へ流用しません。</p>
+            <dl className="hyro-trial-definition-grid">
+                <div><dt>総合</dt><dd data-testid="hyro-core-overall">{reference.overall}</dd></div>
+                <div><dt>評価期間</dt><dd>{reference.period}</dd></div>
+                <div><dt>利益目標</dt><dd>2,500 USDT</dd></div>
+                <div><dt>日次損失</dt><dd>{referenceText(reference.dailyLoss)}</dd></div>
+                <div><dt>最大損失</dt><dd>{referenceText(reference.maximumLoss)}</dd></div>
+                <div><dt>適格取引日</dt><dd>{referenceText(reference.tradingDays)}</dd></div>
+                <div><dt>日次利益算入</dt><dd>{referenceText(reference.profitProgress)}</dd></div>
+                <div><dt>基準日</dt><dd>UTC</dd></div>
+            </dl>
+            <p>利益日は1日1,000 USDTまで算入し、損失日は全額算入します。必要なequity・決済履歴が欠ける項目は判定不能です。</p>
+            <a href={reference.rules.sourceUrl} target="_blank" rel="noreferrer noopener">Core基準の公式出典</a>
         </section>
     );
 }
@@ -121,7 +162,7 @@ function Settings({ operator }) {
                 <button disabled={!operator.selectedChallenge} onClick={operator.saveSelectedSettings} type="button">設定を保存</button>
                 <strong data-testid="hyro-settings-state">{operator.selectedSavedSettings ? dirty ? "UNSAVED CHANGES" : "SAVED FOR THIS ACCOUNT" : "NOT SAVED"}</strong>
             </div>
-            <small>設定は選択中のサンプルだけに保存され、KuCoinや別チャレンジへ自動適用しません。</small>
+            <small>設定は選択中の表示口座だけに保存され、KuCoinや別チャレンジへ自動適用しません。発行済みTrialは読み取り専用でSTARTできません。</small>
         </section>
     );
 }
@@ -178,9 +219,10 @@ function HyroTrialPanel() {
     const operator = useHyroTrialOperator();
     return (
         <div className="terminal-panel operation-console hyro-trial-console" data-testid="hyro-trial-operator-panel">
-            <header className="hyro-trial-hero"><span>FEATURE-GATED · SAMPLE SIMULATION ONLY</span><h2>HyroTrader 無料トライアル発行前シミュレーション</h2><p>この画面は架空データ専用です。実口座、公式ルール、MCP再照会、取引権限へ接続しません。</p></header>
+            <header className="hyro-trial-hero"><span>FEATURE-GATED · READ ONLY / SAMPLE SIMULATION</span><h2>HyroTrader Trial オペレーター</h2><p>発行済みTrialの前回MCP確認結果と、明示されたサンプルを分離表示します。PROP選択中は読み取り専用・注文不可です。</p></header>
             <div className="hyro-trial-grid">
                 <ChallengeSelection operator={operator} />
+                <CoreReferencePanel operator={operator} />
                 <Settings operator={operator} />
                 <FinalPreparation operator={operator} />
             </div>

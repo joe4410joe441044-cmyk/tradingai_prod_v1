@@ -1,3 +1,9 @@
+import {
+    ISSUED_HYRO_TRIAL_EVIDENCE,
+    accountStatusForChallenge,
+    evaluateHyroCore25kReference,
+} from "./hyroTrialReadModel.js";
+
 export const HYRO_TRIAL_OPERATOR_FLAG = "VITE_HYRO_TRIAL_OPERATOR_ENABLED";
 export const HYRO_TRIAL_OPERATOR_PREVIEW_FLAG = "VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED";
 
@@ -32,6 +38,11 @@ export const HYRO_SAMPLE_CHALLENGES = Object.freeze([
         platform: "HYRO PLATFORM SAMPLE",
         updatedAt: "2026-11-15T00:00:00+09:00",
     }),
+]);
+
+export const HYRO_OPERATOR_CHALLENGES = Object.freeze([
+    ISSUED_HYRO_TRIAL_EVIDENCE,
+    ...HYRO_SAMPLE_CHALLENGES,
 ]);
 
 export const EMPTY_HYRO_SETTINGS = Object.freeze({
@@ -72,7 +83,7 @@ export const syntheticHyroTrialClient = Object.freeze({
         return Object.freeze({
             quality: "COMPLETE_SAMPLE",
             source: "IN_MEMORY_FIXTURE",
-            challenges: HYRO_SAMPLE_CHALLENGES,
+            challenges: HYRO_OPERATOR_CHALLENGES,
             externalNetworkCalls: 0,
             orderCalls: 0,
         });
@@ -86,6 +97,16 @@ export const syntheticHyroTrialClient = Object.freeze({
         return Object.freeze({ state: "STOPPED", orderCalls: 0 });
     },
 });
+
+export function deriveHyroTrialAccountStatus(challenge) {
+    return accountStatusForChallenge(challenge) ?? SAMPLE_ACCOUNT_STATUS;
+}
+
+export function deriveHyroCoreReference(challenge) {
+    return challenge?.readKind === "ISSUED_READ_ONLY"
+        ? evaluateHyroCore25kReference(challenge.metrics)
+        : null;
+}
 
 export function validateHyroTrialSettings(settings) {
     const errors = [];
@@ -106,6 +127,7 @@ export function validateHyroTrialSettings(settings) {
 export function deriveHyroTrialReadiness({ selectedChallenge, savedSettings, simulation }) {
     const reasons = [];
     if (!selectedChallenge) reasons.push("チャレンジ未選択");
+    if (selectedChallenge?.readKind === "ISSUED_READ_ONLY") reasons.push("発行済みTrialは読み取り専用です。シミュレーションSTARTはサンプル口座でのみ利用できます");
     const validation = validateHyroTrialSettings(savedSettings);
     if (!savedSettings) reasons.push("戦略・リスク設定未保存");
     else if (!validation.valid) reasons.push(...validation.errors);
