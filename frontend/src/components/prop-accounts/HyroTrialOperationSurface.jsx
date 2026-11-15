@@ -107,6 +107,25 @@ function ChallengeSelection({ operator }) {
                 </dl>
             )}
             {operator.selectedChallenge?.readKind === "ISSUED_READ_ONLY" && (
+                <div className="hyro-trial-refresh" data-testid="hyro-progress-refresh">
+                    <button
+                        disabled={operator.refreshState.state === "REFRESHING"}
+                        onClick={operator.refreshIssuedProgress}
+                        type="button"
+                    >{operator.refreshState.state === "REFRESHING" ? "更新中…" : "進捗を更新"}</button>
+                    <strong data-testid="hyro-refresh-state">{operator.refreshState.state}</strong>
+                    {operator.refreshState.state === "FAILED_STALE" && (
+                        <small role="alert">更新失敗 — 前回値（{shown(operator.refreshState.previousAt)}）を表示中です。</small>
+                    )}
+                    {operator.refreshState.state === "SNAPSHOT_STALE" && (
+                        <small>前回取得済みスナップショットです。「進捗を更新」で最新値を取得してください。</small>
+                    )}
+                    {operator.refreshState.state === "PARTIAL" && (
+                        <small>部分取得 — 未取得項目は未確認のままです。</small>
+                    )}
+                </div>
+            )}
+            {operator.selectedChallenge?.readKind === "ISSUED_READ_ONLY" && (
                 <div className="hyro-trial-terminal-link" data-testid="hyro-terminal-link">
                     <a href={HYRO_DASHBOARD_URL} target="_blank" rel="noreferrer noopener">Hyro Terminalを開く</a>
                     <small>HyroTraderのマイチャレンジを開き、25,000 USDT / swing の無料Trialを選択してください。個別URLは未確認です。</small>

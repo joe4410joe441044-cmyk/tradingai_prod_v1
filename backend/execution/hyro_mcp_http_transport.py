@@ -440,6 +440,21 @@ class HyroMcpHttpTransport(HyroMcpReadTransport):
             raise HyroMcpHttpError("HYRO_MCP_TOOL_SCHEMA_UNCONFIRMED")
         return dict(structured)
 
+    def call_tool_object(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> tuple[Mapping[str, Any], str]:
+        """Return one strict object from an explicitly allowed read tool.
+
+        This applies the same duplicate-key, size, ambiguity, ``isError`` and
+        dual-format checks as ``list_challenges`` while preserving the
+        per-instance allowlist.
+        """
+
+        result = self._call_allowed_tool(tool_name, arguments)
+        return self._list_challenges_payload_object(result)
+
     def call_tool_diagnostic(
         self,
         tool_name: str,

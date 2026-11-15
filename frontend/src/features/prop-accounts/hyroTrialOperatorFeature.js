@@ -3,6 +3,7 @@ import {
     accountStatusForChallenge,
     evaluateHyroCore25kReference,
 } from "./hyroTrialReadModel.js";
+import { refreshHyroTrialProgress } from "./hyroTrialRefreshApi.js";
 
 export const HYRO_TRIAL_OPERATOR_FLAG = "VITE_HYRO_TRIAL_OPERATOR_ENABLED";
 export const HYRO_TRIAL_OPERATOR_PREVIEW_FLAG = "VITE_HYRO_TRIAL_OPERATOR_PREVIEW_ENABLED";
@@ -97,6 +98,16 @@ export const syntheticHyroTrialClient = Object.freeze({
         return Object.freeze({ state: "STOPPED", orderCalls: 0 });
     },
 });
+
+export const authenticatedHyroTrialClient = Object.freeze({
+    ...syntheticHyroTrialClient,
+    refreshIssuedProgress: refreshHyroTrialProgress,
+});
+
+export const DEFAULT_HYRO_TRIAL_CLIENT = HYRO_TRIAL_OPERATOR_ISOLATED_PREVIEW
+    ? syntheticHyroTrialClient
+    : authenticatedHyroTrialClient;
+
 
 export function deriveHyroTrialAccountStatus(challenge) {
     return accountStatusForChallenge(challenge) ?? SAMPLE_ACCOUNT_STATUS;

@@ -75,6 +75,7 @@ from backend.auth.session_middleware import OperatorSessionMiddleware
 from backend.auth.csrf import OperatorCsrfProtection
 from backend.auth.api import create_operator_auth_router
 from backend.api.prop_synthetic_evaluation import create_prop_synthetic_router
+from backend.api.hyro_trial_read import create_hyro_trial_read_router
 from backend.money_management.loss_application_registration import (
     get_money_management_config,
     start_money_management_cash_flow_runtime,
@@ -742,6 +743,7 @@ if _auth_configured:
         "/api/prop-accounts/synthetic/accounts",
         "/api/prop-accounts/synthetic/accounts/revise",
         "/api/prop-accounts/synthetic/evaluate",
+        "/api/prop-accounts/hyro-trial/refresh",
     })
     app.add_middleware(
         OperatorCsrfProtection,
@@ -834,6 +836,7 @@ app.include_router(
 )
 
 app.include_router(create_prop_synthetic_router())
+app.include_router(create_hyro_trial_read_router())
 
 app.include_router(trading_trace_router)
 

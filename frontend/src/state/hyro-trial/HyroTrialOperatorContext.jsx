@@ -14,7 +14,7 @@ import {
     deriveHyroCoreReference,
     deriveHyroTrialAccountStatus,
     deriveHyroTrialReadiness,
-    syntheticHyroTrialClient,
+    DEFAULT_HYRO_TRIAL_CLIENT,
     validateHyroTrialSettings,
 } from "../../features/prop-accounts/hyroTrialOperatorFeature.js";
 
@@ -28,9 +28,16 @@ const initialSimulation = Object.freeze({
     stoppedAt: null,
 });
 
+const staleRefreshState = () => ({
+    state: "SNAPSHOT_STALE",
+    previousAt: null,
+    updatedAt: null,
+    error: null,
+});
+
 export function HyroTrialOperatorProvider({
     children,
-    client = syntheticHyroTrialClient,
+    client = DEFAULT_HYRO_TRIAL_CLIENT,
     enabled = HYRO_TRIAL_OPERATOR_ENABLED,
     now = () => new Date().toISOString(),
 }) {
@@ -43,14 +50,18 @@ export function HyroTrialOperatorProvider({
     const [simulation, setSimulation] = useState(initialSimulation);
     const [actionError, setActionError] = useState(null);
     const [counts, setCounts] = useState({ externalNetworkCalls: 0, orderCalls: 0 });
+    const [refreshState, setRefreshState] = useState({ state: "SNAPSHOT_STALE", previousAt: null, updatedAt: null, error: null });
     const modeRef = useRef(accountMode);
     const requestGeneration = useRef(0);
     const lifecycleToken = useRef(null);
+    const refreshToken = useRef(null);
 
     const selectAccountMode = useCallback((mode) => {
         if (!enabled || !["KUCOIN", "HYRO"].includes(mode)) return;
         requestGeneration.current += 1;
+        refreshToken.current = null;
         modeRef.current = mode;
+        setRefreshState(staleRefreshState());
         setAccountMode(mode);
         setConnection((current) => current.state === "CHECKING"
             ? { state: "NOT_CHECKED", error: null }
@@ -82,6 +93,8 @@ export function HyroTrialOperatorProvider({
     const loadChallenges = useCallback(async () => {
         if (!enabled || modeRef.current !== "HYRO" || challengeList.state === "LOADING") return;
         const generation = ++requestGeneration.current;
+        refreshToken.current = null;
+        setRefreshState(staleRefreshState());
         setChallengeList({ state: "LOADING", quality: "UNKNOWN", items: [], error: null });
         try {
             const result = await client.listChallenges();
@@ -112,6 +125,9 @@ export function HyroTrialOperatorProvider({
 
     const selectChallenge = useCallback((challengeId) => {
         const exists = challengeList.items.some(({ id }) => id === challengeId);
+        requestGeneration.current += 1;
+        refreshToken.current = null;
+        setRefreshState(staleRefreshState());
         setSelectedChallengeId(exists ? challengeId : "");
         setActionError(null);
     }, [challengeList.items]);
@@ -207,6 +223,69 @@ export function HyroTrialOperatorProvider({
         }
     }, [client, now, simulation]);
 
+    const refreshIssuedProgress = useCallback(async () => {
+        if (
+            selectedChallenge?.readKind !== "ISSUED_READ_ONLY"
+            || refreshToken.current
+            || typeof client.refreshIssuedProgress !== "function"
+        ) return false;
+        const token = {};
+        const generation = requestGeneration.current;
+        const challengeId = selectedChallenge.id;
+        const previousAt = selectedChallenge.updatedAt;
+        let settled = false;
+        refreshToken.current = token;
+        setRefreshState({ state: "REFRESHING", previousAt, updatedAt: null, error: null });
+        try {
+            const result = await client.refreshIssuedProgress();
+            if (
+                refreshToken.current !== token
+                || generation !== requestGeneration.current
+                || modeRef.current !== "HYRO"
+                || selectedChallengeId !== challengeId
+            ) return false;
+            if (!result?.ok || result.challenge?.id !== challengeId) {
+                settled = true;
+                setRefreshState({
+                    state: "FAILED_STALE",
+                    previousAt,
+                    updatedAt: null,
+                    error: result?.code || "HYRO_TRIAL_REFRESH_FAILED",
+                });
+                return false;
+            }
+            settled = true;
+            setChallengeList((current) => ({
+                ...current,
+                quality: result.challenge.dataQuality,
+                items: current.items.map((item) => item.id === challengeId ? result.challenge : item),
+            }));
+            setRefreshState({
+                state: result.challenge.dataQuality === "PARTIAL" ? "PARTIAL" : "SUCCESS",
+                previousAt,
+                updatedAt: result.challenge.updatedAt,
+                error: null,
+            });
+            return true;
+        } catch {
+            if (refreshToken.current === token) {
+                settled = true;
+                setRefreshState({
+                    state: "FAILED_STALE",
+                    previousAt,
+                    updatedAt: null,
+                    error: "HYRO_TRIAL_REFRESH_FAILED",
+                });
+            }
+            return false;
+        } finally {
+            if (refreshToken.current === token) {
+                refreshToken.current = null;
+                if (!settled) setRefreshState(staleRefreshState());
+            }
+        }
+    }, [client, selectedChallenge, selectedChallengeId]);
+
     const value = useMemo(() => ({
         enabled,
         accountMode,
@@ -223,6 +302,8 @@ export function HyroTrialOperatorProvider({
         updateDraft,
         saveSelectedSettings,
         readiness,
+        refreshState,
+        refreshIssuedProgress,
         simulation,
         startSimulation,
         stopSimulation,
@@ -233,6 +314,7 @@ export function HyroTrialOperatorProvider({
         realHyroExecutionEnabled: false,
     }), [
         accountMode, actionError, challengeList, checkConnection, connection, counts,
+        refreshIssuedProgress, refreshState,
         enabled, loadChallenges, readiness, saveSelectedSettings, selectAccountMode,
         selectChallenge, selectedChallenge, selectedChallengeId, selectedDraft,
         selectedSavedSettings, simulation, startSimulation, stopSimulation, updateDraft,

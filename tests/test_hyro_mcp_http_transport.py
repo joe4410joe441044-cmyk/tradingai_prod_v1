@@ -484,3 +484,29 @@ def test_list_challenges_empty_first_page_is_not_treated_as_complete_or_account_
     assert result.data == ()
     assert result.list_completeness == "UNKNOWN"
     assert result.account_match == "UNKNOWN"
+
+
+def test_call_tool_object_accepts_strict_text_and_rejects_conflicting_formats():
+    payload = {"publicId": "must-remain-in-process", "status": "active"}
+    subject, _ = diagnostic_transport({
+        "content": [{"type": "text", "text": json.dumps(payload)}],
+        "isError": False,
+    })
+    parsed, result_format = subject.call_tool_object("list_challenges", {})
+    assert parsed == payload
+    assert result_format == "CONTENT_TEXT_JSON_OBJECT"
+
+    conflicting, _ = diagnostic_transport({
+        "structuredContent": payload,
+        "content": [{"type": "text", "text": json.dumps({**payload, "status": "failed"})}],
+        "isError": False,
+    })
+    with pytest.raises(HyroMcpHttpError, match="RESULT_FORMAT_CONFLICT"):
+        conflicting.call_tool_object("list_challenges", {})
+
+
+def test_call_tool_object_keeps_allowlist_enforcement_before_network():
+    subject, session = diagnostic_transport({"structuredContent": {}})
+    with pytest.raises(PermissionError, match="READ_ALLOWLIST"):
+        subject.call_tool_object("place_order", {})
+    assert session.calls == []

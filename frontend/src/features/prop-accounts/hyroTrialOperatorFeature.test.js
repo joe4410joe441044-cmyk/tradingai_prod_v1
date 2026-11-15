@@ -86,8 +86,12 @@ test("normal app integration is feature-gated and Hyro branch excludes productio
     assert.match(surface, /Hyro Terminalを開く/);
     assert.match(surface, /Hyro Core 25K 参考評価/);
     assert.match(surface, /Trialのdrawdown値をCoreの日次損失へ流用しません/);
+    assert.match(surface, /進捗を更新/);
+    assert.match(surface, /FAILED_STALE/);
     assert.doesNotMatch(surface, /authenticatedControlRequest|requestBotStop|live-order-entry|\/api\//);
     assert.match(accountStatus, /未確認値を0として表示しません/);
     assert.match(accountStatus, /ISSUED TRIAL \/ READ ONLY/);
     assert.match(accountStatus, /実Hyro STARTは無効/);
+    assert.match(accountStatus, /進捗を更新/);
+    assert.match(accountStatus, /古いデータ/);
 });

@@ -246,6 +246,10 @@
 .hyro-trial-terminal-link small { color: #b8cad7; }
 .hyro-core-reference { border-color: rgba(116, 215, 255, .48); }
 
+.hyro-trial-refresh { align-items: center; background: rgba(53, 156, 203, .08); border: 1px solid rgba(116, 215, 255, .3); display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; padding: 12px; }
+.hyro-trial-refresh strong { color: #78d8ff; }
+.hyro-trial-refresh small { color: #ffc77a; flex-basis: 100%; }
+
 @media (max-width: 760px) {
     .hyro-trial-switch__buttons,
     .hyro-trial-grid,

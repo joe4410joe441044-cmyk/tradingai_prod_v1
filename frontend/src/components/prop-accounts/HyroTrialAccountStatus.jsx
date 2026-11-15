@@ -56,6 +56,17 @@ export default function HyroTrialAccountStatus() {
                             <div><dt>最終取得</dt><dd>{shown(challenge.updatedAt)}</dd></div>
                             <div><dt>Core参考評価</dt><dd>{shown(coreReference?.overall)}</dd></div>
                         </dl>
+                        <div className="hyro-trial-refresh" data-testid="hyro-account-status-refresh">
+                            <button
+                                disabled={operator.refreshState.state === "REFRESHING"}
+                                onClick={operator.refreshIssuedProgress}
+                                type="button"
+                            >{operator.refreshState.state === "REFRESHING" ? "更新中…" : "進捗を更新"}</button>
+                            <strong>{operator.refreshState.state}</strong>
+                            {operator.refreshState.state === "FAILED_STALE" && (
+                                <small role="alert">更新失敗 — 前回取得 {shown(operator.refreshState.previousAt)} の古いデータを表示中です。</small>
+                            )}
+                        </div>
                         <a href={HYRO_DASHBOARD_URL} target="_blank" rel="noreferrer noopener">Hyro Terminalを開く</a>
                         <small>マイチャレンジから「25,000 USDT / Trial / swing」を選択してください。</small>
                     </section>
