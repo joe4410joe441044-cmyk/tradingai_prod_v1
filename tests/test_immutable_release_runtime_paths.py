@@ -9,6 +9,12 @@ import sys
 
 import pytest
 
+from backend.bot_manager.bot_manager import (
+    CONFIGURED_SYMBOL_PATH_ENV,
+    SAVED_MODE_LIVE,
+    SAVED_MODE_PATH_ENV,
+    BotManager,
+)
 from backend.money_management import config_persistence
 from backend.money_management.config_persistence import (
     CONFIG_PATH_ENVIRONMENT_VARIABLE,
@@ -223,3 +229,160 @@ def test_tracked_systemd_contract_externalizes_mm_config_path():
         "Environment=TRADINGAI_MONEY_MANAGEMENT_CONFIG_PATH="
         "/home/joe4410joe/tradingai_prod_v1/logs/runtime/money_management_config.json"
     ) in lines
+    assert (
+        "Environment=TRADINGAI_SAVED_MODE_PATH="
+        "/home/joe4410joe/tradingai_prod_v1/logs/runtime/saved_mode_authority.json"
+    ) in lines
+    assert (
+        "Environment=TRADINGAI_CONFIGURED_SYMBOL_PATH="
+        "/home/joe4410joe/tradingai_prod_v1/logs/runtime/configured_symbol_authority.json"
+    ) in lines
+
+
+def _fake_release_app(tmp_path, monkeypatch):
+    release_app = tmp_path / "releases" / "abc123" / "app"
+    (release_app / "backend" / "bot_manager").mkdir(parents=True)
+    monkeypatch.setattr(
+        BotManager,
+        "_project_root",
+        staticmethod(lambda: str(release_app)),
+    )
+    return release_app
+
+
+def test_saved_mode_explicit_override_wins_over_release_default(tmp_path, monkeypatch):
+    release_app = _fake_release_app(tmp_path, monkeypatch)
+    monkeypatch.delenv(SAVED_MODE_PATH_ENV, raising=False)
+
+    release_default = (
+        release_app / "logs" / "runtime" / "saved_mode_authority.json"
+    )
+    assert Path(BotManager._default_saved_mode_path()) == release_default
+
+    external = tmp_path / "external" / "saved_mode_authority.json"
+    monkeypatch.setenv(SAVED_MODE_PATH_ENV, str(external))
+
+    resolved = Path(BotManager._default_saved_mode_path())
+    assert resolved == external
+    assert resolved != release_default
+
+
+def test_configured_symbol_override_wins_over_release_default(
+    tmp_path, monkeypatch
+):
+    release_app = _fake_release_app(tmp_path, monkeypatch)
+    monkeypatch.delenv(CONFIGURED_SYMBOL_PATH_ENV, raising=False)
+
+    release_default = (
+        release_app / "logs" / "runtime" / "configured_symbol_authority.json"
+    )
+    assert Path(BotManager._default_configured_symbol_path()) == release_default
+
+    external = tmp_path / "external" / "configured_symbol_authority.json"
+    monkeypatch.setenv(CONFIGURED_SYMBOL_PATH_ENV, str(external))
+
+    resolved = Path(BotManager._default_configured_symbol_path())
+    assert resolved == external
+    assert resolved != release_default
+
+
+def test_persisted_saved_mode_fixture_restores_live_revision_16(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(SAVED_MODE_PATH_ENV, raising=False)
+    fixture = tmp_path / "runtime" / "saved_mode_authority.json"
+    fixture.parent.mkdir()
+    fixture.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "savedMode": "LIVE",
+                "revision": 16,
+                "updatedAt": 1794092939.495398,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = BotManager(
+        saved_mode_path=str(fixture),
+        configured_symbol_path=str(tmp_path / "absent_symbol.json"),
+    )
+
+    assert manager.get_saved_mode() == SAVED_MODE_LIVE
+    assert manager.saved_mode_revision == 16
+
+
+def test_persisted_configured_symbol_fixture_restores_xrpusdtm_revision_2(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(CONFIGURED_SYMBOL_PATH_ENV, raising=False)
+    fixture = tmp_path / "runtime" / "configured_symbol_authority.json"
+    fixture.parent.mkdir()
+    fixture.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "symbol": "XRPUSDTM",
+                "revision": 2,
+                "updatedAt": 1792202914.5755768,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = BotManager(
+        saved_mode_path=str(tmp_path / "absent_mode.json"),
+        configured_symbol_path=str(fixture),
+    )
+
+    assert manager.get_configured_symbol() == "XRPUSDTM"
+    assert manager.configured_symbol_revision == 2
+
+
+def test_saved_mode_write_target_resolves_outside_release_app(
+    tmp_path, monkeypatch
+):
+    release_app = _fake_release_app(tmp_path, monkeypatch)
+    external = tmp_path / "external" / "saved_mode_authority.json"
+    monkeypatch.setenv(SAVED_MODE_PATH_ENV, str(external))
+    monkeypatch.setenv(
+        CONFIGURED_SYMBOL_PATH_ENV,
+        str(tmp_path / "external" / "configured_symbol_authority.json"),
+    )
+
+    manager = BotManager()
+    assert Path(manager.saved_mode_path) == external
+
+    assert manager.set_saved_mode("LIVE")["success"] is True
+
+    assert external.is_file()
+    release_local = (
+        release_app / "logs" / "runtime" / "saved_mode_authority.json"
+    )
+    assert not release_local.exists()
+    assert not (release_app / "logs" / "runtime").exists()
+
+
+def test_configured_symbol_write_target_resolves_outside_release_app(
+    tmp_path, monkeypatch
+):
+    release_app = _fake_release_app(tmp_path, monkeypatch)
+    external = tmp_path / "external" / "configured_symbol_authority.json"
+    monkeypatch.setenv(CONFIGURED_SYMBOL_PATH_ENV, str(external))
+    monkeypatch.setenv(
+        SAVED_MODE_PATH_ENV,
+        str(tmp_path / "external" / "saved_mode_authority.json"),
+    )
+
+    manager = BotManager()
+    assert Path(manager.configured_symbol_path) == external
+
+    assert manager.set_configured_symbol("XRPUSDTM")["success"] is True
+
+    assert external.is_file()
+    release_local = (
+        release_app / "logs" / "runtime" / "configured_symbol_authority.json"
+    )
+    assert not release_local.exists()
+    assert not (release_app / "logs" / "runtime").exists()
