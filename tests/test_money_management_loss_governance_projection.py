@@ -19,7 +19,10 @@ from backend.money_management.loss_reason_models import (
     ReasonCode,
     RecommendedAction,
     WarningReason,
+    build_reason_contract,
 )
+from backend.money_management.loss_decision import evaluate_loss_decision
+from tests.test_money_management_loss_decision import inp, snapshot
 from backend.money_management.loss_runtime_integration_models import (
     GovernanceProjection,
 )
@@ -169,6 +172,41 @@ class GovernanceProjectionBuilderTests(unittest.TestCase):
         self.assertNotIn("exception", first.to_dict())
         with self.assertRaises(FrozenInstanceError):
             first.new_entry_allowed = False
+
+
+class DecisiveRiskBlockProjectionTests(unittest.TestCase):
+    def _projection(self, decision_input):
+        contract = build_reason_contract(evaluate_loss_decision(decision_input))
+        return build(contract, GovernanceProjection.BLOCK_EXECUTION)
+
+    def test_monthly_loss_block_projects_authoritative_block(self):
+        projection = self._projection(inp(m="-50"))
+        self.assertEqual(
+            projection.entry_permission, LossEntryPermission.BLOCK
+        )
+        self.assertFalse(projection.new_entry_allowed)
+        self.assertIs(projection.block_reason, BlockReason.MONTHLY_LOSS_BLOCK)
+        self.assertEqual(projection.risk_state, RiskState.LOCKED)
+
+    def test_daily_loss_block_projects_authoritative_block(self):
+        projection = self._projection(inp(d="-15"))
+        self.assertEqual(
+            projection.entry_permission, LossEntryPermission.BLOCK
+        )
+        self.assertIs(projection.block_reason, BlockReason.DAILY_LOSS_BLOCK)
+
+    def test_indeterminate_drawdown_unknown_projects_unknown(self):
+        projection = self._projection(
+            inp(equity_snapshot=snapshot("0", "0"))
+        )
+        self.assertEqual(
+            projection.entry_permission, LossEntryPermission.UNKNOWN
+        )
+        self.assertFalse(projection.new_entry_allowed)
+        self.assertIs(
+            projection.block_reason,
+            LossGovernanceBoundaryReason.UNKNOWN_STATE,
+        )
 
 
 if __name__ == "__main__":

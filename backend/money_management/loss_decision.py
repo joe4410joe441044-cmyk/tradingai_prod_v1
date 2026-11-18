@@ -4,6 +4,7 @@ from .enums import RiskState
 from .period_models import PeriodType
 from .loss_models import *
 _PRIORITY=(LossReason.NEGATIVE_EQUITY,LossReason.CASH_FLOW_ADJUSTMENT_UNRESOLVED,LossReason.DRAWDOWN_PERCENT_UNKNOWN,LossReason.INPUT_UNKNOWN,LossReason.CONFIG_INVALID,LossReason.CURRENCY_MISMATCH,LossReason.PERIOD_DATA_MISMATCH,LossReason.MAX_DRAWDOWN_BLOCK,LossReason.DAILY_LOSS_BLOCK,LossReason.WEEKLY_LOSS_BLOCK,LossReason.MONTHLY_LOSS_BLOCK,LossReason.MULTIPLE_WARNINGS,LossReason.DAILY_LOSS_WARNING,LossReason.WEEKLY_LOSS_WARNING,LossReason.MONTHLY_LOSS_WARNING,LossReason.NONE)
+_INDETERMINATE=(LossReason.DRAWDOWN_PERCENT_UNKNOWN,LossReason.INPUT_UNKNOWN,LossReason.CONFIG_INVALID,LossReason.CURRENCY_MISMATCH,LossReason.PERIOD_DATA_MISMATCH,LossReason.PERIOD_DATA_MISSING,LossReason.BASE_EQUITY_INVALID,LossReason.CASH_FLOW_ADJUSTMENT_UNRESOLVED)
 def _eval(period_type, aggregate, starting, warning, block, at):
     loss=max(Decimal("0"),-aggregate.net_realized_pnl); pct=loss/starting*Decimal("100")
     if pct>=block: state=ThresholdState.BLOCK; action=ActionDecision.BLOCK
@@ -30,4 +31,5 @@ def evaluate_loss_decision(inp):
     elif LossReason.MULTIPLE_WARNINGS in unique: state=RiskState.DEFENSIVE; action=ActionDecision.WARN
     elif warns: state=RiskState.CAUTION; action=ActionDecision.WARN
     else: state=RiskState.NORMAL; action=ActionDecision.ALLOW
-    return MoneyManagementLossDecision("money-management-loss-decision/v1",inp.evaluated_at,inp.currency,state,action,primary,unique,ev[0],ev[1],ev[2],inp.equity_snapshot.drawdown_percent,inp.equity_snapshot.current_equity<0,inp.cash_flow_adjustment_state,state is RiskState.LOCKED,primary.value)
+    fail_closed=any(r in _INDETERMINATE for r in unique)
+    return MoneyManagementLossDecision("money-management-loss-decision/v1",inp.evaluated_at,inp.currency,state,action,primary,unique,ev[0],ev[1],ev[2],inp.equity_snapshot.drawdown_percent,inp.equity_snapshot.current_equity<0,inp.cash_flow_adjustment_state,fail_closed,primary.value)

@@ -29,6 +29,12 @@ class LossDecisionTests(unittest.TestCase):
     def test_drawdown_and_unknown_zero_peak(self):
         o=evaluate_loss_decision(inp(equity_snapshot=snapshot("950","1000"))); self.assertEqual(o.primary_reason,LossReason.MAX_DRAWDOWN_BLOCK)
         o=evaluate_loss_decision(inp(equity_snapshot=snapshot("0","0"))); self.assertEqual(o.primary_reason,LossReason.DRAWDOWN_PERCENT_UNKNOWN)
+    def test_decisive_monthly_block_is_authoritative_not_fail_closed(self):
+        o=evaluate_loss_decision(inp(m="-50")); self.assertEqual(o.primary_reason,LossReason.MONTHLY_LOSS_BLOCK); self.assertEqual(o.risk_state,RiskState.LOCKED); self.assertEqual(o.action,ActionDecision.BLOCK); self.assertFalse(o.fail_closed)
+    def test_decisive_daily_block_is_authoritative_not_fail_closed(self):
+        o=evaluate_loss_decision(inp(d="-15")); self.assertEqual(o.primary_reason,LossReason.DAILY_LOSS_BLOCK); self.assertEqual(o.action,ActionDecision.BLOCK); self.assertFalse(o.fail_closed)
+    def test_indeterminate_drawdown_percent_unknown_remains_fail_closed(self):
+        o=evaluate_loss_decision(inp(equity_snapshot=snapshot("0","0"))); self.assertEqual(o.primary_reason,LossReason.DRAWDOWN_PERCENT_UNKNOWN); self.assertTrue(o.fail_closed)
     def test_determinism_and_serialization(self):
         a=evaluate_loss_decision(inp(d="-10")); b=evaluate_loss_decision(inp(d="-10")); self.assertEqual(a.to_dict(),b.to_dict()); self.assertEqual(a.to_dict()["risk_state"],"CAUTION")
 if __name__=="__main__": unittest.main()
