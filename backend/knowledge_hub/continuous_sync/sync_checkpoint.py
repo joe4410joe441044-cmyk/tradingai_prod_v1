@@ -148,7 +148,8 @@ def read_existing_state(store_path: str | Path) -> ExistingState | None:
     try:
         rows = connection.execute(
             "SELECT record_id, logical_key FROM records WHERE source_type IN "
-            "('GIT_COMMIT','GIT_WORKTREE','CURSOR_REPORT','VSCODE_REPORT','DEVELOPMENT_REPORT')"
+            "('GIT_COMMIT','GIT_WORKTREE','CURSOR_REPORT','CURSOR_SAVED_REPORT',"
+            "'VSCODE_REPORT','DEVELOPMENT_REPORT')"
         ).fetchall()
     except sqlite3.Error:
         return None

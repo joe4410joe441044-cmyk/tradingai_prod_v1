@@ -9,6 +9,7 @@ from .git_change_detector import scan_repository
 from .models import (
     ACCESS_SCOPE,
     AGENT_CURSOR,
+    AGENT_CURSOR_SAVED,
     AGENT_EXPLICIT,
     AGENT_GIT,
     AGENT_VSCODE,
@@ -46,6 +47,7 @@ from .worktree_tracker import observe_worktree
 __all__ = [
     "ACCESS_SCOPE",
     "AGENT_CURSOR",
+    "AGENT_CURSOR_SAVED",
     "AGENT_EXPLICIT",
     "AGENT_GIT",
     "AGENT_VSCODE",

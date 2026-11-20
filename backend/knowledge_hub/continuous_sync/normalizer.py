@@ -15,6 +15,7 @@ from ..security import secret_bytes, valid_commit_sha
 from .models import (
     ACCESS_SCOPE,
     AGENT_CURSOR,
+    AGENT_CURSOR_SAVED,
     AGENT_EXPLICIT,
     AGENT_VSCODE,
     REPORT_KEEP_STATUSES,
@@ -47,6 +48,8 @@ def _safe(value: str | None, limit: int = 300) -> str | None:
 
 
 def _report_source_type(agent: str) -> str:
+    if agent == AGENT_CURSOR_SAVED:
+        return "CURSOR_SAVED_REPORT"
     if agent == AGENT_CURSOR:
         return "CURSOR_REPORT"
     if agent == AGENT_VSCODE:
@@ -207,6 +210,7 @@ def report_item(candidate: ReportCandidate, *, max_content_bytes: int = 131_072)
         "claimed_verdict": fields.get("VERDICT", _PLACEHOLDER),
         "next_recommended_task": fields.get("NEXT_RECOMMENDED_TASK", _PLACEHOLDER),
         "runtime_truth": "NOT_ASSERTED",
+        "historical_authority": "UNTRUSTED_HISTORICAL",
     }
     return StoreItem(
         source_type=source_type,

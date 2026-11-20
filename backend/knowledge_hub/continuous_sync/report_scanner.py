@@ -16,6 +16,7 @@ from ..report_collector import collect_reports
 from ..security import directory_inside
 from .models import (
     AGENT_CURSOR,
+    AGENT_CURSOR_SAVED,
     AGENT_EXPLICIT,
     AGENT_VSCODE,
     REPORT_PRIVACY_STATUSES,
@@ -30,7 +31,7 @@ from .models import (
 
 def _agent_for(source, relative_path: str) -> str:
     declared = (source.agent or "").upper()
-    if declared in {AGENT_CURSOR, AGENT_VSCODE}:
+    if declared in {AGENT_CURSOR, AGENT_CURSOR_SAVED, AGENT_VSCODE}:
         return declared
     lowered = relative_path.lower()
     if "cursor" in lowered:
