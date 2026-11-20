@@ -18,11 +18,22 @@ from backend.money_management.loss_persistence_adapter import (
     save_loss_state,
 )
 from backend.money_management.loss_persistence_models import (
+    AccountingContinuityStatus,
+    AccountingRebaseAuditMarker,
     AccountingRebaseAuthoritySource,
     AccountingRebaseAuthorizationState,
     AccountingRebaseReason,
     LossBaselineType,
+    PeriodCode,
+    PersistedAccountingRebaseRecord,
+    PersistedDrawdownState,
+    PersistedLossPeriodState,
 )
+from backend.money_management.loss_runtime_integration_models import (
+    GovernanceProjection,
+)
+from backend.money_management.period_aggregation import period_for
+from backend.money_management.period_models import PeriodType
 from backend.money_management.loss_runtime_evaluation_bridge import (
     LossRuntimeEvaluationBridge,
     LossRuntimeEvaluationStatus,
@@ -204,6 +215,160 @@ class AccountingRebaseTests(unittest.TestCase):
         self.assertEqual(duplicate.status, AccountingRebaseStatus.IDEMPOTENT)
         self.assertIsNone(duplicate.update)
         self.assertEqual(len(rebased_snapshot.state.accounting_rebases), 1)
+
+
+PROVENANCE_AT = datetime(2026, 11, 20, 10, 11, 33, tzinfo=timezone.utc)
+PROVENANCE_EQUITY = D("7.90409697")
+LIVE_AUTHORITY = AccountingRebaseAuthoritySource.REAL_LIVE_ACCOUNT_EQUITY
+PAPER_AUTHORITY = AccountingRebaseAuthoritySource.PAPER_RUNTIME_EQUITY
+LIVE_RAW_MONTHLY_PNL = D("-0.4031999999999414")
+CONTAMINATING_PAPER_PNL = D("0.10079999999998535")
+INFLATED_MONTHLY_PNL = D("-0.50399999999992675")
+INFLATED_LOSS_PERCENT = D("6.376439989449253302872877077")
+
+
+def provenance_period(code, period_type, pnl=D("0")):
+    current = period_for(PROVENANCE_AT, period_type)
+    loss = max(D("0"), -pnl)
+    return PersistedLossPeriodState(
+        code, current.period_key, current.start_at, current.end_at,
+        PROVENANCE_EQUITY, pnl, loss,
+        loss / PROVENANCE_EQUITY * D("100"), D("0"), PROVENANCE_AT,
+    )
+
+
+def provenance_rebase(authority, observed_monthly, previous_month_id,
+                      new_month_id=None, observed_at=PROVENANCE_AT):
+    new_month_id = new_month_id or period_for(
+        PROVENANCE_AT, PeriodType.MONTHLY
+    ).period_key
+    return PersistedAccountingRebaseRecord(
+        f"provenance-{authority.value}-{observed_at.isoformat()}",
+        observed_at,
+        PROVENANCE_EQUITY,
+        authority,
+        "primary",
+        "provenance-runtime",
+        (PeriodCode.MONTHLY,),
+        (previous_month_id,),
+        (new_month_id,),
+        (observed_monthly,),
+        AccountingRebaseReason.HISTORICAL_BOUNDARY_CONTINUITY_UNAVAILABLE,
+        AccountingContinuityStatus.UNAVAILABLE_REBASED,
+        AccountingRebaseAuthorizationState.EXPLICITLY_AUTHORIZED,
+        AccountingRebaseAuditMarker.DURABLE_CHECKPOINT_REQUIRED,
+    )
+
+
+def provenance_state(authority, rebases, monthly_pnl=D("0")):
+    return replace(
+        state(PROVENANCE_AT),
+        daily_state=provenance_period(PeriodCode.DAILY, PeriodType.DAILY),
+        weekly_state=provenance_period(PeriodCode.WEEKLY, PeriodType.WEEKLY),
+        monthly_state=provenance_period(
+            PeriodCode.MONTHLY, PeriodType.MONTHLY, monthly_pnl
+        ),
+        drawdown_state=PersistedDrawdownState(
+            PROVENANCE_EQUITY, PROVENANCE_EQUITY, D("0"), D("0"),
+            PROVENANCE_AT,
+        ),
+        accounting_rebases=tuple(rebases),
+        accounting_authority_source=authority,
+    )
+
+
+def provenance_metrics(monthly_pnl=LIVE_RAW_MONTHLY_PNL,
+                       authority="REAL_LIVE_ACCOUNT_EQUITY"):
+    return metrics(
+        at=PROVENANCE_AT + timedelta(minutes=1),
+        equity=PROVENANCE_EQUITY,
+        balance=PROVENANCE_EQUITY,
+        available_balance=PROVENANCE_EQUITY,
+        peak_equity=PROVENANCE_EQUITY,
+        drawdown=D("0"),
+        monthly_pnl=monthly_pnl,
+        runtime_instance_id="provenance-runtime",
+        accounting_authority_source=authority,
+    )
+
+
+def provenance_snapshot(state_obj):
+    return snapshot(state_obj, PROVENANCE_AT)
+
+
+class RebaseProvenanceIsolationTests(unittest.TestCase):
+    def evaluate(self, state_obj, monthly_pnl=LIVE_RAW_MONTHLY_PNL):
+        return LossRuntimeEvaluationBridge(
+            trading_mode=TradingMode.LIVE
+        ).evaluate(
+            provenance_metrics(monthly_pnl),
+            provenance_snapshot(state_obj),
+            "provenance:isolation",
+        )
+
+    def test_case1_paper_observed_pnl_not_subtracted_from_live_monthly(self):
+        monthly_key = period_for(PROVENANCE_AT, PeriodType.MONTHLY).period_key
+        record = provenance_rebase(
+            LIVE_AUTHORITY, CONTAMINATING_PAPER_PNL, monthly_key, monthly_key,
+        )
+        result = self.evaluate(provenance_state(LIVE_AUTHORITY, [record]))
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        monthly = result.build_context.next_state.monthly_state
+        self.assertEqual(monthly.net_realized_pnl, LIVE_RAW_MONTHLY_PNL)
+        self.assertNotEqual(monthly.net_realized_pnl, INFLATED_MONTHLY_PNL)
+
+    def test_case1_paper_state_transition_to_live_uses_raw_live_monthly(self):
+        paper_state = provenance_state(
+            PAPER_AUTHORITY, [], monthly_pnl=CONTAMINATING_PAPER_PNL,
+        )
+        result = self.evaluate(paper_state)
+        self.assertEqual(result.status, LossRuntimeEvaluationStatus.SUCCEEDED)
+        monthly = result.build_context.next_state.monthly_state
+        self.assertEqual(monthly.net_realized_pnl, LIVE_RAW_MONTHLY_PNL)
+        self.assertNotEqual(monthly.net_realized_pnl, INFLATED_MONTHLY_PNL)
+
+    def test_case2_live_to_live_epoch_baseline_is_preserved(self):
+        monthly_key = period_for(PROVENANCE_AT, PeriodType.MONTHLY).period_key
+        record = provenance_rebase(
+            LIVE_AUTHORITY, D("-0.05"), "2026-10", monthly_key,
+        )
+        result = self.evaluate(provenance_state(LIVE_AUTHORITY, [record]))
+        monthly = result.build_context.next_state.monthly_state
+        self.assertEqual(
+            monthly.net_realized_pnl,
+            LIVE_RAW_MONTHLY_PNL - D("-0.05"),
+        )
+
+    def test_case3_incompatible_provenance_does_not_offset_live_pnl(self):
+        monthly_key = period_for(PROVENANCE_AT, PeriodType.MONTHLY).period_key
+        record = provenance_rebase(
+            PAPER_AUTHORITY, CONTAMINATING_PAPER_PNL, "2026-10", monthly_key,
+        )
+        result = self.evaluate(provenance_state(LIVE_AUTHORITY, [record]))
+        monthly = result.build_context.next_state.monthly_state
+        self.assertEqual(monthly.net_realized_pnl, LIVE_RAW_MONTHLY_PNL)
+
+    def test_case4_production_numeric_regression_and_policy(self):
+        monthly_key = period_for(PROVENANCE_AT, PeriodType.MONTHLY).period_key
+        record = provenance_rebase(
+            LIVE_AUTHORITY, CONTAMINATING_PAPER_PNL, monthly_key, monthly_key,
+        )
+        result = self.evaluate(provenance_state(LIVE_AUTHORITY, [record]))
+        next_state = result.build_context.next_state
+        monthly = next_state.monthly_state
+        self.assertEqual(monthly.net_realized_pnl, LIVE_RAW_MONTHLY_PNL)
+        self.assertNotEqual(monthly.loss_percent, INFLATED_LOSS_PERCENT)
+        self.assertAlmostEqual(
+            float(monthly.loss_percent), 5.1011519915594026, places=9,
+        )
+        self.assertEqual(
+            result.build_context.governance_projection,
+            GovernanceProjection.BLOCK_EXECUTION,
+        )
+        self.assertEqual(
+            next_state.last_decision.primary_reason,
+            ReasonCode.MONTHLY_LOSS_BLOCK,
+        )
 
 
 if __name__ == "__main__":

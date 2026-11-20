@@ -113,13 +113,17 @@ def _aggregate(metrics, period_type, sequence):
     )
 
 
-def _apply_rebase_pnl_baseline(previous, aggregate, code):
+def _apply_rebase_pnl_baseline(previous, aggregate, code, authority):
     for record in reversed(previous.accounting_rebases):
         if code not in record.affected_periods:
             continue
         index = record.affected_periods.index(code)
         if record.new_period_ids[index] != aggregate.period.period_key:
             continue
+        if record.authority_source is not authority:
+            return aggregate
+        if record.previous_period_ids[index] == record.new_period_ids[index]:
+            return aggregate
         pnl = aggregate.net_realized_pnl - record.observed_period_pnl[index]
         return MoneyManagementPeriodAggregate(
             aggregate.schema_version, aggregate.period, aggregate.currency,
@@ -359,9 +363,15 @@ class LossRuntimeEvaluationBridge:
                 if authority_transition:
                     validated_accounting_rebase_id = rebase_record.rebase_id
                 period_rollover = True
-            daily = _apply_rebase_pnl_baseline(previous, daily, PeriodCode.DAILY)
-            weekly = _apply_rebase_pnl_baseline(previous, weekly, PeriodCode.WEEKLY)
-            monthly = _apply_rebase_pnl_baseline(previous, monthly, PeriodCode.MONTHLY)
+            daily = _apply_rebase_pnl_baseline(
+                previous, daily, PeriodCode.DAILY, expected_authority
+            )
+            weekly = _apply_rebase_pnl_baseline(
+                previous, weekly, PeriodCode.WEEKLY, expected_authority
+            )
+            monthly = _apply_rebase_pnl_baseline(
+                previous, monthly, PeriodCode.MONTHLY, expected_authority
+            )
             peak_equity = (
                 metrics.equity if authority_transition else metrics.peak_equity
             )
