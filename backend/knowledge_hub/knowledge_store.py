@@ -266,6 +266,14 @@ class KnowledgeStore:
         ).fetchall()
         return tuple(_public_row(row) for row in rows)
 
+    def records_for_logical_key(self, key: str) -> tuple[dict[str, Any], ...]:
+        self._require_open()
+        rows = self._connection.execute(
+            "SELECT * FROM records WHERE logical_key=? ORDER BY id ASC",
+            (key,),
+        ).fetchall()
+        return tuple(_public_row(row) for row in rows)
+
     def delete_record(self, record_id: str) -> bool:
         def action() -> bool:
             row = self._connection.execute(
