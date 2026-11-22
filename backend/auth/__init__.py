@@ -19,6 +19,8 @@ from backend.auth.api import create_operator_auth_router
 from backend.auth.dependencies import (
     operator_session_identity,
     require_operator_session,
+    require_operator_session_context,
+    require_csrf,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "create_operator_auth_router",
     "operator_session_identity",
     "require_operator_session",
+    "require_operator_session_context",
+    "require_csrf",
 ]

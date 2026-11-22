@@ -744,6 +744,10 @@ if _auth_configured:
         "/api/prop-accounts/synthetic/accounts/revise",
         "/api/prop-accounts/synthetic/evaluate",
         "/api/prop-accounts/hyro-trial/refresh",
+        # Knowledge Hub operator-login maintenance (write authorization).
+        "/api/knowledge-hub/g12/approve",
+        "/api/knowledge-hub/g12/import",
+        "/api/knowledge-hub/sources",
     })
     app.add_middleware(
         OperatorCsrfProtection,
@@ -926,6 +930,28 @@ if _auth_configured and _authenticator is not None and _session_manager is not N
             _session_manager,
             _auth_config,
         ),
+    )
+
+# ------------------------------------------------------------
+# KNOWLEDGE HUB OPERATOR MAINTENANCE
+# Disabled by default. When enabled, uses the existing Operator
+# session + CSRF path, not a separate password or manual HMAC.
+# ------------------------------------------------------------
+
+from backend.knowledge_hub.operator_ops import (
+    create_knowledge_hub_ops_router,
+    load_knowledge_hub_ops_config,
+)
+
+_knowledge_ops_config = load_knowledge_hub_ops_config()
+if (
+    _auth_configured
+    and _authenticator is not None
+    and _session_manager is not None
+    and _knowledge_ops_config.enabled
+):
+    app.include_router(
+        create_knowledge_hub_ops_router(_knowledge_ops_config),
     )
 
 # ------------------------------------------------------------
